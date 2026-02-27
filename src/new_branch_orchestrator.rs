@@ -1,10 +1,9 @@
 // new_branch_orchestrator.rs - Orchestrator for the new branch creation workflow
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
-use crate::new_branch_dialog::{ValidationError, validate_branch_name, generate_worktree_path, generate_unique_tmux_session_name};
+use crate::new_branch_dialog::{ValidationError, validate_branch_name, generate_worktree_path};
 use crate::worktree_manager::WorktreeManager;
 use crate::notification::{Notification, NotificationType};
-use crate::tmux::Session;
 
 /// Result of the branch creation workflow
 #[derive(Debug, Clone)]
@@ -84,24 +83,10 @@ impl NewBranchOrchestrator {
         let result = self.worktree_manager.create_worktree(branch_name, &worktree_path);
         
         if result.success {
-            // Try to create tmux session
-            match self.create_tmux_session(&worktree_path, branch_name) {
-                Ok(_) => {
-                    self.send_notification(NotificationType::Info, &format!("Created branch '{}' and worktree", branch_name));
-                    CreationResult::Success {
-                        worktree_path,
-                        branch_name: branch_name.to_string(),
-                    }
-                }
-                Err(e) => {
-                    let error_msg = format!("Failed to create tmux session: {}", e);
-                    self.send_notification(NotificationType::Error, &error_msg);
-                    CreationResult::TmuxFailed {
-                        worktree_path,
-                        branch_name: branch_name.to_string(),
-                        error: error_msg,
-                    }
-                }
+            self.send_notification(NotificationType::Info, &format!("Created branch '{}' and worktree", branch_name));
+            CreationResult::Success {
+                worktree_path,
+                branch_name: branch_name.to_string(),
             }
         } else {
             CreationResult::GitFailed {
@@ -131,49 +116,16 @@ impl NewBranchOrchestrator {
         let result = self.worktree_manager.create_worktree_async(branch_name, &worktree_path).await;
         
         if result.success {
-            // Try to create tmux session
-            match self.create_tmux_session(&worktree_path, branch_name) {
-                Ok(_) => {
-                    self.send_notification(NotificationType::Info, &format!("Created branch '{}' and worktree", branch_name));
-                    CreationResult::Success {
-                        worktree_path,
-                        branch_name: branch_name.to_string(),
-                    }
-                }
-                Err(e) => {
-                    let error_msg = format!("Failed to create tmux session: {}", e);
-                    self.send_notification(NotificationType::Error, &error_msg);
-                    CreationResult::TmuxFailed {
-                        worktree_path,
-                        branch_name: branch_name.to_string(),
-                        error: error_msg,
-                    }
-                }
+            self.send_notification(NotificationType::Info, &format!("Created branch '{}' and worktree", branch_name));
+            CreationResult::Success {
+                worktree_path,
+                branch_name: branch_name.to_string(),
             }
         } else {
             CreationResult::GitFailed {
                 error: result.error.unwrap_or_else(|| "Unknown error".to_string()),
             }
         }
-    }
-
-    /// Create a tmux session for the worktree
-    fn create_tmux_session(&self, worktree_path: &PathBuf, _branch_name: &str) -> Result<(), String> {
-        let session_name = generate_unique_tmux_session_name(worktree_path);
-        
-        // Note: This is a placeholder - actual tmux session creation logic
-        // should call the existing `start_tmux_session` function
-        // For now, we'll create a basic tmux session
-        
-        let session = Session::new(&session_name);
-        session.ensure().map_err(|e| {
-            format!("Failed to create tmux session '{}': {}", session_name, e)
-        })?;
-
-        // TODO: Switch to the worktree directory in the tmux session
-        // This would require calling `tmux send-keys` to cd into the worktree path
-        
-        Ok(())
     }
 
     /// Send a notification to the user
@@ -284,22 +236,4 @@ mod tests {
         assert_eq!(worktree_path, PathBuf::from("/tmp/project/feature-test"));
     }
 
-    /// Test: Tmux session name generation
-    #[test]
-    fn test_tmux_session_name_generation() {
-        let worktree_path = PathBuf::from("/tmp/project/feature-test");
-        let session_name = generate_unique_tmux_session_name(&worktree_path);
-        assert!(!session_name.is_empty());
-        assert!(session_name.starts_with("pmux-"));
-    }
-
-    /// Test: Tmux session names are unique
-    #[test]
-    fn test_tmux_session_names_unique() {
-        let worktree_path = PathBuf::from("/tmp/project/feature-test");
-        let name1 = generate_unique_tmux_session_name(&worktree_path);
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        let name2 = generate_unique_tmux_session_name(&worktree_path);
-        assert_ne!(name1, name2);
-    }
 }

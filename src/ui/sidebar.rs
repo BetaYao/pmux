@@ -1,12 +1,15 @@
 // ui/sidebar.rs - Sidebar component for worktree list with GPUI render
+// Event Bus driven: status_change broadcast triggers debounced parent notify (see app_root)
 use gpui::prelude::*;
 use gpui::{px, svg, *};
-use crate::worktree::WorktreeInfo;
+use crate::worktree::{WorktreeInfo, get_diff_stats};
 use crate::agent_status::AgentStatus;
 use crate::new_branch_orchestrator::NewBranchOrchestrator;
+use crate::notification_manager::NotificationManager;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::Instant;
 
 /// Worktree item with status
 #[derive(Clone)]
@@ -87,6 +90,8 @@ pub struct Sidebar {
     on_toggle_notifications: Option<Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
     on_add_workspace: Option<Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
     notification_count: usize,
+    /// For last message and timestamp per worktree
+    notification_manager: Option<Arc<Mutex<NotificationManager>>>,
 }
 
 impl Sidebar {
@@ -109,7 +114,13 @@ impl Sidebar {
             on_toggle_notifications: None,
             on_add_workspace: None,
             notification_count: 0,
+            notification_manager: None,
         }
+    }
+
+    pub fn with_notification_manager(mut self, mgr: Arc<Mutex<NotificationManager>>) -> Self {
+        self.notification_manager = Some(mgr);
+        self
     }
 
     pub fn on_toggle_sidebar<F: Fn(&mut Window, &mut App) + Send + Sync + 'static>(mut self, f: F) -> Self {
@@ -239,6 +250,24 @@ impl Sidebar {
         } else {
             None
         }
+    }
+
+    fn render_diff_stats(add: u32, del: u32, files: u32, meta_color: Rgba) -> impl IntoElement {
+        let mut row = div().flex().flex_row().items_center().gap(px(4.)).text_size(px(10.));
+        if add == 0 && del == 0 && files == 0 {
+            row = row.child(div().text_color(meta_color).child("—"));
+        } else {
+            if add > 0 {
+                row = row.child(div().text_color(rgb(0x4caf50)).child(format!("+{}", add)));
+            }
+            if del > 0 {
+                row = row.child(div().text_color(rgb(0xf44336)).child(format!("-{}", del)));
+            }
+            if files > 0 {
+                row = row.child(div().text_color(meta_color).child(format!(" · {} File{}", files, if files == 1 { "" } else { "s" })));
+            }
+        }
+        row
     }
 
     fn render_header(repo_name: &str) -> Div {
@@ -491,6 +520,49 @@ impl IntoElement for Sidebar {
     fn into_element(self) -> Self::Element { Component::new(self) }
 }
 
+/// Map worktree path to pane_id (local PTY: "local:{path}")
+fn worktree_path_to_pane_id(path: &std::path::Path) -> String {
+    format!("local:{}", path.display())
+}
+
+fn format_elapsed(instant: Instant) -> String {
+    let elapsed = instant.elapsed();
+    let secs = elapsed.as_secs();
+    if secs < 60 {
+        "Now".to_string()
+    } else if secs < 3600 {
+        format!("{}m", secs / 60)
+    } else if secs < 86400 {
+        format!("{}h", secs / 3600)
+    } else {
+        format!("{}d", secs / 86400)
+    }
+}
+
+fn format_diff_stats(add: u32, del: u32, files: u32) -> String {
+    if add == 0 && del == 0 && files == 0 {
+        "—".to_string()
+    } else {
+        let mut parts = Vec::new();
+        if add > 0 {
+            parts.push(format!("+{}", add));
+        }
+        if del > 0 {
+            parts.push(format!("-{}", del));
+        }
+        let change_part = if parts.is_empty() {
+            "—".to_string()
+        } else {
+            parts.join(" ")
+        };
+        if files > 0 {
+            format!("{} · {} File{}", change_part, files, if files == 1 { "" } else { "s" })
+        } else {
+            change_part
+        }
+    }
+}
+
 impl RenderOnce for Sidebar {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let worktrees = self.worktrees.lock().unwrap().clone();
@@ -509,6 +581,7 @@ impl RenderOnce for Sidebar {
         let on_toggle_notifications = self.on_toggle_notifications.clone();
         let on_add_workspace = self.on_add_workspace.clone();
         let notification_count = self.notification_count;
+        let notification_manager = self.notification_manager.clone();
 
         let has_top_controls = on_toggle_sidebar.is_some() || on_toggle_notifications.is_some() || on_add_workspace.is_some();
         let top_section = if has_top_controls {
@@ -521,22 +594,41 @@ impl RenderOnce for Sidebar {
         let mut rows: Vec<AnyElement> = Vec::new();
         for (idx, item) in worktrees.iter().enumerate() {
             let is_selected = selected == Some(idx);
-            let status = pane_statuses.values().next().copied().unwrap_or(AgentStatus::Unknown);
+            let pane_id = worktree_path_to_pane_id(&item.info.path);
+            let status = pane_statuses.get(&pane_id).copied().unwrap_or(AgentStatus::Unknown);
             let mut item_with_status = item.clone();
             item_with_status.set_status(status);
 
             let status_color = item_with_status.status_color();
             let text_color = if is_selected { rgb(0xffffff) } else { rgb(0xcccccc) };
-            let status_text_color = if is_selected { rgb(0xbbbbbb) } else { rgb(0x888888) };
+            let meta_color = if is_selected { rgb(0xbbbbbb) } else { rgb(0x888888) };
+            let path_color = if is_selected { rgb(0xaaaaaa) } else { rgb(0x666666) };
+
+            let (last_message, last_time) = notification_manager.as_ref().and_then(|mgr| {
+                mgr.lock().ok().and_then(|m| {
+                    m.by_pane(&pane_id).first().map(|n| {
+                        (n.display_message(), format_elapsed(n.timestamp()))
+                    })
+                })
+            }).unwrap_or_else(|| (item_with_status.status_text().to_string(), "—".to_string()));
+
+            let (add, del, files) = get_diff_stats(&item.info.path).unwrap_or((0, 0, 0));
+            let diff_str = format_diff_stats(add, del, files);
 
             let inner = div()
                 .flex().flex_col().gap(px(2.))
                 .child(
                     div().flex().flex_row().items_center().gap(px(6.))
                         .child(div().text_size(px(11.)).text_color(status_color).child(item_with_status.status_icon()))
-                        .child(div().flex_1().text_size(px(12.)).text_color(text_color).child(SharedString::from(item_with_status.formatted_branch())))
+                        .child(div().flex_1().text_size(px(12.)).font_weight(FontWeight::SEMIBOLD).text_color(text_color).child(SharedString::from(item_with_status.formatted_branch())))
                 )
-                .child(div().pl(px(17.)).text_size(px(10.)).text_color(status_text_color).child(item_with_status.status_text()));
+                .child(div().pl(px(17.)).text_size(px(10.)).text_color(meta_color).line_height(px(14.)).child(SharedString::from(last_message)))
+                .child(
+                    div().pl(px(17.)).flex().flex_row().items_center().justify_between().gap(px(4.))
+                        .child(Self::render_diff_stats(add, del, files, meta_color))
+                        .child(div().text_size(px(10.)).text_color(meta_color).flex_shrink_0().child(last_time))
+                )
+                .child(div().pl(px(17.)).text_size(px(10.)).text_color(path_color).font_family(".AppleSystemUIFontMonospaced").child(item.info.display_path()));
 
             let row_content = div()
                 .flex_1()
@@ -547,7 +639,8 @@ impl RenderOnce for Sidebar {
 
             let mut row = div()
                 .id(ElementId::from(idx))
-                .mx(px(4.)).my(px(2.)).px(px(8.)).py(px(6.))
+                .mx(px(4.)).my(px(2.)).px(px(8.)).py(px(8.))
+                .min_h(px(40.))
                 .rounded(px(4.))
                 .flex()
                 .flex_row()

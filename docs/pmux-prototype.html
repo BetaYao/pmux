@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>pmux — UI Prototype (Ghostty style)</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      background: #1a1a1a;
+      color: #e0e0e0;
+      height: 100vh;
+      overflow: hidden;
+    }
+    .app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    .main {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+    }
+    /* Sidebar - 1:1 复刻附件 */
+    .sidebar {
+      width: 300px;
+      min-width: 300px;
+      background: #252525;
+      border-right: 1px solid #333;
+      display: flex;
+      flex-direction: column;
+    }
+    .sidebar-header {
+      padding: 10px 12px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      /* 无分隔线，与 list 无缝衔接 */
+    }
+    .traffic-lights {
+      display: flex;
+      gap: 6px;
+    }
+    .traffic { width: 12px; height: 12px; border-radius: 50%; }
+    .traffic-close { background: #ff5f57; }
+    .traffic-min { background: #febc2e; }
+    .traffic-max { background: #28c840; }
+    .sidebar-icons {
+      margin-left: 4px;
+      display: flex;
+      gap: 12px;
+      color: #9a9a9a;
+    }
+    .sidebar-icons svg { width: 16px; height: 16px; cursor: pointer; }
+    .sidebar-icons svg:hover { opacity: 1; }
+    .sidebar-icons svg { opacity: 0.85; }
+    .worktree-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 0 12px;
+    }
+    .worktree-list::-webkit-scrollbar { width: 8px; }
+    .worktree-list::-webkit-scrollbar-track { background: #252525; }
+    .worktree-list::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
+    .worktree-item {
+      padding: 12px 14px 14px;
+      font-size: 13px;
+      cursor: pointer;
+      border-radius: 6px;
+      margin: 0 8px 2px;
+      position: relative;
+    }
+    .worktree-item .item-menu-btn { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); padding: 4px; opacity: 0; color: #6a6a6a; font-size: 16px; line-height: 1; }
+    .worktree-item:hover .item-menu-btn { opacity: 1; }
+    .worktree-item .item-menu-btn:hover { color: #e0e0e0; }
+    .worktree-item:hover { background: #2d2d2d; }
+    .worktree-item.selected {
+      background: #2563eb;
+      border-radius: 8px;
+    }
+    .worktree-item .worktree-name { font-weight: 600; }
+    .worktree-item .worktree-desc { font-size: 12px; line-height: 1.4; margin-bottom: 4px; }
+    .worktree-item .worktree-meta { display: flex; justify-content: space-between; align-items: center; font-size: 11px; margin-bottom: 4px; }
+    .worktree-item .worktree-changes { font-family: "SF Mono", Monaco, monospace; }
+    .worktree-item .worktree-changes .add { color: #4caf50; }
+    .worktree-item .worktree-changes .del { color: #f44336; }
+    .worktree-item .worktree-time { color: #6a6a6a; flex-shrink: 0; margin-left: 8px; }
+    .worktree-item.selected .worktree-changes .add { color: #81c784; }
+    .worktree-item.selected .worktree-changes .del { color: #e57373; }
+    .worktree-item.selected .worktree-time { color: rgba(255,255,255,0.8); }
+    .worktree-item .worktree-path { font-size: 11px; color: #7a7a7a; font-family: "SF Mono", Monaco, monospace; }
+    .worktree-item.selected .worktree-name,
+    .worktree-item.selected .worktree-desc,
+    .worktree-item.selected .worktree-path,
+    .worktree-item.selected .worktree-meta,
+    .worktree-item.selected .status-icon,
+    .worktree-item.selected .worktree-icon,
+    .worktree-item.selected .item-menu-btn { color: #fff !important; }
+    .worktree-item:not(.selected) .worktree-name { color: #d0d0d0; }
+    .worktree-item:not(.selected) .worktree-desc { color: #9a9a9a; }
+    .worktree-item:not(.selected) .worktree-path { color: #6a6a6a; }
+    .worktree-icon { display: inline-flex; margin-right: 8px; vertical-align: middle; }
+    /* Status 图标：ongoing | idle | error | wait-confirm */
+    .status-icon { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; margin-right: 8px; flex-shrink: 0; }
+    .status-icon svg { width: 12px; height: 12px; }
+    .status-ongoing { color: #4caf50; }
+    .status-ongoing .status-icon { animation: spin 1s linear infinite; }
+    .status-idle { color: #9e9e9e; }
+    .status-error { color: #f44336; }
+    .status-wait-confirm { color: #ffc107; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .worktree-name-row { display: flex; align-items: center; margin-bottom: 4px; }
+    .worktree-item .worktree-desc a { color: #60a5fa; text-decoration: underline; }
+    .worktree-item.selected .worktree-desc a { color: #fff; }
+    .worktree-item .worktree-desc code { font-family: "SF Mono", Monaco, monospace; font-size: 11px; background: rgba(255,255,255,0.08); padding: 1px 4px; border-radius: 3px; }
+    .new-branch {
+      padding: 12px 14px 14px 20px;
+      border-top: 1px solid #333;
+      color: #60a5fa;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .new-branch:hover { background: #2d2d2d; }
+    /* Content */
+    .content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      background: #1a1a1a;
+    }
+    .tab-bar {
+      display: flex;
+      width: 100%;
+      padding: 0;
+      border-bottom: 1px solid #2d2d2d;
+      background: #1e1e1e;
+    }
+    .tab {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      font-size: 13px;
+      color: #8a8a8a;
+      cursor: pointer;
+      border-radius: 6px 6px 0 0;
+      min-width: 0;
+    }
+    .tab:hover { color: #e0e0e0; background: #252525; }
+    .tab.active { color: #fff; background: #1a1a1a; border-bottom: 1px solid #1a1a1a; margin-bottom: -1px; }
+    .tab-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tab-shortcut { flex-shrink: 0; margin-left: 8px; font-size: 11px; color: #6a6a6a; user-select: none; }
+    .tab.active .tab-shortcut { color: #8a8a8a; }
+    .tab-add { flex: 0; min-width: 36px; justify-content: center; color: #5a5a5a; }
+    .tab-add .tab-label { display: none; }
+    /* tmux 风格：可调整大小的 Pane 网格 */
+    .pane-area {
+      flex: 1;
+      display: grid;
+      grid-template-columns: var(--col1, 1fr) 4px var(--col2, 1fr);
+      grid-template-rows: var(--row1, 1fr) 4px var(--row2, 1fr);
+      min-height: 0;
+      background: #171e24;
+    }
+    .pane {
+      background: #171e24;
+      padding: 12px 14px;
+      font-family: "SF Mono", "Fira Code", Monaco, monospace;
+      font-size: 13px;
+      line-height: 1.45;
+      color: #d4d4d4;
+      overflow: auto;
+      min-width: 80px;
+      min-height: 60px;
+    }
+    .pane.focused { outline: 1px solid #3d4f5c; outline-offset: -1px; }
+    .pane.unfocused { opacity: 0.85; }
+    .pane .prompt { color: #4ec9b0; }
+    .pane .output { color: #9cdcfe; }
+    .pane .muted { color: #6a737d; }
+    .resize-handle {
+      background: #2d3748;
+      cursor: col-resize;
+      position: relative;
+      z-index: 1;
+      user-select: none;
+    }
+    .resize-handle.horizontal { cursor: row-resize; grid-column: 1 / -1; }
+    .resize-handle:hover { background: #4a5568; }
+    .resize-handle:active { background: #4a90d9; }
+    .pane-area .pane:nth-child(1) { grid-column: 1; grid-row: 1; }
+    .pane-area .pane:nth-child(2) { grid-column: 3; grid-row: 1; }
+    .pane-area .pane:nth-child(3) { grid-column: 1; grid-row: 3; }
+    .pane-area .pane:nth-child(4) { grid-column: 3; grid-row: 3; }
+    .pane-area #resizeV { grid-column: 2; grid-row: 1 / 4; z-index: 1; }
+    .pane-area #resizeH { grid-row: 2; grid-column: 1 / -1; z-index: 2; }
+    /* tmux 风格 status bar */
+    .tmux-status {
+      padding: 4px 12px;
+      font-size: 12px;
+      font-family: "SF Mono", Monaco, monospace;
+      background: #1e2329;
+      color: #acb2b8;
+      border-top: 1px solid #2d3748;
+      display: flex;
+      justify-content: space-between;
+    }
+    .tmux-left { color: #00af00; }
+    .tmux-right { color: #6a737d; }
+    /* Status Bar */
+    .status-bar {
+      padding: 6px 14px;
+      font-size: 12px;
+      background: #1e1e1e;
+      border-top: 1px solid #2d2d2d;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      color: #6a6a6a;
+    }
+    .status-bar kbd {
+      background: #2d2d2d;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+      color: #a0a0a0;
+    }
+    .status-hint { margin-left: auto; color: #5a5a5a; }
+    /* Overlay / Modal */
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; display: none; align-items: center; justify-content: center; }
+    .overlay.visible { display: flex; animation: fadeIn 0.2s ease; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    /* New Branch Panel */
+    .new-branch-panel { background: #252525; border-radius: 8px; width: 400px; max-width: 90vw; box-shadow: 0 8px 32px rgba(0,0,0,0.4); overflow: hidden; animation: slideUp 0.25s ease; }
+    @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    .new-branch-panel h3 { padding: 16px 20px; margin: 0; font-size: 16px; border-bottom: 1px solid #333; }
+    .new-branch-panel form { padding: 20px; }
+    .new-branch-panel label { display: block; font-size: 12px; color: #9a9a9a; margin-bottom: 6px; }
+    .new-branch-panel input { width: 100%; padding: 10px 12px; background: #1a1a1a; border: 1px solid #444; border-radius: 6px; color: #e0e0e0; font-size: 13px; }
+    .new-branch-panel input:focus { outline: none; border-color: #4a7fd4; }
+    .new-branch-panel .form-row { margin-bottom: 16px; }
+    .new-branch-panel .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; padding-top: 16px; border-top: 1px solid #333; }
+    .new-branch-panel button { padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; border: none; }
+    .new-branch-panel .btn-primary { background: #2563eb; color: #fff; }
+    .new-branch-panel .btn-primary:hover { background: #1d4ed8; }
+    .new-branch-panel .btn-secondary { background: #333; color: #e0e0e0; }
+    .new-branch-panel .btn-secondary:hover { background: #444; }
+    /* Notification Popover */
+    .sidebar-header { position: relative; }
+    .notification-popover { position: fixed; width: 320px; max-width: calc(100vw - 40px); background: #252525; border-radius: 8px; border: 1px solid #333; box-shadow: 0 8px 24px rgba(0,0,0,0.4); z-index: 200; display: none; overflow: hidden; }
+    .notification-popover.visible { display: block; animation: popoverIn 0.2s ease; }
+    @keyframes popoverIn { from { opacity: 0; } to { opacity: 1; } }
+    .notification-popover h4 { padding: 12px 16px; margin: 0; font-size: 13px; border-bottom: 1px solid #333; color: #9a9a9a; }
+    .notification-list { max-height: 280px; overflow-y: auto; }
+    .notification-item { padding: 12px 16px; font-size: 12px; border-bottom: 1px solid #2d2d2d; cursor: pointer; }
+    .notification-item:hover { background: #2d2d2d; }
+    .notification-item:last-child { border-bottom: none; }
+    .notification-item .notif-title { color: #e0e0e0; font-weight: 500; margin-bottom: 4px; }
+    .notification-item .notif-desc { color: #8a8a8a; }
+    .notification-item .notif-time { color: #6a6a6a; font-size: 11px; margin-top: 4px; }
+    .icon-notification { cursor: pointer; position: relative; }
+    .icon-notification .badge { position: absolute; top: -4px; right: -4px; background: #f44336; color: #fff; font-size: 10px; padding: 1px 4px; border-radius: 10px; min-width: 16px; text-align: center; }
+    /* Context Menu */
+    .context-menu { position: fixed; background: #252525; border-radius: 6px; border: 1px solid #333; box-shadow: 0 4px 20px rgba(0,0,0,0.4); z-index: 300; min-width: 160px; padding: 4px 0; display: none; animation: popoverIn 0.15s ease; }
+    .context-menu.visible { display: block; }
+    .context-menu-item { padding: 8px 16px; font-size: 13px; color: #e0e0e0; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+    .context-menu-item:hover { background: #333; }
+    .context-menu-item kbd { font-size: 11px; color: #6a6a6a; margin-left: auto; }
+    /* Diff View */
+    .diff-view { position: fixed; inset: 0; background: #1a1a1a; z-index: 500; display: none; flex-direction: column; }
+    .diff-view.visible { display: flex; animation: fadeIn 0.2s ease; }
+    .diff-view-header { padding: 12px 20px; background: #252525; border-bottom: 1px solid #333; display: flex; align-items: center; justify-content: space-between; }
+    .diff-view-header h2 { margin: 0; font-size: 15px; font-weight: 500; }
+    .diff-view-close { padding: 6px 12px; background: #333; border: none; border-radius: 6px; color: #e0e0e0; cursor: pointer; font-size: 13px; }
+    .diff-view-close:hover { background: #444; }
+    .diff-view-body { flex: 1; display: flex; min-height: 0; }
+    .diff-file-list { width: 280px; min-width: 200px; background: #1e1e1e; border-right: 1px solid #333; overflow-y: auto; padding: 8px 0; }
+    .diff-file-item { padding: 8px 16px; font-size: 13px; font-family: "SF Mono", Monaco, monospace; cursor: pointer; color: #9a9a9a; display: flex; align-items: center; gap: 8px; }
+    .diff-file-item:hover { background: #2d2d2d; color: #e0e0e0; }
+    .diff-file-item.selected { background: #2a3f5f; color: #fff; }
+    .diff-file-item .file-icon { flex-shrink: 0; width: 16px; text-align: center; }
+    .diff-file-item .file-stats { margin-left: auto; font-size: 11px; color: #6a6a6a; }
+    .diff-file-item.selected .file-stats { color: #9cdcfe; }
+    .diff-detail { flex: 1; overflow: auto; padding: 16px; font-family: "SF Mono", Monaco, monospace; font-size: 13px; line-height: 1.5; }
+    .diff-detail .diff-file-name { color: #4ec9b0; margin-bottom: 12px; font-size: 14px; }
+    .diff-detail .diff-hunk { margin-bottom: 16px; }
+    .diff-detail .diff-hunk-header { color: #6a737d; font-size: 12px; margin-bottom: 8px; }
+    .diff-detail .diff-line { padding: 2px 12px; font-family: inherit; display: flex; }
+    .diff-detail .diff-line.add { background: rgba(76, 175, 80, 0.15); color: #9cdcfe; }
+    .diff-detail .diff-line.del { background: rgba(244, 67, 54, 0.15); color: #f48771; }
+    .diff-detail .diff-line .diff-sign { width: 20px; flex-shrink: 0; }
+    .diff-detail .diff-line.add .diff-sign { color: #4caf50; }
+    .diff-detail .diff-line.del .diff-sign { color: #f44336; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="main">
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <div class="traffic-lights">
+            <span class="traffic traffic-close"></span>
+            <span class="traffic traffic-min"></span>
+            <span class="traffic traffic-max"></span>
+          </div>
+          <div class="sidebar-icons">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" title="List"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="18" r="1" fill="currentColor"/></svg>
+            <span class="icon-notification" id="notificationIcon" title="通知">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+              <span class="badge" id="notificationBadge">2</span>
+            </span>
+            <div class="notification-popover" id="notificationPopover">
+              <h4>通知</h4>
+              <div class="notification-list">
+                <div class="notification-item"><div class="notif-title">hq 等待输入</div><div class="notif-desc">Claude is waiting for your input</div><div class="notif-time">2 分钟前</div></div>
+                <div class="notification-item"><div class="notif-title">ssh 错误</div><div class="notif-desc">Connection refused</div><div class="notif-time">10 分钟前</div></div>
+                <div class="notification-item"><div class="notif-title">cmux cli 已完成</div><div class="notif-desc">PR #260 已推送</div><div class="notif-time">1 小时前</div></div>
+              </div>
+            </div>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" title="添加"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </div>
+        </div>
+        <div class="worktree-list">
+          <div class="worktree-item status-wait-confirm" data-worktree="hq" title="Waiting for confirmation">
+            <span class="item-menu-btn" title="菜单">⋯</span>
+            <div class="worktree-name-row">
+              <span class="status-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm0 18c-4.4 0-8-3.6-8-8s3.6-8 8-8 8 3.6 8 8-3.6 8-8 8zm.5-13H11v6l5.2 3.2.8-1.3-4.5-2.7V7z"/></svg></span>
+              <span class="worktree-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg></span>
+              <span class="worktree-name">hq</span>
+            </div>
+            <div class="worktree-desc">Claude is waiting for your input</div>
+            <div class="worktree-meta"><span class="worktree-changes">—</span><span class="worktree-time">Now</span></div>
+            <div class="worktree-path">~/fun/cmuxterm-hq</div>
+          </div>
+          <div class="worktree-item selected status-ongoing" data-worktree="cmux cli/unix socket" title="Ongoing">
+            <span class="item-menu-btn" title="菜单">⋯</span>
+            <div class="worktree-name-row">
+              <span class="status-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10" stroke-dasharray="32 20"/></svg></span>
+              <span class="worktree-name">cmux cli/unix socket</span>
+            </div>
+            <div class="worktree-desc">PR: <a href="#">https://github.com/manaflow-ai/cmux/pull/260</a> Implemented and pushed: - socket focus-policy refactor across v1/v2 command...</div>
+            <div class="worktree-meta"><span class="worktree-changes"><span class="add">+12</span> <span class="del">-5</span> · 3 Files</span><span class="worktree-time">1m</span></div>
+            <div class="worktree-path">~/fun/cmuxterm-hq | ~/fun/cmuxterm/web</div>
+          </div>
+          <div class="worktree-item status-error" data-worktree="ssh" title="Error">
+            <span class="item-menu-btn" title="菜单">⋯</span>
+            <div class="worktree-name-row">
+              <span class="status-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></span>
+              <span class="worktree-name">ssh</span>
+            </div>
+            <div class="worktree-desc">Pushed to <a href="#">https://github.com/manaflow-ai/cmux/pull/239</a> at <code>bab7440</code>. What changed: - Retry count is now surfaced in remot...</div>
+            <div class="worktree-meta"><span class="worktree-changes"><span class="add">+4</span> <span class="del">-40</span> · 1 File</span><span class="worktree-time">10m</span></div>
+            <div class="worktree-path">~/fun/cmuxterm-hq</div>
+          </div>
+          <div class="worktree-item status-idle" data-worktree="cmd shift t tabs" title="Idle">
+            <span class="item-menu-btn" title="菜单">⋯</span>
+            <div class="worktree-name-row">
+              <span class="status-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg></span>
+              <span class="worktree-name">cmd shift t tabs</span>
+            </div>
+            <div class="worktree-desc">Branch created at <code>f881e59</code></div>
+            <div class="worktree-meta"><span class="worktree-changes"><span class="add">+2023</span> <span class="del">-2</span> · 4 Files</span><span class="worktree-time">5m</span></div>
+            <div class="worktree-path">~/fun/cmuxterm-hq</div>
+          </div>
+          <div class="worktree-item status-wait-confirm" data-worktree="posthog" title="Waiting for confirmation">
+            <span class="item-menu-btn" title="菜单">⋯</span>
+            <div class="worktree-name-row">
+              <span class="status-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm0 18c-4.4 0-8-3.6-8-8s3.6-8 8-8 8 3.6 8 8-3.6 8-8 8zm.5-13H11v6l5.2 3.2.8-1.3-4.5-2.7V7z"/></svg></span>
+              <span class="worktree-name">posthog</span>
+            </div>
+            <div class="worktree-desc">Claude is waiting for your input</div>
+            <div class="worktree-meta"><span class="worktree-changes">—</span><span class="worktree-time">17m</span></div>
+            <div class="worktree-path">~/fun/cmuxterm-hq</div>
+          </div>
+          <div class="worktree-item status-ongoing" data-worktree="mark tab as unread" title="Ongoing">
+            <span class="item-menu-btn" title="菜单">⋯</span>
+            <div class="worktree-name-row">
+              <span class="status-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10" stroke-dasharray="32 20"/></svg></span>
+              <span class="worktree-name">mark tab as unread</span>
+            </div>
+            <div class="worktree-desc">Pushed to <a href="#">https://github.com/manaflow-ai/cmux/pull/241</a></div>
+            <div class="worktree-meta"><span class="worktree-changes"><span class="add">+6680</span> · 2 Files</span><span class="worktree-time">3h</span></div>
+            <div class="worktree-path">~/fun/cmuxterm-hq</div>
+          </div>
+        </div>
+        <div class="new-branch" id="newBranchBtn">+ New Branch</div>
+      </aside>
+      <main class="content">
+        <div class="tab-bar">
+          <div class="tab active"><span class="tab-label">repo-a</span><span class="tab-shortcut">⌘1</span></div>
+          <div class="tab"><span class="tab-label">repo-b</span><span class="tab-shortcut">⌘2</span></div>
+          <div class="tab"><span class="tab-label">repo-c</span><span class="tab-shortcut">⌘3</span></div>
+          <div class="tab tab-add">+</div>
+        </div>
+        <div class="pane-area" id="paneArea">
+          <div class="pane focused" data-pane="1">
+            <div><span class="prompt">$</span> agent run --task fix-bug</div>
+            <div class="output">> Running...</div>
+          </div>
+          <div class="pane unfocused" data-pane="2">
+            <div><span class="prompt">$</span> htop</div>
+            <div class="muted">Tasks: 180, 1172 thr</div>
+          </div>
+          <div class="pane unfocused" data-pane="3">
+            <div><span class="prompt">$</span> show_info</div>
+            <div class="muted">NixOS 22.05 | tmux</div>
+          </div>
+          <div class="pane unfocused" data-pane="4">
+            <div><span class="prompt">$</span> ls -l</div>
+            <div class="output">bin  Desktop  Documents  Downloads  Projects...</div>
+          </div>
+          <div class="resize-handle" data-dir="v" id="resizeV"></div>
+          <div class="resize-handle horizontal" data-dir="h" id="resizeH"></div>
+        </div>
+        <div class="tmux-status">
+          <span class="tmux-left">pmux 1 &gt; bash *</span>
+          <span class="tmux-right">2025-02-27 &lt; 19:35</span>
+        </div>
+      </main>
+    </div>
+    <footer class="status-bar">
+      <span><kbd>⌘B</kbd> <kbd>⌘N</kbd> <kbd>⌘⇧N</kbd> <kbd>⌘1-8</kbd> <kbd>⌘W</kbd> <kbd>⌘⇧D</kbd> <kbd>⌘⇧R</kbd></span>
+      <span class="status-hint">提示</span>
+    </footer>
+  </div>
+
+  <!-- New Branch Panel -->
+  <div class="overlay" id="newBranchOverlay">
+    <div class="new-branch-panel">
+      <h3>新建 Worktree 分支</h3>
+      <form id="newBranchForm">
+        <div class="form-row">
+          <label>分支名称</label>
+          <input type="text" id="branchName" placeholder="feat/my-feature" required>
+        </div>
+        <div class="form-row">
+          <label>基于分支（可选）</label>
+          <input type="text" id="baseBranch" placeholder="main" value="main">
+        </div>
+        <div class="actions">
+          <button type="button" class="btn-secondary" id="newBranchCancel">取消</button>
+          <button type="submit" class="btn-primary">创建</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Diff View -->
+  <div class="diff-view" id="diffView">
+    <div class="diff-view-header">
+      <h2 id="diffViewTitle">Diff View — cmux cli/unix socket</h2>
+      <button class="diff-view-close" id="diffViewClose">关闭 ⌘⇧D</button>
+    </div>
+    <div class="diff-view-body">
+      <div class="diff-file-list" id="diffFileList">
+        <div class="diff-file-item selected" data-file="src/lib.rs">📄 src/lib.rs <span class="file-stats">+12 -5</span></div>
+        <div class="diff-file-item" data-file="src/main.rs">📄 src/main.rs <span class="file-stats">+3 -1</span></div>
+        <div class="diff-file-item" data-file="Cargo.toml">📄 Cargo.toml <span class="file-stats">+1 -0</span></div>
+      </div>
+      <div class="diff-detail" id="diffDetail">
+        <div class="diff-file-name">src/lib.rs</div>
+        <div class="diff-hunk">
+          <div class="diff-hunk-header">@@ -10,7 +10,9 @@ impl AgentRuntime</div>
+          <div class="diff-line del"><span class="diff-sign">-</span> fn send_input(&self, pane_id: PaneId, bytes: &[u8]);</div>
+          <div class="diff-line add"><span class="diff-sign">+</span> fn send_input(&self, pane_id: PaneId, bytes: &[u8]);</div>
+          <div class="diff-line add"><span class="diff-sign">+</span> fn flush_input(&self, pane_id: PaneId);</div>
+          <div class="diff-line"><span class="diff-sign"></span> fn resize(&self, pane_id: PaneId, cols: u16, rows: u16);</div>
+        </div>
+        <div class="diff-hunk">
+          <div class="diff-hunk-header">@@ -25,3 +27,4 @@ trait AgentRuntime</div>
+          <div class="diff-line add"><span class="diff-sign">+</span> fn recover(&self, agent_ids: Option&lt;Vec&lt;AgentId&gt;&gt;) -> Result&lt;()&gt;;</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Context Menu (injected by JS) -->
+  <script>
+    (function() {
+      // Pane resize
+      const area = document.getElementById('paneArea');
+      const resizeV = document.getElementById('resizeV');
+      const resizeH = document.getElementById('resizeH');
+      let colRatio = 0.5, rowRatio = 0.5;
+      function applySize() {
+        area.style.setProperty('--col1', colRatio + 'fr');
+        area.style.setProperty('--col2', (1 - colRatio) + 'fr');
+        area.style.setProperty('--row1', rowRatio + 'fr');
+        area.style.setProperty('--row2', (1 - rowRatio) + 'fr');
+      }
+      applySize();
+      function setupResize(handle, isVertical, getRatio, setRatio) {
+        handle.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          const onMove = function(e) {
+            const rect = area.getBoundingClientRect();
+            const total = isVertical ? rect.width : rect.height;
+            const pos = isVertical ? e.clientX - rect.left : e.clientY - rect.top;
+            const newVal = Math.max(0.15, Math.min(0.85, pos / total));
+            setRatio(newVal);
+            applySize();
+          };
+          const onUp = function() {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+          };
+          document.addEventListener('mousemove', onMove);
+          document.addEventListener('mouseup', onUp);
+        });
+      }
+      setupResize(resizeV, true, () => colRatio, v => colRatio = v);
+      setupResize(resizeH, false, () => rowRatio, v => rowRatio = v);
+
+      // 1. New Branch Panel
+      const newBranchBtn = document.getElementById('newBranchBtn');
+      const newBranchOverlay = document.getElementById('newBranchOverlay');
+      const newBranchForm = document.getElementById('newBranchForm');
+      const newBranchCancel = document.getElementById('newBranchCancel');
+      newBranchBtn.addEventListener('click', () => newBranchOverlay.classList.add('visible'));
+      newBranchCancel.addEventListener('click', () => newBranchOverlay.classList.remove('visible'));
+      newBranchOverlay.addEventListener('click', (e) => { if (e.target === newBranchOverlay) newBranchOverlay.classList.remove('visible'); });
+      newBranchForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const name = document.getElementById('branchName').value;
+        const base = document.getElementById('baseBranch').value;
+        console.log('Create worktree:', name, 'from', base);
+        newBranchOverlay.classList.remove('visible');
+        newBranchForm.reset();
+        document.getElementById('baseBranch').value = 'main';
+      });
+
+      // 2. Notification Popover
+      const notificationIcon = document.getElementById('notificationIcon');
+      const notificationPopover = document.getElementById('notificationPopover');
+      notificationIcon.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (notificationPopover.classList.toggle('visible')) {
+          const rect = notificationIcon.getBoundingClientRect();
+          const w = 320;
+          let left = rect.right - w;
+          if (left < 12) left = 12;
+          if (left + w > window.innerWidth - 12) left = window.innerWidth - w - 12;
+          notificationPopover.style.top = (rect.bottom + 8) + 'px';
+          notificationPopover.style.left = left + 'px';
+          notificationPopover.style.right = 'auto';
+        }
+      });
+      document.addEventListener('click', () => notificationPopover.classList.remove('visible'));
+      notificationPopover.addEventListener('click', (e) => e.stopPropagation());
+
+      // 3. Context Menu + Diff View
+      const contextMenu = document.createElement('div');
+      contextMenu.className = 'context-menu';
+      contextMenu.id = 'contextMenu';
+      contextMenu.innerHTML = '<div class="context-menu-item" data-action="diff"><span>Diff View</span><kbd>⌘⇧D</kbd></div><div class="context-menu-item" data-action="review"><span>Review</span><kbd>⌘⇧R</kbd></div>';
+      document.body.appendChild(contextMenu);
+
+      let currentWorktreeForContext = null;
+      function showWorktreeMenu(item, x, y) {
+        currentWorktreeForContext = item.dataset.worktree;
+        contextMenu.style.left = x + 'px';
+        contextMenu.style.top = y + 'px';
+        contextMenu.classList.add('visible');
+      }
+      document.querySelectorAll('.worktree-item').forEach(item => {
+        item.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          showWorktreeMenu(item, e.clientX, e.clientY);
+        });
+        item.querySelector('.item-menu-btn')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const rect = item.getBoundingClientRect();
+          showWorktreeMenu(item, rect.right - 160, rect.bottom + 4);
+        });
+      });
+      contextMenu.querySelectorAll('.context-menu-item').forEach(btn => {
+        btn.addEventListener('click', () => {
+          if (btn.dataset.action === 'diff' && currentWorktreeForContext) {
+            document.getElementById('diffViewTitle').textContent = 'Diff View — ' + currentWorktreeForContext;
+            document.getElementById('diffView').classList.add('visible');
+          }
+          contextMenu.classList.remove('visible');
+        });
+      });
+      document.addEventListener('click', () => contextMenu.classList.remove('visible'));
+
+      // 4. Diff View
+      const diffView = document.getElementById('diffView');
+      const diffViewClose = document.getElementById('diffViewClose');
+      const diffFileList = document.getElementById('diffFileList');
+      const diffDetail = document.getElementById('diffDetail');
+      diffViewClose.addEventListener('click', () => diffView.classList.remove('visible'));
+      diffView.addEventListener('keydown', (e) => { if (e.key === 'Escape') diffView.classList.remove('visible'); });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'd' && e.metaKey && e.shiftKey) {
+          e.preventDefault();
+          const sel = document.querySelector('.worktree-item.selected');
+          if (sel) {
+            document.getElementById('diffViewTitle').textContent = 'Diff View — ' + sel.dataset.worktree;
+            diffView.classList.add('visible');
+          }
+        }
+      });
+      diffFileList.querySelectorAll('.diff-file-item').forEach(item => {
+        item.addEventListener('click', () => {
+          diffFileList.querySelectorAll('.diff-file-item').forEach(i => i.classList.remove('selected'));
+          item.classList.add('selected');
+          diffDetail.querySelector('.diff-file-name').textContent = item.dataset.file;
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

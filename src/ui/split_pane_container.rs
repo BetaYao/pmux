@@ -1,9 +1,10 @@
 // ui/split_pane_container.rs - Split pane layout with draggable dividers
 use crate::split_tree::SplitNode;
-use crate::ui::terminal_view::{TerminalBuffer, TerminalContent, TerminalView};
+use crate::ui::terminal_view::{TerminalBuffer, TerminalView};
 use gpui::prelude::*;
 use gpui::{relative, CursorStyle, *};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 const DIVIDER_WIDTH: f32 = 4.0;
@@ -81,12 +82,18 @@ impl SplitPaneContainer {
     }
 
     fn pane_title(&self, pane_target: &str) -> String {
-        // Extract short name from target (e.g. "sess:win.%0" -> "pane 0")
-        if let Some(dot) = pane_target.rfind('.') {
-            format!("pane {}", &pane_target[dot + 1..])
-        } else {
-            "terminal".to_string()
+        // local:/path/to/worktree -> worktree name (last path component)
+        if let Some(colon) = pane_target.find(':') {
+            let path_part = &pane_target[colon + 1..];
+            if let Some(name) = Path::new(path_part).file_name() {
+                return name.to_string_lossy().to_string();
+            }
         }
+        // sess:win.%0 -> "pane 0"
+        if let Some(dot) = pane_target.rfind('.') {
+            return format!("pane {}", &pane_target[dot + 1..]);
+        }
+        "terminal".to_string()
     }
 }
 
@@ -184,7 +191,7 @@ impl SplitPaneContainer {
                     .get(target)
                     .cloned()
                     .unwrap_or_else(|| {
-                        TerminalBuffer::Legacy(Arc::new(Mutex::new(TerminalContent::new())))
+                        TerminalBuffer::Term(Arc::new(Mutex::new(crate::terminal::TermBridge::new(80, 24))))
                     });
                 let title = self.pane_title(target);
                 let is_focused = pane_index_offset == focused_pane_index;

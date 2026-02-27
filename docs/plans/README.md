@@ -17,6 +17,8 @@
 
 **依赖顺序**：Phase 1 → 2 → 3 → 4（Phase 2 与 3 部分可并行）
 
+**Phase 2+3 路线图**：[2026-02-phase2-phase3-roadmap.md](2026-02-phase2-phase3-roadmap.md) — 快速入口与实施建议
+
 ## 历史计划
 
 - [2026-02-25-spec2-implementation.md](2026-02-25-spec2-implementation.md) — Sidebar + Terminal 实现

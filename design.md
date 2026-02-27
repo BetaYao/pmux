@@ -80,11 +80,11 @@ UI 只依赖 Runtime API；Backend 可插拔，接入新 backend 无需改 UI。
 
 ### 调整
 
-| 现有 | 改为 |
-|------|------|
-| terminal_poller / status_poller / capture-pane | PTY stream + Event Bus |
-| tmux send-keys | xterm escape → PTY write |
-| tmux 直接调用 | 通过 Runtime API，tmux 作为 backend adapter |
+| 现有 | 改为 | 状态 |
+|------|------|------|
+| terminal_poller / status_poller / capture-pane | PTY stream (pipe-pane / control mode) + Event Bus | ✅ 已实现 |
+| tmux send-keys | xterm escape → Runtime.send_input → PTY write | ✅ 已实现 |
+| tmux 直接调用 | 通过 Runtime API，tmux 作为 backend adapter | ✅ 已实现 |
 
 ### 新增
 
@@ -163,7 +163,65 @@ process lifecycle → Event Bus (AgentStateChange) → Sidebar / StatusBar / Not
 - **Content**：Workspace 标签栏、Pane 标签栏、终端主区域
 - **Diff**：⌘⇧D 打开 nvim diffview
 
-### 7.2 UI 数据获取模式
+### 7.2 UI 原型图（Ghostty 风格）
+
+借鉴 [Ghostty](https://ghostty.org) 的设计理念：**平台原生、极简、功能优先**。使用原生 UI 组件，无自定义绘制控件；布局一上来即分为左 | 右 | 底，无统一 title bar。
+
+**可交互原型**：[`docs/pmux-prototype.html`](docs/pmux-prototype.html)（浏览器打开即可预览）
+
+**截图**：![pmux UI 原型](docs/pmux-prototype.png)
+
+```
+╭────────────────────────────┬─────────────────────────────────────────────────────────────────╮
+│  [●][○][○]  [📁][🔔][+]   │  repo-a    repo-b    repo-c    +                                 │  ← 原生 Tab
+│  ─────────────────────    │  ─────────────────────────────────────────────────────────────  │
+│                            │                                                                 │
+│  📎 hq                     │  $ agent run --task fix-bug                                     │
+│     Claude is waiting...   │  > Running...                                                    │
+│     ~/fun/cmuxterm-hq      │                                                                 │
+│                            │  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  │  ← 原生 Split
+│  ▓ cmux cli/unix socket ▓  │  $ git status                                                   │
+│     PR: ...Implemented     │  modified: src/lib.rs                                            │
+│     ~/fun/cmux             │                                                                 │
+│                            │                                                                 │
+│  * ssh                     │  (非焦点 Pane 可淡出，突出当前焦点)                              │
+│     branch: feat-ssh        │                                                                 │
+│     ~/fun/cmux              │                                                                 │
+│  ⋮                         │                                                                 │
+│  ─────────────────────    │                                                                 │
+│  + New Branch              │                                                                 │
+│                            │                                                                 │
+├────────────────────────────┴─────────────────────────────────────────────────────────────────┤
+│  ⌘B  ⌘N  ⌘⇧N  ⌘1-8  ⌘W  ⌘⇧D  ⌘⇧R                                                    │ 提示   │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+**Ghostty 风格要点**
+- **平台原生**：macOS 用原生 traffic lights、原生 Tab、原生 Split，符合系统预期
+- **极简**：无多余装饰，Status Bar 仅展示快捷键，可悬停展开说明
+- **视觉层次**：选中项高亮（▓），非焦点 Pane 可淡出（unfocused split fading）
+- **布局**：左 | 右 | 底 三块，无统一 title bar；Sidebar header 内嵌图标
+
+**图例**：📎 主 worktree  * 其他  ▓ 选中  ⋮ 可滚动
+
+**左侧 Sidebar**
+- **Header**（在 Sidebar 内）：macOS 系统按钮（红黄绿）+ workspace 图标 + 通知 icon + 添加 workspace icon
+- **Worktree list**（可滚动）：
+  - 每项：状态图标 | **worktree 名称**（粗体）| 状态/最后消息 | 路径
+  - 示例：`hq` + "Claude is waiting for your input" + `~/fun/cmuxterm-hq`
+  - 选中项蓝色背景高亮
+- **[+ New Branch]**：固定在 list 下方
+
+**右侧 Content**
+- **Workspace tab bar**：当前 workspace 与多 tab 切换
+- **主区域**：多 Pane terminal（⌘D/⌘⇧D 分屏），每个 Pane 可对应同一 worktree 的不同任务
+- **数据流**：输出通过 Runtime API `subscribe_output` 订阅，输入通过 Runtime API `send_input` 发送
+
+**Status Bar**
+- 展示常用快捷键（⌘B、⌘N、⌘⇧N、⌘1-8、⌘W、⌘⇧D、⌘⇧R）
+- 支持 UI 内实时提示用户
+
+### 7.3 UI 数据获取模式
 
 ```
 Event Bus (subscribe)

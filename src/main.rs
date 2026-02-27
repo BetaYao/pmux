@@ -5,6 +5,13 @@ use gpui::{actions, point, px, size, AssetSource, TitlebarOptions, WindowBounds,
 use pmux::ui::app_root::AppRoot;
 use pmux::window_state::PersistentAppState;
 
+/// Set macOS notification bundle identifier before any notification.
+/// Avoids get_bundle_identifier_or_default() triggering "Where is use_default?" dialog and freeze.
+#[cfg(target_os = "macos")]
+fn init_macos_notifications() {
+    let _ = notify_rust::set_application("cn.mx5.pmux");
+}
+
 struct Assets {
     base: PathBuf,
 }
@@ -29,6 +36,9 @@ impl AssetSource for Assets {
 }
 
 fn main() {
+    #[cfg(target_os = "macos")]
+    init_macos_notifications();
+
     let resources = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources");
     gpui_platform::application()
         .with_assets(Assets { base: resources })

@@ -66,9 +66,8 @@ cargo check
 
 **Agent Status Detection (`src/`)**
 - `agent_status.rs` - Agent status enumeration (Running, Waiting, Idle, Error, Unknown) with display properties
-- `status_poller.rs` - Periodic status polling for tmux panes (500ms interval, debounce threshold)
 - `status_detector.rs` - Analyzes pane content to determine agent status
-- `pane_status_tracker.rs` - Per-pane status tracking with debouncing and history
+- `StatusPublisher` - Publishes agent state changes via Event Bus (reads from stream/Term buffers; no capture-pane)
 
 **Input Handling**
 - `input_handler.rs` - Forwards keyboard events to tmux sessions

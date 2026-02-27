@@ -136,6 +136,37 @@ pub fn get_ahead_behind(_repo_path: &Path, _branch: &str) -> Result<(usize, usiz
     Ok((0, 0))
 }
 
+/// Diff stats: (additions, deletions, file_count). Returns None on error.
+pub fn get_diff_stats(worktree_path: &Path) -> Option<(u32, u32, u32)> {
+    let output = Command::new("git")
+        .args(["diff", "--shortstat"])
+        .current_dir(worktree_path)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let line = stdout.trim();
+    if line.is_empty() {
+        return Some((0, 0, 0));
+    }
+    let mut add: u32 = 0;
+    let mut del: u32 = 0;
+    let mut files: u32 = 0;
+    for part in line.split(',') {
+        let part = part.trim();
+        if part.ends_with("insertion") || part.ends_with("insertions") {
+            add = part.split_whitespace().next()?.parse().ok()?;
+        } else if part.ends_with("deletion") || part.ends_with("deletions") {
+            del = part.split_whitespace().next()?.parse().ok()?;
+        } else if part.contains("file changed") {
+            files = part.split_whitespace().next()?.parse().ok()?;
+        }
+    }
+    Some((add, del, files))
+}
+
 /// Check if worktree has uncommitted changes
 pub fn has_uncommitted_changes(worktree_path: &Path) -> bool {
     let output = match Command::new("git")

@@ -11,8 +11,21 @@
 
 ## 前置条件
 
-- Phase 1 完成（streaming terminal 已接入）
+- [x] Phase 1 完成（streaming terminal、PtyBridge、pipe-pane 已接入）
 - 现有 tmux session、pane、window 逻辑可运行
+- `app_root.rs` 当前直接调用：`Session`、`tmux_pane::*`、`tmux_window::*`、`control_mode_attach`、`InputHandler`
+
+---
+
+## 实施顺序与依赖
+
+```
+Task 1 (AgentRuntime trait) ──┬──> Task 2 (tmux_adapter) ──> Task 4 (app_root 重构)
+                              │
+                              └──> Task 3 (local_pty, 可选)
+```
+
+**建议顺序**：Task 1 → Task 2 → Task 4 → Task 5。Task 3 可与 Task 4 并行或延后。
 
 ---
 
@@ -22,88 +35,146 @@
 - Create: `src/runtime/agent_runtime.rs`
 - Modify: `src/runtime/mod.rs`
 
-**Step 1: 定义核心类型**
+**Step 1: 写失败测试（TDD）**
+
+- 在 `src/runtime/agent_runtime.rs` 中写 `#[cfg(test)] mod tests`
+- 测试：`AgentRuntime` trait 存在，`TmuxRuntime` 实现该 trait（占位实现）
+- `cargo test runtime::agent_runtime` 应失败（模块未实现）
+
+**Step 2: 定义核心类型**
 
 ```rust
-// agent_runtime.rs
+// src/runtime/agent_runtime.rs
+use std::path::Path;
+
 pub type AgentId = String;
 pub type PaneId = String;
 
+#[derive(Clone, Debug)]
 pub struct TerminalEvent {
     pub bytes: Vec<u8>,
     pub pane_id: PaneId,
     pub timestamp: std::time::Instant,
-    pub event_type: TerminalEventType,
 }
 
+#[derive(Clone, Debug)]
 pub struct AgentStateChange {
     pub agent_id: AgentId,
-    pub state: AgentState,
+    pub state: crate::agent_status::AgentStatus,
 }
 
 pub trait AgentRuntime: Send + Sync {
-    fn send_input(&self, pane_id: &PaneId, bytes: &[u8]) -> Result<()>;
-    fn resize(&self, pane_id: &PaneId, cols: u16, rows: u16) -> Result<()>;
-    fn subscribe_output(&self, pane_id: &PaneId) -> impl Stream<Item = TerminalEvent>;
-    fn subscribe_state(&self) -> impl Stream<Item = AgentStateChange>;
+    fn send_input(&self, pane_id: &PaneId, bytes: &[u8]) -> Result<(), RuntimeError>;
+    fn resize(&self, pane_id: &PaneId, cols: u16, rows: u16) -> Result<(), RuntimeError>;
+    fn subscribe_output(&self, pane_id: &PaneId) -> Option<flume::Receiver<Vec<u8>>>;
     fn list_panes(&self, agent_id: &AgentId) -> Vec<PaneId>;
-    fn open_diff(&self, worktree: &Path, pane_id: Option<&PaneId>) -> Result<()>;
-    fn open_review(&self, worktree: &Path) -> Result<()>;
-    fn restart(&self, agent_id: &AgentId) -> Result<()>;
-    fn recover(&self, agent_ids: Option<Vec<AgentId>>) -> Result<()>;
+    fn focus_pane(&self, pane_id: &PaneId) -> Result<(), RuntimeError>;
+    fn split_pane(&self, pane_id: &PaneId, vertical: bool) -> Result<PaneId, RuntimeError>;
+    fn open_diff(&self, worktree: &Path, pane_id: Option<&PaneId>) -> Result<(), RuntimeError>;
+    fn open_review(&self, worktree: &Path) -> Result<(), RuntimeError>;
+    fn kill_window(&self, window_target: &str) -> Result<(), RuntimeError>;
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum RuntimeError {
+    #[error("backend error: {0}")]
+    Backend(String),
+    #[error("pane not found: {0}")]
+    PaneNotFound(String),
 }
 ```
 
-**Step 2: 定义 PtyHandle trait**
+**注意**：`subscribe_output` 先返回 `flume::Receiver`（与 Phase 1 PtyBridge 一致），Phase 3 再统一为 Event Bus Stream。
+
+**Step 3: 定义 PtyHandle trait（可选，供 backend 内部用）**
 
 ```rust
 pub trait PtyHandle: Send + Sync {
-    fn write(&self, bytes: &[u8]) -> Result<()>;
-    fn resize(&self, cols: u16, rows: u16) -> Result<()>;
-    fn subscribe_output(&self) -> impl Stream<Item = TerminalEvent>;
+    fn write(&self, bytes: &[u8]) -> Result<(), RuntimeError>;
+    fn resize(&self, cols: u16, rows: u16) -> Result<(), RuntimeError>;
+    fn subscribe_output(&self) -> Option<flume::Receiver<Vec<u8>>>;
 }
 ```
+
+**Step 4: 验证**
+
+- `cargo build` 通过
+- `cargo test runtime` 通过
 
 ---
 
 ## Task 2: 实现 tmux_adapter
 
 **Files:**
-- Create: `src/backends/mod.rs` 或 `src/runtime/backends/tmux.rs`
-- 封装现有 `tmux::session`、`tmux::pane`、`tmux::window`
+- Create: `src/runtime/backends/mod.rs`
+- Create: `src/runtime/backends/tmux.rs`
+- Modify: `src/runtime/mod.rs`
 
-**Step 1: TmuxRuntime 实现 AgentRuntime**
+**Step 1: 创建 backends 模块**
 
-- `send_input` → 内部调用 `tmux send-keys`（Phase 4 前）或 PTY write
-- `resize` → `tmux resize-pane`
-- `subscribe_output` → 使用 Phase 1 的 PtyBridge（pipe-pane）
-- `list_panes` → `tmux list-panes`
-- `open_diff` / `open_review` → 封装 `tmux new-window` + `send-keys` nvim 命令
-- `restart` → 重启 agent 进程（tmux 内）
-- `recover` → `tmux has-session` + attach
+`src/runtime/backends/mod.rs`:
+```rust
+mod tmux;
+pub use tmux::TmuxRuntime;
+```
 
-**Step 2: 隐藏 tmux 模块**
+**Step 2: TmuxRuntime 实现 AgentRuntime**
 
-- UI 不 `use crate::tmux::*`
-- 所有 tmux 调用仅在 `tmux_adapter` 内部
+封装现有 `crate::tmux::*` 调用，不改变 tmux 逻辑，仅做转发：
+
+| AgentRuntime 方法 | 内部实现 |
+|-------------------|----------|
+| `send_input` | `InputHandler::send_key_to_target_with_literal` 或 `tmux send-keys` |
+| `resize` | `tmux_pane::resize_pane` |
+| `subscribe_output` | `PtyBridge::new` + `subscribe_output`，或 control_mode fallback |
+| `list_panes` | `tmux_pane::list_panes_for_window` |
+| `focus_pane` | `tmux_pane::select_pane` |
+| `split_pane` | `tmux_pane::split_pane_vertical` / `split_pane_horizontal` |
+| `open_diff` | `tmux_window::create_window_with_command` + nvim diffview |
+| `open_review` | `tmux_window::create_window_with_command` + nvim review |
+| `kill_window` | `tmux_window::kill_window` |
+
+**Step 3: TmuxRuntime 构造**
+
+- 持有 `session_name: String`、`window_name: String`、`InputHandler`、`PtyBridge` 或 control_mode handle
+- 提供 `TmuxRuntime::new(session_name, window_name, ...)` 或 `from_session(session: &Session)`
+
+**Step 4: 验证**
+
+- `cargo test runtime::backends` 通过
+- 单元测试：mock 或 `#[ignore]` 集成测试
 
 ---
 
-## Task 3: 实现 local PTY adapter（可选，优先）
+## Task 3: 实现 local PTY adapter（可选，可延后）
 
 **Files:**
 - Create: `src/runtime/backends/local_pty.rs`
+- Modify: `src/runtime/backends/mod.rs`
 
-**Step 1: LocalPtyRuntime**
+**Step 1: 添加依赖**
 
-- 使用 `nix::pty` 或 `portable-pty` 创建 PTY
-- 直接 spawn 进程到 PTY，读取 master 输出
+`Cargo.toml`:
+```toml
+portable-pty = "0.8"  # 或 nix = { version = "0.27", features = ["pty"] }
+```
+
+**Step 2: LocalPtyRuntime**
+
+- 使用 `portable_pty::native_pty_system()` 创建 PTY
+- `Command::new("shell").spawn()` 到 PTY
+- 读取 PTY master 输出 → `flume::Sender`
 - 实现 `AgentRuntime` trait
 
-**Step 2: Backend 选择**
+**Step 3: Backend 选择**
 
-- config.json 或环境变量 `PMUX_BACKEND=tmux|local_pty`
+- `config.json`: `"backend": "tmux" | "local_pty"`
+- 或环境变量 `PMUX_BACKEND=tmux|local_pty`
 - 默认 `tmux`
+
+**Step 4: 验证**
+
+- `PMUX_BACKEND=local_pty cargo run` 可启动（若实现）
 
 ---
 
@@ -111,52 +182,78 @@ pub trait PtyHandle: Send + Sync {
 
 **Files:**
 - Modify: `src/ui/app_root.rs`
+- Modify: `src/input_handler.rs`（可选：移入 runtime，或通过 Runtime 调用）
 
-**Step 1: 替换依赖**
+**Step 1: 引入 Runtime**
 
 - 删除 `use crate::tmux::{session, pane, window, control_mode_attach}`
-- 添加 `use crate::runtime::AgentRuntime` 或持有 `Arc<dyn AgentRuntime>`
+- 添加 `use crate::runtime::{AgentRuntime, backends::TmuxRuntime}`
+- AppRoot 持有 `runtime: Arc<dyn AgentRuntime>` 或 `Option<Arc<TmuxRuntime>>`
 
-**Step 2: 替换调用**
+**Step 2: 替换调用映射**
 
 | 原调用 | 替换为 |
 |--------|--------|
-| `Session::new()` | `runtime.create_session()` 或等价 |
-| `tmux_pane::capture_pane` | 已由 Phase 1 移除 |
+| `Session::new(name)` | `TmuxRuntime::new` 或 `runtime.create_session`（若 trait 扩展） |
+| `session.ensure_in(path)` | 封装在 TmuxRuntime 构造中 |
 | `tmux_pane::list_panes_for_window` | `runtime.list_panes(agent_id)` |
-| `tmux_pane::get_pane_dimensions` | `runtime.resize` 或等价 |
-| `tmux_pane::select_pane` | `runtime.focus_pane(pane_id)` 或等价 |
-| `tmux_pane::split_pane_*` | `runtime.split_pane(pane_id, vertical)` |
-| `tmux_window::create_window_with_command` | `runtime.open_diff` / `open_review` |
+| `tmux_pane::get_pane_dimensions` | `runtime.resize` 调用时传入，或 trait 增加 `get_dimensions` |
+| `tmux_pane::select_pane` | `runtime.focus_pane(pane_id)` |
+| `tmux_pane::split_pane_vertical/horizontal` | `runtime.split_pane(pane_id, vertical)` |
+| `tmux_window::create_window_with_command` | `runtime.open_diff` / `runtime.open_review` |
+| `tmux_window::kill_window` | `runtime.kill_window(target)` |
 | `InputHandler.send_key_to_target` | `runtime.send_input(pane_id, bytes)` |
+| `PtyBridge::new` / control_mode | `runtime.subscribe_output(pane_id)` |
 
-**Step 3: 验证**
+**Step 3: 保持 UI 流程不变**
+
+- `start_tmux_session` → 创建 TmuxRuntime，调用 `runtime.subscribe_output` 等
+- `switch_to_worktree` → 同上
+- `handle_key_down` → `runtime.send_input`
+- `split_pane` 回调 → `runtime.split_pane`
+- Diff/Review 打开 → `runtime.open_diff` / `runtime.open_review`
+
+**Step 4: 移除或隐藏 tmux 模块**
+
+- UI 不 `use crate::tmux::*`
+- 所有 tmux 调用仅在 `src/runtime/backends/tmux.rs` 内部
+
+**Step 5: 验证**
 
 - `rg "tmux::" src/ui/` 应无结果
 - `rg "crate::tmux" src/ui/` 应无结果
+- `rg "tmux_pane" src/ui/` 应无结果
+- `rg "tmux_window" src/ui/` 应无结果
+- `cargo run` 正常启动，多 workspace、多 worktree、多 pane 流程正常
 
 ---
 
 ## Task 5: 依赖检测按 backend
 
 **Files:**
-- Modify: `src/deps.rs` 或启动页逻辑
+- Modify: `src/deps.rs`
+- Modify: 启动页 / `loading_state.rs`（若有）
 
 **Step 1: 分 backend 检测**
 
 - tmux backend：检查 `tmux -V`
-- local_pty backend：检查 PTY 功能（可用 `nix::pty::openpty` 或等价）
+- local_pty backend：检查 PTY 功能（`portable_pty` 或 `nix::pty::openpty`）
 
 **Step 2: 启动页根据 backend 显示**
 
 - 若选择 tmux 且未安装，提示安装 tmux
 - 若选择 local_pty，提示系统要求
 
+**Step 3: 验证**
+
+- `cargo run` 启动时依赖检测正常
+
 ---
 
 ## 验收
 
-- [ ] UI 不包含 `tmux::` 或 `crate::tmux` 调用
-- [ ] 通过 config 可切换 tmux / local_pty 后端
+- [ ] UI 不包含 `tmux::`、`crate::tmux`、`tmux_pane`、`tmux_window` 调用
+- [ ] 通过 config 可切换 tmux / local_pty 后端（若实现 Task 3）
 - [ ] 多 workspace、多 worktree、多 pane 流程正常
-- [ ] `cargo test` 通过
+- [ ] `cargo run` 正常
+- [ ] `cargo test` 通过（SIGBUS 除外）

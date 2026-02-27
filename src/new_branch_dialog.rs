@@ -1,4 +1,7 @@
-// new_branch_dialog.rs - New branch dialog and worktree creation logic
+//! New branch dialog and worktree creation logic.
+//!
+//! **Tmux backend principle**: One repo = one session (`sdlc-{repo}`). New worktrees are added as
+//! windows within that session via `ensure_tmux_worktree_window`, not as new sessions.
 use std::path::PathBuf;
 
 /// Validation error for branch names
@@ -69,25 +72,6 @@ pub fn validate_branch_name(name: &str) -> Result<(), ValidationError> {
 pub fn generate_worktree_path(repo_path: &PathBuf, branch_name: &str) -> PathBuf {
     let safe_branch_name = branch_name.replace('/', "-");
     repo_path.join(&safe_branch_name)
-}
-
-/// Generates a unique tmux session name based on the worktree path
-/// Uses base64 encoding of the path plus a timestamp to ensure uniqueness
-pub fn generate_unique_tmux_session_name(worktree_path: &PathBuf) -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    
-    let path_str = worktree_path.to_string_lossy();
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-    
-    // Create a short hash of the path to keep session names manageable
-    let hash = path_str.chars()
-        .map(|c| c as usize)
-        .fold(0usize, |acc, x| acc.wrapping_add(x));
-    
-    format!("pmux-{:x}-{:x}", hash, timestamp)
 }
 
 /// Dialog state for creating a new branch and worktree
@@ -279,26 +263,6 @@ mod tests {
         let branch_name = "user/john/feature/awesome";
         let worktree_path = generate_worktree_path(&repo_path, branch_name);
         assert_eq!(worktree_path, PathBuf::from("/home/user/myproject/user-john-feature-awesome"));
-    }
-
-    /// Test: Unique tmux session name generation
-    #[test]
-    fn test_generate_unique_tmux_session_name() {
-        let worktree_path = PathBuf::from("/home/user/myproject/feature-test");
-        let session_name = generate_unique_tmux_session_name(&worktree_path);
-        assert!(!session_name.is_empty());
-        assert!(session_name.len() > 10); // Should have timestamp suffix
-    }
-
-    /// Test: Unique tmux session names are different
-    #[test]
-    fn test_generate_unique_tmux_session_names_differ() {
-        let worktree_path = PathBuf::from("/home/user/myproject/feature-test");
-        let name1 = generate_unique_tmux_session_name(&worktree_path);
-        // Wait a tiny bit to ensure different timestamp
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        let name2 = generate_unique_tmux_session_name(&worktree_path);
-        assert_ne!(name1, name2);
     }
 
     /// Test: NewBranchDialog initial state

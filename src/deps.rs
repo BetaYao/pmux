@@ -147,13 +147,10 @@ pub fn check_dependencies() -> Result<(), DependencyError> {
 }
 
 /// Run dependency check and return detailed result for self-check UI.
-/// Use this when you need to show missing deps and installation instructions.
+/// Local PTY backend: no tmux required.
 pub fn check_dependencies_detailed() -> DependencyCheckResult {
     let mut missing = Vec::new();
 
-    if check_cmd("tmux", &["-V"]).is_err() {
-        missing.push("tmux".to_string());
-    }
     if check_cmd("git", &["--version"]).is_err() {
         missing.push("git".to_string());
     }
@@ -171,7 +168,7 @@ pub fn check_dependencies_detailed() -> DependencyCheckResult {
     } else {
         let list = missing.join("、");
         format!(
-            "pmux dependencies missing: {}.\n\npmux needs tmux for terminal sessions, git for worktrees and branches, nvim and diffview for diff view.\nPlease install the above and ensure they are in PATH.",
+            "pmux dependencies missing: {}.\n\npmux needs git for worktrees and branches, nvim and diffview for diff view.\nPlease install the above and ensure they are in PATH.",
             list
         )
     };

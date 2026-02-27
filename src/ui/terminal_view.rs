@@ -1,121 +1,35 @@
 // ui/terminal_view.rs - Terminal view component with GPUI render
-use crate::terminal::TermBridge;
+// No screen text snapshot: content from stream (pipe-pane/control mode) or static error only.
+use crate::terminal::{StyledCell, TermBridge};
 use gpui::prelude::*;
 use gpui::*;
 use std::sync::{Arc, Mutex};
 
-/// Terminal content representation
-#[derive(Clone)]
-pub struct TerminalContent {
-    pub lines: Vec<TerminalLine>,
-    pub cursor_position: Option<(usize, usize)>,
+#[inline]
+fn rgb_u8(r: u8, g: u8, b: u8) -> u32 {
+    ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
 }
 
-impl TerminalContent {
-    pub fn new() -> Self {
-        Self { lines: Vec::new(), cursor_position: None }
-    }
+/// Line height in pixels - enough for 12px font descenders (g, y, p)
+const LINE_HEIGHT: f32 = 20.0;
 
-    pub fn from_string(content: &str) -> Self {
-        Self {
-            lines: content.lines().map(TerminalLine::new).collect(),
-            cursor_position: None,
-        }
-    }
-
-    pub fn line_count(&self) -> usize { self.lines.len() }
-
-    pub fn to_string(&self) -> String {
-        self.lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n")
-    }
-
-    pub fn update(&mut self, content: &str) {
-        self.lines = content.lines().map(TerminalLine::new).collect();
-        self.cursor_position = Self::infer_cursor_position(&self.lines);
-    }
-
-    /// Infer cursor position from plain text lines. With tmux capture-pane -p (no ANSI),
-    /// we don't get cursor coords; use heuristic: cursor at end of last non-empty line
-    /// (typical shell prompt case). Trailing newline yields empty last line → cursor on
-    /// previous line.
-    fn infer_cursor_position(lines: &[TerminalLine]) -> Option<(usize, usize)> {
-        if lines.is_empty() {
-            return None;
-        }
-        let last_non_empty = lines
-            .iter()
-            .enumerate()
-            .rev()
-            .find(|(_, l)| !l.text.is_empty());
-        match last_non_empty {
-            Some((row, line)) => Some((row, line.text.len())),
-            None => Some((0, 0)),
-        }
-    }
-}
-
-impl Default for TerminalContent {
-    fn default() -> Self { Self::new() }
-}
-
-/// Single line in terminal
-#[derive(Debug, Clone)]
-pub struct TerminalLine {
-    pub text: String,
-    pub styles: Vec<StyleRange>,
-}
-
-impl TerminalLine {
-    pub fn new(text: &str) -> Self {
-        Self { text: text.to_string(), styles: Vec::new() }
-    }
-    pub fn len(&self) -> usize { self.text.len() }
-    pub fn is_empty(&self) -> bool { self.text.is_empty() }
-}
-
-/// Style range for a portion of text
-#[derive(Debug, Clone)]
-pub struct StyleRange {
-    pub start: usize,
-    pub end: usize,
-    pub fg_color: Option<Color>,
-    pub bg_color: Option<Color>,
-    pub bold: bool,
-    pub italic: bool,
-}
-
-/// Color representation
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Color {
-    pub r: u8,
-    pub g: u8,
-    pub b: u8,
-}
-
-impl Color {
-    pub fn new(r: u8, g: u8, b: u8) -> Self { Self { r, g, b } }
-
-    pub fn to_hsla(&self) -> Hsla {
-        let hex = ((self.r as u32) << 16) | ((self.g as u32) << 8) | (self.b as u32);
-        rgb(hex).into()
-    }
-
-    pub fn black() -> Self { Self::new(0, 0, 0) }
-    pub fn white() -> Self { Self::new(255, 255, 255) }
-    pub fn red() -> Self { Self::new(255, 0, 0) }
-    pub fn green() -> Self { Self::new(0, 255, 0) }
-    pub fn blue() -> Self { Self::new(0, 0, 255) }
-    pub fn gray() -> Self { Self::new(128, 128, 128) }
-    pub fn dark_gray() -> Self { Self::new(64, 64, 64) }
-}
-
-/// Content source for TerminalView - either legacy capture-pane or control mode Term.
+/// Content source for TerminalView - streaming (Term) or error placeholder (Error).
 #[derive(Clone)]
 pub enum TerminalBuffer {
-    /// Legacy: plain text from capture-pane polling
-    Legacy(Arc<Mutex<TerminalContent>>),
-    /// Control mode: alacritty_terminal::Term with VT parsing
+    /// Error: static message when streaming unavailable (no screen snapshot)
+    Error(String),
+    /// Streaming: alacritty_terminal::Term with VT parsing (pipe-pane / control mode)
     Term(Arc<Mutex<TermBridge>>),
+}
+
+impl TerminalBuffer {
+    /// Extract text for status detection. Source: stream (Term) only—never capture-pane.
+    pub fn content_for_status_detection(&self) -> Option<String> {
+        match self {
+            TerminalBuffer::Term(t) => t.lock().ok().map(|term| term.visible_lines().join("\n")),
+            TerminalBuffer::Error(s) => Some(s.clone()),
+        }
+    }
 }
 
 /// Terminal view component - renders tmux pane content
@@ -135,26 +49,14 @@ impl TerminalView {
         Self {
             pane_id: pane_id.to_string(),
             title: title.to_string(),
-            buffer: TerminalBuffer::Legacy(Arc::new(Mutex::new(TerminalContent::new()))),
+            buffer: TerminalBuffer::Term(Arc::new(Mutex::new(TermBridge::new(80, 24)))),
             scroll_offset: 0,
             is_focused: false,
             cursor_visible: true,
         }
     }
 
-    /// Create with a shared content buffer (for legacy capture-pane polling)
-    pub fn with_content(pane_id: &str, title: &str, content: Arc<Mutex<TerminalContent>>) -> Self {
-        Self {
-            pane_id: pane_id.to_string(),
-            title: title.to_string(),
-            buffer: TerminalBuffer::Legacy(content),
-            scroll_offset: 0,
-            is_focused: false,
-            cursor_visible: true,
-        }
-    }
-
-    /// Create with TermBridge (for tmux control mode)
+    /// Create with TermBridge (for pipe-pane / control mode streaming)
     pub fn with_term(pane_id: &str, title: &str, term: Arc<Mutex<TermBridge>>) -> Self {
         Self {
             pane_id: pane_id.to_string(),
@@ -190,14 +92,6 @@ impl TerminalView {
         self
     }
 
-    pub fn update_content(&mut self, content: &str) {
-        if let TerminalBuffer::Legacy(ref c) = self.buffer {
-            if let Ok(mut guard) = c.lock() {
-                guard.update(content);
-            }
-        }
-    }
-
     pub fn pane_id(&self) -> &str { &self.pane_id }
     pub fn title(&self) -> &str { &self.title }
     pub fn set_title(&mut self, title: &str) { self.title = title.to_string(); }
@@ -213,52 +107,176 @@ impl IntoElement for TerminalView {
 
 impl RenderOnce for TerminalView {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        let (visible_lines, line_count, cursor_pos) = match &self.buffer {
-            TerminalBuffer::Legacy(content) => {
-                let content = content.lock().unwrap().clone();
-                let count = content.line_count();
+        enum LineContent {
+            Plain(Vec<String>),
+            Colored(Vec<Vec<StyledCell>>),
+        }
+        let (content, line_count, cursor_pos) = match &self.buffer {
+            TerminalBuffer::Error(msg) => {
+                let lines: Vec<String> = msg.lines().map(|s| s.to_string()).collect();
+                let count = lines.len();
                 let lines_to_show = 50;
                 let start_idx = count.saturating_sub(lines_to_show + self.scroll_offset);
                 let end_idx = count.saturating_sub(self.scroll_offset);
-                let visible: Vec<String> = content.lines[start_idx..end_idx]
-                    .iter()
-                    .map(|l| l.text.clone())
-                    .collect();
-                (visible, count, content.cursor_position)
+                let visible: Vec<String> = lines.get(start_idx..end_idx).unwrap_or(&[]).to_vec();
+                (LineContent::Plain(visible), count, None)
             }
             TerminalBuffer::Term(term) => {
                 let term = term.lock().unwrap();
-                let lines = term.visible_lines();
+                let lines = term.visible_lines_with_colors();
                 let count = lines.len();
                 let cursor_pos = term.cursor_position();
                 let lines_to_show = 50;
                 let start_idx = count.saturating_sub(lines_to_show + self.scroll_offset);
                 let end_idx = count.saturating_sub(self.scroll_offset);
-                let visible: Vec<String> = lines[start_idx..end_idx].to_vec();
-                (visible, count, cursor_pos)
+                let visible: Vec<Vec<StyledCell>> = lines.get(start_idx..end_idx).unwrap_or(&[]).to_vec();
+                (LineContent::Colored(visible), count, cursor_pos)
             }
         };
         let show_cursor = self.is_focused && self.cursor_visible;
-
         let start_idx = line_count.saturating_sub(50 + self.scroll_offset);
+
+        let line_elements: Vec<AnyElement> = match content {
+            LineContent::Plain(lines) => lines
+                .iter()
+                .enumerate()
+                .map(|(i, line_text)| {
+                    let abs_row = start_idx + i;
+                    let (show_cursor_here, cursor_col) = if show_cursor
+                        && cursor_pos.map(|(r, _)| r) == Some(abs_row)
+                    {
+                        (true, cursor_pos.unwrap().1)
+                    } else {
+                        (false, 0)
+                    };
+                    let line_text = if line_text.is_empty() { " ".to_string() } else { line_text.clone() };
+                    let cursor_col_clamped = cursor_col.min(line_text.chars().count());
+                    let (before, cursor_cell, after) = if show_cursor_here {
+                        let chars: Vec<char> = line_text.chars().collect();
+                        let (b, rest) = chars.split_at(cursor_col_clamped);
+                        let cell = rest.first().map(|c| c.to_string()).unwrap_or_else(|| " ".to_string());
+                        let a: String = rest.iter().skip(1).collect();
+                        (b.iter().collect(), cell, a)
+                    } else {
+                        (line_text.clone(), String::new(), String::new())
+                    };
+                    div()
+                        .h(px(LINE_HEIGHT))
+                        .w_full()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .overflow_x_hidden()
+                        .whitespace_nowrap()
+                        .child(div().text_color(rgb(0xabb2bf)).child(SharedString::from(before)))
+                        .when(show_cursor_here, |el| {
+                            el.child(
+                                div()
+                                    .h(px(LINE_HEIGHT))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .bg(rgb(0x74ade8))
+                                    .text_color(rgb(0x282c34))
+                                    .child(SharedString::from(cursor_cell))
+                            )
+                        })
+                        .child(div().text_color(rgb(0xabb2bf)).child(SharedString::from(after)))
+                        .into_any_element()
+                })
+                .collect(),
+            LineContent::Colored(lines) => lines
+                .iter()
+                .enumerate()
+                .map(|(i, row)| {
+                    let abs_row = start_idx + i;
+                    let (show_cursor_here, cursor_col) = if show_cursor
+                        && cursor_pos.map(|(r, _)| r) == Some(abs_row)
+                    {
+                        (true, cursor_pos.unwrap().1)
+                    } else {
+                        (false, 0)
+                    };
+                    let cursor_col_clamped = cursor_col.min(row.len());
+                    let mut cells: Vec<AnyElement> = Vec::new();
+                    for (col, (c, fg, bg)) in row.iter().enumerate() {
+                        if show_cursor_here && col == cursor_col_clamped {
+                            cells.push(
+                                div()
+                                    .h(px(LINE_HEIGHT))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .bg(rgb(0x74ade8))
+                                    .text_color(rgb(0x282c34))
+                                    .child(SharedString::from(c.to_string()))
+                                    .into_any_element(),
+                            );
+                        } else {
+                            let fg_rgb = rgb(rgb_u8(fg[0], fg[1], fg[2]));
+                            let bg_rgb = rgb(rgb_u8(bg[0], bg[1], bg[2]));
+                            cells.push(
+                                div()
+                                    .text_color(fg_rgb)
+                                    .bg(bg_rgb)
+                                    .child(SharedString::from(c.to_string()))
+                                    .into_any_element(),
+                            );
+                        }
+                    }
+                    if show_cursor_here && cursor_col_clamped >= row.len() {
+                        cells.push(
+                            div()
+                                .h(px(LINE_HEIGHT))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .bg(rgb(0x74ade8))
+                                .text_color(rgb(0x282c34))
+                                .child(SharedString::from(" "))
+                                .into_any_element(),
+                        );
+                    }
+                    div()
+                        .h(px(LINE_HEIGHT))
+                        .w_full()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .overflow_x_hidden()
+                        .whitespace_nowrap()
+                        .children(cells)
+                        .into_any_element()
+                })
+                .collect(),
+        };
+
         div()
             .id("terminal-view")
             .size_full()
             .min_h_0()
             .flex()
             .flex_col()
-            .bg(rgb(0x1a1a1a))
-            .text_color(rgb(0xcccccc))
-            .font_family("Menlo").text_size(px(12.))
+            .bg(rgb(0x282c34))
+            .text_color(rgb(0xabb2bf))
+            .font_family("Menlo")
+            .text_size(px(12.))
             .child(
                 div()
-                    .flex().flex_row().items_center()
-                    .px(px(8.)).py(px(4.))
-                    .bg(rgb(0x2d2d2d)).border_b_1().border_color(rgb(0x3d3d3d))
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .px(px(8.))
+                    .py(px(6.))
+                    .bg(rgb(0x2e343e))
+                    .border_b_1()
+                    .border_color(rgb(0x3d3d3d))
                     .child(
-                        div().text_size(px(11.)).text_color(rgb(0x999999))
-                            .child(format!("🖥 {}", self.title))
-                    )
+                        div()
+                            .text_size(px(11.))
+                            .text_color(rgb(0x999999))
+                            .child(format!("🖥 {}", self.title)),
+                    ),
             )
             .child(
                 div()
@@ -270,53 +288,7 @@ impl RenderOnce for TerminalView {
                     .p(px(4.))
                     .overflow_y_scroll()
                     .overflow_x_hidden()
-                    .children(
-                        visible_lines
-                            .iter()
-                            .enumerate()
-                            .map(|(i, line_text)| {
-                                let abs_row = start_idx + i;
-                                let (show_cursor_here, cursor_col) = if show_cursor
-                                    && cursor_pos.map(|(r, _)| r) == Some(abs_row)
-                                {
-                                    (true, cursor_pos.unwrap().1)
-                                } else {
-                                    (false, 0)
-                                };
-                                let line_text = if line_text.is_empty() {
-                                    " ".to_string()
-                                } else {
-                                    line_text.clone()
-                                };
-                                let cursor_col_clamped = cursor_col.min(line_text.len());
-                                let (before, after) = if show_cursor_here {
-                                    let (b, a) = line_text.split_at(cursor_col_clamped);
-                                    (b.to_string(), a.to_string())
-                                } else {
-                                    (line_text.clone(), String::new())
-                                };
-                                div()
-                                    .h(px(14.))
-                                    .w_full()
-                                    .flex()
-                                    .flex_row()
-                                    .items_center()
-                                    .overflow_x_hidden()
-                                    .whitespace_nowrap()
-                                    .child(div().child(SharedString::from(before)))
-                                    .when(show_cursor_here, |el| {
-                                        el.child(
-                                            div()
-                                                .bg(rgb(0xcccccc))
-                                                .text_color(rgb(0x1a1a1a))
-                                                .child("▌")
-                                        )
-                                    })
-                                    .child(div().child(SharedString::from(after)))
-                                    .into_any_element()
-                            })
-                            .collect::<Vec<_>>()
-                    )
+                    .children(line_elements),
             )
     }
 }
@@ -330,103 +302,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_terminal_content_creation() {
-        let content = TerminalContent::new();
-        assert_eq!(content.line_count(), 0);
-        assert!(content.cursor_position.is_none());
-    }
-
-    #[test]
-    fn test_terminal_content_from_string() {
-        let content = TerminalContent::from_string("Line 1\nLine 2\nLine 3");
-        assert_eq!(content.line_count(), 3);
-        assert_eq!(content.lines[0].text, "Line 1");
-    }
-
-    #[test]
-    fn test_terminal_content_to_string() {
-        let content = TerminalContent::from_string("Hello\nWorld");
-        assert_eq!(content.to_string(), "Hello\nWorld");
-    }
-
-    #[test]
-    fn test_terminal_content_update() {
-        let mut content = TerminalContent::from_string("Old");
-        content.update("New\nLines");
-        assert_eq!(content.line_count(), 2);
-        assert_eq!(content.lines[0].text, "New");
-    }
-
-    #[test]
-    fn test_infer_cursor_prompt_with_trailing_newline() {
-        let mut content = TerminalContent::new();
-        content.update("→ saas-mono git:(main)\n");
-        assert_eq!(content.cursor_position, Some((0, 22)));
-    }
-
-    #[test]
-    fn test_infer_cursor_multiline() {
-        let mut content = TerminalContent::new();
-        content.update("line1\nline2\n");
-        assert_eq!(content.cursor_position, Some((1, 5)));
-    }
-
-    #[test]
-    fn test_infer_cursor_single_line_no_trailing() {
-        let mut content = TerminalContent::new();
-        content.update("prompt");
-        assert_eq!(content.cursor_position, Some((0, 6)));
-    }
-
-    #[test]
-    fn test_terminal_line() {
-        let line = TerminalLine::new("Hello World");
-        assert_eq!(line.text, "Hello World");
-        assert_eq!(line.len(), 11);
-        assert!(!line.is_empty());
-    }
-
-    #[test]
-    fn test_empty_terminal_line() {
-        let line = TerminalLine::new("");
-        assert!(line.is_empty());
-    }
-
-    #[test]
-    fn test_color_creation() {
-        let color = Color::new(100, 150, 200);
-        assert_eq!(color.r, 100);
-        assert_eq!(color.g, 150);
-        assert_eq!(color.b, 200);
-    }
-
-    #[test]
-    fn test_common_colors() {
-        assert_eq!(Color::black().r, 0);
-        assert_eq!(Color::white().r, 255);
-        assert_eq!(Color::red().r, 255);
-        assert_eq!(Color::green().g, 255);
-        assert_eq!(Color::blue().b, 255);
-    }
-
-    #[test]
     fn test_terminal_view_creation() {
         let view = TerminalView::new("session:0.0", "main");
         assert_eq!(view.pane_id(), "session:0.0");
         assert_eq!(view.title(), "main");
-    }
-
-    #[test]
-    fn test_terminal_view_update_content() {
-        let mut view = TerminalView::new("pane-1", "zsh");
-        view.update_content("Test content\nSecond line");
-        if let TerminalBuffer::Legacy(content) = &view.buffer {
-            let content = content.lock().unwrap();
-            assert_eq!(content.line_count(), 2);
-            assert_eq!(content.lines[0].text, "Test content");
-        } else {
-            panic!("expected Legacy buffer");
-        }
     }
 
     #[test]
@@ -449,8 +328,8 @@ mod tests {
     }
 
     #[test]
-    fn test_color_to_hsla() {
-        let color = Color::new(255, 0, 0);
-        let _ = color.to_hsla();
+    fn test_buffer_content_for_status_detection() {
+        let buf = TerminalBuffer::Error("Streaming unavailable".to_string());
+        assert_eq!(buf.content_for_status_detection(), Some("Streaming unavailable".to_string()));
     }
 }

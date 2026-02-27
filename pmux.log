@@ -1,0 +1,3 @@
+   Compiling pmux v0.1.0 (/Users/matt.chow/workspace/pmux)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.47s
+     Running `target/debug/pmux`

@@ -7,15 +7,14 @@ use crate::git_utils::{is_git_repository, get_git_error_message, GitError};
 use crate::notification::NotificationType;
 use crate::notification_manager::NotificationManager;
 use crate::system_notifier;
-use crate::tmux::session::Session;
-use crate::tmux::pane as tmux_pane;
-use crate::tmux::window as tmux_window;
-use crate::tmux::control_mode_attach;
 use crate::terminal::TermBridge;
-use crate::ui::{AppState, sidebar::Sidebar, workspace_tabbar::WorkspaceTabBar, terminal_view::{TerminalBuffer, TerminalContent}, notification_panel::{NotificationPanel, NotificationItem}, new_branch_dialog_ui::NewBranchDialogUi, delete_worktree_dialog_ui::DeleteWorktreeDialogUi, split_pane_container::SplitPaneContainer, diff_overlay::DiffOverlay, status_bar::StatusBar};
+use crate::runtime::{AgentRuntime, EventBus, RuntimeEvent, StatusPublisher};
+use crate::runtime::backends::create_runtime;
+use crate::runtime::{RuntimeState, WorktreeState};
+use crate::ui::{AppState, sidebar::Sidebar, workspace_tabbar::WorkspaceTabBar, terminal_view::TerminalBuffer, notification_panel::{NotificationPanel, NotificationItem}, new_branch_dialog_ui::NewBranchDialogUi, delete_worktree_dialog_ui::DeleteWorktreeDialogUi, split_pane_container::SplitPaneContainer, diff_overlay::DiffOverlay, status_bar::StatusBar};
 use crate::split_tree::SplitNode;
 use crate::workspace_manager::WorkspaceManager;
-use crate::input_handler::InputHandler;
+use crate::input::{key_to_xterm_escape, KeyModifiers};
 use crate::window_state::PersistentAppState;
 use crate::new_branch_orchestrator::{NewBranchOrchestrator, CreationResult, NotificationSender};
 use crate::notification::Notification;
@@ -23,9 +22,9 @@ use gpui::prelude::FluentBuilder;
 use gpui::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tokio::sync::broadcast;
 
 /// Notification sender that forwards to AppRoot's NotificationManager
 struct AppNotificationSender {
@@ -48,7 +47,7 @@ pub struct AppRoot {
     notification_manager: Arc<Mutex<NotificationManager>>,
     show_notification_panel: bool,
     sidebar_visible: bool,
-    /// Per-pane terminal buffers (Legacy capture-pane or Term control mode)
+    /// Per-pane terminal buffers (Term = pipe-pane/control mode streaming; Legacy = error placeholder only)
     terminal_buffers: Arc<Mutex<HashMap<String, TerminalBuffer>>>,
     /// Split layout tree (single Pane or Vertical/Horizontal with children)
     split_tree: SplitNode,
@@ -56,18 +55,24 @@ pub struct AppRoot {
     focused_pane_index: usize,
     /// When dragging a divider: (path, start_pos, start_ratio, is_vertical)
     split_divider_drag: Option<(Vec<bool>, f32, f32, bool)>,
-    /// Active tmux pane target (e.g. "sdlc-myproject:@0.%0")
+    /// Active pane target (e.g. "local:/path/to/worktree")
     active_pane_target: Option<String>,
-    /// Shared target for polling loop to read (updated when switching panes)
+    /// Shared target for input routing (updated when switching panes)
     active_pane_target_shared: Arc<Mutex<String>>,
-    /// List of pane targets to poll (for multi-pane split layout)
+    /// List of pane targets (for multi-pane split layout)
     pane_targets_shared: Arc<Mutex<Vec<String>>>,
-    /// Input handler for forwarding keyboard events to tmux
-    input_handler: Option<InputHandler>,
-    /// Real-time agent status per pane ID (tmux pane target format)
+    /// Runtime for terminal/backend operations (local PTY)
+    runtime: Option<Arc<dyn AgentRuntime>>,
+    /// Real-time agent status per pane ID
     pane_statuses: Arc<Mutex<HashMap<String, AgentStatus>>>,
-    /// Status poller for background agent status detection
-    status_poller: Option<Arc<Mutex<crate::status_poller::StatusPoller>>>,
+    /// Event Bus for status/notification events
+    event_bus: Arc<EventBus>,
+    /// Status publisher (publishes to EventBus, replaces StatusPoller)
+    status_publisher: Option<StatusPublisher>,
+    /// Whether EventBus subscription has been started (spawn once)
+    event_bus_subscription_started: bool,
+    /// Broadcast channel for status changes - Sidebar/StatusBar subscribe, only they re-render (not AppRoot)
+    status_change_tx: broadcast::Sender<()>,
     /// New branch dialog UI
     new_branch_dialog: NewBranchDialogUi,
     /// Delete worktree confirmation dialog
@@ -80,7 +85,7 @@ pub struct AppRoot {
     per_repo_worktree_index: HashMap<PathBuf, usize>,
     /// Sidebar context menu: which worktree index has menu open
     sidebar_context_menu_index: Option<usize>,
-    /// Review windows: branch -> tmux window name (e.g. "review-feat-x")
+    /// Review windows: branch -> window name (stub for local PTY)
     review_windows: HashMap<String, String>,
     /// When Some, diff overlay is shown: (branch, window_name, pane_target)
     diff_overlay_open: Option<(String, String, String)>,
@@ -88,16 +93,12 @@ pub struct AppRoot {
     sidebar_width: u32,
     /// When Some, dependency check failed - show self-check page
     dependency_check: Option<DependencyCheckResult>,
-    /// Cursor blink tick for terminal (toggles every ~530ms)
-    cursor_blink_tick: u32,
-    /// Whether cursor blink timer has been started
-    cursor_blink_timer_started: bool,
     /// When true, focus terminal area on next frame (keyboard input without clicking first)
     terminal_needs_focus: bool,
-    /// When set to false, signals the control mode consumer loop to exit
-    control_mode_running: Option<Arc<AtomicBool>>,
     /// Stable focus handle for terminal area (must persist across renders for key events)
     terminal_focus: Option<FocusHandle>,
+    /// Last terminal dimensions used for resize (cols, rows) - triggers PTY/TermBridge resize when window changes
+    last_term_dims: Option<(u16, u16)>,
 }
 
 impl AppRoot {
@@ -184,10 +185,13 @@ impl AppRoot {
             active_pane_target: None,
             active_pane_target_shared: Arc::new(Mutex::new(String::new())),
             pane_targets_shared: Arc::new(Mutex::new(Vec::new())),
-            input_handler: None,
+            runtime: None,
             pane_statuses: Arc::new(Mutex::new(HashMap::new())),
-            status_poller: None,
-            new_branch_dialog: NewBranchDialogUi::new(),
+            event_bus: Arc::new(EventBus::default()),
+            status_publisher: None,
+        event_bus_subscription_started: false,
+        status_change_tx: broadcast::channel(16).0,
+        new_branch_dialog: NewBranchDialogUi::new(),
             delete_worktree_dialog: DeleteWorktreeDialogUi::new(),
             pending_worktree_selection: None,
             active_worktree_index: None,
@@ -197,11 +201,9 @@ impl AppRoot {
             diff_overlay_open: None,
             sidebar_width,
             dependency_check,
-            cursor_blink_tick: 0,
-            cursor_blink_timer_started: false,
             terminal_needs_focus: false,
-            control_mode_running: None,
             terminal_focus: None,
+            last_term_dims: None,
         }
     }
 
@@ -227,6 +229,9 @@ impl AppRoot {
                         if let Some(wt) = worktrees.get(awi) {
                             let wt_path = wt.path.clone();
                             let branch = wt.short_branch_name().to_string();
+                            if self.try_recover_then_switch(&path, &wt_path, &branch, cx) {
+                                return;
+                            }
                             self.switch_to_worktree(&wt_path, &branch, cx);
                             return;
                         }
@@ -242,29 +247,80 @@ impl AppRoot {
                     let wt = &worktrees[0];
                     let wt_path = wt.path.clone();
                     let branch = wt.short_branch_name().to_string();
+                    if self.try_recover_then_switch(&path, &wt_path, &branch, cx) {
+                        return;
+                    }
                     self.switch_to_worktree(&wt_path, &branch, cx);
                     return;
                 }
             }
-            self.start_tmux_session(&name, &path, cx);
+            if self.try_recover_then_start(&path, &name, cx) {
+                return;
+            }
+            self.start_local_session(&path, "main", cx);
         }
 
     }
 
-    /// Start tmux session and pane polling for the given repo name
-    /// Sets up terminal content polling, status polling, and input handling
-    fn start_tmux_session(&mut self, repo_name: &str, repo_path: &Path, cx: &mut Context<Self>) {
-        let session = Session::new(repo_name);
-        if let Err(e) = session.ensure_in(Some(repo_path)) {
-            self.state.error_message = Some(format!("tmux error: {}", e));
-            return;
+    fn setup_local_terminal(&mut self, runtime: Arc<dyn AgentRuntime>, pane_target: &str, cx: &mut Context<Self>) {
+        let (cols, rows) = runtime.get_pane_dimensions(&pane_target.to_string());
+        if let Ok(mut buffers) = self.terminal_buffers.lock() {
+            buffers.clear();
+            buffers.insert(
+                pane_target.to_string(),
+                TerminalBuffer::Term(Arc::new(Mutex::new(TermBridge::new(cols as usize, rows as usize)))),
+            );
         }
 
-        // Get actual pane target from tmux (more reliable than hardcoding .0)
-        let pane_target = tmux_pane::list_panes_for_window(session.name(), session.window_name())
-            .ok()
-            .and_then(|panes| panes.first().map(|p| p.target()))
-            .unwrap_or_else(|| format!("{}:{}.0", session.name(), session.window_name()));
+        if let Some(rx) = runtime.subscribe_output(&pane_target.to_string()) {
+            let terminal_buffers = self.terminal_buffers.clone();
+            let pane_target_clone = pane_target.to_string();
+            let rx = std::sync::Arc::new(std::sync::Mutex::new(rx));
+            let _entity = cx.entity();
+            cx.spawn(async move |entity, cx| {
+                loop {
+                    let rx_clone = rx.clone();
+                    let bytes = blocking::unblock(move || rx_clone.lock().unwrap().recv()).await;
+                    match bytes {
+                        Ok(b) => {
+                            if let Ok(mut buffers) = terminal_buffers.lock() {
+                                if let Some(TerminalBuffer::Term(t)) = buffers.get_mut(&pane_target_clone) {
+                                    if let Ok(guard) = t.lock() {
+                                        guard.advance(&b);
+                                    }
+                                }
+                            }
+                            let _ = entity.update(cx, |_, cx| cx.notify());
+                        }
+                        Err(_) => break,
+                    }
+                }
+            })
+            .detach();
+        } else {
+            if let Ok(mut buffers) = self.terminal_buffers.lock() {
+                buffers.insert(
+                    pane_target.to_string(),
+                    TerminalBuffer::Error("Streaming unavailable.".to_string()),
+                );
+            }
+            cx.notify();
+        }
+    }
+
+    /// Start local PTY session for the given repo
+    /// Sets up terminal content polling, status polling, and input handling
+    fn start_local_session(&mut self, worktree_path: &Path, branch_name: &str, cx: &mut Context<Self>) {
+        let runtime = match create_runtime(worktree_path, 80, 24) {
+            Ok(rt) => rt,
+            Err(e) => {
+                self.state.error_message = Some(format!("PTY error: {}", e));
+                return;
+            }
+        };
+        self.runtime = Some(runtime.clone());
+
+        let pane_target = runtime.primary_pane_id().unwrap_or_else(|| format!("local:{}", worktree_path.display()));
         self.active_pane_target = Some(pane_target.clone());
         self.split_tree = SplitNode::pane(&pane_target);
         self.focused_pane_index = 0;
@@ -275,172 +331,25 @@ impl AppRoot {
             *guard = vec![pane_target.clone()];
         }
 
-        // Initialize input handler for this session
-        self.input_handler = Some(InputHandler::new(session.name().to_string()));
         self.terminal_needs_focus = true;
 
-        // Initialize and register StatusPoller for agent status detection
-        let status_poller = Arc::new(Mutex::new(crate::status_poller::StatusPoller::new()));
-        {
-            let mut poller = status_poller.lock().unwrap();
-            poller.register_pane(&pane_target);
-        }
-        self.status_poller = Some(status_poller.clone());
+        self.ensure_event_bus_subscription(cx);
 
-        // Try control mode first; fallback to capture-pane polling on failure
-        // Set PMUX_USE_CAPTURE_PANE=1 to force capture-pane (for debugging display issues)
-        let session_name = session.name().to_string();
-        let force_capture_pane = std::env::var("PMUX_USE_CAPTURE_PANE")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
-        let handle = if force_capture_pane {
-            eprintln!("pmux: PMUX_USE_CAPTURE_PANE=1, forcing capture-pane fallback");
-            None
-        } else {
-            control_mode_attach(&session_name)
-                .inspect_err(|e| eprintln!("pmux: control mode attach failed ({}), using capture-pane fallback", e))
-                .ok()
-        };
-        match handle {
-            Some(handle) => {
-                let (cols, rows) = tmux_pane::get_pane_dimensions(&pane_target);
-                if let Ok(mut buffers) = self.terminal_buffers.lock() {
-                    buffers.clear();
-                    buffers.insert(
-                        pane_target.clone(),
-                        TerminalBuffer::Term(Arc::new(Mutex::new(TermBridge::new(cols, rows)))),
-                    );
-                }
-                let terminal_buffers = self.terminal_buffers.clone();
-                let running = Arc::new(AtomicBool::new(true));
-                self.control_mode_running = Some(running.clone());
-                let _entity = cx.entity();
-                cx.spawn(async move |entity, cx| {
-                    while running.load(Ordering::Relaxed) {
-                        let mut needs_notify = false;
-                        while let Some((target, bytes)) = handle.try_recv() {
-                            if let Ok(mut buffers) = terminal_buffers.lock() {
-                                let (cols, rows) = tmux_pane::get_pane_dimensions(&target);
-                                let term = buffers
-                                    .entry(target.to_string())
-                                    .or_insert_with(|| {
-                                        TerminalBuffer::Term(Arc::new(Mutex::new(
-                                            TermBridge::new(cols, rows),
-                                        )))
-                                    });
-                                if let TerminalBuffer::Term(t) = term {
-                                    if let Ok(guard) = t.lock() {
-                                        guard.advance(&bytes);
-                                        needs_notify = true;
-                                    }
-                                }
-                            }
-                        }
-                        if needs_notify {
-                            let _ = entity.update(cx, |_, cx| cx.notify());
-                        }
-                        cx.background_executor().timer(Duration::from_millis(16)).await;
-                    }
-                    let _ = handle.shutdown();
-                })
-                .detach();
-            }
-            None => {
-                let terminal_buffers = self.terminal_buffers.clone();
-                let pane_targets = self.pane_targets_shared.clone();
-                if let Ok(mut buffers) = terminal_buffers.lock() {
-                    buffers.clear();
-                    buffers.insert(
-                        pane_target.clone(),
-                        TerminalBuffer::Legacy(Arc::new(Mutex::new(TerminalContent::new()))),
-                    );
-                }
-                let terminal_buffers = self.terminal_buffers.clone();
-                let _entity = cx.entity();
-                cx.spawn(async move |entity, cx| {
-                    loop {
-                        let targets = pane_targets.lock().map(|g| g.clone()).unwrap_or_default();
-                        let mut updated = false;
-                        for target in &targets {
-                            if let Ok(text) = tmux_pane::capture_pane(target) {
-                                if let Ok(mut buffers) = terminal_buffers.lock() {
-                                    if let Some(TerminalBuffer::Legacy(content)) = buffers.get_mut(target) {
-                                        if let Ok(mut guard) = content.lock() {
-                                            guard.update(&text);
-                                            updated = true;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        if updated {
-                            let _ = entity.update(cx, |_, cx| cx.notify());
-                        }
-                        cx.background_executor().timer(Duration::from_millis(200)).await;
-                    }
-                })
-                .detach();
-            }
-        }
+        // Initialize StatusPublisher (publishes to EventBus)
+        // Status from stream (Term) only—no capture-pane / screen snapshot
+        let mut status_publisher = StatusPublisher::new(Arc::clone(&self.event_bus));
+        status_publisher.register_pane(&pane_target);
+        let buffers = self.terminal_buffers.clone();
+        status_publisher.start(move |pane_id| {
+            buffers.lock().ok().and_then(|guard| guard.get(pane_id).and_then(|buf| buf.content_for_status_detection()))
+        });
+        self.status_publisher = Some(status_publisher);
 
-        // Start background status polling loop (500ms interval)
-        // Polls StatusPoller for status changes and updates UI
-        let pane_statuses = self.pane_statuses.clone();
-        let status_poller_for_polling = status_poller.clone();
-        cx.spawn(async move |entity, cx| {
-            loop {
-                // Check for status changes from StatusPoller
-                if let Ok(poller) = status_poller_for_polling.lock() {
-                    let current_status = poller.get_status(&pane_target);
-                    let mut updated = false;
+        self.setup_local_terminal(runtime, &pane_target, cx);
 
-                    // Update shared status HashMap if status changed
-                    if let Ok(mut statuses) = pane_statuses.lock() {
-                        let previous = statuses.get(&pane_target);
-                        if previous != Some(&current_status) {
-                            statuses.insert(pane_target.clone(), current_status);
-                            updated = true;
-                        }
-                    }
-
-                    if updated {
-                        let pane_target_for_notif = pane_target.clone();
-                        let _ = entity.update(cx, |this, cx| {
-                            this.update_status_counts();
-                            if let Ok(statuses) = this.pane_statuses.lock() {
-                                if let Some(&new_status) = statuses.get(&pane_target_for_notif) {
-                                    if new_status.is_urgent() {
-                                        let notif_type = match new_status {
-                                            AgentStatus::Error => Some(NotificationType::Error),
-                                            AgentStatus::Waiting => Some(NotificationType::Waiting),
-                                            _ => None,
-                                        };
-                                        if let Some(nt) = notif_type {
-                                            let message = new_status.display_text().to_string();
-                                            if let Ok(mut mgr) = this.notification_manager.lock() {
-                                                if mgr.add(&pane_target_for_notif, nt, &message) {
-                                                    system_notifier::notify("pmux", &message, nt);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            cx.notify();
-                        });
-                    }
-                }
-
-                cx.background_executor().timer(Duration::from_millis(500)).await;
-            }
-        }).detach();
-
-        // Start the StatusPoller background thread
-        // This thread runs in background polling tmux panes for status detection
-        if let Some(poller) = &self.status_poller {
-            if let Ok(mut p) = poller.lock() {
-                p.start();
-            }
+        if let Some(tab) = self.workspace_manager.active_tab() {
+            let wp = tab.path.clone();
+            self.save_runtime_state(&wp, worktree_path, branch_name);
         }
     }
 
@@ -481,16 +390,10 @@ impl AppRoot {
                                 let branch = wt.short_branch_name().to_string();
                                 this.switch_to_worktree(&wt_path, &branch, cx);
                             } else {
-                                let repo_name = path.file_name()
-                                    .and_then(|n| n.to_str())
-                                    .unwrap_or("workspace");
-                                this.start_tmux_session(repo_name, &path, cx);
+                                this.start_local_session(&path, "main", cx);
                             }
                         } else {
-                            let repo_name = path.file_name()
-                                .and_then(|n| n.to_str())
-                                .unwrap_or("workspace");
-                            this.start_tmux_session(repo_name, &path, cx);
+                            this.start_local_session(&path, "main", cx);
                         }
                     }
                     cx.notify();
@@ -518,7 +421,6 @@ impl AppRoot {
 
         if let Some(tab) = self.workspace_manager.active_tab() {
             let repo_path = tab.path.clone();
-            let repo_name = tab.name.clone();
 
             // Restore active_worktree_index for this repo
             let restored_idx = self.per_repo_worktree_index.get(&repo_path).copied();
@@ -551,7 +453,7 @@ impl AppRoot {
                     return;
                 }
             }
-            self.start_tmux_session(&repo_name, &repo_path, cx);
+            self.start_local_session(&repo_path, "main", cx);
         }
         cx.notify();
     }
@@ -561,7 +463,6 @@ impl AppRoot {
     fn start_session_for_active_tab(&mut self, cx: &mut Context<Self>) {
         if let Some(tab) = self.workspace_manager.active_tab() {
             let repo_path = tab.path.clone();
-            let repo_name = tab.name.clone();
             let restored_idx = self.per_repo_worktree_index.get(&repo_path).copied();
 
             if let Some(awi) = restored_idx {
@@ -588,10 +489,10 @@ impl AppRoot {
                     let branch = wt.short_branch_name().to_string();
                     self.switch_to_worktree(&wt_path, &branch, cx);
                 } else {
-                    self.start_tmux_session(&repo_name, &repo_path, cx);
+                    self.start_local_session(&repo_path, "main", cx);
                 }
             } else {
-                self.start_tmux_session(&repo_name, &repo_path, cx);
+                self.start_local_session(&repo_path, "main", cx);
             }
         }
         cx.notify();
@@ -601,51 +502,122 @@ impl AppRoot {
         !self.workspace_manager.is_empty()
     }
 
-    /// Switch to a specific worktree
-    /// Mapping: workspace=session, worktree=window, terminal=pane
-    fn switch_to_worktree(&mut self, worktree_path: &Path, branch_name: &str, cx: &mut Context<Self>) {
-        let repo_name = self.workspace_manager.active_tab()
-            .map(|t| t.name.clone())
-            .unwrap_or_else(|| "workspace".to_string());
-        let session_name = format!("sdlc-{}", repo_name.replace('/', "-").replace(' ', "-").replace('\\', "-"));
-        let window_name = branch_name.replace('/', "-");
+    /// Try recover from runtime_state. For local PTY, always returns false (no session recovery).
+    fn try_recover_then_switch(&mut self, _workspace_path: &Path, _worktree_path: &Path, _branch_name: &str, _cx: &mut Context<Self>) -> bool {
+        false
+    }
 
-        // When switching to a different session (different workspace), stop current first
-        let same_session = self.input_handler.as_ref()
-            .map(|h| h.session_name() == session_name)
-            .unwrap_or(false);
-        if !same_session {
-            self.stop_current_session();
-        }
+    /// Try recover for repo-only (no worktrees). For local PTY, always returns false.
+    fn try_recover_then_start(&mut self, _workspace_path: &Path, _repo_name: &str, _cx: &mut Context<Self>) -> bool {
+        false
+    }
 
-        // Ensure workspace session exists; create with first window if not
-        if !Session::exists(&session_name) {
-            let session = Session::new(&repo_name);
-            if let Err(e) = session.ensure_in(Some(worktree_path)) {
-                self.state.error_message = Some(format!("tmux error for worktree {}: {}", worktree_path.display(), e));
-                return;
-            }
-            let _ = tmux_window::rename_window(&format!("{}:control-tower", session_name), &window_name);
-        } else {
-            let windows = tmux_window::list_windows(&session_name).unwrap_or_default();
-            let has_window = windows.iter().any(|w| w.name == window_name);
-            if has_window {
-                let _ = tmux_window::select_window(&session_name, &window_name);
-            } else {
-                if let Err(e) = tmux_window::create_window_with_cwd(&session_name, &window_name, worktree_path) {
-                    self.state.error_message = Some(format!("tmux error creating window: {}", e));
-                    return;
+    fn ensure_event_bus_subscription(&mut self, cx: &mut Context<Self>) {
+        if self.event_bus_subscription_started { return; }
+        self.event_bus_subscription_started = true;
+        let event_bus = Arc::clone(&self.event_bus);
+        let pane_statuses = self.pane_statuses.clone();
+        let notification_manager = self.notification_manager.clone();
+        let status_change_tx = self.status_change_tx.clone();
+        let mut status_change_rx = self.status_change_tx.subscribe();
+        cx.spawn(async move |entity, cx| {
+            let rx = std::sync::Arc::new(std::sync::Mutex::new(event_bus.subscribe()));
+            loop {
+                let rx_clone = rx.clone();
+                let ev = blocking::unblock(move || rx_clone.lock().unwrap().recv()).await;
+                match ev {
+                    Ok(RuntimeEvent::AgentStateChange(e)) => {
+                        if let Some(pane_id) = &e.pane_id {
+                            let mut updated = false;
+                            if let Ok(mut statuses) = pane_statuses.lock() {
+                                let prev = statuses.get(pane_id);
+                                if prev != Some(&e.state) {
+                                    statuses.insert(pane_id.clone(), e.state);
+                                    updated = true;
+                                }
+                            }
+                            if updated {
+                                let _ = status_change_tx.send(());
+                            }
+                        }
+                    }
+                    Ok(RuntimeEvent::Notification(n)) => {
+                        let pane_id = n.pane_id.as_deref().unwrap_or(&n.agent_id);
+                        let notif_type = match n.notif_type {
+                            crate::runtime::NotificationType::Error => NotificationType::Error,
+                            crate::runtime::NotificationType::WaitingInput => NotificationType::Waiting,
+                            crate::runtime::NotificationType::Info => NotificationType::Info,
+                        };
+                        let message = n.message.clone();
+                        if let Ok(mut mgr) = notification_manager.lock() {
+                            if mgr.add(pane_id, notif_type, &message) {
+                                system_notifier::notify("pmux", &message, notif_type);
+                            }
+                        }
+                        let _ = entity.update(cx, |_, cx| cx.notify());
+                    }
+                    Err(_) => break,
+                    _ => {}
                 }
             }
-        }
+        })
+        .detach();
 
-        // Get actual pane target from tmux
-        let pane_target = tmux_pane::list_panes_for_window(&session_name, &window_name)
-            .ok()
-            .and_then(|panes| panes.first().map(|p| p.target()))
-            .unwrap_or_else(|| format!("{}:{}.0", session_name, window_name));
-        let _ = tmux_pane::select_pane(&pane_target);
-        let old_pane_target = self.active_pane_target.clone();
+        cx.spawn(async move |entity, cx| {
+            let debounce_ms = 150u64;
+            loop {
+                match status_change_rx.recv().await {
+                    Ok(()) => {
+                        cx.background_executor().timer(Duration::from_millis(debounce_ms)).await;
+                        while status_change_rx.try_recv().is_ok() {}
+                        let _ = entity.update(cx, |this, cx| {
+                            this.update_status_counts();
+                            cx.notify();
+                        });
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn save_runtime_state(&mut self, workspace_path: &Path, worktree_path: &Path, branch_name: &str) {
+        let Some(rt) = &self.runtime else { return };
+        let Some(_tab) = self.workspace_manager.active_tab() else { return };
+        let agent_id = rt.primary_pane_id().unwrap_or_else(|| format!("local:{}", worktree_path.display()));
+        let panes = rt.list_panes(&agent_id);
+        let pane_ids: Vec<String> = panes.iter().cloned().collect();
+        let wt = WorktreeState {
+            branch: branch_name.to_string(),
+            path: worktree_path.to_path_buf(),
+            agent_id: agent_id.clone(),
+            pane_ids: pane_ids.clone(),
+            backend: "local".to_string(),
+            backend_session_id: worktree_path.to_string_lossy().to_string(),
+            backend_window_id: branch_name.to_string(),
+        };
+        let mut state = RuntimeState::load().unwrap_or_default();
+        state.upsert_worktree(workspace_path.to_path_buf(), wt);
+        let _ = state.save();
+    }
+
+    /// Switch to a specific worktree (local PTY: spawn new shell for worktree)
+    fn switch_to_worktree(&mut self, worktree_path: &Path, branch_name: &str, cx: &mut Context<Self>) {
+        self.stop_current_session();
+
+        let runtime = match create_runtime(worktree_path, 80, 24) {
+            Ok(rt) => rt,
+            Err(e) => {
+                self.state.error_message = Some(format!("PTY error for worktree {}: {}", worktree_path.display(), e));
+                return;
+            }
+        };
+        self.runtime = Some(runtime.clone());
+
+        let pane_target = runtime.primary_pane_id().unwrap_or_else(|| format!("local:{}", worktree_path.display()));
+        let _ = runtime.focus_pane(&pane_target);
         self.active_pane_target = Some(pane_target.clone());
         self.split_tree = SplitNode::pane(&pane_target);
         self.focused_pane_index = 0;
@@ -657,190 +629,22 @@ impl AppRoot {
         }
         self.terminal_needs_focus = true;
 
-        if same_session {
-            // Same session: just update pane tracking, no need to restart control mode
-            if let Some(old) = old_pane_target.as_ref() {
-                if let Some(poller) = &self.status_poller {
-                    if let Ok(mut p) = poller.lock() {
-                        p.unregister_pane(old);
-                    }
-                }
-            }
-            self.input_handler.get_or_insert_with(|| InputHandler::new(session_name.clone()));
-            let status_poller = self.status_poller.get_or_insert_with(|| Arc::new(Mutex::new(crate::status_poller::StatusPoller::new())));
-            if let Ok(mut poller) = status_poller.lock() {
-                poller.register_pane(&pane_target);
-                poller.start(); // restart to pick up new pane list
-            }
-            if let Ok(mut buffers) = self.terminal_buffers.lock() {
-                let (cols, rows) = tmux_pane::get_pane_dimensions(&pane_target);
-                buffers.entry(pane_target.clone()).or_insert_with(|| {
-                    TerminalBuffer::Term(Arc::new(Mutex::new(TermBridge::new(cols, rows))))
-                });
-            }
-            println!("Switched to worktree: {} (window: {})", worktree_path.display(), window_name);
-            return;
+        self.ensure_event_bus_subscription(cx);
+
+        let mut status_publisher = StatusPublisher::new(Arc::clone(&self.event_bus));
+        status_publisher.register_pane(&pane_target);
+        let buffers = self.terminal_buffers.clone();
+        status_publisher.start(move |pane_id| {
+            buffers.lock().ok().and_then(|guard| guard.get(pane_id).and_then(|buf| buf.content_for_status_detection()))
+        });
+        self.status_publisher = Some(status_publisher);
+
+        self.setup_local_terminal(runtime, &pane_target, cx);
+
+        if let Some(tab) = self.workspace_manager.active_tab() {
+            let wp = tab.path.clone();
+            self.save_runtime_state(&wp, worktree_path, branch_name);
         }
-
-        // New session: full setup
-        self.input_handler = Some(InputHandler::new(session_name.clone()));
-        let status_poller = Arc::new(Mutex::new(crate::status_poller::StatusPoller::new()));
-        {
-            let mut poller = status_poller.lock().unwrap();
-            poller.register_pane(&pane_target);
-        }
-        self.status_poller = Some(status_poller.clone());
-
-        // Try control mode first; fallback to capture-pane polling on failure
-        let force_capture_pane = std::env::var("PMUX_USE_CAPTURE_PANE")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
-        let handle = if force_capture_pane {
-            eprintln!("pmux: PMUX_USE_CAPTURE_PANE=1, forcing capture-pane fallback");
-            None
-        } else {
-            control_mode_attach(&session_name)
-                .inspect_err(|e| eprintln!("pmux: control mode attach failed ({}), using capture-pane fallback", e))
-                .ok()
-        };
-        match handle {
-            Some(handle) => {
-                let (cols, rows) = tmux_pane::get_pane_dimensions(&pane_target);
-                if let Ok(mut buffers) = self.terminal_buffers.lock() {
-                    buffers.clear();
-                    buffers.insert(
-                        pane_target.clone(),
-                        TerminalBuffer::Term(Arc::new(Mutex::new(TermBridge::new(cols, rows)))),
-                    );
-                }
-                let terminal_buffers = self.terminal_buffers.clone();
-                let running = Arc::new(AtomicBool::new(true));
-                self.control_mode_running = Some(running.clone());
-                let _entity = cx.entity();
-                cx.spawn(async move |entity, cx| {
-                    while running.load(Ordering::Relaxed) {
-                        let mut needs_notify = false;
-                        while let Some((target, bytes)) = handle.try_recv() {
-                            if let Ok(mut buffers) = terminal_buffers.lock() {
-                                let (cols, rows) = tmux_pane::get_pane_dimensions(&target);
-                                let term = buffers
-                                    .entry(target.to_string())
-                                    .or_insert_with(|| {
-                                        TerminalBuffer::Term(Arc::new(Mutex::new(
-                                            TermBridge::new(cols, rows),
-                                        )))
-                                    });
-                                if let TerminalBuffer::Term(t) = term {
-                                    if let Ok(guard) = t.lock() {
-                                        guard.advance(&bytes);
-                                        needs_notify = true;
-                                    }
-                                }
-                            }
-                        }
-                        if needs_notify {
-                            let _ = entity.update(cx, |_, cx| cx.notify());
-                        }
-                        cx.background_executor().timer(Duration::from_millis(16)).await;
-                    }
-                    let _ = handle.shutdown();
-                })
-                .detach();
-            }
-            None => {
-                let terminal_buffers = self.terminal_buffers.clone();
-                let pane_targets = self.pane_targets_shared.clone();
-                if let Ok(mut buffers) = terminal_buffers.lock() {
-                    buffers.clear();
-                    buffers.insert(
-                        pane_target.clone(),
-                        TerminalBuffer::Legacy(Arc::new(Mutex::new(TerminalContent::new()))),
-                    );
-                }
-                let terminal_buffers = self.terminal_buffers.clone();
-                let _entity = cx.entity();
-                cx.spawn(async move |entity, cx| {
-                    loop {
-                        let targets = pane_targets.lock().map(|g| g.clone()).unwrap_or_default();
-                        let mut updated = false;
-                        for target in &targets {
-                            if let Ok(text) = tmux_pane::capture_pane(target) {
-                                if let Ok(mut buffers) = terminal_buffers.lock() {
-                                    if let Some(TerminalBuffer::Legacy(content)) = buffers.get_mut(target) {
-                                        if let Ok(mut guard) = content.lock() {
-                                            guard.update(&text);
-                                            updated = true;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        if updated {
-                            let _ = entity.update(cx, |_, cx| cx.notify());
-                        }
-                        cx.background_executor().timer(Duration::from_millis(200)).await;
-                    }
-                })
-                .detach();
-            }
-        }
-
-        // Start status polling for this worktree
-        let pane_statuses = self.pane_statuses.clone();
-        let status_poller_for_polling = status_poller.clone();
-        cx.spawn(async move |entity, cx| {
-            loop {
-                if let Ok(poller) = status_poller_for_polling.lock() {
-                    let current_status = poller.get_status(&pane_target);
-                    let mut updated = false;
-
-                    if let Ok(mut statuses) = pane_statuses.lock() {
-                        let previous = statuses.get(&pane_target);
-                        if previous != Some(&current_status) {
-                            statuses.insert(pane_target.clone(), current_status);
-                            updated = true;
-                        }
-                    }
-
-                    if updated {
-                        let pane_target_for_notif = pane_target.clone();
-                        let _ = entity.update(cx, |this, cx| {
-                            this.update_status_counts();
-                            if let Ok(statuses) = this.pane_statuses.lock() {
-                                if let Some(&new_status) = statuses.get(&pane_target_for_notif) {
-                                    if new_status.is_urgent() {
-                                        let notif_type = match new_status {
-                                            AgentStatus::Error => Some(NotificationType::Error),
-                                            AgentStatus::Waiting => Some(NotificationType::Waiting),
-                                            _ => None,
-                                        };
-                                        if let Some(nt) = notif_type {
-                                            let message = new_status.display_text().to_string();
-                                            if let Ok(mut mgr) = this.notification_manager.lock() {
-                                                if mgr.add(&pane_target_for_notif, nt, &message) {
-                                                    system_notifier::notify("pmux", &message, nt);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            cx.notify();
-                        });
-                    }
-                }
-                cx.background_executor().timer(Duration::from_millis(500)).await;
-            }
-        }).detach();
-
-        // Start StatusPoller background thread
-        if let Some(poller) = &self.status_poller {
-            if let Ok(mut p) = poller.lock() {
-                p.start();
-            }
-        }
-
-        println!("Switched to worktree: {} (session: {})", worktree_path.display(), session_name);
     }
 
     /// Process pending worktree selection (called from render context)
@@ -874,30 +678,22 @@ impl AppRoot {
         self.status_counts = counts;
     }
 
-    /// Stop current tmux session and status polling
-    /// Called when switching workspaces or cleaning up
+    /// Stop current session and status polling.
+    /// Does NOT clear pane_statuses - preserves last known status for worktrees we're leaving
+    /// (avoids flicker: main=Idle, switch to feature/test → main stays Idle, feature/test gets its status)
     fn stop_current_session(&mut self) {
-        // Signal control mode consumer loop to exit
-        if let Some(running) = self.control_mode_running.take() {
-            running.store(false, Ordering::Relaxed);
+        if let Some(mut pub_) = self.status_publisher.take() {
+            pub_.stop();
         }
 
-        // Stop StatusPoller background thread
-        if let Some(poller) = &self.status_poller {
-            if let Ok(mut p) = poller.lock() {
-                p.stop();
+        self.status_counts = StatusCounts::new();
+        if let Ok(statuses) = self.pane_statuses.lock() {
+            for s in statuses.values() {
+                self.status_counts.increment(s);
             }
         }
-        self.status_poller = None;
 
-        // Clear status tracking state
-        if let Ok(mut statuses) = self.pane_statuses.lock() {
-            statuses.clear();
-        }
-        self.status_counts = StatusCounts::new();
-
-        // Clear input handler
-        self.input_handler = None;
+        self.runtime = None;
         self.active_pane_target = None;
     }
 
@@ -913,7 +709,9 @@ impl AppRoot {
                             (self.focused_pane_index + pane_count - 1) % pane_count;
                         if let Some(target) = self.split_tree.focus_index_to_pane_target(self.focused_pane_index) {
                             let t = target.clone();
-                            let _ = tmux_pane::select_pane(&t);
+                            if let Some(rt) = &self.runtime {
+                                let _ = rt.focus_pane(&t);
+                            }
                             self.active_pane_target = Some(target);
                             if let Ok(mut guard) = self.active_pane_target_shared.lock() {
                                 *guard = t;
@@ -926,7 +724,9 @@ impl AppRoot {
                         self.focused_pane_index = (self.focused_pane_index + 1) % pane_count;
                         if let Some(target) = self.split_tree.focus_index_to_pane_target(self.focused_pane_index) {
                             let t = target.clone();
-                            let _ = tmux_pane::select_pane(&t);
+                            if let Some(rt) = &self.runtime {
+                                let _ = rt.focus_pane(&t);
+                            }
                             self.active_pane_target = Some(target);
                             if let Ok(mut guard) = self.active_pane_target_shared.lock() {
                                 *guard = t;
@@ -976,31 +776,32 @@ impl AppRoot {
             return; // Don't forward Cmd+key to tmux
         }
 
-        // Forward all other keys to tmux via InputHandler
-        // Use explicit pane target (session:window.pane) - session:window can fail in control mode
+        // Forward all other keys to terminal via Runtime (xterm escape sequences)
         let send_target = self.active_pane_target.as_deref();
         let key_name = event.keystroke.key.clone();
-        match (&self.input_handler, send_target) {
-            (Some(input_handler), Some(target)) => {
-                if let Some((tmux_key, use_literal)) =
-                    crate::input_handler::key_to_tmux(&key_name, false)
-                {
-                    if let Err(e) =
-                        input_handler.send_key_to_target_with_literal(target, &tmux_key, use_literal)
-                    {
-                        eprintln!("pmux: send_key_to_target failed: {}", e);
-                    } else {
-                        eprintln!("pmux: key forwarded '{}' -> tmux target {}", key_name, target);
+        let modifiers = KeyModifiers {
+            platform: event.keystroke.modifiers.platform,
+            shift: event.keystroke.modifiers.shift,
+            alt: event.keystroke.modifiers.alt,
+            ctrl: event.keystroke.modifiers.control,
+        };
+        match (&self.runtime, send_target) {
+            (Some(runtime), Some(target)) => {
+                if let Some(bytes) = key_to_xterm_escape(&key_name, modifiers) {
+                    if let Err(e) = runtime.send_input(&target.to_string(), &bytes) {
+                        eprintln!("pmux: send_input failed: {}", e);
                     }
                 }
             }
             _ => {
-                eprintln!(
-                    "pmux: key '{}' not forwarded (input_handler={} target={})",
-                    key_name,
-                    self.input_handler.is_some(),
-                    send_target.unwrap_or("none")
-                );
+                if !modifiers.platform {
+                    eprintln!(
+                        "pmux: key '{}' not forwarded (runtime={} target={})",
+                        key_name,
+                        self.runtime.is_some(),
+                        send_target.unwrap_or("none")
+                    );
+                }
             }
         }
     }
@@ -1010,13 +811,12 @@ impl AppRoot {
         let Some(target) = self.split_tree.focus_index_to_pane_target(self.focused_pane_index) else {
             return;
         };
-        let new_target = if vertical {
-            tmux_pane::split_pane_vertical(&target)
-        } else {
-            tmux_pane::split_pane_horizontal(&target)
-        };
-        let Ok(new_target) = new_target else {
-            return;
+        let new_target = match &self.runtime {
+            Some(rt) => match rt.split_pane(&target, vertical) {
+                Ok(t) => t,
+                Err(_) => return,
+            },
+            None => return,
         };
         if let Some(new_tree) = self.split_tree.split_at_focused(
             self.focused_pane_index,
@@ -1029,20 +829,18 @@ impl AppRoot {
                 buffers.insert(
                     new_target.clone(),
                     if use_term {
-                        let (cols, rows) = tmux_pane::get_pane_dimensions(&new_target);
-                        TerminalBuffer::Term(Arc::new(Mutex::new(TermBridge::new(cols, rows))))
+                        let (cols, rows) = self.runtime.as_ref().map(|r| r.get_pane_dimensions(&new_target)).unwrap_or((80, 24));
+                        TerminalBuffer::Term(Arc::new(Mutex::new(TermBridge::new(cols as usize, rows as usize))))
                     } else {
-                        TerminalBuffer::Legacy(Arc::new(Mutex::new(TerminalContent::new())))
+                        TerminalBuffer::Term(Arc::new(Mutex::new(TermBridge::new(80, 24))))
                     },
                 );
             }
             if let Ok(mut guard) = self.pane_targets_shared.lock() {
                 *guard = self.split_tree.flatten().into_iter().map(|(t, _)| t).collect();
             }
-            if let Some(ref poller) = self.status_poller {
-                if let Ok(mut p) = poller.lock() {
-                    p.register_pane(&new_target);
-                }
+            if let Some(ref mut pub_) = self.status_publisher {
+                pub_.register_pane(&new_target);
             }
             cx.notify();
         }
@@ -1090,22 +888,17 @@ impl AppRoot {
             self.switch_to_worktree(&worktree_path, &branch, cx);
         }
 
-        let session_name = match &self.active_pane_target {
-            Some(t) => t.split(':').next().unwrap_or("").to_string(),
-            None => return,
-        };
-
         let window_name = format!("review-{}", branch.replace('/', "-"));
-        // Preload diffview module first (needed for lazy-loading plugin managers like lazy.nvim)
-        let command = "nvim -c 'lua require(\"diffview\")' -c 'DiffviewOpen main...HEAD'";
 
-        match tmux_window::create_window_with_command(&session_name, &window_name, &worktree_path, command) {
-            Ok(_) => {
-                self.review_windows.insert(branch.clone(), window_name.clone());
-                self.open_diff_overlay(&branch, &window_name, cx);
-            }
-            Err(e) => {
-                self.state.error_message = Some(format!("Failed to open diff view: {}", e));
+        if let Some(rt) = &self.runtime {
+            match rt.open_review(&worktree_path) {
+                Ok(_) => {
+                    self.review_windows.insert(branch.clone(), window_name.clone());
+                    self.open_diff_overlay(&branch, &window_name, cx);
+                }
+                Err(e) => {
+                    self.state.error_message = Some(format!("Failed to open diff view: {}", e));
+                }
             }
         }
         cx.notify();
@@ -1120,14 +913,14 @@ impl AppRoot {
 
         let pane_target = format!("{}:{}.0", session_name, window_name);
 
-        // Add buffer for overlay pane so capture-pane can populate it
+        // Add buffer for overlay pane (streaming will populate)
         if let Ok(mut buffers) = self.terminal_buffers.lock() {
             buffers.entry(pane_target.clone()).or_insert_with(|| {
-                TerminalBuffer::Legacy(Arc::new(Mutex::new(TerminalContent::new())))
+                TerminalBuffer::Term(Arc::new(Mutex::new(TermBridge::new(80, 24))))
             });
         }
 
-        // Add to pane_targets_shared so the capture-pane loop polls this pane
+        // Add to pane_targets_shared for multi-pane tracking
         if let Ok(mut guard) = self.pane_targets_shared.lock() {
             if !guard.contains(&pane_target) {
                 guard.push(pane_target.clone());
@@ -1152,7 +945,9 @@ impl AppRoot {
         let target = format!("{}:{}", session_name, window_name);
         let pane_target = format!("{}:{}.0", session_name, window_name);
 
-        let _ = tmux_window::kill_window(&target);
+        if let Some(rt) = &self.runtime {
+            let _ = rt.kill_window(&target);
+        }
         self.review_windows.remove(branch);
         self.diff_overlay_open = None;
 
@@ -1285,8 +1080,10 @@ impl AppRoot {
         let window_name = branch.replace('/', "-");
         let target = format!("{}:{}", session_name, window_name);
 
-        if let Err(e) = tmux_window::kill_window(&target) {
-            eprintln!("tmux kill-window failed (best-effort): {}", e);
+        if let Some(rt) = &self.runtime {
+            if let Err(e) = rt.kill_window(&target) {
+                eprintln!("tmux kill-window failed (best-effort): {}", e);
+            }
         }
 
         // Git worktree remove
@@ -1511,6 +1308,7 @@ impl AppRoot {
         // Create sidebar with callbacks (cmux style: top controls in sidebar)
         let mut sidebar = Sidebar::new(&repo_name, repo_path.clone())
             .with_statuses(pane_statuses.clone())
+            .with_notification_manager(self.notification_manager.clone())
             .with_context_menu(self.sidebar_context_menu_index)
             .on_toggle_sidebar(move |_window, cx| {
                 let _ = cx.update_entity(&app_root_entity_for_toggle, |this: &mut AppRoot, cx| {
@@ -1743,6 +1541,7 @@ impl AppRoot {
                                 let app_root_entity_for_drag_end = app_root_entity.clone();
                                 let app_root_entity_for_pane_click = app_root_entity.clone();
                                 let terminal_focus_for_click = terminal_focus.clone();
+                                let terminal_focus_for_pane = terminal_focus.clone();
                                 div()
                                     .flex_1()
                                     .min_h_0()
@@ -1778,18 +1577,22 @@ impl AppRoot {
                                                 cx.notify();
                                             });
                                         })
-                                        .on_pane_click(move |pane_idx, _window, cx| {
+                                        .on_pane_click(move |pane_idx, window, cx| {
                                             let _ = cx.update_entity(&app_root_entity_for_pane_click, |this: &mut AppRoot, cx| {
                                                 this.focused_pane_index = pane_idx;
                                                 if let Some(target) = this.split_tree.focus_index_to_pane_target(pane_idx) {
-                                                    let _ = tmux_pane::select_pane(&target);
+                                                    if let Some(rt) = &this.runtime {
+                                                        let _ = rt.focus_pane(&target);
+                                                    }
                                                     this.active_pane_target = Some(target.clone());
                                                     if let Ok(mut guard) = this.active_pane_target_shared.lock() {
                                                         *guard = target;
                                                     }
                                                 }
+                                                this.terminal_needs_focus = true;
                                                 cx.notify();
                                             });
+                                            window.focus(&terminal_focus_for_pane, cx);
                                         })
                                     )
                             })
@@ -1858,7 +1661,7 @@ impl AppRoot {
             .when(self.diff_overlay_open.is_some(), |el| {
                 if let Some((branch, window_name, pane_target)) = &self.diff_overlay_open {
                     let buffer = terminal_buffers.get(pane_target).cloned().unwrap_or_else(|| {
-                        TerminalBuffer::Legacy(Arc::new(Mutex::new(TerminalContent::new())))
+                        TerminalBuffer::Term(Arc::new(Mutex::new(TermBridge::new(80, 24))))
                     });
                     let branch = branch.clone();
                     let window_name = window_name.clone();
@@ -1878,22 +1681,49 @@ impl AppRoot {
     }
 }
 
+/// Approximate pixels per character (Menlo/monospace 12px)
+const CHAR_WIDTH_PX: f32 = 8.0;
+/// Line height in pixels (matches terminal_view.rs)
+const LINE_HEIGHT_PX: f32 = 20.0;
+/// Pixels for topbar + tabbar + status bar + terminal header
+const CHROME_HEIGHT_PX: f32 = 120.0;
+
 impl Render for AppRoot {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Start cursor blink timer once when workspace is shown
-        if self.has_workspaces() && !self.cursor_blink_timer_started {
-            self.cursor_blink_timer_started = true;
-            cx.spawn(async move |entity, cx| {
-                loop {
-                    cx.background_executor().timer(Duration::from_millis(530)).await;
-                    let _ = entity.update(cx, |this: &mut AppRoot, cx| {
-                        this.cursor_blink_tick = this.cursor_blink_tick.wrapping_add(1);
-                        cx.notify();
-                    });
+        // Resize PTY and TermBridge when window size changes (fixes opencode layout, resize responsiveness)
+        if self.has_workspaces() {
+            let bounds = window.window_bounds().get_bounds();
+            let w = f32::from(bounds.size.width);
+            let h = f32::from(bounds.size.height);
+            let sidebar_w = if self.sidebar_visible { self.sidebar_width as f32 } else { 0. };
+            let term_w = (w - sidebar_w).max(80.);
+            let term_h = (h - CHROME_HEIGHT_PX).max(200.);
+            let cols = (term_w / CHAR_WIDTH_PX).round() as u16;
+            let rows = (term_h / LINE_HEIGHT_PX).round() as u16;
+            let cols = cols.max(10).min(500);
+            let rows = rows.max(5).min(200);
+            let new_dims = (cols, rows);
+            if self.last_term_dims != Some(new_dims) {
+                self.last_term_dims = Some(new_dims);
+                if let Some(ref rt) = self.runtime {
+                    for pane_target in self.split_tree.flatten().into_iter().map(|(t, _)| t) {
+                        let _ = rt.resize(&pane_target, cols, rows);
+                    }
                 }
-            }).detach();
+                if let Ok(mut buffers) = self.terminal_buffers.lock() {
+                    for buf in buffers.values_mut() {
+                        if let TerminalBuffer::Term(t) = buf {
+                            if let Ok(guard) = t.lock() {
+                                guard.resize(cols as usize, rows as usize);
+                            }
+                        }
+                    }
+                }
+                cx.notify();
+            }
         }
 
+        // Cursor: Zed style - always visible, no blink
         let terminal_focus = self.terminal_focus.get_or_insert_with(|| cx.focus_handle()).clone();
 
         // Auto-focus terminal when workspace loads so keyboard input works without clicking
@@ -1905,7 +1735,7 @@ impl Render for AppRoot {
             });
         }
 
-        let cursor_blink_visible = self.cursor_blink_tick % 2 == 0;
+        let cursor_blink_visible = true; // Zed: cursor always visible, no blink
         div()
             .id("app-root")
             .size_full()

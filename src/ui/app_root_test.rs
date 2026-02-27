@@ -18,10 +18,7 @@ fn test_sidebar_toggle_state() {
 }
 
 #[test]
-fn test_input_handler_initialized_after_session_start() {
-    // Test that input_handler is None initially
+fn test_has_workspaces_false_initially() {
     let app_root = AppRoot::new();
-    // We can't test the session start without a GPUI context,
-    // but we verify the struct has the field
-    let _ = &app_root.input_handler;
+    assert!(!app_root.has_workspaces());
 }

@@ -164,6 +164,15 @@ impl StatusCounts {
         self.waiting > 0
     }
 
+    /// Compute StatusCounts from a HashMap of pane_id -> AgentStatus
+    pub fn from_pane_statuses(statuses: &std::collections::HashMap<String, AgentStatus>) -> Self {
+        let mut counts = Self::new();
+        for status in statuses.values() {
+            counts.increment(status);
+        }
+        counts
+    }
+
     /// Get the most prevalent status
     pub fn most_prevalent(&self) -> Option<AgentStatus> {
         let counts = [
