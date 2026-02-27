@@ -37,12 +37,17 @@ pub enum ShortcutAction {
     VerticalSplit,
     HorizontalSplit,
     ToggleMute,
+    FocusPaneLeft,
+    FocusPaneRight,
+    FocusPaneUp,
+    FocusPaneDown,
 
     // View
     Refresh,
     ZoomIn,
     ZoomOut,
     ResetZoom,
+    ViewDiff,
 }
 
 /// Key binding structure
@@ -205,6 +210,34 @@ impl KeyBinding {
                 "Mute or unmute notifications for current worktree",
                 ShortcutCategory::Workspace,
             ),
+            Self::new(
+                ShortcutAction::FocusPaneLeft,
+                "Focus Pane Left",
+                "⌥⌘←",
+                "Move focus to the pane on the left",
+                ShortcutCategory::Workspace,
+            ),
+            Self::new(
+                ShortcutAction::FocusPaneRight,
+                "Focus Pane Right",
+                "⌥⌘→",
+                "Move focus to the pane on the right",
+                ShortcutCategory::Workspace,
+            ),
+            Self::new(
+                ShortcutAction::FocusPaneUp,
+                "Focus Pane Up",
+                "⌥⌘↑",
+                "Move focus to the pane above",
+                ShortcutCategory::Workspace,
+            ),
+            Self::new(
+                ShortcutAction::FocusPaneDown,
+                "Focus Pane Down",
+                "⌥⌘↓",
+                "Move focus to the pane below",
+                ShortcutCategory::Workspace,
+            ),
             // View
             Self::new(
                 ShortcutAction::Refresh,
@@ -232,6 +265,13 @@ impl KeyBinding {
                 "Reset Zoom",
                 "⌘0",
                 "Reset zoom to default",
+                ShortcutCategory::View,
+            ),
+            Self::new(
+                ShortcutAction::ViewDiff,
+                "View Diff",
+                "⌘⇧R",
+                "Open diff view for current branch (nvim diffview)",
                 ShortcutCategory::View,
             ),
         ]
@@ -355,7 +395,8 @@ mod tests {
     #[test]
     fn test_default_bindings_count() {
         let bindings = KeyBinding::all_defaults();
-        assert_eq!(bindings.len(), 22); // Total number of default bindings
+        // General(6) + Navigation(9) + Workspace(7) + View(5) = 27
+        assert_eq!(bindings.len(), 27, "VerticalSplit/HorizontalSplit and other defaults");
     }
 
     #[test]

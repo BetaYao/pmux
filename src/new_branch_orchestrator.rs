@@ -1,10 +1,10 @@
 // new_branch_orchestrator.rs - Orchestrator for the new branch creation workflow
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
-use crate::new_branch_dialog::{NewBranchDialog, ValidationError, validate_branch_name, generate_worktree_path, generate_unique_tmux_session_name};
-use crate::worktree_manager::{WorktreeManager, WorktreeCreateResult};
+use crate::new_branch_dialog::{ValidationError, validate_branch_name, generate_worktree_path, generate_unique_tmux_session_name};
+use crate::worktree_manager::WorktreeManager;
 use crate::notification::{Notification, NotificationType};
-use crate::tmux::{Session, SessionError};
+use crate::tmux::Session;
 
 /// Result of the branch creation workflow
 #[derive(Debug, Clone)]
@@ -158,7 +158,7 @@ impl NewBranchOrchestrator {
     }
 
     /// Create a tmux session for the worktree
-    fn create_tmux_session(&self, worktree_path: &PathBuf, branch_name: &str) -> Result<(), String> {
+    fn create_tmux_session(&self, worktree_path: &PathBuf, _branch_name: &str) -> Result<(), String> {
         let session_name = generate_unique_tmux_session_name(worktree_path);
         
         // Note: This is a placeholder - actual tmux session creation logic
@@ -179,7 +179,7 @@ impl NewBranchOrchestrator {
     /// Send a notification to the user
     fn send_notification(&self, notif_type: NotificationType, message: &str) {
         if let Some(sender) = &self.notification_sender {
-            let _ = sender.lock().map(|mut sender| {
+            let _ = sender.lock().map(|sender| {
                 sender.send(Notification::new("new-branch", notif_type, message));
             });
         }

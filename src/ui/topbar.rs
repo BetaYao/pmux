@@ -9,6 +9,8 @@ use crate::workspace_manager::{WorkspaceManager, WorkspaceTab};
 pub struct TopBar {
     workspace_manager: WorkspaceManager,
     status_counts: StatusCounts,
+    /// Override for notification bell count (from NotificationManager). If None, uses status_counts.error + status_counts.waiting
+    notification_count_override: Option<usize>,
     on_add_workspace: Arc<dyn Fn(&mut Window, &mut App)>,
     on_select_tab: Arc<dyn Fn(usize, &mut Window, &mut App)>,
     on_close_tab: Arc<dyn Fn(usize, &mut Window, &mut App)>,
@@ -21,6 +23,7 @@ impl TopBar {
         Self {
             workspace_manager,
             status_counts: StatusCounts::new(),
+            notification_count_override: None,
             on_add_workspace: Arc::new(|_, _| {}),
             on_select_tab: Arc::new(|_, _, _| {}),
             on_close_tab: Arc::new(|_, _, _| {}),
@@ -31,6 +34,11 @@ impl TopBar {
 
     pub fn with_status_counts(mut self, counts: StatusCounts) -> Self {
         self.status_counts = counts;
+        self
+    }
+
+    pub fn with_notification_count(mut self, count: usize) -> Self {
+        self.notification_count_override = Some(count);
         self
     }
 
@@ -69,7 +77,8 @@ impl TopBar {
     }
 
     fn notification_count(&self) -> usize {
-        self.status_counts.error + self.status_counts.waiting
+        self.notification_count_override
+            .unwrap_or_else(|| self.status_counts.error + self.status_counts.waiting)
     }
 
     fn render_workspace_tab(&self, tab: &WorkspaceTab, index: usize, is_active: bool) -> impl IntoElement {

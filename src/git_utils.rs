@@ -61,12 +61,12 @@ pub fn get_git_error_message(path: &Path, error: &GitError) -> String {
     match error {
         GitError::NotARepository => {
             format!(
-                "所选目录 '{}' 不是 Git 仓库。\n\n请选择包含 .git 目录的文件夹。",
+                "The selected directory '{}' is not a Git repository.\n\nPlease select a folder containing a .git directory.",
                 path.display()
             )
         }
         GitError::Io(e) => {
-            format!("无法访问路径 '{}': {}", path.display(), e)
+            format!("Cannot access path '{}': {}", path.display(), e)
         }
     }
 }
@@ -191,7 +191,7 @@ mod tests {
         let message = get_git_error_message(path, &error);
 
         // Assert
-        assert!(message.contains("不是 Git 仓库"));
+        assert!(message.contains("not a Git repository"));
         assert!(message.contains(".git"));
     }
 }

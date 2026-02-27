@@ -1,6 +1,6 @@
 // notification_manager.rs - Notification management and storage
 use crate::notification::{Notification, NotificationSummary, NotificationType};
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::time::Duration;
 
 /// Maximum number of notifications to keep in memory

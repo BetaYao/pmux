@@ -1,0 +1,2 @@
+# Dependencies for generate_icon.py
+Pillow>=10.0.0

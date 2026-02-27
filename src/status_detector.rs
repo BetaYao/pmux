@@ -1,7 +1,6 @@
 // status_detector.rs - Agent status detection from terminal output
 use crate::agent_status::AgentStatus;
 use regex::Regex;
-use std::collections::HashMap;
 
 /// Detects agent status from terminal content
 pub struct StatusDetector {

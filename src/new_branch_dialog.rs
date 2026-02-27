@@ -84,7 +84,7 @@ pub fn generate_unique_tmux_session_name(worktree_path: &PathBuf) -> String {
     
     // Create a short hash of the path to keep session names manageable
     let hash = path_str.chars()
-        .map(|c| (c as usize))
+        .map(|c| c as usize)
         .fold(0usize, |acc, x| acc.wrapping_add(x));
     
     format!("pmux-{:x}-{:x}", hash, timestamp)

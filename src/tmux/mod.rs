@@ -1,11 +1,13 @@
 // tmux/mod.rs - Tmux integration module
-pub mod session;
+pub mod control_mode;
 pub mod pane;
+pub mod session;
 pub mod window;
 
+pub use control_mode::{attach as control_mode_attach, build_pane_map, ControlModeError, ControlModeHandle};
+pub use pane::{PaneInfo, capture_pane, create_pane, get_pane_dimensions, list_panes, select_pane, send_keys, PaneError};
 pub use session::{Session, SessionError};
-pub use pane::{PaneInfo, list_panes, create_pane, capture_pane, send_keys, PaneError};
-pub use window::{WindowInfo, list_windows, create_window, rename_window, WindowError};
+pub use window::{WindowInfo, create_window, list_windows, rename_window, WindowError};
 
 #[cfg(test)]
 mod tests {

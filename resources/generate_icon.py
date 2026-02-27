@@ -3,11 +3,13 @@
 Generate macOS app icon from the pudding logo.
 1. Crop the image to remove white space
 2. Generate all required sizes for .icns file
+3. Supports --dev flag for dev mode variant (adds DEV badge)
 """
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import os
 import subprocess
+import argparse
 
 # macOS app icon sizes
 ICON_SIZES = [
@@ -101,7 +103,61 @@ def create_square_image(image, bg_color=(255, 255, 255, 0)):
 
     return square
 
-def generate_iconset(source_path, output_dir):
+def add_dev_badge(image):
+    """Add a small DEV badge to the bottom-right corner of the image."""
+    img = image.convert('RGBA')
+    size = img.size[0]
+    draw = ImageDraw.Draw(img)
+
+    # Badge dimensions: ~18% of icon size, positioned in corner with 4% margin
+    badge_height = max(14, int(size * 0.18))
+    badge_width = int(badge_height * 1.8)
+    margin = max(2, int(size * 0.04))
+    x1 = size - badge_width - margin
+    y1 = size - badge_height - margin
+    x2 = size - margin
+    y2 = size - margin
+
+    # Rounded rectangle for badge (amber/orange dev indicator)
+    radius = badge_height // 4
+    draw.rounded_rectangle(
+        [(x1, y1), (x2, y2)],
+        radius=radius,
+        fill=(255, 149, 0, 230),  # Amber/orange
+        outline=(200, 100, 0, 255),
+        width=max(1, size // 256),
+    )
+
+    # DEV text - use default font, scaled to badge
+    font_size = max(8, badge_height // 2)
+    font_paths = [
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/System/Library/Fonts/SFNSMono.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    ]
+    font = None
+    for path in font_paths:
+        if os.path.exists(path):
+            try:
+                font = ImageFont.truetype(path, font_size)
+                break
+            except (OSError, IOError):
+                continue
+    if font is None:
+        font = ImageFont.load_default()
+
+    text = "DEV"
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+    text_x = x1 + (badge_width - text_width) // 2
+    text_y = y1 + (badge_height - text_height) // 2 - 1
+    draw.text((text_x, text_y), text, fill=(255, 255, 255, 255), font=font)
+
+    return img
+
+def generate_iconset(source_path, output_dir, dev_mode=False):
     """Generate .iconset folder with all required sizes."""
     # Load and process source image
     img = Image.open(source_path)
@@ -114,6 +170,10 @@ def generate_iconset(source_path, output_dir):
     # Make it square
     square = create_square_image(cropped)
     print(f"Square size: {square.size}")
+
+    if dev_mode:
+        square = add_dev_badge(square)
+        print("Added DEV badge")
 
     # Create iconset directory
     iconset_name = "pmux.iconset"
@@ -154,16 +214,25 @@ def convert_to_icns(iconset_path, output_path):
     return True
 
 def main():
+    parser = argparse.ArgumentParser(description="Generate pmux app icon from pudding logo")
+    parser.add_argument(
+        "--dev",
+        action="store_true",
+        help="Generate dev mode variant with DEV badge in corner",
+    )
+    args = parser.parse_args()
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(script_dir)
 
     source_image = os.path.join(project_root, "布丁logo_极简线条.png")
     resources_dir = script_dir
 
-    print(f"Processing {source_image}...")
+    mode_str = " (dev mode)" if args.dev else ""
+    print(f"Processing {source_image}{mode_str}...")
 
     # Generate iconset
-    iconset_path = generate_iconset(source_image, resources_dir)
+    iconset_path = generate_iconset(source_image, resources_dir, dev_mode=args.dev)
 
     # Convert to icns
     icns_path = os.path.join(resources_dir, "pmux.icns")

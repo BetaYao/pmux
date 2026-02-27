@@ -130,10 +130,27 @@ fn parse_worktree_list(output: &str) -> Result<Vec<WorktreeInfo>, WorktreeError>
 }
 
 /// Get ahead/behind count for a branch
-pub fn get_ahead_behind(repo_path: &Path, branch: &str) -> Result<(usize, usize), WorktreeError> {
+pub fn get_ahead_behind(_repo_path: &Path, _branch: &str) -> Result<(usize, usize), WorktreeError> {
     // This would need to compare with remote tracking branch
     // For now, return 0,0 as placeholder
     Ok((0, 0))
+}
+
+/// Check if worktree has uncommitted changes
+pub fn has_uncommitted_changes(worktree_path: &Path) -> bool {
+    let output = match Command::new("git")
+        .args(["status", "--short"])
+        .current_dir(worktree_path)
+        .output()
+    {
+        Ok(o) => o,
+        Err(_) => return false,
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    !stdout.trim().is_empty()
 }
 
 #[cfg(test)]

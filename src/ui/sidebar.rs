@@ -1,6 +1,6 @@
 // ui/sidebar.rs - Sidebar component for worktree list with GPUI render
 use gpui::prelude::*;
-use gpui::*;
+use gpui::{px, svg, *};
 use crate::worktree::WorktreeInfo;
 use crate::agent_status::AgentStatus;
 use crate::new_branch_orchestrator::NewBranchOrchestrator;
@@ -65,7 +65,7 @@ impl WorktreeItem {
 /// Type alias for the select callback
 pub type SelectCallback = Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>;
 
-/// Sidebar component - renders worktree list with status
+/// Sidebar component - renders top controls, worktree list with status, add branch
 pub struct Sidebar {
     repo_name: String,
     repo_path: PathBuf,
@@ -73,11 +73,20 @@ pub struct Sidebar {
     pane_statuses: Arc<Mutex<std::collections::HashMap<String, AgentStatus>>>,
     selected_index: Option<usize>,
     on_select: Option<SelectCallback>,
-    on_new_branch: Option<Arc<dyn Fn() + Send + 'static>>,
-    on_delete: Option<Arc<dyn Fn(usize) + Send + 'static>>,
+    on_new_branch: Option<Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
+    on_delete: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>>,
+    on_view_diff: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>>,
+    on_right_click: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>>,
+    /// Which worktree index has context menu open (from parent state)
+    context_menu_for: Option<usize>,
     creating_branch: bool,
     /// Store original worktree info for access in callbacks
     worktrees_info: Arc<Mutex<Vec<crate::worktree::WorktreeInfo>>>,
+    /// Top control row callbacks (cmux style)
+    on_toggle_sidebar: Option<Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
+    on_toggle_notifications: Option<Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
+    on_add_workspace: Option<Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
+    notification_count: usize,
 }
 
 impl Sidebar {
@@ -91,9 +100,33 @@ impl Sidebar {
             on_select: None,
             on_new_branch: None,
             on_delete: None,
+            on_view_diff: None,
+            on_right_click: None,
+            context_menu_for: None,
             creating_branch: false,
             worktrees_info: Arc::new(Mutex::new(Vec::new())),
+            on_toggle_sidebar: None,
+            on_toggle_notifications: None,
+            on_add_workspace: None,
+            notification_count: 0,
         }
+    }
+
+    pub fn on_toggle_sidebar<F: Fn(&mut Window, &mut App) + Send + Sync + 'static>(mut self, f: F) -> Self {
+        self.on_toggle_sidebar = Some(Arc::new(f));
+        self
+    }
+    pub fn on_toggle_notifications<F: Fn(&mut Window, &mut App) + Send + Sync + 'static>(mut self, f: F) -> Self {
+        self.on_toggle_notifications = Some(Arc::new(f));
+        self
+    }
+    pub fn on_add_workspace<F: Fn(&mut Window, &mut App) + Send + Sync + 'static>(mut self, f: F) -> Self {
+        self.on_add_workspace = Some(Arc::new(f));
+        self
+    }
+    pub fn with_notification_count(mut self, count: usize) -> Self {
+        self.notification_count = count;
+        self
     }
 
     pub fn with_statuses(mut self, pane_statuses: Arc<Mutex<HashMap<String, AgentStatus>>>) -> Self {
@@ -130,11 +163,24 @@ impl Sidebar {
         self.on_select = Some(Arc::new(callback));
     }
 
-    pub fn on_delete<F: Fn(usize) + Send + 'static>(&mut self, callback: F) {
+    pub fn on_delete<F: Fn(usize, &mut Window, &mut App) + Send + Sync + 'static>(&mut self, callback: F) {
         self.on_delete = Some(Arc::new(callback));
     }
 
-    pub fn on_new_branch<F: Fn() + Send + 'static>(&mut self, callback: F) {
+    pub fn on_view_diff<F: Fn(usize, &mut Window, &mut App) + Send + Sync + 'static>(&mut self, callback: F) {
+        self.on_view_diff = Some(Arc::new(callback));
+    }
+
+    pub fn on_right_click<F: Fn(usize, &mut Window, &mut App) + Send + Sync + 'static>(&mut self, callback: F) {
+        self.on_right_click = Some(Arc::new(callback));
+    }
+
+    pub fn with_context_menu(mut self, index: Option<usize>) -> Self {
+        self.context_menu_for = index;
+        self
+    }
+
+    pub fn on_new_branch<F: Fn(&mut Window, &mut App) + Send + Sync + 'static>(&mut self, callback: F) {
         self.on_new_branch = Some(Arc::new(callback));
     }
 
@@ -204,10 +250,134 @@ impl Sidebar {
                 div()
                     .text_size(px(13.)).font_weight(FontWeight::SEMIBOLD)
                     .text_color(rgb(0xffffff))
-                    .child(SharedString::from(format!("📁 {}", repo_name)))
+                    .child(SharedString::from(format!("{}", repo_name)))
             )
     }
 
+    /// Top control row: collapse, notification, add workspace (cmux style)
+    /// Height 36px to match content workspace tab bar; pt(6) aligns icons with macOS traffic lights
+    const TITLE_BAR_HEIGHT: f32 = 36.;
+
+    fn render_top_controls(
+        on_toggle_sidebar: Option<Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
+        on_toggle_notifications: Option<Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
+        on_add_workspace: Option<Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
+        notification_count: usize,
+    ) -> impl IntoElement {
+        let has_notifications = notification_count > 0;
+        let icon_color = rgb(0xcccccc);
+        let icon_color_alert = rgb(0xff4444);
+        // pt(6): push controls down to align with traffic lights (center ~19px from top)
+        // pl(72): after macOS traffic lights (~12+52+8)
+        let mut controls = div()
+            .id("sidebar-top-controls")
+            .flex()
+            .flex_row()
+            .items_center()
+            .h(px(Self::TITLE_BAR_HEIGHT))
+            .pt(px(6.))
+            .pl(px(72.))
+            .pr(px(8.))
+            .gap(px(4.))
+            .border_b(px(1.))
+            .border_color(rgb(0x3d3d3d))
+            .bg(rgb(0x252526));
+
+        let btn_size = px(28.);
+        if let Some(cb) = on_toggle_sidebar {
+            let cb = Arc::clone(&cb);
+            controls = controls.child(
+                div()
+                    .id("toggle-sidebar-btn")
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .w(btn_size)
+                    .h(btn_size)
+                    .rounded(px(4.))
+                    .hover(|s: StyleRefinement| s.bg(rgb(0x3d3d3d)))
+                    .cursor_pointer()
+                    .on_click(move |_, window, cx| cb(window, cx))
+                    .child(
+                        svg()
+                            .path("icons/sidebar.svg")
+                            .w(px(14.))
+                            .h(px(14.))
+                            .text_color(icon_color),
+                    ),
+            );
+        }
+        if let Some(cb) = on_toggle_notifications {
+            let cb = Arc::clone(&cb);
+            controls = controls.child(
+                div()
+                    .id("notification-btn")
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .w(btn_size)
+                    .h(btn_size)
+                    .rounded(px(4.))
+                    .when(has_notifications, |el: Stateful<Div>| el.bg(rgb(0x3a1111)))
+                    .when(!has_notifications, |el: Stateful<Div>| el.hover(|s: StyleRefinement| s.bg(rgb(0x3d3d3d))))
+                    .cursor_pointer()
+                    .on_click(move |_, window, cx| cb(window, cx))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(4.))
+                            .child(
+                                svg()
+                                    .path("icons/bell.svg")
+                                    .w(px(14.))
+                                    .h(px(14.))
+                                    .text_color(if has_notifications {
+                                        icon_color_alert
+                                    } else {
+                                        icon_color
+                                    }),
+                            )
+                            .when(has_notifications, |el: Div| {
+                                el.child(
+                                    div()
+                                        .text_size(px(10.))
+                                        .text_color(icon_color_alert)
+                                        .font_weight(FontWeight::BOLD)
+                                        .child(format!("{}", notification_count)),
+                                )
+                            }),
+                    ),
+            );
+        }
+        if let Some(cb) = on_add_workspace {
+            let cb = Arc::clone(&cb);
+            controls = controls.child(
+                div()
+                    .id("add-workspace-btn")
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .w(btn_size)
+                    .h(btn_size)
+                    .rounded(px(4.))
+                    .hover(|s: StyleRefinement| s.bg(rgb(0x3d3d3d)))
+                    .cursor_pointer()
+                    .on_click(move |_, window, cx| cb(window, cx))
+                    .child(
+                        svg()
+                            .path("icons/plus.svg")
+                            .w(px(14.))
+                            .h(px(14.))
+                            .text_color(icon_color),
+                    ),
+            );
+        }
+        controls
+    }
+
+    #[allow(dead_code)]
     fn render_row(idx: usize, item: &WorktreeItem, is_selected: bool) -> Stateful<Div> {
         let status_color = item.status_color();
         let text_color = if is_selected { rgb(0xffffff) } else { rgb(0xcccccc) };
@@ -235,7 +405,54 @@ impl Sidebar {
         }
     }
 
-    fn render_footer(creating: bool, on_new_branch: Option<&Arc<dyn Fn() + Send + 'static>>) -> Stateful<Div> {
+    fn render_context_menu(
+        idx: usize,
+        on_view_diff: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>>,
+        on_delete: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>>,
+        worktrees_info: &[crate::worktree::WorktreeInfo],
+    ) -> impl IntoElement {
+        let mut menu = div()
+            .id(format!("sidebar-context-menu-{}", idx))
+            .mx(px(4.)).my(px(2.)).px(px(4.)).py(px(4.))
+            .rounded(px(4.))
+            .bg(rgb(0x2d2d2d))
+            .border_1().border_color(rgb(0x3d3d3d))
+            .flex().flex_col().gap(px(2.));
+
+        // Only show View Diff for non-main worktrees (main...HEAD is empty for main branch)
+        let show_view_diff = on_view_diff.is_some()
+            && !worktrees_info.get(idx).map(|w| w.is_main).unwrap_or(true);
+        if let Some(on_view_diff) = on_view_diff.filter(|_| show_view_diff) {
+            let item = div()
+                .id(format!("context-menu-view-diff-{}", idx))
+                .px(px(8.)).py(px(6.))
+                .text_size(px(12.)).text_color(rgb(0xcccccc))
+                .hover(|s: StyleRefinement| s.bg(rgb(0x3d3d3d)))
+                .cursor_pointer()
+                .on_click(move |_event, window, cx| {
+                    on_view_diff(idx, window, cx);
+                })
+                .child("View Diff");
+            menu = menu.child(item);
+        }
+        if let Some(ref on_delete) = on_delete {
+            let on_delete = Arc::clone(on_delete);
+            let item = div()
+                .id(format!("context-menu-remove-{}", idx))
+                .px(px(8.)).py(px(6.))
+                .text_size(px(12.)).text_color(rgb(0xcccccc))
+                .hover(|s: StyleRefinement| s.bg(rgb(0x3d3d3d)))
+                .cursor_pointer()
+                .on_click(move |_event, window, cx| {
+                    on_delete(idx, window, cx);
+                })
+                .child("Remove Worktree");
+            menu = menu.child(item);
+        }
+        menu
+    }
+
+    fn render_footer(creating: bool, on_new_branch: Option<&Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>) -> Stateful<Div> {
         let mut btn = div()
             .id("new-branch-btn")
             .px(px(12.)).py(px(6.)).rounded(px(4.))
@@ -254,8 +471,8 @@ impl Sidebar {
         if !creating {
             if let Some(callback) = on_new_branch {
                 let cb = Arc::clone(callback);
-                btn = btn.on_click(move |_, _, _| {
-                    cb();
+                btn = btn.on_click(move |_, window, cx| {
+                    cb(window, cx);
                 });
             }
         }
@@ -277,6 +494,7 @@ impl IntoElement for Sidebar {
 impl RenderOnce for Sidebar {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let worktrees = self.worktrees.lock().unwrap().clone();
+        let worktrees_info = self.worktrees_info.lock().unwrap().clone();
         let pane_statuses = self.pane_statuses.lock().unwrap().clone();
         let selected = self.selected_index;
         let repo_name = self.repo_name.clone();
@@ -284,8 +502,20 @@ impl RenderOnce for Sidebar {
         let on_new_branch_ref = self.on_new_branch.as_ref();
         let on_delete = self.on_delete.clone();
         let on_select = self.on_select.clone();
+        let on_view_diff = self.on_view_diff.clone();
+        let on_right_click = self.on_right_click.clone();
+        let context_menu_for = self.context_menu_for;
+        let on_toggle_sidebar = self.on_toggle_sidebar.clone();
+        let on_toggle_notifications = self.on_toggle_notifications.clone();
+        let on_add_workspace = self.on_add_workspace.clone();
+        let notification_count = self.notification_count;
 
-        let header = Self::render_header(&repo_name);
+        let has_top_controls = on_toggle_sidebar.is_some() || on_toggle_notifications.is_some() || on_add_workspace.is_some();
+        let top_section = if has_top_controls {
+            Self::render_top_controls(on_toggle_sidebar, on_toggle_notifications, on_add_workspace, notification_count).into_any_element()
+        } else {
+            Self::render_header(&repo_name).into_any_element()
+        };
         let footer = Self::render_footer(creating, on_new_branch_ref);
 
         let mut rows: Vec<AnyElement> = Vec::new();
@@ -308,11 +538,22 @@ impl RenderOnce for Sidebar {
                 )
                 .child(div().pl(px(17.)).text_size(px(10.)).text_color(status_text_color).child(item_with_status.status_text()));
 
+            let row_content = div()
+                .flex_1()
+                .flex()
+                .flex_row()
+                .items_center()
+                .child(inner);
+
             let mut row = div()
                 .id(ElementId::from(idx))
                 .mx(px(4.)).my(px(2.)).px(px(8.)).py(px(6.))
                 .rounded(px(4.))
-                .child(inner);
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(4.))
+                .cursor_pointer();
 
             if let Some(on_select) = &on_select {
                 let on_select = on_select.clone();
@@ -321,7 +562,22 @@ impl RenderOnce for Sidebar {
                 });
             }
 
-            row = row.cursor_pointer();
+            row = row.child(row_content);
+
+            if let Some(ref on_delete) = on_delete {
+                let on_delete = Arc::clone(on_delete);
+                let delete_btn = div()
+                    .id(format!("sidebar-delete-{}", idx))
+                    .px(px(4.)).py(px(2.))
+                    .text_size(px(10.)).text_color(rgb(0x666666))
+                    .hover(|s: StyleRefinement| s.text_color(rgb(0xffffff)))
+                    .cursor_pointer()
+                    .on_click(move |_event, window, cx| {
+                        on_delete(idx, window, cx);
+                    })
+                    .child("×");
+                row = row.child(delete_btn);
+            }
 
             if is_selected {
                 row = row.bg(rgb(0x094771));
@@ -329,7 +585,19 @@ impl RenderOnce for Sidebar {
                 row = row.hover(|s: StyleRefinement| s.bg(rgb(0x2a2d2e)));
             }
 
+            if let Some(on_right_click) = &on_right_click {
+                let on_right_click = on_right_click.clone();
+                row = row.on_mouse_down(MouseButton::Right, move |_event, window, cx| {
+                    on_right_click(idx, window, cx);
+                });
+            }
+
             rows.push(row.into_any_element());
+
+            if context_menu_for == Some(idx) {
+                let menu_row = Self::render_context_menu(idx, on_view_diff.clone(), on_delete.clone(), &worktrees_info);
+                rows.push(menu_row.into_any_element());
+            }
         }
 
         let list = div()
@@ -341,10 +609,9 @@ impl RenderOnce for Sidebar {
 
         div()
             .id("sidebar")
-            .w(px(220.)).h_full().flex().flex_col()
+            .w_full().h_full().flex().flex_col()
             .bg(rgb(0x252526))
-            .border_r(px(1.)).border_color(rgb(0x3d3d3d))
-            .child(header)
+            .child(top_section)
             .child(list)
             .child(footer)
     }
@@ -482,20 +749,23 @@ mod tests {
     #[test]
     fn test_on_new_branch_callback() {
         let mut sidebar = Sidebar::new("myproject", PathBuf::from("/tmp/project"));
-        let mut called = false;
-        sidebar.on_new_branch(|| {
-            called = true;
-        });
+        sidebar.on_new_branch(|_window: &mut Window, _cx: &mut App| {});
         assert!(sidebar.on_new_branch.is_some());
     }
 
     #[test]
     fn test_on_select_callback() {
         let mut sidebar = Sidebar::new("myproject", PathBuf::from("/tmp/project"));
-        let mut selected = None;
-        sidebar.on_select(|idx| {
-            selected = Some(idx);
+        sidebar.on_select(|idx: usize, _window: &mut Window, _cx: &mut App| {
+            let _ = idx;
         });
         assert!(sidebar.on_select.is_some());
+    }
+
+    #[test]
+    fn test_on_delete_callback() {
+        let mut sidebar = Sidebar::new("myproject", PathBuf::from("/tmp/project"));
+        sidebar.on_delete(|_idx: usize, _window: &mut Window, _cx: &mut App| {});
+        assert!(sidebar.on_delete.is_some());
     }
 }

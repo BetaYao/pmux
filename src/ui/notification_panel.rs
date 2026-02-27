@@ -4,11 +4,13 @@ use gpui::*;
 use std::sync::Arc;
 use crate::notification::{Notification, NotificationType};
 use std::time::Instant;
+use uuid::Uuid;
 
 /// Notification item for rendering
 #[derive(Clone)]
 pub struct NotificationItem {
     pub id: String,
+    pub uuid: Uuid,
     pub pane_id: String,
     pub notif_type: NotificationType,
     pub message: String,
@@ -17,9 +19,10 @@ pub struct NotificationItem {
 }
 
 impl NotificationItem {
-    pub fn from_notification(notif: &Notification, index: usize) -> Self {
+    pub fn from_notification(notif: &Notification, _index: usize) -> Self {
         Self {
-            id: format!("notif-{}", index),
+            id: notif.id().to_string(),
+            uuid: notif.id(),
             pane_id: notif.pane_id().to_string(),
             notif_type: notif.notif_type(),
             message: notif.display_message(),
@@ -63,7 +66,7 @@ pub struct NotificationPanel {
     notifications: Vec<NotificationItem>,
     is_visible: bool,
     on_close: Arc<dyn Fn(&mut Window, &mut App)>,
-    on_mark_read: Arc<dyn Fn(usize, &mut Window, &mut App)>,
+    on_mark_read: Arc<dyn Fn(Uuid, &mut Window, &mut App)>,
     on_clear_all: Arc<dyn Fn(&mut Window, &mut App)>,
     on_jump_to_pane: Arc<dyn Fn(&str, &mut Window, &mut App)>,
 }
@@ -74,7 +77,7 @@ impl NotificationPanel {
             notifications: Vec::new(),
             is_visible: false,
             on_close: Arc::new(|_, _| {}),
-            on_mark_read: Arc::new(|_, _, _| {}),
+            on_mark_read: Arc::new(|_: Uuid, _, _| {}),
             on_clear_all: Arc::new(|_, _| {}),
             on_jump_to_pane: Arc::new(|_, _, _| {}),
         }
@@ -82,6 +85,11 @@ impl NotificationPanel {
 
     pub fn with_notifications(mut self, notifications: Vec<NotificationItem>) -> Self {
         self.notifications = notifications;
+        self
+    }
+
+    pub fn with_visible(mut self, visible: bool) -> Self {
+        self.is_visible = visible;
         self
     }
 
@@ -101,7 +109,7 @@ impl NotificationPanel {
     pub fn on_close<F: Fn(&mut Window, &mut App) + 'static>(mut self, f: F) -> Self {
         self.on_close = Arc::new(f); self
     }
-    pub fn on_mark_read<F: Fn(usize, &mut Window, &mut App) + 'static>(mut self, f: F) -> Self {
+    pub fn on_mark_read<F: Fn(Uuid, &mut Window, &mut App) + 'static>(mut self, f: F) -> Self {
         self.on_mark_read = Arc::new(f); self
     }
     pub fn on_clear_all<F: Fn(&mut Window, &mut App) + 'static>(mut self, f: F) -> Self {
@@ -118,6 +126,7 @@ impl NotificationPanel {
         let message = item.message.clone();
         let pane_id = item.pane_id.clone();
         let is_read = item.read;
+        let item_uuid = item.uuid;
         let on_mark_read = self.on_mark_read.clone();
         let on_jump = self.on_jump_to_pane.clone();
 
@@ -157,7 +166,7 @@ impl NotificationPanel {
                                     .text_color(rgb(0x666666))
                                     .hover(|s: StyleRefinement| s.text_color(rgb(0xffffff)))
                                     .cursor_pointer()
-                                    .on_click(move |_, window, cx| { on_mark_read(index, window, cx); })
+                                    .on_click(move |_, window, cx| { on_mark_read(item_uuid, window, cx); })
                                     .child("✓")
                             })
                     )
@@ -284,7 +293,7 @@ mod tests {
     fn test_notification_item_creation() {
         let notif = Notification::new("pane-1", NotificationType::Error, "Test error");
         let item = NotificationItem::from_notification(&notif, 0);
-        assert_eq!(item.id, "notif-0");
+        assert_eq!(item.id, notif.id().to_string());
         assert_eq!(item.pane_id, "pane-1");
         assert!(!item.read);
     }
@@ -292,14 +301,14 @@ mod tests {
     #[test]
     fn test_icon_mapping() {
         let error_item = NotificationItem {
-            id: "1".to_string(), pane_id: "p1".to_string(),
+            id: "1".to_string(), uuid: Uuid::nil(), pane_id: "p1".to_string(),
             notif_type: NotificationType::Error, message: "err".to_string(),
             timestamp: Instant::now(), read: false,
         };
         assert_eq!(error_item.icon(), "✕");
 
         let info_item = NotificationItem {
-            id: "2".to_string(), pane_id: "p2".to_string(),
+            id: "2".to_string(), uuid: Uuid::nil(), pane_id: "p2".to_string(),
             notif_type: NotificationType::Info, message: "ok".to_string(),
             timestamp: Instant::now(), read: false,
         };
@@ -309,7 +318,7 @@ mod tests {
     #[test]
     fn test_color_mapping() {
         let error_item = NotificationItem {
-            id: "1".to_string(), pane_id: "p1".to_string(),
+            id: "1".to_string(), uuid: Uuid::nil(), pane_id: "p1".to_string(),
             notif_type: NotificationType::Error, message: "err".to_string(),
             timestamp: Instant::now(), read: false,
         };
@@ -319,7 +328,7 @@ mod tests {
     #[test]
     fn test_timestamp_formatting() {
         let item = NotificationItem {
-            id: "1".to_string(), pane_id: "p1".to_string(),
+            id: "1".to_string(), uuid: Uuid::nil(), pane_id: "p1".to_string(),
             notif_type: NotificationType::Info, message: "msg".to_string(),
             timestamp: Instant::now(), read: false,
         };
@@ -345,9 +354,9 @@ mod tests {
     #[test]
     fn test_unread_count() {
         let items = vec![
-            NotificationItem { id: "1".to_string(), pane_id: "p1".to_string(), notif_type: NotificationType::Error, message: "err".to_string(), timestamp: Instant::now(), read: false },
-            NotificationItem { id: "2".to_string(), pane_id: "p2".to_string(), notif_type: NotificationType::Info, message: "info".to_string(), timestamp: Instant::now(), read: true },
-            NotificationItem { id: "3".to_string(), pane_id: "p3".to_string(), notif_type: NotificationType::Waiting, message: "wait".to_string(), timestamp: Instant::now(), read: false },
+            NotificationItem { id: "1".to_string(), uuid: Uuid::nil(), pane_id: "p1".to_string(), notif_type: NotificationType::Error, message: "err".to_string(), timestamp: Instant::now(), read: false },
+            NotificationItem { id: "2".to_string(), uuid: Uuid::nil(), pane_id: "p2".to_string(), notif_type: NotificationType::Info, message: "info".to_string(), timestamp: Instant::now(), read: true },
+            NotificationItem { id: "3".to_string(), uuid: Uuid::nil(), pane_id: "p3".to_string(), notif_type: NotificationType::Waiting, message: "wait".to_string(), timestamp: Instant::now(), read: false },
         ];
         let panel = NotificationPanel::new().with_notifications(items);
         assert_eq!(panel.unread_count(), 2);
@@ -357,7 +366,7 @@ mod tests {
     fn test_callback_registration() {
         let panel = NotificationPanel::new()
             .on_close(|_, _| {})
-            .on_mark_read(|_, _, _| {})
+            .on_mark_read(|_: Uuid, _, _| {})
             .on_clear_all(|_, _| {})
             .on_jump_to_pane(|_, _, _| {});
         assert!(!panel.is_visible());

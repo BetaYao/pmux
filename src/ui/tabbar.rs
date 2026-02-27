@@ -3,10 +3,19 @@ use gpui::prelude::*;
 use gpui::*;
 use std::sync::Arc;
 
+/// Kind of tab: pane (terminal within current worktree) or review (diff view)
+#[derive(Debug, Clone, PartialEq)]
+pub enum TabKind {
+    /// Pane index within current tmux window (worktree)
+    Pane(usize),
+    Review { branch: String, window_name: String },
+}
+
 /// Information about a single pane tab
 #[derive(Debug, Clone)]
 pub struct PaneTabInfo {
     pub index: usize,
+    pub kind: TabKind,
     pub name: String,
     pub display_name: String,
     pub is_active: bool,
@@ -18,8 +27,38 @@ impl PaneTabInfo {
     pub fn new(index: usize, name: &str, display_name: &str) -> Self {
         Self {
             index,
+            kind: TabKind::Pane(index),
             name: name.to_string(),
             display_name: display_name.to_string(),
+            is_active: false,
+            is_modified: false,
+            status_icon: None,
+        }
+    }
+
+    /// Pane tab - terminal within current worktree's tmux window
+    pub fn pane(index: usize, display: &str) -> Self {
+        Self {
+            index,
+            kind: TabKind::Pane(index),
+            name: display.to_string(),
+            display_name: display.to_string(),
+            is_active: false,
+            is_modified: false,
+            status_icon: None,
+        }
+    }
+
+    pub fn review(index: usize, branch: &str, window_name: &str) -> Self {
+        let display = format!("{branch}");
+        Self {
+            index,
+            kind: TabKind::Review {
+                branch: branch.to_string(),
+                window_name: window_name.to_string(),
+            },
+            name: window_name.to_string(),
+            display_name: display,
             is_active: false,
             is_modified: false,
             status_icon: None,
@@ -35,9 +74,18 @@ impl PaneTabInfo {
     }
 
     pub fn full_label(&self) -> String {
-        let mut label = format!("🖥 {}", self.display_name);
-        if self.is_modified { label.push_str(" ●"); }
-        label
+        match &self.kind {
+            TabKind::Pane(_) => {
+                let mut label = self.display_name.clone();
+                if self.is_modified { label.push_str(" ●"); }
+                label
+            }
+            TabKind::Review { branch, .. } => format!("review-{branch}"),
+        }
+    }
+
+    pub fn is_review(&self) -> bool {
+        matches!(&self.kind, TabKind::Review { .. })
     }
 }
 
@@ -207,8 +255,15 @@ mod tests {
 
     #[test]
     fn test_full_label() {
-        assert_eq!(PaneTabInfo::new(0, "main", "main").full_label(), "🖥 main");
-        assert_eq!(PaneTabInfo::new(0, "main", "main").with_modified(true).full_label(), "🖥 main ●");
+        assert_eq!(PaneTabInfo::pane(0, "1").full_label(), "1");
+        assert_eq!(PaneTabInfo::pane(0, "1").with_modified(true).full_label(), "1 ●");
+    }
+
+    #[test]
+    fn test_review_tab_label() {
+        let tab = PaneTabInfo::review(2, "feat-x", "review-feat-x");
+        assert_eq!(tab.full_label(), "review-feat-x");
+        assert!(tab.is_review());
     }
 
     #[test]

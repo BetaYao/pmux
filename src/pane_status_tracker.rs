@@ -6,7 +6,8 @@ use std::time::{Duration, Instant};
 
 /// Tracks status for multiple panes
 pub struct PaneStatusTracker {
-    /// Detector for initial status detection
+    /// Detector for initial status detection (reserved for future use)
+    #[allow(dead_code)]
     detector: StatusDetector,
     /// Per-pane trackers with debouncing
     pane_trackers: HashMap<String, DebouncedStatusTracker>,
@@ -34,7 +35,7 @@ impl PaneStatusTracker {
     }
 
     /// Create tracker with custom debounce threshold
-    pub fn with_debounce(threshold: u8) -> Self {
+    pub fn with_debounce(_threshold: u8) -> Self {
         Self {
             detector: StatusDetector::new(),
             pane_trackers: HashMap::new(),

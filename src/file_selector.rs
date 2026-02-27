@@ -5,14 +5,14 @@ use std::path::PathBuf;
 /// Returns Some(PathBuf) if user selected a folder, None if cancelled
 pub fn show_folder_picker() -> Option<PathBuf> {
     rfd::FileDialog::new()
-        .set_title("选择 Git 仓库")
+        .set_title("Select Git Repository")
         .pick_folder()
 }
 
 /// Show a folder picker with a default starting path
 pub fn show_folder_picker_with_default(start_path: &PathBuf) -> Option<PathBuf> {
     rfd::FileDialog::new()
-        .set_title("选择 Git 仓库")
+        .set_title("Select Git Repository")
         .set_directory(start_path)
         .pick_folder()
 }
@@ -21,7 +21,7 @@ pub fn show_folder_picker_with_default(start_path: &PathBuf) -> Option<PathBuf> 
 /// Returns Some(PathBuf) if user selected a folder, None if cancelled
 pub async fn show_folder_picker_async() -> Option<PathBuf> {
     let handle = rfd::AsyncFileDialog::new()
-        .set_title("选择 Git 仓库")
+        .set_title("Select Git Repository")
         .pick_folder()
         .await;
     handle.map(|h| h.path().to_path_buf())

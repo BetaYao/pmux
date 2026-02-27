@@ -9,8 +9,12 @@ pmux is an AI Agent multi-branch development workbench - a native desktop GUI ap
 ## Build and Test Commands
 
 ```bash
-# Run all tests
-cargo test
+# Build and run the application (use stable toolchain if RUSTUP_TOOLCHAIN=esp is set)
+RUSTUP_TOOLCHAIN=stable cargo run
+# or: unset RUSTUP_TOOLCHAIN && cargo run
+
+# Run all tests (SIGBUS in gpui_macros can occur on some macOS setups; use stable)
+RUSTUP_TOOLCHAIN=stable cargo test
 
 # Run a specific test by name
 cargo test test_workspace_tab_creation
@@ -18,15 +22,14 @@ cargo test test_workspace_tab_creation
 # Run tests in a specific module
 cargo test workspace_manager::
 
-# Build and run the application
-cargo run
-
 # Build release version
 cargo build --release
 
 # Check code without building
 cargo check
 ```
+
+**Note:** If `RUSTUP_TOOLCHAIN=esp` is set (e.g. for ESP-IDF development), pmux must use `stable` to avoid proc-macro SIGBUS. The project's `rust-toolchain.toml` specifies `stable`; override the env when needed.
 
 ## Architecture
 
@@ -78,12 +81,19 @@ cargo check
 - Integration tests are in `tests/` directory
 - Tests follow TDD pattern with Arrange-Act-Assert structure
 - Use `tempfile::TempDir` for filesystem test isolation
+- See `test-driven-development` skill for full TDD workflow
 
 ### Spec-Driven Development
 The project uses openspec for feature specifications:
 - `openspec/changes/` - Active feature specifications
 - `openspec/archive/` - Completed specs
 - Each spec contains: proposal.md, design.md, specs/, tasks.md
+
+### Subagent-Driven Development
+When implementing plans from `docs/plans/` (Runtime Phase 1–4), use the `subagent-driven-development` skill to delegate tasks to subagents (explore/shell/generalPurpose) for parallel execution. See `.cursor/skills/subagent-driven-development/SKILL.md`.
+
+### Code Review
+When the user requests a code review, use the `requesting-code-review` skill. Review against design.md, success criteria, and pmux conventions. See `.cursor/skills/requesting-code-review/SKILL.md`.
 
 ### UI Component Pattern
 GPUI components implement the `Render` trait:

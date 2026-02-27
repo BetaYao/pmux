@@ -1,11 +1,16 @@
 // ui/mod.rs - GUI components for pmux
 pub mod app_root;
+pub mod delete_worktree_dialog_ui;
+pub mod diff_overlay;
 pub mod new_branch_dialog_ui;
 pub mod notification_panel;
 pub mod sidebar;
+pub mod split_pane_container;
+pub mod status_bar;
 pub mod tabbar;
 pub mod terminal_view;
 pub mod topbar;
+pub mod workspace_tabbar;
 
 use std::path::PathBuf;
 

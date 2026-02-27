@@ -1,9 +1,38 @@
 // main.rs - pmux GUI application using gpui
-use gpui::{actions, *};
+use std::path::PathBuf;
+
+use gpui::{actions, point, px, size, AssetSource, TitlebarOptions, WindowBounds, WindowOptions, *};
 use pmux::ui::app_root::AppRoot;
+use pmux::window_state::PersistentAppState;
+
+struct Assets {
+    base: PathBuf,
+}
+
+impl AssetSource for Assets {
+    fn load(&self, path: &str) -> anyhow::Result<Option<std::borrow::Cow<'static, [u8]>>> {
+        std::fs::read(self.base.join(path))
+            .map(|data| Some(std::borrow::Cow::Owned(data)))
+            .map_err(Into::into)
+    }
+
+    fn list(&self, path: &str) -> anyhow::Result<Vec<SharedString>> {
+        std::fs::read_dir(self.base.join(path))
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok().and_then(|e| e.file_name().into_string().ok()))
+                    .map(SharedString::from)
+                    .collect()
+            })
+            .map_err(Into::into)
+    }
+}
 
 fn main() {
-    gpui_platform::application().run(|cx: &mut App| {
+    let resources = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources");
+    gpui_platform::application()
+        .with_assets(Assets { base: resources })
+        .run(|cx: &mut App| {
         // Register menu actions
         cx.on_action(open_settings);
         cx.on_action(select_workspace_from_menu);
@@ -34,16 +63,49 @@ fn main() {
             },
         ]);
 
-        let bounds = Bounds::centered(None, size(px(900.), px(600.)), cx);
+        let bounds = {
+            let state = PersistentAppState::load().unwrap_or_default();
+            let ws = &state.window_state;
+            let (w, h) = ws.size;
+            let (x, y) = ws.position;
+            if w > 0 && h > 0 {
+                Bounds::new(
+                    point(px(x as f32), px(y as f32)),
+                    size(px(w as f32), px(h as f32)),
+                )
+            } else {
+                Bounds::centered(None, size(px(900.), px(600.)), cx)
+            }
+        };
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
+                titlebar: Some(TitlebarOptions {
+                    title: None,
+                    appears_transparent: true,
+                    traffic_light_position: Some(point(px(12.), px(12.))),
+                }),
                 ..Default::default()
             },
             |window, cx| {
-                // Register window close handler to quit the application
-                // when the main window is closed.
-                window.on_window_should_close(cx, |_window, app| {
+                // Register window close handler to save state and quit
+                window.on_window_should_close(cx, |window, app| {
+                    let mut state = PersistentAppState::load().unwrap_or_default();
+                    let bounds = window.window_bounds().get_bounds();
+                    state.window_state.size = (
+                        (f32::from(bounds.size.width)).round().max(0.) as u32,
+                        (f32::from(bounds.size.height)).round().max(0.) as u32,
+                    );
+                    state.window_state.position = (
+                        (f32::from(bounds.origin.x)).round() as i32,
+                        (f32::from(bounds.origin.y)).round() as i32,
+                    );
+                    if let Some(Some(root)) = window.root::<AppRoot>() {
+                        root.update(app, |app_root, _| {
+                            state.sidebar_width = app_root.sidebar_width();
+                        });
+                    }
+                    let _ = state.save();
                     app.quit();
                     true // Allow the window to close
                 });

@@ -41,6 +41,41 @@ impl PaneInfo {
     }
 }
 
+/// List all panes in a specific window
+pub fn list_panes_for_window(session_name: &str, window_id: &str) -> Result<Vec<PaneInfo>, PaneError> {
+    let target = format!("{}:{}", session_name, window_id);
+    let output = Command::new("tmux")
+        .args([
+            "list-panes",
+            "-t", &target,
+            "-F", "#{pane_id}|#{window_id}|#{pane_title}|#{pane_current_path}",
+        ])
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(PaneError::CommandFailed(stderr.to_string()));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut panes = Vec::new();
+
+    for line in stdout.lines() {
+        let parts: Vec<&str> = line.split('|').collect();
+        if parts.len() >= 4 {
+            panes.push(PaneInfo::new(
+                parts[0],
+                session_name,
+                parts[1],
+                parts[2],
+                parts[3],
+            ));
+        }
+    }
+
+    Ok(panes)
+}
+
 /// List all panes in a session
 pub fn list_panes(session_name: &str) -> Result<Vec<PaneInfo>, PaneError> {
     let output = Command::new("tmux")
@@ -75,6 +110,46 @@ pub fn list_panes(session_name: &str) -> Result<Vec<PaneInfo>, PaneError> {
     Ok(panes)
 }
 
+/// Split pane vertically (left/right, divider is vertical). Returns new pane target.
+pub fn split_pane_vertical(target: &str) -> Result<String, PaneError> {
+    let output = Command::new("tmux")
+        .args([
+            "split-window",
+            "-h", // horizontal split = panes side by side
+            "-t", target,
+            "-P",
+            "-F", "#{session_name}:#{window_id}.#{pane_id}",
+        ])
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(PaneError::CommandFailed(stderr.to_string()));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Split pane horizontally (top/bottom, divider is horizontal). Returns new pane target.
+pub fn split_pane_horizontal(target: &str) -> Result<String, PaneError> {
+    let output = Command::new("tmux")
+        .args([
+            "split-window",
+            "-v", // vertical split = panes stacked
+            "-t", target,
+            "-P",
+            "-F", "#{session_name}:#{window_id}.#{pane_id}",
+        ])
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(PaneError::CommandFailed(stderr.to_string()));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 /// Create a new pane in a window
 pub fn create_pane(session: &str, window: &str, path: &Path) -> Result<String, PaneError> {
     let path_str = path.to_str().unwrap_or(".");
@@ -98,6 +173,44 @@ pub fn create_pane(session: &str, window: &str, path: &Path) -> Result<String, P
     Ok(pane_id)
 }
 
+/// Get pane dimensions (columns, rows). Returns (80, 24) on error or parse failure.
+/// Clamps to minimum 40 columns to avoid single-column vertical wrapping.
+pub fn get_pane_dimensions(target: &str) -> (usize, usize) {
+    let output = match Command::new("tmux")
+        .args([
+            "display-message",
+            "-p",
+            "-t",
+            target,
+            "#{pane_width}x#{pane_height}",
+        ])
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => {
+            eprintln!("pmux: get_pane_dimensions({}) failed, using 80x24", target);
+            return (80, 24);
+        }
+    };
+
+    let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if let Some((w, h)) = s.split_once('x') {
+        if let (Ok(cols), Ok(rows)) = (w.parse::<usize>(), h.parse::<usize>()) {
+            let clamped_cols = cols.max(40).min(200);
+            let clamped_rows = rows.max(1).min(100);
+            if cols != clamped_cols || rows != clamped_rows {
+                eprintln!(
+                    "pmux: get_pane_dimensions({}) raw={}x{} clamped={}x{}",
+                    target, cols, rows, clamped_cols, clamped_rows
+                );
+            }
+            return (clamped_cols, clamped_rows);
+        }
+    }
+    eprintln!("pmux: get_pane_dimensions({}) parse failed (got {:?}), using 80x24", target, s);
+    (80, 24)
+}
+
 /// Capture pane content
 pub fn capture_pane(target: &str) -> Result<String, PaneError> {
     let output = Command::new("tmux")
@@ -114,6 +227,19 @@ pub fn capture_pane(target: &str) -> Result<String, PaneError> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// Select (focus) a pane. Ensures tmux's active pane matches our UI focus.
+pub fn select_pane(target: &str) -> Result<(), PaneError> {
+    let output = Command::new("tmux")
+        .args(["select-pane", "-t", target])
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(PaneError::CommandFailed(stderr.to_string()));
+    }
+    Ok(())
 }
 
 /// Send keys to a pane

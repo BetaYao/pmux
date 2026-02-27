@@ -1,0 +1,4 @@
+# macOS build configuration for gpui (Zed UI framework)
+[env]
+# Fix bindgen target mismatch on Apple Silicon (aarch64-apple-darwin vs arm64-apple-darwin)
+BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_darwin = "--target=arm64-apple-darwin"

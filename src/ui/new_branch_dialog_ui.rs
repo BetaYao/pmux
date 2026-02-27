@@ -5,16 +5,22 @@ use std::sync::Arc;
 use crate::new_branch_dialog::NewBranchDialog;
 
 /// Callback type for creating a new branch
-pub type CreateBranchCallback = Arc<dyn Fn(&str) + Send + 'static>;
+pub type CreateBranchCallback = Arc<dyn Fn(&mut Window, &mut App) + Send + 'static>;
 
 /// Callback type for closing the dialog
-pub type CloseDialogCallback = Arc<dyn Fn() + Send + 'static>;
+pub type CloseDialogCallback = Arc<dyn Fn(&mut Window, &mut App) + Send + 'static>;
+
+/// Callback type for when the branch name input changes
+pub type BranchNameChangeCallback = Arc<dyn Fn(String, &mut Window, &mut App) + Send + 'static>;
 
 /// New Branch Dialog UI component - manages the dialog UI state and rendering
 pub struct NewBranchDialogUi {
     dialog: NewBranchDialog,
     on_create: Option<CreateBranchCallback>,
     on_close: Option<CloseDialogCallback>,
+    on_branch_name_change: Option<BranchNameChangeCallback>,
+    /// Focus handle for the branch name input - when set, used for track_focus and initial focus
+    input_focus_handle: Option<gpui::FocusHandle>,
 }
 
 impl NewBranchDialogUi {
@@ -24,18 +30,32 @@ impl NewBranchDialogUi {
             dialog: NewBranchDialog::new(),
             on_create: None,
             on_close: None,
+            on_branch_name_change: None,
+            input_focus_handle: None,
         }
     }
 
+    /// Sets the focus handle for the branch name input (for track_focus and initial focus on open)
+    pub fn with_focus_handle(mut self, handle: gpui::FocusHandle) -> Self {
+        self.input_focus_handle = Some(handle);
+        self
+    }
+
     /// Sets the callback for when the user clicks "Create"
-    pub fn on_create<F: Fn(&str) + Send + 'static>(mut self, callback: F) -> Self {
+    pub fn on_create<F: Fn(&mut Window, &mut App) + Send + 'static>(mut self, callback: F) -> Self {
         self.on_create = Some(Arc::new(callback));
         self
     }
 
     /// Sets the callback for when the user clicks "Cancel" or closes the dialog
-    pub fn on_close<F: Fn() + Send + 'static>(mut self, callback: F) -> Self {
+    pub fn on_close<F: Fn(&mut Window, &mut App) + Send + 'static>(mut self, callback: F) -> Self {
         self.on_close = Some(Arc::new(callback));
+        self
+    }
+
+    /// Sets the callback for when the branch name input changes (e.g. user types)
+    pub fn on_branch_name_change<F: Fn(String, &mut Window, &mut App) + Send + 'static>(mut self, callback: F) -> Self {
+        self.on_branch_name_change = Some(Arc::new(callback));
         self
     }
 
@@ -125,8 +145,9 @@ impl IntoElement for NewBranchDialogUi {
         let error_message = self.error_message().to_string();
         let is_creating = self.is_creating();
         let is_create_enabled = self.is_create_enabled();
-        let on_create = self.on_create.clone();
         let on_close = self.on_close.clone();
+        let on_branch_name_change = self.on_branch_name_change.clone();
+        let input_focus_handle = self.input_focus_handle.clone();
 
         // Modal overlay - covers entire screen with semi-transparent background
         let modal_overlay = div()
@@ -140,14 +161,14 @@ impl IntoElement for NewBranchDialogUi {
             .bg(rgba(0x00000099u32)) // Semi-transparent black
             // Click outside to close (only if not creating)
             .when(!is_creating, |el| {
-                el.on_click(move |_event, _window, _cx| {
+                el.on_click(move |_event, window, cx| {
                     if let Some(ref close_cb) = on_close {
-                        close_cb();
+                        close_cb(window, cx);
                     }
                 })
             });
 
-        // Dialog card
+        // Dialog card - stop propagation so clicks on dialog don't close it
         let dialog_card = div()
             .id("new-branch-dialog-card")
             .w(px(400.))
@@ -159,9 +180,8 @@ impl IntoElement for NewBranchDialogUi {
             .rounded(px(8.))
             .bg(rgb(0x2d2d2d))
             .shadow_lg()
-            // Prevent click propagation to overlay
-            .on_click(|_event, _window, _cx| {
-                // Do nothing - just stop propagation
+            .on_click(|_event, _window, cx| {
+                cx.stop_propagation();
             });
 
         // Title
@@ -190,13 +210,13 @@ impl IntoElement for NewBranchDialogUi {
             .text_color(rgb(0xcccccc))
             .child("Branch Name");
 
-        // Text input - use SharedString for 'static lifetime
+        // Editable text input - focusable div with on_key_down for branch name entry
         let input_text: SharedString = if branch_name.is_empty() {
             "e.g., feature/my-new-feature".into()
         } else {
             branch_name.clone().into()
         };
-        let input_field = div()
+        let mut input_field = div()
             .id("new-branch-input")
             .w_full()
             .h(px(40.))
@@ -207,12 +227,61 @@ impl IntoElement for NewBranchDialogUi {
             .border_color(rgb(0xf44336))
             .flex()
             .items_center()
+            .cursor(gpui::CursorStyle::IBeam)
             .child(
                 div()
                     .text_size(px(14.))
                     .text_color(if branch_name.is_empty() { rgb(0x666666) } else { rgb(0xffffff) })
                     .child(input_text)
             );
+        // Make input editable when not creating and callback is set
+        if !is_creating {
+            if let Some(ref on_change) = on_branch_name_change {
+                let on_change = Arc::clone(on_change);
+                let branch_name_for_keys = branch_name.clone();
+                input_field = input_field
+                    .focusable();
+                if let Some(ref handle) = input_focus_handle {
+                    input_field = input_field.track_focus(handle);
+                }
+                input_field = input_field
+                    .on_key_down(move |event, window, cx| {
+                        let new_value = match event.keystroke.key.as_str() {
+                            "backspace" => {
+                                let mut s = branch_name_for_keys.clone();
+                                if s.pop().is_some() {
+                                    s
+                                } else {
+                                    branch_name_for_keys.clone()
+                                }
+                            }
+                            "delete" => {
+                                // Forward delete - with cursor-at-end model, no change
+                                branch_name_for_keys.clone()
+                            }
+                            _ => {
+                                if let Some(ref key_char) = event.keystroke.key_char {
+                                    // Filter out newlines and other control chars
+                                    let filtered: String = key_char.chars()
+                                        .filter(|c| !c.is_control() && *c != '\n' && *c != '\r')
+                                        .collect();
+                                    if !filtered.is_empty() {
+                                        format!("{}{}", branch_name_for_keys, filtered)
+                                    } else {
+                                        branch_name_for_keys.clone()
+                                    }
+                                } else {
+                                    branch_name_for_keys.clone()
+                                }
+                            }
+                        };
+                        if new_value != branch_name_for_keys {
+                            on_change(new_value, window, cx);
+                        }
+                        window.prevent_default();
+                    });
+            }
+        }
 
         // Error message
         let error_display = if has_error {
@@ -251,9 +320,9 @@ impl IntoElement for NewBranchDialogUi {
             .hover(|style: StyleRefinement| style.bg(rgb(0x4d4d4d)))
             .when(!is_creating, |el| {
                 let close_cb = self.on_close.clone();
-                el.on_click(move |_event, _window, _cx| {
+                el.on_click(move |_event, window, cx| {
                     if let Some(ref cb) = close_cb {
-                        cb();
+                        cb(window, cx);
                     }
                 })
             })
@@ -284,11 +353,10 @@ impl IntoElement for NewBranchDialogUi {
             .cursor_pointer()
             .when(is_create_enabled && !is_creating, |el| {
                 let create_cb = self.on_create.clone();
-                let branch_name_clone = branch_name.clone();
                 el.hover(|style: StyleRefinement| style.bg(create_button_hover_bg))
-                    .on_click(move |_event, _window, _cx| {
+                    .on_click(move |_event, window, cx| {
                         if let Some(ref cb) = create_cb {
-                            cb(&branch_name_clone);
+                            cb(window, cx);
                         }
                     })
             })
@@ -425,8 +493,9 @@ mod tests {
     #[test]
     fn test_callbacks_can_be_set() {
         let dialog = NewBranchDialogUi::new()
-            .on_create(|_name| {})
-            .on_close(|| {});
+            .on_create(|_: &mut Window, _: &mut App| {})
+            .on_close(|_: &mut Window, _: &mut App| {})
+            .on_branch_name_change(|_: String, _: &mut Window, _: &mut App| {});
         // Just verify it compiles and doesn't panic
         assert!(!dialog.is_open());
     }

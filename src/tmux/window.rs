@@ -1,4 +1,5 @@
 // tmux/window.rs - Tmux window management
+use std::path::Path;
 use std::process::Command;
 use thiserror::Error;
 
@@ -72,6 +73,33 @@ pub fn list_windows(session_name: &str) -> Result<Vec<WindowInfo>, WindowError> 
     Ok(windows)
 }
 
+/// Create a new window in a session with a specific working directory (runs default shell)
+pub fn create_window_with_cwd(
+    session_name: &str,
+    name: &str,
+    cwd: &Path,
+) -> Result<String, WindowError> {
+    let cwd_str = cwd.to_str().unwrap_or(".");
+    let output = Command::new("tmux")
+        .args([
+            "new-window",
+            "-t", session_name,
+            "-n", name,
+            "-c", cwd_str,
+            "-P",
+            "-F", "#{window_id}",
+        ])
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(WindowError::CommandFailed(stderr.to_string()));
+    }
+
+    let window_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(window_id)
+}
+
 /// Create a new window in a session
 pub fn create_window(session_name: &str, name: &str) -> Result<String, WindowError> {
     let output = Command::new("tmux")
@@ -91,6 +119,64 @@ pub fn create_window(session_name: &str, name: &str) -> Result<String, WindowErr
 
     let window_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
     Ok(window_id)
+}
+
+/// Create a new window in a session and run a command in it
+pub fn create_window_with_command(
+    session_name: &str,
+    name: &str,
+    cwd: &Path,
+    command: &str,
+) -> Result<String, WindowError> {
+    let cwd_str = cwd.to_str().unwrap_or(".");
+    let output = Command::new("tmux")
+        .args([
+            "new-window",
+            "-t", session_name,
+            "-n", name,
+            "-c", cwd_str,
+            "-P",
+            "-F", "#{window_id}",
+            command,
+        ])
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(WindowError::CommandFailed(stderr.to_string()));
+    }
+
+    let window_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(window_id)
+}
+
+/// Select (switch to) a window in a session
+pub fn select_window(session_name: &str, window_name: &str) -> Result<(), WindowError> {
+    let target = format!("{}:{}", session_name, window_name);
+    let output = Command::new("tmux")
+        .args(["select-window", "-t", &target])
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(WindowError::CommandFailed(stderr.to_string()));
+    }
+
+    Ok(())
+}
+
+/// Kill a window
+pub fn kill_window(target: &str) -> Result<(), WindowError> {
+    let output = Command::new("tmux")
+        .args(["kill-window", "-t", target])
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(WindowError::CommandFailed(stderr.to_string()));
+    }
+
+    Ok(())
 }
 
 /// Rename a window

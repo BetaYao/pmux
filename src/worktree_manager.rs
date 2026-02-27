@@ -1,7 +1,6 @@
 // worktree_manager.rs - Git worktree creation and management
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use tokio::process::Command as AsyncCommand;
 use crate::worktree::WorktreeError;
 
 /// Result of a git worktree operation
@@ -85,23 +84,30 @@ impl WorktreeManager {
     /// Creates a new git worktree asynchronously
     ///
     /// This function executes `git worktree add <path> -b <branch_name>`
-    /// and returns the result.
+    /// and returns the result. Uses std::process::Command with blocking::unblock
+    /// so it works without a tokio runtime (e.g. when run from GPUI's executor).
     pub async fn create_worktree_async(
         &self,
         branch_name: &str,
         worktree_path: &PathBuf,
     ) -> WorktreeCreateResult {
-        let output = AsyncCommand::new("git")
-            .arg("worktree")
-            .arg("add")
-            .arg(worktree_path)
-            .arg("-b")
-            .arg(branch_name)
-            .current_dir(&self.repo_path)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .await;
+        let repo_path = self.repo_path.clone();
+        let worktree_path_clone = worktree_path.clone();
+        let branch_name_owned = branch_name.to_string();
+
+        let output = blocking::unblock(move || {
+            Command::new("git")
+                .arg("worktree")
+                .arg("add")
+                .arg(&worktree_path_clone)
+                .arg("-b")
+                .arg(&branch_name_owned)
+                .current_dir(&repo_path)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output()
+        })
+        .await;
 
         match output {
             Ok(output) => {

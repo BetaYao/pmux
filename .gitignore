@@ -22,6 +22,9 @@
 # Local config (user-specific)
 config.json
 
+# Python venv for icon generation
+.venv-icon/
+
 # Build artifacts
 *.dSYM/
 *.dylib

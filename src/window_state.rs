@@ -98,7 +98,7 @@ impl Default for PersistentAppState {
     fn default() -> Self {
         Self {
             window_state: WindowState::default(),
-            sidebar_width: 250,
+            sidebar_width: 280,
             active_workspace_index: 0,
             recent_workspaces: Vec::new(),
             last_saved: None,

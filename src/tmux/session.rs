@@ -55,20 +55,27 @@ impl Session {
         }
     }
 
-    /// Create a new tmux session
-    pub fn create(&self) -> Result<(), SessionError> {
+    /// Create a new tmux session, optionally in the given directory
+    pub fn create_in(&self, work_dir: Option<&std::path::Path>) -> Result<(), SessionError> {
         if Self::exists(&self.name) {
             return Err(SessionError::AlreadyExists(self.name.clone()));
         }
 
-        let output = Command::new("tmux")
-            .args([
-                "new-session",
-                "-d", // detached
-                "-s", &self.name,
-                "-n", &self.window_name,
-            ])
-            .output()?;
+        let mut args = vec![
+            "new-session",
+            "-d", // detached
+            "-x", "80",  // explicit columns (avoids 1-column vertical wrapping when server has wrong default)
+            "-y", "24",  // explicit rows
+            "-s", &self.name,
+            "-n", &self.window_name,
+        ];
+        if let Some(dir) = work_dir {
+            if let Some(s) = dir.to_str() {
+                args.extend(["-c", s]);
+            }
+        }
+
+        let output = Command::new("tmux").args(args).output()?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -78,13 +85,43 @@ impl Session {
         Ok(())
     }
 
+    /// Create a new tmux session (no working directory)
+    pub fn create(&self) -> Result<(), SessionError> {
+        self.create_in(None)
+    }
+
+    /// Ensure session exists (create if not), optionally in the given directory.
+    /// Always resizes window to 80x24 to avoid 1-column vertical wrapping.
+    pub fn ensure_in(&self, work_dir: Option<&std::path::Path>) -> Result<(), SessionError> {
+        if !Self::exists(&self.name) {
+            self.create_in(work_dir)?;
+        }
+        self.resize_window(80, 24)
+    }
+
+    /// Resize the session's window to the given columns and rows.
+    fn resize_window(&self, cols: usize, rows: usize) -> Result<(), SessionError> {
+        let output = Command::new("tmux")
+            .args([
+                "resize-window",
+                "-x",
+                &cols.to_string(),
+                "-y",
+                &rows.to_string(),
+                "-t",
+                &self.name,
+            ])
+            .output()?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(SessionError::CommandFailed(stderr.to_string()));
+        }
+        Ok(())
+    }
+
     /// Ensure session exists (create if not)
     pub fn ensure(&self) -> Result<(), SessionError> {
-        if Self::exists(&self.name) {
-            Ok(())
-        } else {
-            self.create()
-        }
+        self.ensure_in(None)
     }
 
     /// Kill the session

@@ -1,5 +1,6 @@
 // config.rs - Configuration management for pmux
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -15,10 +16,34 @@ pub enum ConfigError {
 /// Application configuration
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
+    /// Legacy single workspace path (for backward compatibility)
+    #[serde(default)]
     pub recent_workspace: Option<String>,
+    /// Multi-repo workspace paths
+    #[serde(default)]
+    pub workspace_paths: Vec<String>,
+    /// Currently active workspace tab index
+    #[serde(default)]
+    pub active_workspace_index: usize,
+    /// Per-repo worktree index: path string -> worktree index
+    #[serde(default)]
+    pub per_repo_worktree_index: HashMap<String, usize>,
 }
 
 impl Config {
+    /// Migrate from legacy recent_workspace to workspace_paths if needed.
+    /// Call after load for backward compatibility.
+    pub fn migrate_from_legacy(&mut self) {
+        if self.workspace_paths.is_empty() {
+            if let Some(ref path) = self.recent_workspace {
+                if !path.is_empty() {
+                    self.workspace_paths = vec![path.clone()];
+                    self.active_workspace_index = 0;
+                }
+            }
+        }
+    }
+
     /// Load configuration from a specific path
     /// Returns default config if file doesn't exist
     pub fn load_from_path(path: &PathBuf) -> Result<Self, ConfigError> {
@@ -27,7 +52,8 @@ impl Config {
         }
 
         let content = std::fs::read_to_string(path)?;
-        let config: Config = serde_json::from_str(&content)?;
+        let mut config: Config = serde_json::from_str(&content)?;
+        config.migrate_from_legacy();
         Ok(config)
     }
 
@@ -43,14 +69,60 @@ impl Config {
         Ok(())
     }
 
-    /// Get the recent workspace as a PathBuf
+    /// Get the recent workspace as a PathBuf (legacy, prefers first workspace_paths)
     pub fn get_recent_workspace(&self) -> Option<PathBuf> {
-        self.recent_workspace.as_ref().map(PathBuf::from)
+        self.workspace_paths
+            .first()
+            .map(PathBuf::from)
+            .or_else(|| self.recent_workspace.as_ref().map(PathBuf::from))
     }
 
-    /// Save a new workspace path
+    /// Get all workspace paths as PathBuf
+    pub fn get_workspace_paths(&self) -> Vec<PathBuf> {
+        self.workspace_paths
+            .iter()
+            .map(PathBuf::from)
+            .collect()
+    }
+
+    /// Save a new workspace path (legacy, for single-workspace)
     pub fn save_workspace(&mut self, path: &str) {
         self.recent_workspace = Some(path.to_string());
+        if path.is_empty() {
+            self.workspace_paths.clear();
+            self.active_workspace_index = 0;
+            self.per_repo_worktree_index.clear();
+        } else if !self.workspace_paths.contains(&path.to_string()) {
+            self.workspace_paths = vec![path.to_string()];
+            self.active_workspace_index = 0;
+        }
+    }
+
+    /// Save multi-repo workspace state
+    pub fn save_workspaces(
+        &mut self,
+        paths: &[PathBuf],
+        active_index: usize,
+        per_repo_worktree_index: &HashMap<PathBuf, usize>,
+    ) {
+        self.workspace_paths = paths
+            .iter()
+            .filter_map(|p| p.to_str().map(String::from))
+            .collect();
+        self.active_workspace_index = active_index.min(paths.len().saturating_sub(1));
+        self.per_repo_worktree_index = per_repo_worktree_index
+            .iter()
+            .filter_map(|(k, v)| k.to_str().map(|s| (s.to_string(), *v)))
+            .collect();
+        self.recent_workspace = self.workspace_paths.first().cloned();
+    }
+
+    /// Get per-repo worktree index as PathBuf -> usize
+    pub fn get_per_repo_worktree_index(&self) -> HashMap<PathBuf, usize> {
+        self.per_repo_worktree_index
+            .iter()
+            .map(|(k, v)| (PathBuf::from(k), *v))
+            .collect()
     }
 
     /// Get the default config path (~/.config/pmux/config.json)
@@ -178,6 +250,7 @@ mod tests {
 
         let mut config = Config {
             recent_workspace: None,
+            ..Default::default()
         };
 
         // Act
@@ -190,5 +263,49 @@ mod tests {
             loaded.recent_workspace,
             Some("/new/workspace/path".to_string())
         );
+    }
+
+    /// Test: Config multi-workspace save and load
+    #[test]
+    fn test_config_multi_workspace_save_load() {
+        use std::collections::HashMap;
+
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.json");
+
+        let mut config = Config::default();
+        let paths = vec![
+            PathBuf::from("/path/repo1"),
+            PathBuf::from("/path/repo2"),
+        ];
+        let mut per_repo = HashMap::new();
+        per_repo.insert(PathBuf::from("/path/repo1"), 1);
+        per_repo.insert(PathBuf::from("/path/repo2"), 0);
+
+        config.save_workspaces(&paths, 1, &per_repo);
+        config.save_to_path(&config_path).unwrap();
+
+        let loaded = Config::load_from_path(&config_path).unwrap();
+        assert_eq!(loaded.workspace_paths.len(), 2);
+        assert_eq!(loaded.active_workspace_index, 1);
+        let loaded_per_repo = loaded.get_per_repo_worktree_index();
+        assert_eq!(loaded_per_repo.get(&PathBuf::from("/path/repo1")), Some(&1));
+        assert_eq!(loaded_per_repo.get(&PathBuf::from("/path/repo2")), Some(&0));
+    }
+
+    /// Test: migrate_from_legacy populates workspace_paths from recent_workspace
+    #[test]
+    fn test_config_migrate_from_legacy() {
+        let mut config = Config {
+            recent_workspace: Some("/home/user/project".to_string()),
+            workspace_paths: vec![],
+            active_workspace_index: 0,
+            per_repo_worktree_index: HashMap::new(),
+        };
+
+        config.migrate_from_legacy();
+
+        assert_eq!(config.workspace_paths, vec!["/home/user/project"]);
+        assert_eq!(config.active_workspace_index, 0);
     }
 }

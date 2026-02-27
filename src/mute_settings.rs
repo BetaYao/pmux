@@ -1,5 +1,4 @@
 // mute_settings.rs - Notification mute settings
-use crate::agent_status::AgentStatus;
 use crate::notification::NotificationType;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;

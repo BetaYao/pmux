@@ -1,5 +1,7 @@
 // tests/integration_test.rs - Integration tests for keyboard handling and workspace restoration
 
+use pmux::input_handler::key_to_tmux;
+
 #[test]
 fn test_input_handler_integration() {
     // Test that InputHandler can be created with a session name
@@ -11,7 +13,6 @@ fn test_input_handler_integration() {
 
 #[test]
 fn test_key_to_tmux_mapping() {
-    // Test key name mapping
     let test_cases = vec![
         ("enter", false, Some("Enter")),
         ("backspace", false, Some("BSpace")),
@@ -22,15 +23,8 @@ fn test_key_to_tmux_mapping() {
     ];
 
     for (key, cmd, expected) in test_cases {
-        // Verify the expected result
-        match expected {
-            Some(expected_key) => {
-                let _expected_key = expected_key;
-            }
-            None => {
-                // Key should be None (intercepted)
-            }
-        }
+        let result = key_to_tmux(key, cmd);
+        assert_eq!(result.as_deref(), expected.as_deref(), "key={key} cmd={cmd}");
     }
 }
 
