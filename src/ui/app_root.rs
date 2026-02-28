@@ -1,6 +1,7 @@
 // ui/app_root.rs - Root component for pmux GUI
 use crate::agent_status::{StatusCounts, AgentStatus};
 use crate::config::Config;
+use crate::remotes::RemoteChannelPublisher;
 use crate::deps::{self, DependencyCheckResult};
 use crate::file_selector::show_folder_picker_async;
 use crate::git_utils::{is_git_repository, get_git_error_message, GitError};
@@ -11,7 +12,7 @@ use crate::terminal::TerminalEngine;
 use crate::runtime::{AgentRuntime, EventBus, RuntimeEvent, StatusPublisher};
 use crate::runtime::backends::{create_runtime_from_env, recover_runtime, resolve_backend, window_name_for_worktree, window_target};
 use crate::runtime::{RuntimeState, WorktreeState};
-use crate::ui::{AppState, sidebar::Sidebar, workspace_tabbar::WorkspaceTabBar, terminal_view::TerminalBuffer, notification_panel::{NotificationPanel, NotificationItem}, new_branch_dialog_ui::NewBranchDialogUi, delete_worktree_dialog_ui::DeleteWorktreeDialogUi, split_pane_container::SplitPaneContainer, diff_overlay::DiffOverlay, status_bar::StatusBar};
+use crate::ui::{AppState, sidebar::Sidebar, workspace_tabbar::WorkspaceTabBar, terminal_controller::ResizeController, terminal_view::TerminalBuffer, notification_panel::{NotificationPanel, NotificationItem}, new_branch_dialog_ui::NewBranchDialogUi, delete_worktree_dialog_ui::DeleteWorktreeDialogUi, split_pane_container::SplitPaneContainer, diff_overlay::DiffOverlay, status_bar::StatusBar};
 use crate::split_tree::SplitNode;
 use crate::workspace_manager::WorkspaceManager;
 use crate::input::{key_to_xterm_escape, KeyModifiers};
@@ -104,8 +105,9 @@ pub struct AppRoot {
     terminal_needs_focus: bool,
     /// Stable focus handle for terminal area (must persist across renders for key events)
     terminal_focus: Option<FocusHandle>,
-    /// Last terminal dimensions used for resize (cols, rows) - triggers PTY/TermBridge resize when window changes
-    last_term_dims: Option<(u16, u16)>,
+    /// ResizeController: debounced window bounds → (cols, rows) for engine/runtime resize.
+    /// Resize is driven here, NOT by TerminalElement/TerminalView request_layout/prepaint/paint.
+    resize_controller: ResizeController,
 }
 
 impl AppRoot {
@@ -213,7 +215,7 @@ impl AppRoot {
             dependency_check,
             terminal_needs_focus: false,
             terminal_focus: None,
-            last_term_dims: None,
+            resize_controller: ResizeController::new(),
         }
     }
 
@@ -756,6 +758,13 @@ impl AppRoot {
         if self.event_bus_subscription_started { return; }
         self.event_bus_subscription_started = true;
         let event_bus = Arc::clone(&self.event_bus);
+        let remote_rx = event_bus.subscribe();
+        let config = Config::load().unwrap_or_default();
+        let secrets = crate::remotes::Secrets::load().unwrap_or_default();
+        let publisher = RemoteChannelPublisher::from_config(&config, &secrets);
+        if publisher.has_channels() {
+            publisher.run(remote_rx);
+        }
         let pane_statuses = self.pane_statuses.clone();
         let notification_manager = self.notification_manager.clone();
         let status_change_tx = self.status_change_tx.clone();
@@ -2037,43 +2046,43 @@ impl AppRoot {
     }
 }
 
-/// Approximate pixels per character (Menlo/monospace 12px)
-const CHAR_WIDTH_PX: f32 = 8.0;
-/// Line height in pixels (matches terminal_view.rs)
-const LINE_HEIGHT_PX: f32 = 20.0;
-/// Pixels for topbar + tabbar + status bar + terminal header
-const CHROME_HEIGHT_PX: f32 = 120.0;
-
 impl Render for AppRoot {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Resize PTY and TermBridge when window size changes (fixes opencode layout, resize responsiveness)
-        if self.has_workspaces() {
+        // Resize PTY and TermBridge via ResizeController (debounced, NOT in request_layout/prepaint/paint).
+        // TerminalElement/TerminalView do NOT trigger resize.
+        if self.has_workspaces() && !self.resize_controller.is_pending() {
             let bounds = window.window_bounds().get_bounds();
             let w = f32::from(bounds.size.width);
             let h = f32::from(bounds.size.height);
             let sidebar_w = if self.sidebar_visible { self.sidebar_width as f32 } else { 0. };
-            let term_w = (w - sidebar_w).max(80.);
-            let term_h = (h - CHROME_HEIGHT_PX).max(200.);
-            let cols = (term_w / CHAR_WIDTH_PX).round() as u16;
-            let rows = (term_h / LINE_HEIGHT_PX).round() as u16;
-            let cols = cols.max(10).min(500);
-            let rows = rows.max(5).min(200);
-            let new_dims = (cols, rows);
-            if self.last_term_dims != Some(new_dims) {
-                self.last_term_dims = Some(new_dims);
-                if let Some(ref rt) = self.runtime {
-                    for pane_target in self.split_tree.flatten().into_iter().map(|(t, _)| t) {
-                        let _ = rt.resize(&pane_target, cols, rows);
-                    }
-                }
-                if let Ok(mut buffers) = self.terminal_buffers.lock() {
-                    for buf in buffers.values_mut() {
-                        if let TerminalBuffer::Term(engine, _) = buf {
-                            engine.resize(cols as usize, rows as usize);
+            let (cols, rows) = ResizeController::compute_dims_from_bounds(
+                w, h, self.sidebar_visible, sidebar_w,
+            );
+            if let Some((cols, rows)) = self.resize_controller.maybe_resize(cols, rows) {
+                self.resize_controller.set_pending(true);
+                let pane_targets: Vec<String> =
+                    self.split_tree.flatten().into_iter().map(|(t, _)| t).collect();
+                let runtime = self.runtime.clone();
+                let terminal_buffers = self.terminal_buffers.clone();
+                let entity = cx.entity();
+                window.on_next_frame(move |_window, cx| {
+                    if let Some(ref rt) = runtime {
+                        for pane_target in &pane_targets {
+                            let _ = rt.resize(pane_target, cols, rows);
                         }
                     }
-                }
-                cx.notify();
+                    if let Ok(mut buffers) = terminal_buffers.lock() {
+                        for buf in buffers.values_mut() {
+                            if let TerminalBuffer::Term(engine, _) = buf {
+                                engine.resize(cols as usize, rows as usize);
+                            }
+                        }
+                    }
+                    let _ = entity.update(cx, |this, cx| {
+                        this.resize_controller.set_pending(false);
+                        cx.notify();
+                    });
+                });
             }
         }
 
