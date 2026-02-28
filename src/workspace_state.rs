@@ -18,7 +18,7 @@ impl WorkspaceState {
             .unwrap_or_default()
             .to_string_lossy()
             .to_string();
-        let tmux_session = format!("sdlc-{}", repo_name);
+        let tmux_session = format!("pmux-{}", repo_name);
         Self {
             repo_path,
             repo_name,
@@ -50,7 +50,7 @@ mod tests {
     fn test_workspace_state_new() {
         let state = WorkspaceState::new(PathBuf::from("/home/user/myproject"));
         assert_eq!(state.repo_name, "myproject");
-        assert_eq!(state.tmux_session, "sdlc-myproject");
+        assert_eq!(state.tmux_session, "pmux-myproject");
         assert_eq!(state.selected_index, 0);
         assert!(!state.input_focused);
     }

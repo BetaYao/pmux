@@ -84,14 +84,14 @@ fn main() {
                     size(px(w as f32), px(h as f32)),
                 )
             } else {
-                Bounds::centered(None, size(px(900.), px(600.)), cx)
+                Bounds::centered(None, size(px(1200.), px(800.)), cx)
             }
         };
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 titlebar: Some(TitlebarOptions {
-                    title: None,
+                    title: Some("pmux".into()),
                     appears_transparent: true,
                     traffic_light_position: Some(point(px(12.), px(12.))),
                 }),

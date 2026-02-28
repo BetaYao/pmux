@@ -1,7 +1,7 @@
 //! New branch dialog and worktree creation logic.
 //!
-//! **Tmux backend principle**: One repo = one session (`sdlc-{repo}`). New worktrees are added as
-//! windows within that session via `ensure_tmux_worktree_window`, not as new sessions.
+//! **Tmux backend principle**: One worktree = one session (`pmux-{worktree_folder}`). New worktrees
+//! get new sessions; each session has a main window.
 use std::path::PathBuf;
 
 /// Validation error for branch names

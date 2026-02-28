@@ -58,6 +58,11 @@ pub trait AgentRuntime: Send + Sync + DowncastSync {
     fn open_diff(&self, worktree: &Path, pane_id: Option<&PaneId>) -> Result<String, RuntimeError>;
     fn open_review(&self, worktree: &Path) -> Result<String, RuntimeError>;
     fn kill_window(&self, window_target: &str) -> Result<(), RuntimeError>;
+
+    /// Returns (session_id, window_id) for backends that support session persistence.
+    /// - tmux: Some((session_name, window_name)) e.g. Some(("pmux-feature-x", "main"))
+    /// - local_pty: None (no session to recover)
+    fn session_info(&self) -> Option<(String, String)>;
 }
 
 downcast_rs::impl_downcast!(sync AgentRuntime);

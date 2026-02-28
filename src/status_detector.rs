@@ -1,7 +1,23 @@
 // status_detector.rs - Agent status detection from terminal output
+// Priority: Process lifecycle > OSC 133 markers > Text patterns (fallback)
 use crate::agent_status::AgentStatus;
 use crate::shell_integration::{ShellPhase, ShellPhaseInfo};
 use regex::Regex;
+
+/// Process lifecycle status from the runtime layer.
+/// This is the primary source for Agent status determination.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProcessStatus {
+    /// Process is running normally
+    Running,
+    /// Process exited with code 0
+    Exited,
+    /// Process exited with non-zero code (crash/error)
+    Error,
+    /// Process status unknown (not started or monitoring unavailable)
+    #[default]
+    Unknown,
+}
 
 /// Detects agent status from terminal content
 #[derive(Clone)]
@@ -77,43 +93,59 @@ impl StatusDetector {
         Ok(self)
     }
 
-    /// Detect status from content
-    /// Priority: Error > Waiting > Running > Idle > Unknown
-    /// Uses text-based detection only (no OSC 133).
-    pub fn detect(&self, content: &str) -> AgentStatus {
-        self.detect_with_shell_phase(content, None)
-    }
-
-    /// Detect status from content, with optional OSC 133 shell phase info.
-    /// When shell_phase is available: Running → Running, Output+exit!=0 → Error.
-    /// Otherwise falls back to text-based detection (Task 4.4).
-    /// Priority: Error > Waiting > Running > Idle > Unknown
-    pub fn detect_with_shell_phase(
+    /// Detect status with full context.
+    /// Priority: Process lifecycle > OSC 133 markers > Text patterns (fallback)
+    ///
+    /// # Arguments
+    /// * `process_status` - Primary status source from process lifecycle
+    /// * `shell_info` - OSC 133 shell phase info (secondary source)
+    /// * `content` - Terminal content for text-based fallback detection
+    pub fn detect(
         &self,
-        content: &str,
+        process_status: ProcessStatus,
         shell_info: Option<ShellPhaseInfo>,
+        content: &str,
     ) -> AgentStatus {
-        // Task 4.2: PreExec (Running phase) → AgentStatus::Running
-        if let Some(info) = shell_info {
-            if info.phase == ShellPhase::Running {
-                return AgentStatus::Running;
+        // Priority 1: Process lifecycle (highest priority)
+        match process_status {
+            ProcessStatus::Exited => return AgentStatus::Exited,
+            ProcessStatus::Error => return AgentStatus::Error,
+            ProcessStatus::Running => {
+                // Process is running, check OSC 133 for more detail
             }
-            // Task 4.3: PostExec with error → AgentStatus::Error
-            if info.phase == ShellPhase::Output {
-                if let Some(code) = info.last_post_exec_exit_code {
-                    if code != 0 {
-                        return AgentStatus::Error;
-                    }
-                }
+            ProcessStatus::Unknown => {
+                // Fall through to OSC 133 / text detection
             }
-            // Task 4.4: If phase is Unknown, fall through to text detection
-            // For Prompt, Input, Output (success): use text detection for Waiting/Running/Idle
         }
 
-        // Task 4.4: Fallback to text-based detection
+        // Priority 2: OSC 133 markers
+        if let Some(info) = shell_info {
+            match info.phase {
+                ShellPhase::Running => return AgentStatus::Running,
+                ShellPhase::Input | ShellPhase::Prompt => return AgentStatus::Waiting,
+                ShellPhase::Output => {
+                    if let Some(code) = info.last_post_exec_exit_code {
+                        if code != 0 {
+                            return AgentStatus::Error;
+                        }
+                    }
+                    // Exit code 0 or unknown - fall through to text detection
+                }
+                ShellPhase::Unknown => {
+                    // Fall through to text detection
+                }
+            }
+        }
+
+        // Priority 3: Text-based detection (fallback only)
+        self.detect_from_text(content)
+    }
+
+    /// Detect status from text patterns only (fallback method).
+    /// Priority: Error > Waiting > Running > Idle > Unknown
+    pub fn detect_from_text(&self, content: &str) -> AgentStatus {
         let processed = self.preprocess(content);
 
-        // Check in priority order
         if self.matches_error(&processed) {
             return AgentStatus::Error;
         }
@@ -126,7 +158,6 @@ impl StatusDetector {
             return AgentStatus::Running;
         }
 
-        // If content is not empty but no patterns match, it's Idle
         if !processed.trim().is_empty() {
             return AgentStatus::Idle;
         }
@@ -139,7 +170,7 @@ impl StatusDetector {
         // Remove ANSI escape sequences
         let ansi_regex = Regex::new(r"\x1b\[[0-9;]*m").unwrap();
         let without_ansi = ansi_regex.replace_all(content, "");
-        
+
         // Get last N lines
         let lines: Vec<&str> = without_ansi.lines().collect();
         let start = lines.len().saturating_sub(self.check_line_count);
@@ -165,28 +196,33 @@ impl StatusDetector {
     /// Higher score means more confident in the detection
     pub fn confidence(&self, content: &str) -> f32 {
         let processed = self.preprocess(content);
-        
+
         // Count matching patterns
-        let error_matches = self.error_patterns.iter()
+        let error_matches = self
+            .error_patterns
+            .iter()
             .filter(|re| re.is_match(&processed))
             .count();
-        let waiting_matches = self.waiting_patterns.iter()
+        let waiting_matches = self
+            .waiting_patterns
+            .iter()
             .filter(|re| re.is_match(&processed))
             .count();
-        let running_matches = self.running_patterns.iter()
+        let running_matches = self
+            .running_patterns
+            .iter()
             .filter(|re| re.is_match(&processed))
             .count();
-        
-        let total_checks = self.error_patterns.len() + 
-                          self.waiting_patterns.len() + 
-                          self.running_patterns.len();
-        
+
+        let total_checks =
+            self.error_patterns.len() + self.waiting_patterns.len() + self.running_patterns.len();
+
         let max_matches = error_matches.max(waiting_matches).max(running_matches);
-        
+
         if max_matches == 0 {
             return 0.5; // Medium confidence for Idle/Unknown
         }
-        
+
         (max_matches as f32 / total_checks as f32).min(1.0)
     }
 }
@@ -223,19 +259,32 @@ impl DebouncedStatusTracker {
         }
     }
 
-    /// Update with new content, returns true if status changed
-    pub fn update(&mut self, content: &str) -> bool {
-        let detected = self.detector.detect(content);
+    /// Update with full context (process status + shell info + content).
+    /// Returns true if status changed.
+    pub fn update(
+        &mut self,
+        process_status: ProcessStatus,
+        shell_info: Option<ShellPhaseInfo>,
+        content: &str,
+    ) -> bool {
+        let detected = self.detector.detect(process_status, shell_info, content);
+        self.update_with_status(detected)
+    }
+
+    /// Update with text content only (uses ProcessStatus::Unknown).
+    /// Returns true if status changed.
+    pub fn update_from_text(&mut self, content: &str) -> bool {
+        let detected = self.detector.detect(ProcessStatus::Unknown, None, content);
         self.update_with_status(detected)
     }
 
     /// Update with a pre-detected status, returns true if status changed.
     /// Used by StatusPublisher when status is already detected via shell phase.
     pub fn update_with_status(&mut self, detected: AgentStatus) -> bool {
-        // Error status always updates immediately
-        if detected == AgentStatus::Error {
-            if self.current_status != AgentStatus::Error {
-                self.current_status = AgentStatus::Error;
+        // Error and Exited status always update immediately
+        if detected == AgentStatus::Error || detected == AgentStatus::Exited {
+            if self.current_status != detected {
+                self.current_status = detected;
                 self.pending_status = None;
                 self.pending_count = 0;
                 return true;
@@ -299,7 +348,9 @@ impl Default for DebouncedStatusTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shell_integration::{MarkerKind, ParsedMarker, ShellMarker, ShellPhase, ShellPhaseInfo};
+    use crate::shell_integration::{
+        MarkerKind, ParsedMarker, ShellMarker, ShellPhase, ShellPhaseInfo,
+    };
     use crate::terminal::TerminalEngine;
 
     // --- Phase 4: OSC 133 shell phase integration tests ---
@@ -460,37 +511,61 @@ mod tests {
     #[test]
     fn test_detect_running() {
         let detector = StatusDetector::new();
-        
-        assert_eq!(detector.detect("AI is thinking about your request"), AgentStatus::Running);
+
+        assert_eq!(
+            detector.detect("AI is thinking about your request"),
+            AgentStatus::Running
+        );
         assert_eq!(detector.detect("Writing code..."), AgentStatus::Running);
         assert_eq!(detector.detect("Running tool: grep"), AgentStatus::Running);
-        assert_eq!(detector.detect("Loading data from API"), AgentStatus::Running);
+        assert_eq!(
+            detector.detect("Loading data from API"),
+            AgentStatus::Running
+        );
     }
 
     #[test]
     fn test_detect_waiting() {
         let detector = StatusDetector::new();
-        
-        assert_eq!(detector.detect("? What would you like to do?"), AgentStatus::Waiting);
-        assert_eq!(detector.detect("> Enter your choice:"), AgentStatus::Waiting);
-        assert_eq!(detector.detect("Human: please review"), AgentStatus::Waiting);
-        assert_eq!(detector.detect("Press enter to continue"), AgentStatus::Waiting);
+
+        assert_eq!(
+            detector.detect("? What would you like to do?"),
+            AgentStatus::Waiting
+        );
+        assert_eq!(
+            detector.detect("> Enter your choice:"),
+            AgentStatus::Waiting
+        );
+        assert_eq!(
+            detector.detect("Human: please review"),
+            AgentStatus::Waiting
+        );
+        assert_eq!(
+            detector.detect("Press enter to continue"),
+            AgentStatus::Waiting
+        );
     }
 
     #[test]
     fn test_detect_error() {
         let detector = StatusDetector::new();
-        
+
         assert_eq!(detector.detect("Error: file not found"), AgentStatus::Error);
-        assert_eq!(detector.detect("Traceback (most recent call):"), AgentStatus::Error);
-        assert_eq!(detector.detect("Command failed with exit code 1"), AgentStatus::Error);
+        assert_eq!(
+            detector.detect("Traceback (most recent call):"),
+            AgentStatus::Error
+        );
+        assert_eq!(
+            detector.detect("Command failed with exit code 1"),
+            AgentStatus::Error
+        );
         assert_eq!(detector.detect("Panic: runtime error"), AgentStatus::Error);
     }
 
     #[test]
     fn test_detect_idle() {
         let detector = StatusDetector::new();
-        
+
         // Content that doesn't match any pattern
         assert_eq!(detector.detect("Just some regular text"), AgentStatus::Idle);
         assert_eq!(detector.detect("Hello world"), AgentStatus::Idle);
@@ -500,7 +575,7 @@ mod tests {
     #[test]
     fn test_detect_unknown() {
         let detector = StatusDetector::new();
-        
+
         // Empty or whitespace-only content
         assert_eq!(detector.detect(""), AgentStatus::Unknown);
         assert_eq!(detector.detect("   "), AgentStatus::Unknown);
@@ -510,11 +585,11 @@ mod tests {
     #[test]
     fn test_priority_ordering() {
         let detector = StatusDetector::new();
-        
+
         // Error has highest priority - "error" in text should trigger Error status
         let content = "An error occurred while processing";
         assert_eq!(detector.detect(content), AgentStatus::Error);
-        
+
         // Waiting > Running - "awaiting input" should trigger Waiting even if other words suggest Running
         let content = "awaiting input from user";
         assert_eq!(detector.detect(content), AgentStatus::Waiting);
@@ -523,7 +598,7 @@ mod tests {
     #[test]
     fn test_ansi_removal() {
         let detector = StatusDetector::new();
-        
+
         let with_ansi = "\x1b[32mAI is\x1b[0m \x1b[1mthinking\x1b[0m";
         assert_eq!(detector.detect(with_ansi), AgentStatus::Running);
     }
@@ -531,7 +606,7 @@ mod tests {
     #[test]
     fn test_line_limit() {
         let detector = StatusDetector::with_line_count(StatusDetector::new(), 2);
-        
+
         // Only checks last 2 lines
         let content = "Old content without keywords\nNew content\nAI is thinking";
         assert_eq!(detector.detect(content), AgentStatus::Running);
@@ -540,18 +615,19 @@ mod tests {
     #[test]
     fn test_custom_patterns() {
         let detector = StatusDetector::new()
-            .add_running_pattern(r"custom_running").unwrap();
-        
+            .add_running_pattern(r"custom_running")
+            .unwrap();
+
         assert_eq!(detector.detect("custom_running now"), AgentStatus::Running);
     }
 
     #[test]
     fn test_confidence() {
         let detector = StatusDetector::new();
-        
+
         let conf = detector.confidence("AI is thinking and writing code");
         assert!(conf > 0.0 && conf <= 1.0);
-        
+
         // No matches
         let conf = detector.confidence("random text without keywords");
         assert_eq!(conf, 0.5);
@@ -567,13 +643,13 @@ mod tests {
     #[test]
     fn test_debounce_requires_multiple_calls() {
         let mut tracker = DebouncedStatusTracker::with_debounce(2);
-        
+
         // First call sets pending
         let changed = tracker.update("AI is thinking");
         assert!(!changed);
         assert_eq!(tracker.current_status(), AgentStatus::Unknown);
         assert_eq!(tracker.pending_status(), Some(AgentStatus::Running));
-        
+
         // Second call with same status commits
         let changed = tracker.update("AI is still thinking");
         assert!(changed);
@@ -584,13 +660,13 @@ mod tests {
     #[test]
     fn test_error_bypasses_debounce() {
         let mut tracker = DebouncedStatusTracker::with_debounce(2);
-        
+
         // Set to running first (need 2 calls with same status)
         tracker.update("AI is thinking");
         let changed = tracker.update("AI is thinking");
         assert!(changed); // Status changed to Running
         assert_eq!(tracker.current_status(), AgentStatus::Running);
-        
+
         // Error should immediately change (bypasses debounce)
         let changed = tracker.update("Error occurred!");
         assert!(changed);
@@ -600,15 +676,15 @@ mod tests {
     #[test]
     fn test_different_status_resets_debounce() {
         let mut tracker = DebouncedStatusTracker::with_debounce(2);
-        
+
         // Start with running
         tracker.update("AI is thinking");
-        
+
         // Different status resets counter
         tracker.update("? What next?");
         assert_eq!(tracker.pending_status(), Some(AgentStatus::Waiting));
         assert_eq!(tracker.pending_count, 1);
-        
+
         // Need another waiting to commit
         tracker.update("? Still waiting");
         assert_eq!(tracker.current_status(), AgentStatus::Waiting);
@@ -617,7 +693,7 @@ mod tests {
     #[test]
     fn test_force_status() {
         let mut tracker = DebouncedStatusTracker::new();
-        
+
         tracker.force_status(AgentStatus::Running);
         assert_eq!(tracker.current_status(), AgentStatus::Running);
         assert_eq!(tracker.pending_status(), None);
@@ -626,11 +702,11 @@ mod tests {
     #[test]
     fn test_tracker_reset() {
         let mut tracker = DebouncedStatusTracker::new();
-        
+
         tracker.update("AI is thinking");
         tracker.update("AI is thinking");
         assert_eq!(tracker.current_status(), AgentStatus::Running);
-        
+
         tracker.reset();
         assert_eq!(tracker.current_status(), AgentStatus::Unknown);
         assert_eq!(tracker.pending_status(), None);

@@ -3,6 +3,7 @@
 # 按顺序运行所有层级的测试
 
 set -e
+set -o pipefail
 
 PMUX_ROOT="/Users/matt.chow/workspace/pmux"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -6,6 +6,10 @@ fn default_terminal_row_cache_size() -> usize {
     200
 }
 
+fn default_backend() -> String {
+    "local".to_string()
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {

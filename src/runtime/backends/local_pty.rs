@@ -1,16 +1,28 @@
 //! Local PTY backend - spawns shell directly in a PTY, no tmux.
 //!
-//! One PTY per worktree. True PTY write for input, direct read for output.
+//! Supports multiple panes per worktree. True PTY write for input, direct read for output.
 
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::Path;
-use std::sync::atomic::{AtomicU16, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU16, Ordering, AtomicUsize};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
 use crate::runtime::agent_runtime::{AgentId, AgentRuntime, PaneId, RuntimeError};
+
+/// Single pane PTY instance.
+struct LocalPtyPane {
+    pane_id: PaneId,
+    master: Mutex<Box<dyn portable_pty::MasterPty + Send>>,
+    input_tx: flume::Sender<Vec<u8>>,
+    output_rx: Mutex<Option<flume::Receiver<Vec<u8>>>>,
+    cols: AtomicU16,
+    rows: AtomicU16,
+    _child: Mutex<Option<Box<dyn portable_pty::Child + Send + Sync>>>,
+}
 
 /// Local PTY runtime - one shell per worktree, direct PTY read/write.
 /// Input is queued via flume channel; a dedicated writer thread drains the queue
@@ -25,6 +37,234 @@ pub struct LocalPtyRuntime {
     cols: AtomicU16,
     rows: AtomicU16,
     _child: Mutex<Option<Box<dyn portable_pty::Child + Send + Sync>>>,
+}
+
+/// Local PTY Agent - manages multiple panes for a single worktree.
+/// Each pane has its own PTY and shell process.
+pub struct LocalPtyAgent {
+    worktree_path: std::path::PathBuf,
+    panes: Mutex<HashMap<PaneId, Arc<LocalPtyPane>>>,
+    pane_counter: AtomicUsize,
+    cols: u16,
+    rows: u16,
+}
+
+impl LocalPtyAgent {
+    /// Create a new LocalPtyAgent for the given worktree.
+    /// Initializes with a single primary pane.
+    pub fn new(worktree_path: &Path, cols: u16, rows: u16) -> Result<Self, RuntimeError> {
+        let agent = Self {
+            worktree_path: worktree_path.to_path_buf(),
+            panes: Mutex::new(HashMap::new()),
+            pane_counter: AtomicUsize::new(0),
+            cols,
+            rows,
+        };
+
+        // Create primary pane
+        agent.create_pane("main")?;
+
+        Ok(agent)
+    }
+
+    /// Create a new pane with the given name suffix.
+    fn create_pane(&self, name_suffix: &str) -> Result<PaneId, RuntimeError> {
+        let pane_id = format!("local:{}:{}", self.worktree_path.display(), name_suffix);
+
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize {
+                rows: self.rows,
+                cols: self.cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| RuntimeError::Backend(e.to_string()))?;
+
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "bash".to_string());
+        let mut cmd = CommandBuilder::new(shell);
+        cmd.cwd(&self.worktree_path);
+
+        let child: Box<dyn portable_pty::Child + Send + Sync> = pair
+            .slave
+            .spawn_command(cmd)
+            .map_err(|e| RuntimeError::Backend(e.to_string()))?;
+
+        let master = pair.master;
+        let writer = master
+            .take_writer()
+            .map_err(|e| RuntimeError::Backend(e.to_string()))?;
+
+        let (output_tx, output_rx) = flume::unbounded();
+        let reader = master
+            .try_clone_reader()
+            .map_err(|e| RuntimeError::Backend(e.to_string()))?;
+
+        // Reader thread
+        thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            let mut reader = reader;
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if output_tx.send(buf[..n].to_vec()).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        // Writer thread
+        let (input_tx, input_rx) = flume::unbounded::<Vec<u8>>();
+        thread::spawn(move || {
+            let mut writer = writer;
+            while let Ok(bytes) = input_rx.recv() {
+                if writer.write_all(&bytes).is_err() || writer.flush().is_err() {
+                    break;
+                }
+            }
+        });
+
+        let pane = Arc::new(LocalPtyPane {
+            pane_id: pane_id.clone(),
+            master: Mutex::new(master),
+            input_tx,
+            output_rx: Mutex::new(Some(output_rx)),
+            cols: AtomicU16::new(self.cols),
+            rows: AtomicU16::new(self.rows),
+            _child: Mutex::new(Some(child)),
+        });
+
+        if let Ok(mut panes) = self.panes.lock() {
+            panes.insert(pane_id.clone(), pane);
+        }
+
+        Ok(pane_id)
+    }
+
+    /// Get a reference to a pane by ID.
+    fn get_pane(&self, pane_id: &PaneId) -> Option<Arc<LocalPtyPane>> {
+        self.panes.lock().ok()?.get(pane_id).cloned()
+    }
+
+    /// List all pane IDs.
+    fn list_all_panes(&self) -> Vec<PaneId> {
+        self.panes
+            .lock()
+            .ok()
+            .map(|p| p.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+}
+
+impl AgentRuntime for LocalPtyAgent {
+    fn backend_type(&self) -> &'static str {
+        "local"
+    }
+
+    fn primary_pane_id(&self) -> Option<PaneId> {
+        // Return the first pane (usually "main")
+        self.list_all_panes().first().cloned()
+    }
+
+    fn send_input(&self, pane_id: &PaneId, bytes: &[u8]) -> Result<(), RuntimeError> {
+        let pane = self
+            .get_pane(pane_id)
+            .ok_or_else(|| RuntimeError::PaneNotFound(pane_id.clone()))?;
+        pane.input_tx
+            .send(bytes.to_vec())
+            .map_err(|e| RuntimeError::Backend(e.to_string()))
+    }
+
+    fn send_key(&self, pane_id: &PaneId, key: &str, _use_literal: bool) -> Result<(), RuntimeError> {
+        self.send_input(pane_id, key.as_bytes())
+    }
+
+    fn resize(&self, pane_id: &PaneId, cols: u16, rows: u16) -> Result<(), RuntimeError> {
+        let pane = self
+            .get_pane(pane_id)
+            .ok_or_else(|| RuntimeError::PaneNotFound(pane_id.clone()))?;
+        pane.cols.store(cols, Ordering::SeqCst);
+        pane.rows.store(rows, Ordering::SeqCst);
+        let guard = pane
+            .master
+            .lock()
+            .map_err(|e| RuntimeError::Backend(e.to_string()))?;
+        guard
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| RuntimeError::Backend(e.to_string()))
+    }
+
+    fn subscribe_output(&self, pane_id: &PaneId) -> Option<flume::Receiver<Vec<u8>>> {
+        let pane = self.get_pane(pane_id)?;
+        pane.output_rx.lock().ok().and_then(|mut g| g.take())
+    }
+
+    fn capture_initial_content(&self, _pane_id: &PaneId) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn list_panes(&self, _agent_id: &AgentId) -> Vec<PaneId> {
+        self.list_all_panes()
+    }
+
+    fn focus_pane(&self, _pane_id: &PaneId) -> Result<(), RuntimeError> {
+        // Local PTY doesn't need explicit focus, just selection tracking
+        Ok(())
+    }
+
+    fn split_pane(&self, _pane_id: &PaneId, _vertical: bool) -> Result<PaneId, RuntimeError> {
+        // Create a new pane with indexed name
+        let idx = self.pane_counter.fetch_add(1, Ordering::SeqCst);
+        self.create_pane(&format!("pane{}", idx))
+    }
+
+    fn get_pane_dimensions(&self, pane_id: &PaneId) -> (u16, u16) {
+        if let Some(pane) = self.get_pane(pane_id) {
+            (
+                pane.cols.load(Ordering::SeqCst),
+                pane.rows.load(Ordering::SeqCst),
+            )
+        } else {
+            (self.cols, self.rows)
+        }
+    }
+
+    fn open_diff(&self, worktree: &Path, pane_id: Option<&PaneId>) -> Result<String, RuntimeError> {
+        // Get the target pane or primary pane
+        let target_pane_id = pane_id
+            .map(|p| p.to_string())
+            .or_else(|| self.primary_pane_id())
+            .ok_or_else(|| RuntimeError::Backend("No pane available".to_string()))?;
+
+        // Send git diff command to the pane
+        let cmd = format!("git diff main...HEAD --color=always\n");
+        self.send_input(&target_pane_id, cmd.as_bytes())?;
+
+        Ok(format!("Diff displayed in pane {}", target_pane_id))
+    }
+
+    fn open_review(&self, worktree: &Path) -> Result<String, RuntimeError> {
+        // Same as open_diff for local PTY
+        self.open_diff(worktree, None)
+    }
+
+    fn kill_window(&self, _window_target: &str) -> Result<(), RuntimeError> {
+        // Local PTY doesn't have windows to kill
+        Ok(())
+    }
+
+    fn session_info(&self) -> Option<(String, String)> {
+        None
+    }
 }
 
 impl LocalPtyRuntime {
@@ -150,7 +390,7 @@ impl AgentRuntime for LocalPtyRuntime {
                 pixel_width: 0,
                 pixel_height: 0,
             })
-            .map_err(|e| RuntimeError::Backend(e.to_string()))?;
+            .map_err(|e| RuntimeError::Backend(e.to_string()));
         Ok(())
     }
 
@@ -188,7 +428,7 @@ impl AgentRuntime for LocalPtyRuntime {
 
     fn split_pane(&self, _pane_id: &PaneId, _vertical: bool) -> Result<PaneId, RuntimeError> {
         Err(RuntimeError::Backend(
-            "split pane not implemented in local PTY backend".to_string(),
+            "split pane not implemented in single LocalPtyRuntime - use LocalPtyAgent".to_string(),
         ))
     }
 
@@ -209,18 +449,22 @@ impl AgentRuntime for LocalPtyRuntime {
         _pane_id: Option<&PaneId>,
     ) -> Result<String, RuntimeError> {
         Err(RuntimeError::Backend(
-            "open_diff not implemented in local PTY backend".to_string(),
+            "open_diff not implemented in LocalPtyRuntime - use LocalPtyAgent".to_string(),
         ))
     }
 
     fn open_review(&self, _worktree: &Path) -> Result<String, RuntimeError> {
         Err(RuntimeError::Backend(
-            "open_review not implemented in local PTY backend".to_string(),
+            "open_review not implemented in LocalPtyRuntime - use LocalPtyAgent".to_string(),
         ))
     }
 
     fn kill_window(&self, _window_target: &str) -> Result<(), RuntimeError> {
         Ok(())
+    }
+
+    fn session_info(&self) -> Option<(String, String)> {
+        None
     }
 }
 
@@ -265,5 +509,47 @@ mod tests {
         }
 
         assert_eq!(ok_count, 500, "all 500 rapid sends should succeed");
+    }
+
+    #[test]
+    fn test_local_pty_agent_creates_primary_pane() {
+        let dir = tempfile::tempdir().unwrap();
+        let agent = LocalPtyAgent::new(dir.path(), 80, 24).unwrap();
+
+        // Should have primary pane
+        let primary = agent.primary_pane_id();
+        assert!(primary.is_some());
+        assert!(primary.unwrap().contains("main"));
+    }
+
+    #[test]
+    fn test_local_pty_agent_split_pane() {
+        let dir = tempfile::tempdir().unwrap();
+        let agent = LocalPtyAgent::new(dir.path(), 80, 24).unwrap();
+
+        let primary = agent.primary_pane_id().unwrap();
+        let new_pane = agent.split_pane(&primary, true).unwrap();
+
+        // Should have 2 panes
+        let panes = agent.list_panes(&String::new());
+        assert_eq!(panes.len(), 2);
+        assert!(panes.contains(&new_pane));
+    }
+
+    #[test]
+    fn test_local_pty_agent_open_diff() {
+        let dir = tempfile::tempdir().unwrap();
+        // Initialize git repo
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(dir.path())
+            .output()
+            .ok();
+
+        let agent = LocalPtyAgent::new(dir.path(), 80, 24).unwrap();
+        let result = agent.open_diff(dir.path(), None);
+
+        // Should succeed (command sent to pane)
+        assert!(result.is_ok());
     }
 }

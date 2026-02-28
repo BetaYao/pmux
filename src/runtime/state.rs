@@ -118,10 +118,10 @@ mod tests {
             WorktreeState {
                 branch: "main".to_string(),
                 path: PathBuf::from("/repo"),
-                agent_id: "sdlc-repo:main".to_string(),
+                agent_id: "pmux-repo:main".to_string(),
                 pane_ids: vec!["%0".to_string()],
                 backend: "tmux".to_string(),
-                backend_session_id: "sdlc-repo".to_string(),
+                backend_session_id: "pmux-repo".to_string(),
                 backend_window_id: "@0".to_string(),
             },
         );
@@ -138,10 +138,10 @@ mod tests {
             WorktreeState {
                 branch: "main".to_string(),
                 path: PathBuf::from("/repo"),
-                agent_id: "sdlc-repo:main".to_string(),
+                agent_id: "pmux-repo:main".to_string(),
                 pane_ids: vec!["%0".to_string()],
                 backend: "tmux".to_string(),
-                backend_session_id: "sdlc-repo".to_string(),
+                backend_session_id: "pmux-repo".to_string(),
                 backend_window_id: "@0".to_string(),
             },
         );
@@ -150,10 +150,10 @@ mod tests {
             WorktreeState {
                 branch: "main".to_string(),
                 path: PathBuf::from("/repo"),
-                agent_id: "sdlc-repo:main".to_string(),
+                agent_id: "pmux-repo:main".to_string(),
                 pane_ids: vec!["%0".to_string(), "%1".to_string()],
                 backend: "tmux".to_string(),
-                backend_session_id: "sdlc-repo".to_string(),
+                backend_session_id: "pmux-repo".to_string(),
                 backend_window_id: "@0".to_string(),
             },
         );

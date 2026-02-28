@@ -2,6 +2,7 @@
 # 性能测试主运行脚本
 
 set -e
+set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../regression/lib/test_utils.sh"
@@ -124,9 +125,9 @@ if [ "$BASELINE_MODE" = true ]; then
     echo "✓ 性能基线已建立"
     echo ""
     echo "基线数据保存位置："
-    echo "  $REPORT_DIR/baseline.json"
+    echo "  ${REPORT_DIR:-tests/regression/results}/baseline.json"
 else
-    echo "详细性能报告：$REPORT_DIR/performance_report.md"
+    echo "详细性能报告：${REPORT_FILE:-${REPORT_DIR:-tests/regression/results}/report_*.md}"
 fi
 
 exit $OVERALL_FAILED

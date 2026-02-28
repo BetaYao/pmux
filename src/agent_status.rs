@@ -11,6 +11,8 @@ pub enum AgentStatus {
     Idle,
     /// Agent encountered an error (red ✕)
     Error,
+    /// Agent process has exited (blue ✓)
+    Exited,
     /// Status cannot be determined (purple ?)
     Unknown,
 }
@@ -23,6 +25,7 @@ impl AgentStatus {
             AgentStatus::Waiting => "yellow",
             AgentStatus::Idle => "gray",
             AgentStatus::Error => "red",
+            AgentStatus::Exited => "blue",
             AgentStatus::Unknown => "purple",
         }
     }
@@ -30,11 +33,12 @@ impl AgentStatus {
     /// Get the RGB color values for UI rendering
     pub fn rgb_color(&self) -> (u8, u8, u8) {
         match self {
-            AgentStatus::Running => (76, 175, 80),    // #4caf50
-            AgentStatus::Waiting => (255, 193, 7),    // #ffc107
-            AgentStatus::Idle => (158, 158, 158),     // #9e9e9e
-            AgentStatus::Error => (244, 67, 54),      // #f44336
-            AgentStatus::Unknown => (156, 39, 176),   // #9c27b0
+            AgentStatus::Running => (76, 175, 80),  // #4caf50
+            AgentStatus::Waiting => (255, 193, 7),  // #ffc107
+            AgentStatus::Idle => (158, 158, 158),   // #9e9e9e
+            AgentStatus::Error => (244, 67, 54),    // #f44336
+            AgentStatus::Exited => (33, 150, 243),  // #2196f3
+            AgentStatus::Unknown => (156, 39, 176), // #9c27b0
         }
     }
 
@@ -45,6 +49,7 @@ impl AgentStatus {
             AgentStatus::Waiting => "◐",
             AgentStatus::Idle => "○",
             AgentStatus::Error => "✕",
+            AgentStatus::Exited => "✓",
             AgentStatus::Unknown => "?",
         }
     }
@@ -56,6 +61,7 @@ impl AgentStatus {
             AgentStatus::Waiting => "Waiting for input",
             AgentStatus::Idle => "Idle",
             AgentStatus::Error => "Error detected",
+            AgentStatus::Exited => "Process exited",
             AgentStatus::Unknown => "Unknown",
         }
     }
@@ -67,6 +73,7 @@ impl AgentStatus {
             AgentStatus::Waiting => "Waiting",
             AgentStatus::Idle => "Idle",
             AgentStatus::Error => "Error",
+            AgentStatus::Exited => "Exited",
             AgentStatus::Unknown => "Unknown",
         }
     }
@@ -75,7 +82,8 @@ impl AgentStatus {
     /// Used for determining which status to show when multiple indicators exist
     pub fn priority(&self) -> u8 {
         match self {
-            AgentStatus::Error => 5,
+            AgentStatus::Error => 6,
+            AgentStatus::Exited => 5,
             AgentStatus::Waiting => 4,
             AgentStatus::Running => 3,
             AgentStatus::Idle => 2,
@@ -113,6 +121,7 @@ pub struct StatusCounts {
     pub waiting: usize,
     pub idle: usize,
     pub error: usize,
+    pub exited: usize,
     pub unknown: usize,
 }
 
@@ -129,6 +138,7 @@ impl StatusCounts {
             AgentStatus::Waiting => self.waiting += 1,
             AgentStatus::Idle => self.idle += 1,
             AgentStatus::Error => self.error += 1,
+            AgentStatus::Exited => self.exited += 1,
             AgentStatus::Unknown => self.unknown += 1,
         }
     }
@@ -140,13 +150,14 @@ impl StatusCounts {
             AgentStatus::Waiting => self.waiting = self.waiting.saturating_sub(1),
             AgentStatus::Idle => self.idle = self.idle.saturating_sub(1),
             AgentStatus::Error => self.error = self.error.saturating_sub(1),
+            AgentStatus::Exited => self.exited = self.exited.saturating_sub(1),
             AgentStatus::Unknown => self.unknown = self.unknown.saturating_sub(1),
         }
     }
 
     /// Get total count
     pub fn total(&self) -> usize {
-        self.running + self.waiting + self.idle + self.error + self.unknown
+        self.running + self.waiting + self.idle + self.error + self.exited + self.unknown
     }
 
     /// Get count of urgent statuses (Error + Waiting)
@@ -180,10 +191,12 @@ impl StatusCounts {
             (AgentStatus::Waiting, self.waiting),
             (AgentStatus::Running, self.running),
             (AgentStatus::Idle, self.idle),
+            (AgentStatus::Exited, self.exited),
             (AgentStatus::Unknown, self.unknown),
         ];
 
-        counts.iter()
+        counts
+            .iter()
             .filter(|(_, count)| *count > 0)
             .max_by_key(|(status, _)| status.priority())
             .map(|(status, _)| *status)
@@ -202,11 +215,12 @@ mod tests {
             AgentStatus::Waiting,
             AgentStatus::Idle,
             AgentStatus::Error,
+            AgentStatus::Exited,
             AgentStatus::Unknown,
         ];
 
         // All should be different
-        assert_eq!(statuses.len(), 5);
+        assert_eq!(statuses.len(), 6);
     }
 
     /// Test: Status color mapping
@@ -216,6 +230,7 @@ mod tests {
         assert_eq!(AgentStatus::Waiting.color(), "yellow");
         assert_eq!(AgentStatus::Idle.color(), "gray");
         assert_eq!(AgentStatus::Error.color(), "red");
+        assert_eq!(AgentStatus::Exited.color(), "blue");
         assert_eq!(AgentStatus::Unknown.color(), "purple");
     }
 
@@ -233,6 +248,7 @@ mod tests {
         assert_eq!(AgentStatus::Waiting.icon(), "◐");
         assert_eq!(AgentStatus::Idle.icon(), "○");
         assert_eq!(AgentStatus::Error.icon(), "✕");
+        assert_eq!(AgentStatus::Exited.icon(), "✓");
         assert_eq!(AgentStatus::Unknown.icon(), "?");
     }
 
@@ -243,6 +259,7 @@ mod tests {
         assert_eq!(AgentStatus::Waiting.display_text(), "Waiting for input");
         assert_eq!(AgentStatus::Idle.display_text(), "Idle");
         assert_eq!(AgentStatus::Error.display_text(), "Error detected");
+        assert_eq!(AgentStatus::Exited.display_text(), "Process exited");
         assert_eq!(AgentStatus::Unknown.display_text(), "Unknown");
     }
 
@@ -256,8 +273,8 @@ mod tests {
     /// Test: Status priority ordering
     #[test]
     fn test_status_priority() {
-        // Error has highest priority
-        assert_eq!(AgentStatus::Error.priority(), 5);
+        assert_eq!(AgentStatus::Error.priority(), 6);
+        assert_eq!(AgentStatus::Exited.priority(), 5);
         assert_eq!(AgentStatus::Waiting.priority(), 4);
         assert_eq!(AgentStatus::Running.priority(), 3);
         assert_eq!(AgentStatus::Idle.priority(), 2);
@@ -267,11 +284,12 @@ mod tests {
     /// Test: Priority comparison
     #[test]
     fn test_priority_comparison() {
-        assert!(AgentStatus::Error.higher_priority_than(&AgentStatus::Waiting));
+        assert!(AgentStatus::Error.higher_priority_than(&AgentStatus::Exited));
+        assert!(AgentStatus::Exited.higher_priority_than(&AgentStatus::Waiting));
         assert!(AgentStatus::Waiting.higher_priority_than(&AgentStatus::Running));
         assert!(AgentStatus::Running.higher_priority_than(&AgentStatus::Idle));
         assert!(AgentStatus::Idle.higher_priority_than(&AgentStatus::Unknown));
-        
+
         assert!(!AgentStatus::Unknown.higher_priority_than(&AgentStatus::Error));
     }
 
@@ -282,6 +300,7 @@ mod tests {
         assert!(AgentStatus::Waiting.is_urgent());
         assert!(!AgentStatus::Running.is_urgent());
         assert!(!AgentStatus::Idle.is_urgent());
+        assert!(!AgentStatus::Exited.is_urgent());
         assert!(!AgentStatus::Unknown.is_urgent());
     }
 
@@ -292,6 +311,7 @@ mod tests {
         assert!(AgentStatus::Waiting.is_active());
         assert!(!AgentStatus::Idle.is_active());
         assert!(!AgentStatus::Error.is_active());
+        assert!(!AgentStatus::Exited.is_active());
         assert!(!AgentStatus::Unknown.is_active());
     }
 
@@ -315,19 +335,19 @@ mod tests {
     #[test]
     fn test_status_counts_increment_decrement() {
         let mut counts = StatusCounts::new();
-        
+
         counts.increment(&AgentStatus::Running);
         counts.increment(&AgentStatus::Running);
         counts.increment(&AgentStatus::Error);
-        
+
         assert_eq!(counts.running, 2);
         assert_eq!(counts.error, 1);
         assert_eq!(counts.total(), 3);
         assert!(counts.has_errors());
-        
+
         counts.decrement(&AgentStatus::Running);
         assert_eq!(counts.running, 1);
-        
+
         // Should not go below 0
         counts.decrement(&AgentStatus::Waiting);
         assert_eq!(counts.waiting, 0);
@@ -341,7 +361,7 @@ mod tests {
         counts.increment(&AgentStatus::Error);
         counts.increment(&AgentStatus::Waiting);
         counts.increment(&AgentStatus::Running);
-        
+
         assert_eq!(counts.urgent_count(), 3);
     }
 
@@ -349,18 +369,18 @@ mod tests {
     #[test]
     fn test_most_prevalent() {
         let mut counts = StatusCounts::new();
-        
+
         // Empty should return None
         assert_eq!(counts.most_prevalent(), None);
-        
+
         // Add some counts
         counts.increment(&AgentStatus::Running);
         counts.increment(&AgentStatus::Running);
         counts.increment(&AgentStatus::Idle);
-        
+
         // Running has highest count but check priority
         assert_eq!(counts.most_prevalent(), Some(AgentStatus::Running));
-        
+
         // Add error - should take precedence due to priority
         counts.increment(&AgentStatus::Error);
         assert_eq!(counts.most_prevalent(), Some(AgentStatus::Error));

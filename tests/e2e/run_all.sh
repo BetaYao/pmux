@@ -2,6 +2,7 @@
 # E2E 场景测试主运行脚本
 
 set -e
+set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../regression/lib/test_utils.sh"

@@ -144,6 +144,85 @@ def check_sidebar_status(image_path, sidebar_region):
         print(f"Error checking sidebar: {e}", file=sys.stderr)
         return {'status': 'error', 'confidence': 0}
 
+def verify_window(image_path, min_width=400, min_height=300):
+    """
+    验证 pmux 窗口是否正常显示
+    - 图片尺寸合理（非 0 或过小）
+    - 主色调为深色（pmux 主题 rgb 0x1e1e1e 附近）
+    - 有内容（颜色方差 > 0，非纯白/纯黑/透明）
+    返回: {'ok': bool, 'reason': str, 'avg_brightness': float, 'variance': float, 'width': int, 'height': int}
+    """
+    try:
+        img = Image.open(image_path)
+        w, h = img.size
+
+        if w < min_width or h < min_height:
+            return {
+                'ok': False,
+                'reason': f'window_too_small',
+                'avg_brightness': 0,
+                'variance': 0,
+                'width': w,
+                'height': h,
+            }
+
+        pixels = list(img.getdata())
+        count = len(pixels)
+        r_sum = sum(p[0] for p in pixels)
+        g_sum = sum(p[1] for p in pixels)
+        b_sum = sum(p[2] for p in pixels)
+        avg_r = r_sum / count
+        avg_g = g_sum / count
+        avg_b = b_sum / count
+        avg_brightness = (avg_r + avg_g + avg_b) / 3
+
+        r_var = sum((p[0] - avg_r) ** 2 for p in pixels) / count
+        g_var = sum((p[1] - avg_g) ** 2 for p in pixels) / count
+        b_var = sum((p[2] - avg_b) ** 2 for p in pixels) / count
+        variance = (r_var + g_var + b_var) / 3
+
+        # pmux 深色主题：平均亮度应 < 120（0x1e1e1e ≈ 30）
+        # 纯白/透明会接近 255，纯黑会接近 0 但方差极低
+        if avg_brightness > 200:
+            return {
+                'ok': False,
+                'reason': 'window_too_bright',
+                'avg_brightness': avg_brightness,
+                'variance': variance,
+                'width': w,
+                'height': h,
+            }
+
+        # 有内容的窗口应有一定颜色变化（sidebar、terminal、文字等）
+        if variance < 50:
+            return {
+                'ok': False,
+                'reason': 'window_too_flat',
+                'avg_brightness': avg_brightness,
+                'variance': variance,
+                'width': w,
+                'height': h,
+            }
+
+        return {
+            'ok': True,
+            'reason': 'ok',
+            'avg_brightness': avg_brightness,
+            'variance': variance,
+            'width': w,
+            'height': h,
+        }
+    except Exception as e:
+        return {
+            'ok': False,
+            'reason': f'error:{e}',
+            'avg_brightness': 0,
+            'variance': 0,
+            'width': 0,
+            'height': 0,
+        }
+
+
 def has_multiple_colors(image_path, region, min_colors=3):
     """
     检查区域是否包含多种颜色（用于验证颜色显示）

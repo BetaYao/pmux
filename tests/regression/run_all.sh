@@ -3,6 +3,7 @@
 # 只运行核心的回归测试（自动化视觉验证）
 
 set -e
+set -o pipefail  # 确保 pipeline 中任一端失败时整体失败（否则 tee 会掩盖测试脚本的 exit 1）
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/test_utils.sh"

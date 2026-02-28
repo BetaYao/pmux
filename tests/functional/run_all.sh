@@ -3,6 +3,7 @@
 # 运行所有功能测试
 
 set -e
+set -o pipefail  # 确保 pipeline 中任一端失败时整体失败
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../regression/lib/test_utils.sh"

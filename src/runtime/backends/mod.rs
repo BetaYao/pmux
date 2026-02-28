@@ -22,6 +22,27 @@ pub const PMUX_BACKEND_ENV: &str = "PMUX_BACKEND";
 /// Default backend when environment variable is not set.
 pub const DEFAULT_BACKEND: &str = "local";
 
+/// Session naming for tmux backend. One worktree = one session.
+/// Example: /foo/repo/feature-x -> "pmux-feature-x"
+pub fn session_name_for_worktree(worktree_path: &Path) -> String {
+    format!(
+        "pmux-{}",
+        worktree_path
+            .file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_else(|| "default".into())
+    )
+}
+
+/// Default main window name for a worktree session.
+pub const MAIN_WINDOW: &str = "main";
+
+/// Window target for killing the main worktree session.
+/// Used when deleting a worktree (kill its session's main window).
+pub fn main_window_target(worktree_path: &Path) -> String {
+    format!("{}:{}", session_name_for_worktree(worktree_path), MAIN_WINDOW)
+}
+
 /// Create a runtime for the given worktree path, using the backend specified
 /// by the `PMUX_BACKEND` environment variable (defaults to local PTY).
 ///
@@ -44,10 +65,8 @@ pub fn create_runtime_from_env(
         "tmux" => {
             #[cfg(unix)]
             {
-                let session_name = format!("pmux-{}", worktree_path.file_name()
-                    .map(|n| n.to_string_lossy())
-                    .unwrap_or_else(|| "default".into()));
-                Ok(create_tmux_runtime(session_name, "main"))
+                let session_name = session_name_for_worktree(worktree_path);
+                Ok(create_tmux_runtime(session_name, MAIN_WINDOW))
             }
             #[cfg(not(unix))]
             Err(RuntimeError::Backend(
@@ -59,6 +78,7 @@ pub fn create_runtime_from_env(
 }
 
 /// Create a LocalPtyRuntime for the given worktree path.
+/// Returns an AgentRuntime that supports multiple panes.
 pub fn create_runtime(
     worktree_path: &Path,
     cols: u16,

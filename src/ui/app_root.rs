@@ -9,7 +9,7 @@ use crate::notification_manager::NotificationManager;
 use crate::system_notifier;
 use crate::terminal::TerminalEngine;
 use crate::runtime::{AgentRuntime, EventBus, RuntimeEvent, StatusPublisher};
-use crate::runtime::backends::create_runtime_from_env;
+use crate::runtime::backends::{create_runtime_from_env, main_window_target};
 use crate::runtime::{RuntimeState, WorktreeState};
 use crate::ui::{AppState, sidebar::Sidebar, workspace_tabbar::WorkspaceTabBar, terminal_view::TerminalBuffer, notification_panel::{NotificationPanel, NotificationItem}, new_branch_dialog_ui::NewBranchDialogUi, delete_worktree_dialog_ui::DeleteWorktreeDialogUi, split_pane_container::SplitPaneContainer, diff_overlay::DiffOverlay, status_bar::StatusBar};
 use crate::split_tree::SplitNode;
@@ -87,8 +87,8 @@ pub struct AppRoot {
     sidebar_context_menu_index: Option<usize>,
     /// Review windows: branch -> window name (stub for local PTY)
     review_windows: HashMap<String, String>,
-    /// When Some, diff overlay is shown: (branch, window_name, pane_target)
-    diff_overlay_open: Option<(String, String, String)>,
+    /// When Some, diff overlay is shown: (branch, window_name, session, pane_target)
+    diff_overlay_open: Option<(String, String, Option<String>, String)>,
     /// Sidebar width in pixels (persisted to state.json)
     sidebar_width: u32,
     /// When Some, dependency check failed - show self-check page
@@ -613,18 +613,15 @@ impl AppRoot {
         let panes = rt.list_panes(&agent_id);
         let pane_ids: Vec<String> = panes.iter().cloned().collect();
 
-        // Detect backend type and get session info for tmux
         let backend = rt.backend_type();
-        let (backend_session_id, backend_window_id) = if backend == "tmux" {
-            // Downcast to TmuxRuntime to get session/window names
-            if let Some(tmux_rt) = rt.as_any().downcast_ref::<crate::runtime::backends::TmuxRuntime>() {
-                (tmux_rt.session_name().to_string(), tmux_rt.window_name().to_string())
-            } else {
-                (worktree_path.to_string_lossy().to_string(), branch_name.to_string())
-            }
-        } else {
-            (worktree_path.to_string_lossy().to_string(), branch_name.to_string())
-        };
+        let (backend_session_id, backend_window_id) = rt
+            .session_info()
+            .unwrap_or_else(|| {
+                (
+                    worktree_path.to_string_lossy().to_string(),
+                    branch_name.to_string(),
+                )
+            });
 
         let wt = WorktreeState {
             branch: branch_name.to_string(),
@@ -794,8 +791,8 @@ impl AppRoot {
                     }
                 }
                 "w" => {
-                    if let Some((branch, window_name, _)) = self.diff_overlay_open.clone() {
-                        self.close_diff_overlay(&branch, &window_name, cx);
+                    if let Some((branch, window_name, session, pane_target)) = self.diff_overlay_open.clone() {
+                        self.close_diff_overlay(&branch, &window_name, session.as_deref(), &pane_target, cx);
                     }
                 }
                 "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" => {
@@ -943,12 +940,15 @@ impl AppRoot {
 
     /// Open diff overlay (add buffer, set pane target for polling, show overlay)
     fn open_diff_overlay(&mut self, branch: &str, window_name: &str, cx: &mut Context<Self>) {
-        let session_name = self.active_pane_target
+        let session = self
+            .runtime
             .as_ref()
-            .and_then(|t| t.split(':').next().map(String::from))
-            .unwrap_or_else(|| "sdlc-workspace".to_string());
-
-        let pane_target = format!("{}:{}.0", session_name, window_name);
+            .and_then(|rt| rt.session_info())
+            .map(|(s, _)| s);
+        let pane_target = session
+            .as_ref()
+            .map(|s| format!("{}:{}.0", s, window_name))
+            .unwrap_or_else(|| format!("local:{}.0", window_name));
 
         // Add buffer for overlay pane (streaming will populate)
         if let Ok(mut buffers) = self.terminal_buffers.lock() {
@@ -965,7 +965,12 @@ impl AppRoot {
         }
 
         self.active_pane_target = Some(pane_target.clone());
-        self.diff_overlay_open = Some((branch.to_string(), window_name.to_string(), pane_target.clone()));
+        self.diff_overlay_open = Some((
+            branch.to_string(),
+            window_name.to_string(),
+            session,
+            pane_target.clone(),
+        ));
         if let Ok(mut guard) = self.active_pane_target_shared.lock() {
             *guard = pane_target;
         }
@@ -974,15 +979,16 @@ impl AppRoot {
     }
 
     /// Close diff overlay (kill tmux window, remove from buffers, switch back to worktree)
-    fn close_diff_overlay(&mut self, branch: &str, window_name: &str, cx: &mut Context<Self>) {
-        let session_name = self.active_pane_target
-            .as_ref()
-            .and_then(|t| t.split(':').next().map(String::from))
-            .unwrap_or_else(|| "sdlc-workspace".to_string());
-        let target = format!("{}:{}", session_name, window_name);
-        let pane_target = format!("{}:{}.0", session_name, window_name);
-
-        if let Some(rt) = &self.runtime {
+    fn close_diff_overlay(
+        &mut self,
+        branch: &str,
+        window_name: &str,
+        session: Option<&str>,
+        pane_target: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if let (Some(rt), Some(s)) = (&self.runtime, session) {
+            let target = format!("{}:{}", s, window_name);
             let _ = rt.kill_window(&target);
         }
         self.review_windows.remove(branch);
@@ -990,7 +996,7 @@ impl AppRoot {
 
         // Remove from terminal_buffers and pane_targets_shared
         if let Ok(mut buffers) = self.terminal_buffers.lock() {
-            buffers.remove(&pane_target);
+            buffers.remove(pane_target);
         }
         if let Ok(mut guard) = self.pane_targets_shared.lock() {
             guard.retain(|t| t != &pane_target);
@@ -1110,13 +1116,7 @@ impl AppRoot {
         let worktree_path = worktree.path.clone();
         let branch = worktree.short_branch_name().to_string();
 
-        let repo_name = self.workspace_manager.active_tab()
-            .map(|t| t.name.clone())
-            .unwrap_or_else(|| "workspace".to_string());
-        let session_name = format!("sdlc-{}", repo_name.replace('/', "-").replace(' ', "-").replace('\\', "-"));
-        let window_name = branch.replace('/', "-");
-        let target = format!("{}:{}", session_name, window_name);
-
+        let target = main_window_target(&worktree.path);
         if let Some(rt) = &self.runtime {
             if let Err(e) = rt.kill_window(&target) {
                 eprintln!("tmux kill-window failed (best-effort): {}", e);
@@ -1696,18 +1696,20 @@ impl AppRoot {
             .child(delete_dialog)
             .child(new_branch_dialog)
             .when(self.diff_overlay_open.is_some(), |el| {
-                if let Some((branch, window_name, pane_target)) = &self.diff_overlay_open {
+                if let Some((branch, window_name, session, pane_target)) = &self.diff_overlay_open {
                     let buffer = terminal_buffers.get(pane_target).cloned().unwrap_or_else(|| {
                         TerminalBuffer::new_empty_term(80, 24)
                     });
                     let branch = branch.clone();
                     let window_name = window_name.clone();
+                    let session = session.clone();
+                    let pane_target = pane_target.clone();
                     let app_root_entity_for_diff_close = app_root_entity.clone();
                     el.child(
-                        DiffOverlay::new(&branch, pane_target, buffer)
+                        DiffOverlay::new(&branch, &pane_target, buffer)
                             .on_close(move |_window, cx| {
                                 let _ = cx.update_entity(&app_root_entity_for_diff_close, |this: &mut AppRoot, cx| {
-                                    this.close_diff_overlay(&branch, &window_name, cx);
+                                    this.close_diff_overlay(&branch, &window_name, session.as_deref(), &pane_target, cx);
                                 });
                             })
                     )

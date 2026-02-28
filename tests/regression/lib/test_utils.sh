@@ -83,10 +83,11 @@ assert_less_than() {
     fi
 }
 
-# 应用控制函数
+# 应用控制函数（PMUX_BIN 可选，未设置时用 target/debug/pmux）
 start_pmux() {
     log_info "Starting pmux..."
-    "$PMUX_ROOT/target/debug/pmux" &
+    local bin="${PMUX_BIN:-$PMUX_ROOT/target/debug/pmux}"
+    "$bin" &
     PMUX_PID=$!
     sleep 3
     
@@ -194,6 +195,7 @@ take_screenshot() {
 init_report() {
     local report_dir="tests/regression/results"
     mkdir -p "$report_dir"
+    export REPORT_DIR="${PMUX_ROOT:-.}/$report_dir"
     
     REPORT_FILE="$report_dir/report_$(date +%Y%m%d_%H%M%S).md"
     

@@ -441,6 +441,10 @@ impl AgentRuntime for TmuxRuntime {
     fn kill_window(&self, window_target: &str) -> Result<(), RuntimeError> {
         self.tmux_cmd(&["kill-window", "-t", window_target])
     }
+
+    fn session_info(&self) -> Option<(String, String)> {
+        Some((self.session_name.clone(), self.window_name.clone()))
+    }
 }
 
 /// Escape string for tmux send-keys -l (literal mode).
@@ -496,9 +500,9 @@ mod tests {
 
     #[test]
     fn test_tmux_runtime_new() {
-        let rt = TmuxRuntime::new("sdlc-test", "main");
-        assert_eq!(rt.pane_target(&"%0".to_string()), "sdlc-test:main.%0");
-        assert_eq!(rt.window_target(), "sdlc-test:main");
+        let rt = TmuxRuntime::new("pmux-test", "main");
+        assert_eq!(rt.pane_target(&"%0".to_string()), "pmux-test:main.%0");
+        assert_eq!(rt.window_target(), "pmux-test:main");
     }
 
     #[test]
@@ -528,7 +532,7 @@ mod tests {
     fn test_send_input_no_process_spawn() {
         use std::time::Instant;
         // send_input queues to channel - no process spawn per keystroke
-        let rt = TmuxRuntime::new("sdlc-test", "main");
+        let rt = TmuxRuntime::new("pmux-test", "main");
         let pane_id = "%0".to_string();
 
         let start = Instant::now();
@@ -567,7 +571,7 @@ mod tests {
         if !tmux_available() {
             return;
         }
-        let rt = TmuxRuntime::new("sdlc-test", "main");
+        let rt = TmuxRuntime::new("pmux-test", "main");
         let err = rt.kill_window("nonexistent:window");
         assert!(err.is_err());
     }
@@ -582,7 +586,7 @@ mod tests {
 
     #[test]
     fn test_tmux_runtime_open_diff_no_git() {
-        let rt = TmuxRuntime::new("sdlc-test", "main");
+        let rt = TmuxRuntime::new("pmux-test", "main");
         let err = rt.open_diff(PathBuf::from("/nonexistent/path").as_path(), None);
         assert!(err.is_err());
     }

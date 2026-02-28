@@ -6,6 +6,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../regression/lib/test_utils.sh"
 
+PMUX_BIN="${PMUX_BIN:-$PMUX_ROOT/target/debug/pmux}"
+
 echo "================================"
 echo "Startup Performance Benchmark"
 echo "================================"
@@ -28,7 +30,7 @@ for i in $(seq 1 $ITERATIONS); do
     
     # 测量启动时间
     START_TIME=$(date +%s.%N)
-    "$PMUX_ROOT/target/debug/pmux" &
+    "$PMUX_BIN" &
     PID=$!
     
     # 等待窗口出现
@@ -65,7 +67,7 @@ for i in $(seq 1 $ITERATIONS); do
     
     # 热启动 - 不清理缓存
     START_TIME=$(date +%s.%N)
-    ./target/debug/pmux &
+    "$PMUX_BIN" &
     PID=$!
     
     # 等待窗口出现

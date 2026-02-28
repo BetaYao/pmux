@@ -36,28 +36,32 @@ cd "$PMUX_DIR"
 cargo build --release 2>&1 | tail -3
 echo ""
 
-# 运行各个性能测试
-cd "$PMUX_DIR/tests/regression"
+# 运行各个性能测试（1–3 使用 performance 目录下脚本，release 二进制）
+export PMUX_ROOT="$PMUX_DIR"
+export PMUX_BIN="$PMUX_DIR/target/release/pmux"
+source "$SCRIPT_DIR/lib/test_utils.sh"
+
+cd "$PMUX_DIR"
 
 # 1. 启动性能
 echo "================================"
 echo "1/5: Startup Performance"
 echo "================================"
-./test_startup_performance.sh 2>&1 | tee "$RESULTS_DIR/startup.log"
+bash "$PMUX_DIR/tests/performance/startup_benchmark.sh" 2>&1 | tee "$RESULTS_DIR/startup.log"
 echo ""
 
 # 2. 帧率性能
 echo "================================"
 echo "2/5: Frame Rate Performance"
 echo "================================"
-./test_framerate.sh 2>&1 | tee "$RESULTS_DIR/framerate.log"
+bash "$PMUX_DIR/tests/performance/framerate_benchmark.sh" 2>&1 | tee "$RESULTS_DIR/framerate.log"
 echo ""
 
 # 3. 输入性能
 echo "================================"
 echo "3/5: Typing Performance"
 echo "================================"
-./test_typing_performance.sh 2>&1 | tee "$RESULTS_DIR/typing.log"
+bash "$PMUX_DIR/tests/performance/typing_benchmark.sh" 2>&1 | tee "$RESULTS_DIR/typing.log"
 echo ""
 
 # 4. 内存使用
@@ -66,7 +70,7 @@ echo "4/5: Memory Usage"
 echo "================================"
 
 # 启动应用并测量内存
-./target/release/pmux &
+"$PMUX_DIR/target/release/pmux" &
 PMUX_PID=$!
 sleep 5
 
@@ -108,7 +112,7 @@ echo ""
 echo "================================"
 echo "5/5: TUI Performance"
 echo "================================"
-./target/release/pmux &
+"$PMUX_DIR/target/release/pmux" &
 PMUX_PID=$!
 sleep 5
 
