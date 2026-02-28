@@ -18,6 +18,7 @@ pub mod new_branch_dialog;
 pub mod new_branch_orchestrator;
 pub mod notification;
 pub mod notification_manager;
+pub mod remotes;
 pub mod resizable_sidebar;
 pub mod runtime;
 pub mod shell_integration;
