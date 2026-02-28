@@ -218,6 +218,21 @@ Add `static RENDER_COUNT: AtomicU64` in TopBarEntity and increment in render. Lo
 
 ---
 
+## Implementation Status (2026-02-28)
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| 0 | ✅ Done | StatusCountsModel, TopBarEntity spike |
+| 1 | ✅ Done | Model aggregation, TopBar reads from model |
+| 2 | ✅ Done | TopBar as Entity; Sidebar as Entity skipped |
+| 3.1 | ✅ Done | NotificationPanelModel + NotificationPanelEntity |
+| 3.2 | ✅ Done | NewBranchDialogModel + NewBranchDialogEntity |
+| 4 | ✅ Done | TerminalAreaEntity; spawn notifies entity instead of AppRoot |
+
+**Cleanup done:** Removed unused `status_change_tx` from AppRoot.
+
+---
+
 ## Rollback / Fallback
 
 If Phase 0 spike shows GPUI does **not** support entity-scoped re-render:

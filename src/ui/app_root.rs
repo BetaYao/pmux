@@ -12,7 +12,7 @@ use crate::terminal::TerminalEngine;
 use crate::runtime::{AgentRuntime, EventBus, RuntimeEvent, StatusPublisher};
 use crate::runtime::backends::{create_runtime_from_env, recover_runtime, resolve_backend, window_name_for_worktree, window_target};
 use crate::runtime::{RuntimeState, WorktreeState};
-use crate::ui::{AppState, sidebar::Sidebar, workspace_tabbar::WorkspaceTabBar, terminal_controller::ResizeController, terminal_view::TerminalBuffer, notification_panel::{NotificationPanel, NotificationItem}, new_branch_dialog_ui::NewBranchDialogUi, delete_worktree_dialog_ui::DeleteWorktreeDialogUi, split_pane_container::SplitPaneContainer, diff_overlay::DiffOverlay, status_bar::StatusBar};
+use crate::ui::{AppState, sidebar::Sidebar, workspace_tabbar::WorkspaceTabBar, terminal_controller::ResizeController, terminal_view::TerminalBuffer, terminal_area_entity::TerminalAreaEntity, notification_panel_entity::NotificationPanelEntity, new_branch_dialog_entity::NewBranchDialogEntity, delete_worktree_dialog_ui::DeleteWorktreeDialogUi, split_pane_container::SplitPaneContainer, diff_overlay::DiffOverlay, status_bar::StatusBar, models::{StatusCountsModel, NotificationPanelModel, NewBranchDialogModel}, topbar_entity::TopBarEntity};
 use crate::split_tree::SplitNode;
 use crate::workspace_manager::WorkspaceManager;
 use crate::input::{key_to_xterm_escape, KeyModifiers};
@@ -25,7 +25,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::broadcast;
 
 /// Notification sender that forwards to AppRoot's NotificationManager
 struct AppNotificationSender {
@@ -46,7 +45,6 @@ pub struct AppRoot {
     workspace_manager: WorkspaceManager,
     status_counts: StatusCounts,
     notification_manager: Arc<Mutex<NotificationManager>>,
-    show_notification_panel: bool,
     sidebar_visible: bool,
     /// Per-pane terminal buffers (Term = pipe-pane/control mode streaming; Legacy = error placeholder only)
     terminal_buffers: Arc<Mutex<HashMap<String, TerminalBuffer>>>,
@@ -72,10 +70,11 @@ pub struct AppRoot {
     status_publisher: Option<StatusPublisher>,
     /// Whether EventBus subscription has been started (spawn once)
     event_bus_subscription_started: bool,
-    /// Broadcast channel for status changes - Sidebar/StatusBar subscribe, only they re-render (not AppRoot)
-    status_change_tx: broadcast::Sender<()>,
-    /// New branch dialog UI
-    new_branch_dialog: NewBranchDialogUi,
+    /// NewBranchDialogModel + Entity - dialog state; Entity observes, re-renders only when model notifies
+    new_branch_dialog_model: Option<Entity<NewBranchDialogModel>>,
+    new_branch_dialog_entity: Option<Entity<NewBranchDialogEntity>>,
+    /// Focus handle for new branch dialog input (focus on open)
+    dialog_input_focus: Option<FocusHandle>,
     /// Delete worktree confirmation dialog
     delete_worktree_dialog: DeleteWorktreeDialogUi,
     /// Pending worktree selection to be processed on next render
@@ -108,6 +107,16 @@ pub struct AppRoot {
     /// ResizeController: debounced window bounds → (cols, rows) for engine/runtime resize.
     /// Resize is driven here, NOT by TerminalElement/TerminalView request_layout/prepaint/paint.
     resize_controller: ResizeController,
+    /// StatusCountsModel - TopBar/StatusBar observe this for entity-scoped re-render (Phase 0 spike)
+    status_counts_model: Option<Entity<StatusCountsModel>>,
+    /// TopBar Entity - observes StatusCountsModel, re-renders only when status changes
+    topbar_entity: Option<Entity<TopBarEntity>>,
+    /// NotificationPanelModel - show_panel, unread_count; Panel + bell observe this
+    notification_panel_model: Option<Entity<NotificationPanelModel>>,
+    /// NotificationPanel Entity - observes model, re-renders only when panel state changes
+    notification_panel_entity: Option<Entity<NotificationPanelEntity>>,
+    /// Terminal area Entity - when content changes, notify this instead of AppRoot (Phase 4)
+    terminal_area_entity: Option<Entity<TerminalAreaEntity>>,
 }
 
 impl AppRoot {
@@ -185,7 +194,6 @@ impl AppRoot {
             workspace_manager,
             status_counts: StatusCounts::new(),
             notification_manager: Arc::new(Mutex::new(NotificationManager::new())),
-            show_notification_panel: false,
             sidebar_visible: true,
             terminal_buffers: Arc::new(Mutex::new(HashMap::new())),
             split_tree: SplitNode::pane(""),
@@ -199,9 +207,10 @@ impl AppRoot {
             event_bus: Arc::new(EventBus::default()),
             status_publisher: None,
         event_bus_subscription_started: false,
-        status_change_tx: broadcast::channel(16).0,
-        new_branch_dialog: NewBranchDialogUi::new(),
-            delete_worktree_dialog: DeleteWorktreeDialogUi::new(),
+        new_branch_dialog_model: None,
+        new_branch_dialog_entity: None,
+        dialog_input_focus: None,
+        delete_worktree_dialog: DeleteWorktreeDialogUi::new(),
             pending_worktree_selection: None,
             worktree_switch_loading: None,
             active_worktree_index: None,
@@ -216,12 +225,226 @@ impl AppRoot {
             terminal_needs_focus: false,
             terminal_focus: None,
             resize_controller: ResizeController::new(),
+            status_counts_model: None,
+            topbar_entity: None,
+            notification_panel_model: None,
+            notification_panel_entity: None,
+            terminal_area_entity: None,
+        }
+    }
+
+    /// Create StatusCountsModel and TopBarEntity when has_workspaces (Phase 0 spike).
+    /// Called from init_workspace_restoration before attach_runtime so EventBus handler can use model.
+    fn ensure_entities(&mut self, cx: &mut Context<Self>) {
+        if self.dialog_input_focus.is_none() {
+            self.dialog_input_focus = Some(cx.focus_handle());
+        }
+        if !self.has_workspaces() {
+            return;
+        }
+        if self.status_counts_model.is_none() {
+            let pane_statuses = Arc::clone(&self.pane_statuses);
+            let model = cx.new(move |_cx| StatusCountsModel::new(pane_statuses));
+            self.status_counts_model = Some(model);
+        }
+        if self.topbar_entity.is_none() {
+            if let Some(ref model) = self.status_counts_model {
+                let workspace_manager = self.workspace_manager.clone();
+                let app_root_entity = cx.entity();
+                let app_root_entity_select = app_root_entity.clone();
+                let on_select = Arc::new(move |idx: usize, _w: &mut Window, cx: &mut App| {
+                    let _ = cx.update_entity(&app_root_entity_select, |this: &mut AppRoot, cx| {
+                        this.handle_workspace_tab_switch(idx, cx);
+                        if let Some(ref e) = this.topbar_entity {
+                            let _ = cx.update_entity(e, |t: &mut TopBarEntity, cx| {
+                                t.set_workspace_manager(this.workspace_manager.clone());
+                                cx.notify();
+                            });
+                        }
+                    });
+                });
+                let app_root_entity_close = app_root_entity.clone();
+                let on_close = Arc::new(move |idx: usize, _w: &mut Window, cx: &mut App| {
+                    let _ = cx.update_entity(&app_root_entity_close, |this: &mut AppRoot, cx| {
+                        let closed_path = this.workspace_manager.get_tab(idx).map(|t| t.path.clone());
+                        this.workspace_manager.close_tab(idx);
+                        if let Some(path) = closed_path {
+                            this.per_repo_worktree_index.remove(&path);
+                        }
+                        if this.workspace_manager.is_empty() {
+                            this.stop_current_session();
+                        } else {
+                            this.stop_current_session();
+                            this.start_session_for_active_tab(cx);
+                        }
+                        this.save_config();
+                        if let Some(ref e) = this.topbar_entity {
+                            let _ = cx.update_entity(e, |t: &mut TopBarEntity, cx| {
+                                t.set_workspace_manager(this.workspace_manager.clone());
+                                cx.notify();
+                            });
+                        }
+                        cx.notify();
+                    });
+                });
+                let topbar = cx.new(move |cx| {
+                    TopBarEntity::new(model.clone(), workspace_manager, on_select, on_close, cx)
+                });
+                self.topbar_entity = Some(topbar);
+            }
+        }
+        if self.notification_panel_model.is_none() {
+            let model = cx.new(|_cx| NotificationPanelModel::new());
+            self.notification_panel_model = Some(model);
+        }
+        if self.notification_panel_entity.is_none() {
+            if let Some(ref model) = self.notification_panel_model {
+                let model = model.clone();
+                let notif_mgr = Arc::clone(&self.notification_manager);
+                let app_root_entity = cx.entity();
+                let on_close = {
+                    let model = model.clone();
+                    Arc::new(move |_window: &mut Window, cx: &mut App| {
+                        let _ = cx.update_entity(&model, |m: &mut NotificationPanelModel, cx| {
+                            m.set_show_panel(false);
+                            cx.notify();
+                        });
+                    })
+                };
+                let on_mark_read = {
+                    let model = model.clone();
+                    let mgr = notif_mgr.clone();
+                    Arc::new(move |id: uuid::Uuid, _window: &mut Window, cx: &mut App| {
+                        if let Ok(mut m) = mgr.lock() {
+                            m.mark_read(id);
+                            let count = m.unread_count();
+                            drop(m);
+                            let _ = cx.update_entity(&model, |m: &mut NotificationPanelModel, cx| {
+                                m.set_unread_count(count);
+                                cx.notify();
+                            });
+                        }
+                    })
+                };
+                let on_clear_all = {
+                    let model = model.clone();
+                    let mgr = notif_mgr.clone();
+                    Arc::new(move |_window: &mut Window, cx: &mut App| {
+                        if let Ok(mut m) = mgr.lock() {
+                            m.clear_all();
+                            drop(m);
+                            let _ = cx.update_entity(&model, |m: &mut NotificationPanelModel, cx| {
+                                m.set_unread_count(0);
+                                cx.notify();
+                            });
+                        }
+                    })
+                };
+                let on_jump_to_pane = {
+                    let entity = app_root_entity.clone();
+                    Arc::new(move |pane_id: &str, _window: &mut Window, cx: &mut App| {
+                        let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
+                            if let Some(idx) = this.split_tree.flatten().into_iter().position(|(t, _)| t == pane_id) {
+                                if this.focused_pane_index != idx {
+                                    this.focused_pane_index = idx;
+                                    this.active_pane_target = Some(pane_id.to_string());
+                                    if let Ok(mut guard) = this.active_pane_target_shared.lock() {
+                                        *guard = pane_id.to_string();
+                                    }
+                                    if let Some(ref rt) = this.runtime {
+                                        let _ = rt.focus_pane(&pane_id.to_string());
+                                    }
+                                    this.terminal_needs_focus = true;
+                                }
+                            }
+                            cx.notify();
+                        });
+                    })
+                };
+                let entity = cx.new(move |cx| {
+                    NotificationPanelEntity::new(
+                        model,
+                        notif_mgr,
+                        on_close,
+                        on_mark_read,
+                        on_clear_all,
+                        on_jump_to_pane,
+                        cx,
+                    )
+                });
+                self.notification_panel_entity = Some(entity);
+            }
+        }
+        if self.new_branch_dialog_model.is_none() {
+            let model = cx.new(|_cx| NewBranchDialogModel::new());
+            self.new_branch_dialog_model = Some(model);
+        }
+        if self.new_branch_dialog_entity.is_none() {
+            if let (Some(ref model), Some(ref focus)) =
+                (&self.new_branch_dialog_model, &self.dialog_input_focus)
+            {
+                let model = model.clone();
+                let focus = focus.clone();
+                let app_root_entity = cx.entity();
+                let app_root_for_close = app_root_entity.clone();
+                let on_create = {
+                    let model = model.clone();
+                    Arc::new(move |_window: &mut Window, cx: &mut App| {
+                        let branch_name = model.read(cx).branch_name.clone();
+                        if branch_name.trim().is_empty() {
+                            return;
+                        }
+                        let _ = cx.update_entity(&model, |m: &mut NewBranchDialogModel, cx| {
+                            m.start_creating();
+                            cx.notify();
+                        });
+                        let _ = cx.update_entity(&app_root_entity, |this: &mut AppRoot, cx| {
+                            this.create_branch_from_model(cx);
+                        });
+                    }) as Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>
+                };
+                let on_close = {
+                    let model = model.clone();
+                    Arc::new(move |_window: &mut Window, cx: &mut App| {
+                        let _ = cx.update_entity(&model, |m: &mut NewBranchDialogModel, cx| {
+                            m.close();
+                            cx.notify();
+                        });
+                        let _ = cx.update_entity(&app_root_for_close, |this: &mut AppRoot, cx| {
+                            this.terminal_needs_focus = true;
+                            cx.notify();
+                        });
+                    }) as Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>
+                };
+                let on_branch_name_change = {
+                    let model = model.clone();
+                    Arc::new(move |new_value: String, _window: &mut Window, cx: &mut App| {
+                        let _ = cx.update_entity(&model, |m: &mut NewBranchDialogModel, cx| {
+                            m.set_branch_name(&new_value);
+                            m.validate();
+                            cx.notify();
+                        });
+                    }) as Arc<dyn Fn(String, &mut Window, &mut App) + Send + Sync>
+                };
+                let entity = cx.new(move |cx| {
+                    NewBranchDialogEntity::new(
+                        model,
+                        focus,
+                        on_create,
+                        on_close,
+                        on_branch_name_change,
+                        cx,
+                    )
+                });
+                self.new_branch_dialog_entity = Some(entity);
+            }
         }
     }
 
     /// Initialize workspace restoration (call after AppRoot is created)
     /// Ensures all tmux sessions exist, attaches to active tab, restores per-repo worktree selection
     pub fn init_workspace_restoration(&mut self, cx: &mut Context<Self>) {
+        self.ensure_entities(cx);
         // Stable focus handle must persist across renders; creating it here ensures key events reach handle_key_down
         if self.terminal_focus.is_none() {
             self.terminal_focus = Some(cx.focus_handle());
@@ -274,7 +497,13 @@ impl AppRoot {
 
     }
 
-    fn setup_local_terminal(&mut self, runtime: Arc<dyn AgentRuntime>, pane_target: &str, cx: &mut Context<Self>) {
+    fn setup_local_terminal(
+        &mut self,
+        runtime: Arc<dyn AgentRuntime>,
+        pane_target: &str,
+        terminal_area_entity: Option<Entity<TerminalAreaEntity>>,
+        cx: &mut Context<Self>,
+    ) {
         let (cols, rows) = runtime.get_pane_dimensions(&pane_target.to_string());
 
         let cache_size = Config::load().unwrap_or_default().terminal_row_cache_size();
@@ -287,11 +516,10 @@ impl AppRoot {
                 buffers.insert(pane_target.to_string(), buffer);
             }
 
-            // Clone for status detection
             let status_publisher = self.status_publisher.clone();
             let pane_target_clone = pane_target.to_string();
+            let terminal_area_entity = terminal_area_entity;
 
-            let _entity = cx.entity();
             cx.spawn(async move |entity, cx| {
                 loop {
                     // Use 16ms for ~60fps input polling
@@ -330,8 +558,13 @@ impl AppRoot {
                         }
                     }
 
-                    if content_changed && entity.update(cx, |_, cx| cx.notify()).is_err() {
-                        break;
+                    // Phase 4: notify terminal_area_entity if present, else AppRoot
+                    if content_changed {
+                        if let Some(ref e) = terminal_area_entity {
+                            let _ = e.update(cx, |_, cx| cx.notify());
+                        } else if entity.update(cx, |_, cx| cx.notify()).is_err() {
+                            break;
+                        }
                     }
                 }
             })
@@ -354,6 +587,7 @@ impl AppRoot {
         &mut self,
         runtime: Arc<dyn AgentRuntime>,
         pane_target: &str,
+        terminal_area_entity: Option<Entity<TerminalAreaEntity>>,
         cx: &mut Context<Self>,
     ) {
         let (cols, rows) = runtime.get_pane_dimensions(&pane_target.to_string());
@@ -368,7 +602,7 @@ impl AppRoot {
 
             let status_publisher = self.status_publisher.clone();
             let pane_target_clone = pane_target.to_string();
-            let _entity = cx.entity();
+            let terminal_area_entity = terminal_area_entity;
             cx.spawn(async move |entity, cx| {
                 loop {
                     blocking::unblock(|| std::thread::sleep(Duration::from_millis(16))).await;
@@ -398,8 +632,12 @@ impl AppRoot {
                             );
                         }
                     }
-                    if content_changed && entity.update(cx, |_, cx| cx.notify()).is_err() {
-                        break;
+                    if content_changed {
+                        if let Some(ref e) = terminal_area_entity {
+                            let _ = e.update(cx, |_, cx| cx.notify());
+                        } else if entity.update(cx, |_, cx| cx.notify()).is_err() {
+                            break;
+                        }
                     }
                 }
             })
@@ -459,14 +697,116 @@ impl AppRoot {
         }
         self.status_publisher = Some(status_publisher);
 
+        // Phase 4: Create TerminalAreaEntity for scoped notify (only terminal re-renders on content change)
+        let repo_name = self.workspace_manager.active_tab().map(|t| t.name.clone()).unwrap_or_else(|| "workspace".to_string());
+        let app_root_entity = cx.entity();
+        let app_root_for_drag = app_root_entity.clone();
+        let app_root_for_drag_end = app_root_entity.clone();
+        let app_root_for_pane = app_root_entity.clone();
+        let term_entity_holder: Arc<Mutex<Option<Entity<TerminalAreaEntity>>>> = Arc::new(Mutex::new(None));
+        let term_entity_holder_for_ratio = term_entity_holder.clone();
+        let term_entity_holder_for_drag = term_entity_holder.clone();
+        let term_entity_holder_for_drag_end = term_entity_holder.clone();
+        let term_entity_holder_for_pane = term_entity_holder.clone();
+        let on_ratio = Arc::new(move |path: Vec<bool>, ratio: f32, _w: &mut Window, cx: &mut App| {
+            let _ = cx.update_entity(&app_root_entity, |this: &mut AppRoot, cx| {
+                this.split_tree.update_ratio(&path, ratio);
+                if let Ok(mut guard) = term_entity_holder_for_ratio.lock() {
+                    if let Some(ref e) = *guard {
+                        let _ = cx.update_entity(e, |ent: &mut TerminalAreaEntity, cx| {
+                            ent.set_split_tree(this.split_tree.clone());
+                            cx.notify();
+                        });
+                    }
+                }
+                cx.notify();
+            });
+        }) as Arc<dyn Fn(Vec<bool>, f32, &mut Window, &mut App)>;
+        let on_drag_start = Arc::new(move |path: Vec<bool>, pos: f32, ratio: f32, vert: bool, _w: &mut Window, cx: &mut App| {
+            let _ = cx.update_entity(&app_root_for_drag, |this: &mut AppRoot, cx| {
+                this.split_divider_drag = Some((path.clone(), pos, ratio, vert));
+                if let Ok(mut guard) = term_entity_holder_for_drag.lock() {
+                    if let Some(ref e) = *guard {
+                        let _ = cx.update_entity(e, |ent: &mut TerminalAreaEntity, cx| {
+                            ent.set_split_divider_drag(Some((path, pos, ratio, vert)));
+                            cx.notify();
+                        });
+                    }
+                }
+                cx.notify();
+            });
+        }) as Arc<dyn Fn(Vec<bool>, f32, f32, bool, &mut Window, &mut App)>;
+        let on_drag_end = Arc::new(move |_w: &mut Window, cx: &mut App| {
+            let _ = cx.update_entity(&app_root_for_drag_end, |this: &mut AppRoot, cx| {
+                this.split_divider_drag = None;
+                if let Ok(mut guard) = term_entity_holder_for_drag_end.lock() {
+                    if let Some(ref e) = *guard {
+                        let _ = cx.update_entity(e, |ent: &mut TerminalAreaEntity, cx| {
+                            ent.set_split_divider_drag(None);
+                            cx.notify();
+                        });
+                    }
+                }
+                cx.notify();
+            });
+        }) as Arc<dyn Fn(&mut Window, &mut App)>;
+        let terminal_focus = self.terminal_focus.clone();
+        let on_pane = Arc::new(move |pane_idx: usize, window: &mut Window, cx: &mut App| {
+            let _ = cx.update_entity(&app_root_for_pane, |this: &mut AppRoot, cx| {
+                this.focused_pane_index = pane_idx;
+                if let Some(target) = this.split_tree.focus_index_to_pane_target(pane_idx) {
+                    if let Some(ref rt) = this.runtime {
+                        let _ = rt.focus_pane(&target);
+                    }
+                    this.active_pane_target = Some(target.clone());
+                    if let Ok(mut guard) = this.active_pane_target_shared.lock() {
+                        *guard = target;
+                    }
+                }
+                this.terminal_needs_focus = true;
+                if let Ok(guard) = term_entity_holder_for_pane.lock() {
+                    if let Some(ref e) = *guard {
+                        let _ = cx.update_entity(e, |entity: &mut TerminalAreaEntity, cx| {
+                            entity.set_focused_pane_index(pane_idx);
+                            cx.notify();
+                        });
+                    }
+                }
+                cx.notify();
+            });
+            if let Some(ref focus) = terminal_focus {
+                window.focus(focus, cx);
+            }
+        }) as Arc<dyn Fn(usize, &mut Window, &mut App)>;
+
+        let term_entity = cx.new(|_cx| {
+            TerminalAreaEntity::new(
+                self.split_tree.clone(),
+                Arc::clone(&self.terminal_buffers),
+                self.focused_pane_index,
+                repo_name.clone(),
+                true,
+                self.split_divider_drag.clone(),
+                Some(on_ratio),
+                Some(on_drag_start),
+                Some(on_drag_end),
+                Some(on_pane),
+            )
+        });
+        if let Ok(mut guard) = term_entity_holder.lock() {
+            *guard = Some(term_entity.clone());
+        }
+        self.terminal_area_entity = Some(term_entity);
+
+        let term_entity_for_setup = self.terminal_area_entity.clone();
         if pane_targets.len() == 1 {
-            self.setup_local_terminal(runtime, &pane_targets[0], cx);
+            self.setup_local_terminal(runtime, &pane_targets[0], term_entity_for_setup, cx);
         } else {
             if let Ok(mut buffers) = self.terminal_buffers.lock() {
                 buffers.clear();
             }
             for pt in &pane_targets {
-                self.setup_pane_terminal_output(runtime.clone(), pt, cx);
+                self.setup_pane_terminal_output(runtime.clone(), pt, self.terminal_area_entity.clone(), cx);
             }
         }
 
@@ -538,6 +878,12 @@ impl AppRoot {
                             this.switch_to_worktree(&wt_path, &branch, cx);
                         } else {
                             this.start_local_session(&path, "main", cx);
+                        }
+                        if let Some(ref e) = this.topbar_entity {
+                            let _ = cx.update_entity(e, |t: &mut TopBarEntity, cx| {
+                                t.set_workspace_manager(this.workspace_manager.clone());
+                                cx.notify();
+                            });
                         }
                     }
                     cx.notify();
@@ -757,6 +1103,7 @@ impl AppRoot {
     fn ensure_event_bus_subscription(&mut self, cx: &mut Context<Self>) {
         if self.event_bus_subscription_started { return; }
         self.event_bus_subscription_started = true;
+        self.ensure_entities(cx);
         let event_bus = Arc::clone(&self.event_bus);
         let remote_rx = event_bus.subscribe();
         let config = Config::load().unwrap_or_default();
@@ -767,8 +1114,8 @@ impl AppRoot {
         }
         let pane_statuses = self.pane_statuses.clone();
         let notification_manager = self.notification_manager.clone();
-        let status_change_tx = self.status_change_tx.clone();
-        let mut status_change_rx = self.status_change_tx.subscribe();
+        let status_counts_model = self.status_counts_model.clone();
+        let notification_panel_model = self.notification_panel_model.clone();
         cx.spawn(async move |entity, cx| {
             let rx = std::sync::Arc::new(std::sync::Mutex::new(event_bus.subscribe()));
             loop {
@@ -776,17 +1123,27 @@ impl AppRoot {
                 let ev = blocking::unblock(move || rx_clone.lock().unwrap().recv()).await;
                 match ev {
                     Ok(RuntimeEvent::AgentStateChange(e)) => {
-                        if let Some(pane_id) = &e.pane_id {
-                            let mut updated = false;
-                            if let Ok(mut statuses) = pane_statuses.lock() {
-                                let prev = statuses.get(pane_id);
-                                if prev != Some(&e.state) {
-                                    statuses.insert(pane_id.clone(), e.state);
-                                    updated = true;
+                        if let Some(ref pane_id) = e.pane_id {
+                            if let Some(ref model) = status_counts_model {
+                                let _ = cx.update_entity(model, |m, cx| {
+                                    m.update_pane_status(pane_id, e.state);
+                                    cx.notify();
+                                });
+                            } else {
+                                let mut updated = false;
+                                if let Ok(mut statuses) = pane_statuses.lock() {
+                                    let prev = statuses.get(pane_id);
+                                    if prev != Some(&e.state) {
+                                        statuses.insert(pane_id.clone(), e.state);
+                                        updated = true;
+                                    }
                                 }
-                            }
-                            if updated {
-                                let _ = status_change_tx.send(());
+                                if updated {
+                                    let _ = entity.update(cx, |this, cx| {
+                                        this.update_status_counts();
+                                        cx.notify();
+                                    });
+                                }
                             }
                         }
                     }
@@ -801,34 +1158,23 @@ impl AppRoot {
                             crate::runtime::NotificationType::Info => NotificationType::Info,
                         };
                         let message = n.message.clone();
+                        let mut unread_after = 0usize;
                         if let Ok(mut mgr) = notification_manager.lock() {
                             if mgr.add(pane_id, notif_type, &message) {
                                 system_notifier::notify("pmux", &message, notif_type);
                             }
+                            unread_after = mgr.unread_count();
+                        }
+                        if let Some(ref np_model) = notification_panel_model {
+                            let _ = cx.update_entity(np_model, |m, cx| {
+                                m.set_unread_count(unread_after);
+                                cx.notify();
+                            });
                         }
                         let _ = entity.update(cx, |_, cx| cx.notify());
                     }
                     Err(_) => break,
                     _ => {}
-                }
-            }
-        })
-        .detach();
-
-        cx.spawn(async move |entity, cx| {
-            let debounce_ms = 150u64;
-            loop {
-                match status_change_rx.recv().await {
-                    Ok(()) => {
-                        cx.background_executor().timer(Duration::from_millis(debounce_ms)).await;
-                        while status_change_rx.try_recv().is_ok() {}
-                        let _ = entity.update(cx, |this, cx| {
-                            this.update_status_counts();
-                            cx.notify();
-                        });
-                    }
-                    Err(broadcast::error::RecvError::Lagged(_)) => {}
-                    Err(broadcast::error::RecvError::Closed) => break,
                 }
             }
         })
@@ -1008,8 +1354,8 @@ impl AppRoot {
     /// Does NOT clear pane_statuses - preserves last known status for worktrees we're leaving
     /// (avoids flicker: main=Idle, switch to feature/test → main stays Idle, feature/test gets its status)
     fn stop_current_session(&mut self) {
-        // StatusPublisher is event-driven (no polling thread), so just drop it
         self.status_publisher.take();
+        self.terminal_area_entity.take();
 
         self.status_counts = StatusCounts::new();
         if let Ok(statuses) = self.pane_statuses.lock() {
@@ -1069,7 +1415,14 @@ impl AppRoot {
         if event.keystroke.modifiers.platform {
             match event.keystroke.key.as_str() {
                 "b" => self.sidebar_visible = !self.sidebar_visible,
-                "i" => self.show_notification_panel = !self.show_notification_panel,
+                "i" => {
+                    if let Some(ref model) = self.notification_panel_model {
+                        let _ = cx.update_entity(model, |m, cx| {
+                            m.toggle_panel();
+                            cx.notify();
+                        });
+                    }
+                }
                 "d" => {
                     if event.keystroke.modifiers.shift {
                         self.handle_split_pane(false, cx); // horizontal
@@ -1156,9 +1509,15 @@ impl AppRoot {
             vertical,
             new_target.clone(),
         ) {
-            self.split_tree = new_tree;
+            self.split_tree = new_tree.clone();
+            if let Some(ref e) = self.terminal_area_entity {
+                let _ = cx.update_entity(e, |ent: &mut TerminalAreaEntity, cx| {
+                    ent.set_split_tree(new_tree);
+                    cx.notify();
+                });
+            }
             if let Some(rt) = &self.runtime {
-                self.setup_pane_terminal_output(rt.clone(), &new_target, cx);
+                self.setup_pane_terminal_output(rt.clone(), &new_target, self.terminal_area_entity.clone(), cx);
             }
             if let Ok(mut guard) = self.pane_targets_shared.lock() {
                 *guard = self.split_tree.flatten().into_iter().map(|(t, _)| t).collect();
@@ -1324,38 +1683,48 @@ impl AppRoot {
 
     /// Opens the new branch dialog
     fn open_new_branch_dialog(&mut self, cx: &mut Context<Self>) {
-        self.new_branch_dialog.open();
-        cx.notify();
+        if let Some(ref model) = self.new_branch_dialog_model {
+            let _ = cx.update_entity(model, |m, cx| {
+                m.open();
+                cx.notify();
+            });
+        }
     }
 
     /// Closes the new branch dialog
     fn close_new_branch_dialog(&mut self, cx: &mut Context<Self>) {
-        self.new_branch_dialog.close();
+        if let Some(ref model) = self.new_branch_dialog_model {
+            let _ = cx.update_entity(model, |m, cx| {
+                m.close();
+                cx.notify();
+            });
+        }
         self.terminal_needs_focus = true;
         cx.notify();
     }
 
-    /// Creates a new branch and worktree
-    fn create_branch(&mut self, cx: &mut Context<Self>) {
-        let branch_name = self.new_branch_dialog.branch_name().to_string();
-        
-        if branch_name.trim().is_empty() {
-            return;
-        }
+    /// Creates a new branch and worktree (called from NewBranchDialogEntity's on_create).
+    /// Reads branch_name from model; spawn updates model on completion.
+    fn create_branch_from_model(&mut self, cx: &mut Context<Self>) {
+        let (branch_name, repo_path) = {
+            let model = self.new_branch_dialog_model.as_ref().and_then(|m| Some(m.read(cx).branch_name.clone()));
+            let branch = model.unwrap_or_default();
+            if branch.trim().is_empty() {
+                return;
+            }
+            let repo = self.workspace_manager.active_tab()
+                .map(|t| t.path.clone())
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            (branch, repo)
+        };
 
-        let repo_path = self.workspace_manager.active_tab()
-            .map(|t| t.path.clone())
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
-
-        self.new_branch_dialog.start_creating();
-        cx.notify();
-
-        // Create worktree in background
+        let notification_manager = self.notification_manager.clone();
+        let model = self.new_branch_dialog_model.clone();
+        let app_root_entity = cx.entity();
         let repo_path_clone = repo_path.clone();
         let branch_name_clone = branch_name.clone();
 
-        let notification_manager = self.notification_manager.clone();
-        cx.spawn(async move |entity, cx| {
+        cx.spawn(async move |_entity, cx| {
             let sender = Arc::new(Mutex::new(AppNotificationSender {
                 manager: notification_manager,
             }));
@@ -1363,36 +1732,44 @@ impl AppRoot {
                 .with_notification_sender(sender);
             let result = orchestrator.create_branch_async(&branch_name_clone).await;
 
-            let _ = entity.update(cx, |this: &mut AppRoot, cx| {
-                match result {
-                    CreationResult::Success { worktree_path, branch_name: _ } => {
-                        this.new_branch_dialog.complete_creating(true);
-                        if let Some(repo_path) = this.workspace_manager.active_tab().map(|t| t.path.clone()) {
-                            this.refresh_worktrees_for_repo(&repo_path);
+            if let Some(ref m) = model {
+                let _ = cx.update_entity(m, |modl: &mut NewBranchDialogModel, cx| {
+                    match &result {
+                        CreationResult::Success { worktree_path, branch_name: _ } => {
+                            modl.complete_creating(true);
+                            println!("Successfully created worktree at: {:?}", worktree_path);
                         }
-                        this.refresh_sidebar(cx);
-                        println!("Successfully created worktree at: {:?}", worktree_path);
+                        CreationResult::ValidationFailed { error } => {
+                            modl.set_error(error);
+                            modl.complete_creating(false);
+                        }
+                        CreationResult::BranchExists { branch_name } => {
+                            modl.set_error(&format!("Branch '{}' already exists", branch_name));
+                            modl.complete_creating(false);
+                        }
+                        CreationResult::GitFailed { error } => {
+                            modl.set_error(&format!("Git error: {}", error));
+                            modl.complete_creating(false);
+                        }
+                        CreationResult::TmuxFailed { worktree_path: _, branch_name: _, error } => {
+                            modl.set_error(&format!("Tmux error: {}", error));
+                            modl.complete_creating(false);
+                        }
                     }
-                    CreationResult::ValidationFailed { error } => {
-                        this.new_branch_dialog.set_error(&error);
-                        this.new_branch_dialog.complete_creating(false);
+                    cx.notify();
+                });
+            }
+            if matches!(result, CreationResult::Success { .. }) {
+                let _ = app_root_entity.update(cx, |this: &mut AppRoot, cx| {
+                    if let Some(repo_path) = this.workspace_manager.active_tab().map(|t| t.path.clone()) {
+                        this.refresh_worktrees_for_repo(&repo_path);
                     }
-                    CreationResult::BranchExists { branch_name } => {
-                        this.new_branch_dialog.set_error(&format!("Branch '{}' already exists", branch_name));
-                        this.new_branch_dialog.complete_creating(false);
-                    }
-                    CreationResult::GitFailed { error } => {
-                        this.new_branch_dialog.set_error(&format!("Git error: {}", error));
-                        this.new_branch_dialog.complete_creating(false);
-                    }
-                    CreationResult::TmuxFailed { worktree_path: _, branch_name: _, error } => {
-                        this.new_branch_dialog.set_error(&format!("Tmux error: {}", error));
-                        this.new_branch_dialog.complete_creating(false);
-                    }
-                }
-                cx.notify();
-            });
-        }).detach();
+                    this.refresh_sidebar(cx);
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
     }
 
     /// Refreshes the sidebar to show updated worktrees
@@ -1625,7 +2002,6 @@ impl AppRoot {
 
     fn render_workspace_view(&self, cx: &mut Context<Self>, terminal_focus: &gpui::FocusHandle, cursor_blink_visible: bool) -> impl IntoElement {
         let sidebar_visible = self.sidebar_visible;
-        let show_notifications = self.show_notification_panel;
         let workspace_manager = self.workspace_manager.clone();
         let terminal_buffers = Arc::clone(&self.terminal_buffers);
         let split_tree = self.split_tree.clone();
@@ -1644,9 +2020,13 @@ impl AppRoot {
             .map(|t| t.path.clone())
             .unwrap_or_else(|| std::path::PathBuf::from("."));
 
-        let notification_unread = self.notification_manager.lock().map(|m| m.unread_count()).unwrap_or(0);
+        let notification_unread = self
+            .notification_panel_model
+            .as_ref()
+            .map(|m| m.read(cx).unread_count)
+            .unwrap_or_else(|| self.notification_manager.lock().map(|m| m.unread_count()).unwrap_or(0));
         let app_root_entity_for_toggle = app_root_entity.clone();
-        let app_root_entity_for_notif = app_root_entity.clone();
+        let notification_panel_model_for_toggle = self.notification_panel_model.clone();
         let app_root_entity_for_add_ws = app_root_entity.clone();
 
         // Create sidebar with callbacks (cmux style: top controls in sidebar)
@@ -1661,10 +2041,12 @@ impl AppRoot {
                 });
             })
             .on_toggle_notifications(move |_window, cx| {
-                let _ = cx.update_entity(&app_root_entity_for_notif, |this: &mut AppRoot, cx| {
-                    this.show_notification_panel = !this.show_notification_panel;
-                    cx.notify();
-                });
+                if let Some(ref model) = notification_panel_model_for_toggle {
+                    let _ = cx.update_entity(model, |m, cx| {
+                        m.toggle_panel();
+                        cx.notify();
+                    });
+                }
             })
             .on_add_workspace(move |_window, cx| {
                 let _ = cx.update_entity(&app_root_entity_for_add_ws, |this: &mut AppRoot, cx| {
@@ -1696,20 +2078,15 @@ impl AppRoot {
             });
         });
 
-        // Focus handle for the new branch dialog input - created here so we can focus it when dialog opens
-        let input_focus = cx.focus_handle();
-        let input_focus_for_sidebar = input_focus.clone();
-
         // Set up New Branch callback - opens the dialog
-        // Get Entity from window at click time (not from cx.entity() at render time) -
-        // the latter can be invalid when click originates from inside Sidebar Component
+        let app_root_entity_for_new_branch = app_root_entity.clone();
+        let dialog_focus = self.dialog_input_focus.clone();
         sidebar.on_new_branch(move |window, cx| {
-            if let Some(Some(root)) = window.root::<AppRoot>() {
-                let _ = cx.update_entity(&root, |this: &mut AppRoot, cx| {
-                    this.open_new_branch_dialog(cx);
-                });
-                // Focus input on next frame (after dialog is rendered)
-                let focus = input_focus_for_sidebar.clone();
+            let _ = cx.update_entity(&app_root_entity_for_new_branch, |this: &mut AppRoot, cx| {
+                this.open_new_branch_dialog(cx);
+            });
+            if let Some(ref focus) = dialog_focus {
+                let focus = focus.clone();
                 window.on_next_frame(move |window, cx| {
                     window.focus(&focus, cx);
                 });
@@ -1742,44 +2119,6 @@ impl AppRoot {
                 cx.notify();
             });
         });
-
-        // Create dialog with callbacks - use window.root() for Create (same as New Branch) so it works when click originates from dialog
-        let app_root_entity_for_close = app_root_entity.clone();
-        let app_root_entity_for_input = app_root_entity.clone();
-        let new_branch_dialog = NewBranchDialogUi::new()
-            .with_focus_handle(input_focus.clone())
-            .on_create(move |window, cx| {
-                if let Some(Some(root)) = window.root::<AppRoot>() {
-                    let _ = cx.update_entity(&root, |this: &mut AppRoot, cx| {
-                        this.create_branch(cx);
-                    });
-                }
-            })
-            .on_close(move |_window, cx| {
-                let _ = cx.update_entity(&app_root_entity_for_close, |this: &mut AppRoot, cx| {
-                    this.close_new_branch_dialog(cx);
-                });
-            })
-            .on_branch_name_change(move |new_value, _window, cx| {
-                let _ = cx.update_entity(&app_root_entity_for_input, |this: &mut AppRoot, cx| {
-                    this.new_branch_dialog.set_branch_name(&new_value);
-                    this.new_branch_dialog.validate();
-                    cx.notify();
-                });
-            });
-
-        // Apply current dialog state
-        let mut new_branch_dialog = new_branch_dialog;
-        if self.new_branch_dialog.is_open() {
-            new_branch_dialog.open();
-        }
-        new_branch_dialog.set_branch_name(self.new_branch_dialog.branch_name());
-        if self.new_branch_dialog.has_error() {
-            new_branch_dialog.set_error(self.new_branch_dialog.error_message());
-        }
-        if self.new_branch_dialog.is_creating() {
-            new_branch_dialog.start_creating();
-        }
 
         let delete_dialog = {
             let app_root_entity_for_confirm = app_root_entity.clone();
@@ -1851,32 +2190,37 @@ impl AppRoot {
                             .flex()
                             .flex_col()
                             .overflow_hidden()
-                            .child({
+                            .when(self.topbar_entity.is_some(), |el: Div| {
+                                el.child(self.topbar_entity.as_ref().unwrap().clone())
+                            })
+                            .when(self.topbar_entity.is_none(), |el: Div| {
                                 let app_root_entity_for_ws_select = app_root_entity.clone();
                                 let app_root_entity_for_ws_close = app_root_entity.clone();
-                                WorkspaceTabBar::new(workspace_manager.clone())
-                                    .on_select_tab(move |idx, _window, app| {
-                                        let _ = app.update_entity(&app_root_entity_for_ws_select, |this: &mut AppRoot, cx| {
-                                            this.handle_workspace_tab_switch(idx, cx);
-                                        });
-                                    })
-                                    .on_close_tab(move |idx, _window, app| {
-                                        let _ = app.update_entity(&app_root_entity_for_ws_close, |this: &mut AppRoot, cx| {
-                                            let closed_path = this.workspace_manager.get_tab(idx).map(|t| t.path.clone());
-                                            this.workspace_manager.close_tab(idx);
-                                            if let Some(path) = closed_path {
-                                                this.per_repo_worktree_index.remove(&path);
-                                            }
-                                            if this.workspace_manager.is_empty() {
-                                                this.stop_current_session();
-                                            } else {
-                                                this.stop_current_session();
-                                                this.start_session_for_active_tab(cx);
-                                            }
-                                            this.save_config();
-                                            cx.notify();
-                                        });
-                                    })
+                                el.child(
+                                    WorkspaceTabBar::new(workspace_manager.clone())
+                                        .on_select_tab(move |idx, _window, app| {
+                                            let _ = app.update_entity(&app_root_entity_for_ws_select, |this: &mut AppRoot, cx| {
+                                                this.handle_workspace_tab_switch(idx, cx);
+                                            });
+                                        })
+                                        .on_close_tab(move |idx, _window, app| {
+                                            let _ = app.update_entity(&app_root_entity_for_ws_close, |this: &mut AppRoot, cx| {
+                                                let closed_path = this.workspace_manager.get_tab(idx).map(|t| t.path.clone());
+                                                this.workspace_manager.close_tab(idx);
+                                                if let Some(path) = closed_path {
+                                                    this.per_repo_worktree_index.remove(&path);
+                                                }
+                                                if this.workspace_manager.is_empty() {
+                                                    this.stop_current_session();
+                                                } else {
+                                                    this.stop_current_session();
+                                                    this.start_session_for_active_tab(cx);
+                                                }
+                                                this.save_config();
+                                                cx.notify();
+                                            });
+                                        })
+                                )
                             })
                             .child({
                                 let app_root_entity_for_ratio = app_root_entity.clone();
@@ -1905,50 +2249,52 @@ impl AppRoot {
                                                 .text_size(px(14.))
                                                 .child("Connecting to worktree...")
                                                 .into_any_element()
+                                        } else if let Some(ref term_entity) = self.terminal_area_entity {
+                                            div().child(term_entity.clone()).into_any_element()
                                         } else {
                                             SplitPaneContainer::new(
-                                            split_tree,
-                                            terminal_buffers.clone(),
-                                            focused_pane_index,
-                                            &repo_name,
-                                        )
-                                        .with_cursor_blink_visible(cursor_blink_visible)
-                                        .with_drag_state(split_divider_drag)
-                                        .on_ratio_change(move |path, ratio, _window, cx| {
-                                            let _ = cx.update_entity(&app_root_entity_for_ratio, |this: &mut AppRoot, cx| {
-                                                this.split_tree.update_ratio(&path, ratio);
-                                                cx.notify();
-                                            });
-                                        })
-                                        .on_divider_drag_start(move |path, pos, ratio, is_vertical, _window, cx| {
-                                            let _ = cx.update_entity(&app_root_entity_for_drag, |this: &mut AppRoot, cx| {
-                                                this.split_divider_drag = Some((path, pos, ratio, is_vertical));
-                                                cx.notify();
-                                            });
-                                        })
-                                        .on_divider_drag_end(move |_window, cx| {
-                                            let _ = cx.update_entity(&app_root_entity_for_drag_end, |this: &mut AppRoot, cx| {
-                                                this.split_divider_drag = None;
-                                                cx.notify();
-                                            });
-                                        })
-                                        .on_pane_click(move |pane_idx, window, cx| {
-                                            let _ = cx.update_entity(&app_root_entity_for_pane_click, |this: &mut AppRoot, cx| {
-                                                this.focused_pane_index = pane_idx;
-                                                if let Some(target) = this.split_tree.focus_index_to_pane_target(pane_idx) {
-                                                    if let Some(rt) = &this.runtime {
-                                                        let _ = rt.focus_pane(&target);
+                                                split_tree,
+                                                terminal_buffers.clone(),
+                                                focused_pane_index,
+                                                &repo_name,
+                                            )
+                                            .with_cursor_blink_visible(cursor_blink_visible)
+                                            .with_drag_state(split_divider_drag)
+                                            .on_ratio_change(move |path, ratio, _window, cx| {
+                                                let _ = cx.update_entity(&app_root_entity_for_ratio, |this: &mut AppRoot, cx| {
+                                                    this.split_tree.update_ratio(&path, ratio);
+                                                    cx.notify();
+                                                });
+                                            })
+                                            .on_divider_drag_start(move |path, pos, ratio, is_vertical, _window, cx| {
+                                                let _ = cx.update_entity(&app_root_entity_for_drag, |this: &mut AppRoot, cx| {
+                                                    this.split_divider_drag = Some((path, pos, ratio, is_vertical));
+                                                    cx.notify();
+                                                });
+                                            })
+                                            .on_divider_drag_end(move |_window, cx| {
+                                                let _ = cx.update_entity(&app_root_entity_for_drag_end, |this: &mut AppRoot, cx| {
+                                                    this.split_divider_drag = None;
+                                                    cx.notify();
+                                                });
+                                            })
+                                            .on_pane_click(move |pane_idx, window, cx| {
+                                                let _ = cx.update_entity(&app_root_entity_for_pane_click, |this: &mut AppRoot, cx| {
+                                                    this.focused_pane_index = pane_idx;
+                                                    if let Some(target) = this.split_tree.focus_index_to_pane_target(pane_idx) {
+                                                        if let Some(rt) = &this.runtime {
+                                                            let _ = rt.focus_pane(&target);
+                                                        }
+                                                        this.active_pane_target = Some(target.clone());
+                                                        if let Ok(mut guard) = this.active_pane_target_shared.lock() {
+                                                            *guard = target;
+                                                        }
                                                     }
-                                                    this.active_pane_target = Some(target.clone());
-                                                    if let Ok(mut guard) = this.active_pane_target_shared.lock() {
-                                                        *guard = target;
-                                                    }
-                                                }
-                                                this.terminal_needs_focus = true;
-                                                cx.notify();
-                                            });
-                                            window.focus(&terminal_focus_for_pane, cx);
-                                        })
+                                                    this.terminal_needs_focus = true;
+                                                    cx.notify();
+                                                });
+                                                window.focus(&terminal_focus_for_pane, cx);
+                                            })
                                             .into_any_element()
                                         }
                                     )
@@ -1963,62 +2309,29 @@ impl AppRoot {
                     wts.get(idx).map(|w| w.short_branch_name().to_string())
                 });
                 {
+                    let status_counts = self
+                        .status_counts_model
+                        .as_ref()
+                        .map(|m| m.read(cx).counts.clone())
+                        .unwrap_or_else(|| self.status_counts.clone());
                     let backend = resolve_backend(Config::load().ok().as_ref());
                     StatusBar::from_context(
                         worktree_branch.as_deref(),
                         self.split_tree.pane_count(),
                         self.focused_pane_index,
-                        &self.status_counts,
+                        &status_counts,
                         Some(backend.as_str()),
                     )
                 }
             })
-            .when(show_notifications, |el: Stateful<Div>| {
-                let notification_items: Vec<NotificationItem> = self
-                    .notification_manager
-                    .lock()
-                    .map(|m| {
-                        m.recent(100)
-                            .iter()
-                            .enumerate()
-                            .map(|(i, n)| NotificationItem::from_notification(n, i))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let app_root_entity_for_close = app_root_entity.clone();
-                let app_root_entity_for_clear = app_root_entity.clone();
-                let app_root_entity_for_read = app_root_entity.clone();
-                el.child(
-                    NotificationPanel::new()
-                        .with_notifications(notification_items)
-                        .with_visible(true)
-                        .on_close(move |_window, cx| {
-                            let _ = cx.update_entity(&app_root_entity_for_close, |this: &mut AppRoot, cx| {
-                                this.show_notification_panel = false;
-                                cx.notify();
-                            });
-                        })
-                        .on_clear_all(move |_window, cx| {
-                            let _ = cx.update_entity(&app_root_entity_for_clear, |this: &mut AppRoot, cx| {
-                                if let Ok(mut mgr) = this.notification_manager.lock() {
-                                    mgr.clear_all();
-                                }
-                                cx.notify();
-                            });
-                        })
-                        .on_mark_read(move |id, _window, cx| {
-                            let _ = cx.update_entity(&app_root_entity_for_read, |this: &mut AppRoot, cx| {
-                                if let Ok(mut mgr) = this.notification_manager.lock() {
-                                    mgr.mark_read(id);
-                                }
-                                cx.notify();
-                            });
-                        })
-                )
+            .when(self.notification_panel_entity.is_some(), |el: Stateful<Div>| {
+                el.child(self.notification_panel_entity.as_ref().unwrap().clone())
             })
             // Dialogs rendered last so they appear on top (absolute overlay)
             .child(delete_dialog)
-            .child(new_branch_dialog)
+            .when(self.new_branch_dialog_entity.is_some(), |el: Stateful<Div>| {
+                el.child(self.new_branch_dialog_entity.as_ref().unwrap().clone())
+            })
             .when(self.diff_overlay_open.is_some(), |el| {
                 if let Some((branch, window_name, session, pane_target)) = &self.diff_overlay_open {
                     let buffer = terminal_buffers
