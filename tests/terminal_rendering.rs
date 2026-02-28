@@ -84,7 +84,7 @@ fn test_content_for_status_detection_works_with_status_detector() {
     let content = buf.content_for_status_detection();
     assert!(content.is_some());
     let detector = StatusDetector::new();
-    let status = detector.detect(content.as_deref().unwrap());
+    let status = detector.detect_from_text(content.as_deref().unwrap());
     assert_eq!(status, AgentStatus::Running, "content should be detected as Running");
 }
 
@@ -95,7 +95,7 @@ fn test_content_for_status_detection_waiting_pattern() {
     let content = buf.content_for_status_detection();
     assert!(content.is_some());
     let detector = StatusDetector::new();
-    let status = detector.detect(content.as_deref().unwrap());
+    let status = detector.detect_from_text(content.as_deref().unwrap());
     assert_eq!(status, AgentStatus::Waiting);
 }
 
@@ -106,7 +106,7 @@ fn test_content_for_status_detection_error_pattern() {
     let content = buf.content_for_status_detection();
     assert!(content.is_some());
     let detector = StatusDetector::new();
-    let status = detector.detect(content.as_deref().unwrap());
+    let status = detector.detect_from_text(content.as_deref().unwrap());
     assert_eq!(status, AgentStatus::Error);
 }
 
@@ -117,6 +117,6 @@ fn test_content_for_status_detection_idle() {
     let content = buf.content_for_status_detection();
     assert!(content.is_some());
     let detector = StatusDetector::new();
-    let status = detector.detect(content.as_deref().unwrap());
+    let status = detector.detect_from_text(content.as_deref().unwrap());
     assert_eq!(status, AgentStatus::Idle);
 }

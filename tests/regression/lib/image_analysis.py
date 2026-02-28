@@ -257,6 +257,7 @@ if __name__ == '__main__':
         print("Usage: python3 image_analysis.py <command> <image_path> [args...]")
         print("")
         print("Commands:")
+        print("  verify_window <image> [min_w] [min_h]   - Verify pmux window is visible/normal")
         print("  sidebar_status <image> <x> <y> <w> <h>  - Detect sidebar status color")
         print("  cursor_pos <image> <x> <y> <w> <h>      - Detect cursor in terminal")
         print("  check_colors <image> <x> <y> <w> <h>    - Check for multiple colors")
@@ -265,8 +266,19 @@ if __name__ == '__main__':
     
     cmd = sys.argv[1]
     image_path = sys.argv[2]
-    
-    if cmd == 'sidebar_status':
+
+    if cmd == 'verify_window':
+        min_w = int(sys.argv[3]) if len(sys.argv) > 3 else 400
+        min_h = int(sys.argv[4]) if len(sys.argv) > 4 else 300
+        result = verify_window(image_path, min_width=min_w, min_height=min_h)
+        print(f"OK:{result['ok']}")
+        print(f"REASON:{result['reason']}")
+        print(f"AVG_BRIGHTNESS:{result['avg_brightness']:.1f}")
+        print(f"VARIANCE:{result['variance']:.1f}")
+        print(f"WIDTH:{result['width']}")
+        print(f"HEIGHT:{result['height']}")
+
+    elif cmd == 'sidebar_status':
         x, y, w, h = map(int, sys.argv[3:7])
         result = check_sidebar_status(image_path, (x, y, w, h))
         print(f"STATUS:{result['status']}")

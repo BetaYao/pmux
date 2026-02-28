@@ -4,7 +4,7 @@
 
 use pmux::agent_status::AgentStatus;
 use pmux::shell_integration::{MarkerKind, ShellPhase};
-use pmux::status_detector::StatusDetector;
+use pmux::status_detector::{ProcessStatus, StatusDetector};
 use pmux::terminal::TerminalEngine;
 
 fn osc133_st(kind: char, exit_code: Option<u8>) -> Vec<u8> {
@@ -56,7 +56,7 @@ fn test_zsh_osc133_prompt_input_running_output_flow() {
         last_post_exec_exit_code: engine.last_post_exec_exit_code(),
     };
     assert_eq!(
-        detector.detect_with_shell_phase("command output", Some(info)),
+        detector.detect(ProcessStatus::Running, Some(info), "command output"),
         AgentStatus::Running
     );
 
@@ -74,7 +74,7 @@ fn test_zsh_osc133_prompt_input_running_output_flow() {
         last_post_exec_exit_code: engine.last_post_exec_exit_code(),
     };
     assert_eq!(
-        detector.detect_with_shell_phase("total 42", Some(info)),
+        detector.detect(ProcessStatus::Unknown, Some(info), "total 42"),
         AgentStatus::Idle
     );
 
@@ -170,19 +170,19 @@ fn test_fallback_text_detection_without_osc133() {
 
     // No shell_info (OSC 133 unavailable) → pure text detection
     assert_eq!(
-        detector.detect_with_shell_phase("AI is thinking...", None),
+        detector.detect(ProcessStatus::Unknown, None, "AI is thinking..."),
         AgentStatus::Running
     );
     assert_eq!(
-        detector.detect_with_shell_phase("? What would you like to do?", None),
+        detector.detect(ProcessStatus::Unknown, None, "? What would you like to do?"),
         AgentStatus::Waiting
     );
     assert_eq!(
-        detector.detect_with_shell_phase("error: command failed", None),
+        detector.detect(ProcessStatus::Unknown, None, "error: command failed"),
         AgentStatus::Error
     );
     assert_eq!(
-        detector.detect_with_shell_phase("$ echo done\ndone", None),
+        detector.detect(ProcessStatus::Unknown, None, "$ echo done\ndone"),
         AgentStatus::Idle
     );
 
@@ -192,7 +192,7 @@ fn test_fallback_text_detection_without_osc133() {
         last_post_exec_exit_code: None,
     };
     assert_eq!(
-        detector.detect_with_shell_phase("AI is thinking", Some(info)),
+        detector.detect(ProcessStatus::Unknown, Some(info), "AI is thinking"),
         AgentStatus::Running
     );
 }

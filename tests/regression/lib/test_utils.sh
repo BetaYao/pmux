@@ -131,7 +131,11 @@ activate_window() {
 
 send_keystroke() {
     local keys="$1"
-    osascript_cmd "tell application \"System Events\" to tell process \"pmux\" to keystroke \"$keys\""
+    # Escape backslashes and double quotes for AppleScript string
+    local keys_escaped
+    keys_escaped="${keys//\\/\\\\}"
+    keys_escaped="${keys_escaped//\"/\\\"}"
+    osascript_cmd "tell application \"System Events\" to tell process \"pmux\" to keystroke \"$keys_escaped\""
 }
 
 send_keycode() {
@@ -188,7 +192,9 @@ take_screenshot() {
         screencapture "$output_dir/$filename"
     fi
     
-    log_info "Screenshot saved: $output_dir/$filename"
+    local filepath="$output_dir/$filename"
+    log_info "Screenshot saved: $filepath" >&2
+    echo "$filepath"
 }
 
 # 测试报告函数

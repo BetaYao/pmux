@@ -311,7 +311,6 @@ impl RenderOnce for TerminalView {
                 result.unwrap_or_else(Vec::new)
             }
         };
-
         div()
             .id("terminal-view")
             .size_full()

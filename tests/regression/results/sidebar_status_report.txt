@@ -1,0 +1,18 @@
+Sidebar Status Detection Report
+==============================
+Test Time: Sat Feb 28 16:59:33 CST 2026
+
+Screenshots:
+1. IDLE state: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/sidebar_idle_20260228_165927.png
+   Detected: error (confidence: 0.00)
+
+2. PROGRESS state: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/sidebar_progress_20260228_165930.png
+   Detected: error
+
+3. ERROR state: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/sidebar_error_20260228_165933.png
+   Detected: error
+
+Notes:
+- Color detection is based on dominant colors in sidebar region
+- Manual verification may be needed if confidence is low
+- Review screenshots to confirm accuracy

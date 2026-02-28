@@ -333,7 +333,7 @@ impl DebouncedStatusTracker {
 
         // Check if this matches pending status
         if Some(detected) == self.pending_status {
-            self.pending_count += 1;
+            self.pending_count = self.pending_count.saturating_add(1);
 
             // If we've seen this enough times, commit the change
             if self.pending_count >= self.debounce_threshold {

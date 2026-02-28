@@ -14,9 +14,9 @@ uuid = { version = "1.6", features = ["v4"] }
 tokio = { version = "1.35", features = ["rt-multi-thread", "sync"] }
 blocking = "1.5"
 flume = "0.11"
-# GPUI dependencies (pinned to known working commit)
-gpui = { git = "https://github.com/zed-industries/zed", rev = "269b03f4" }
-gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "269b03f4", features = ["font-kit"] }
+# GPUI dependencies (track main branch for latest)
+gpui = { git = "https://github.com/zed-industries/zed" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit"] }
 anyhow = "1.0"
 alacritty_terminal = "0.25.1"
 notify-rust = "4"

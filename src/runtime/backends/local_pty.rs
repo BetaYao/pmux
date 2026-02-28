@@ -12,7 +12,6 @@ use std::thread;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
 use crate::runtime::agent_runtime::{AgentId, AgentRuntime, PaneId, RuntimeError};
-
 /// Single pane PTY instance.
 struct LocalPtyPane {
     pane_id: PaneId,
@@ -117,13 +116,24 @@ impl LocalPtyAgent {
             }
         });
 
-        // Writer thread
+        // Writer thread (batched: recv first, try_recv rest, write+flush once)
         let (input_tx, input_rx) = flume::unbounded::<Vec<u8>>();
         thread::spawn(move || {
             let mut writer = writer;
-            while let Ok(bytes) = input_rx.recv() {
-                if writer.write_all(&bytes).is_err() || writer.flush().is_err() {
-                    break;
+            let mut buffer = Vec::new();
+            loop {
+                match input_rx.recv() {
+                    Ok(bytes) => {
+                        buffer.extend_from_slice(&bytes);
+                        while let Ok(bytes) = input_rx.try_recv() {
+                            buffer.extend_from_slice(&bytes);
+                        }
+                        if writer.write_all(&buffer).is_err() || writer.flush().is_err() {
+                            break;
+                        }
+                        buffer.clear();
+                    }
+                    Err(_) => break,
                 }
             }
         });
@@ -174,9 +184,10 @@ impl AgentRuntime for LocalPtyAgent {
         let pane = self
             .get_pane(pane_id)
             .ok_or_else(|| RuntimeError::PaneNotFound(pane_id.clone()))?;
-        pane.input_tx
+        let result = pane.input_tx
             .send(bytes.to_vec())
-            .map_err(|e| RuntimeError::Backend(e.to_string()))
+            .map_err(|e| RuntimeError::Backend(e.to_string()));
+        result
     }
 
     fn send_key(&self, pane_id: &PaneId, key: &str, _use_literal: bool) -> Result<(), RuntimeError> {
@@ -318,13 +329,27 @@ impl LocalPtyRuntime {
             }
         });
 
-        // Input queue + writer thread: input_rx -> PTY (non-blocking send_input)
+        // Input queue + writer thread: input_rx -> PTY (batched writes)
         let (input_tx, input_rx) = flume::unbounded::<Vec<u8>>();
         thread::spawn(move || {
             let mut writer = writer;
-            while let Ok(bytes) = input_rx.recv() {
-                if writer.write_all(&bytes).is_err() || writer.flush().is_err() {
-                    break;
+            let mut buf = Vec::new();
+            loop {
+                // Recv first chunk (blocks until available)
+                match input_rx.recv() {
+                    Ok(bytes) => {
+                        buf.extend_from_slice(&bytes);
+                        // Drain all immediately available chunks
+                        while let Ok(bytes) = input_rx.try_recv() {
+                            buf.extend_from_slice(&bytes);
+                        }
+                        // Write all at once and flush once
+                        if writer.write_all(&buf).is_err() || writer.flush().is_err() {
+                            break;
+                        }
+                        buf.clear();
+                    }
+                    Err(_) => break,
                 }
             }
         });

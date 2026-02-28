@@ -14,15 +14,17 @@ use std::time::Duration;
 
 /// Extract visible text from engine via renderable_content.
 fn engine_content_text(engine: &TerminalEngine) -> String {
-    engine.with_renderable_content(|_content, display_iter, _screen_lines| {
-        let mut chars = Vec::new();
-        for indexed in display_iter {
-            if !indexed.cell.flags.contains(Flags::WIDE_CHAR_SPACER) && indexed.cell.c != '\0' {
-                chars.push(indexed.cell.c);
+    engine
+        .try_renderable_content(|_content, display_iter, _screen_lines| {
+            let mut chars = Vec::new();
+            for indexed in display_iter {
+                if !indexed.cell.flags.contains(Flags::WIDE_CHAR_SPACER) && indexed.cell.c != '\0' {
+                    chars.push(indexed.cell.c);
+                }
             }
-        }
-        chars.into_iter().collect::<String>()
-    })
+            chars.into_iter().collect::<String>()
+        })
+        .unwrap_or_default()
 }
 
 /// Get cursor position (row, col) from engine.

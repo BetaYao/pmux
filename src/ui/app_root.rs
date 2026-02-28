@@ -79,10 +79,17 @@ pub struct AppRoot {
     delete_worktree_dialog: DeleteWorktreeDialogUi,
     /// Pending worktree selection to be processed on next render
     pending_worktree_selection: Option<usize>,
+    /// When Some(idx): switching to worktree idx, show loading in terminal area
+    worktree_switch_loading: Option<usize>,
     /// Current active worktree index (synced with Sidebar/TabBar)
     active_worktree_index: Option<usize>,
     /// Per-repo active worktree index for restoring state when switching workspace tabs
     per_repo_worktree_index: HashMap<PathBuf, usize>,
+    /// Cached worktrees for active repo. Refreshed on workspace change, branch create/delete, explicit refresh.
+    /// Avoids calling discover_worktrees in render path.
+    cached_worktrees: Vec<crate::worktree::WorktreeInfo>,
+    /// Repo path for which cached_worktrees is valid
+    cached_worktrees_repo: Option<PathBuf>,
     /// Sidebar context menu: which worktree index has menu open
     sidebar_context_menu_index: Option<usize>,
     /// Review windows: branch -> window name (stub for local PTY)
@@ -194,8 +201,11 @@ impl AppRoot {
         new_branch_dialog: NewBranchDialogUi::new(),
             delete_worktree_dialog: DeleteWorktreeDialogUi::new(),
             pending_worktree_selection: None,
+            worktree_switch_loading: None,
             active_worktree_index: None,
             per_repo_worktree_index,
+            cached_worktrees: Vec::new(),
+            cached_worktrees_repo: None,
             sidebar_context_menu_index: None,
             review_windows: HashMap::new(),
             diff_overlay_open: None,
@@ -221,39 +231,38 @@ impl AppRoot {
         let repo_path = self.workspace_manager.active_tab().map(|t| t.path.clone());
 
         if let (Some(name), Some(path)) = (repo_name, repo_path) {
+            self.refresh_worktrees_for_repo(&path);
+            let worktrees = &self.cached_worktrees;
+
             // Restore per-repo worktree selection if saved
             let restored_idx = self.per_repo_worktree_index.get(&path).copied();
             if let Some(awi) = restored_idx {
-                if let Ok(worktrees) = crate::worktree::discover_worktrees(&path) {
-                    if awi < worktrees.len() {
-                        self.active_worktree_index = Some(awi);
-                        if let Some(wt) = worktrees.get(awi) {
-                            let wt_path = wt.path.clone();
-                            let branch = wt.short_branch_name().to_string();
-                            if self.try_recover_then_switch(&path, &wt_path, &branch, cx) {
-                                return;
-                            }
-                            self.switch_to_worktree(&wt_path, &branch, cx);
+                if awi < worktrees.len() {
+                    self.active_worktree_index = Some(awi);
+                    if let Some(wt) = worktrees.get(awi) {
+                        let wt_path = wt.path.clone();
+                        let branch = wt.short_branch_name().to_string();
+                        if self.try_recover_then_switch(&path, &wt_path, &branch, cx) {
                             return;
                         }
+                        self.switch_to_worktree(&wt_path, &branch, cx);
+                        return;
                     }
                 }
             }
 
             // No saved worktree or invalid: use first worktree if any, else repo session
             self.active_worktree_index = None;
-            if let Ok(worktrees) = crate::worktree::discover_worktrees(&path) {
-                if !worktrees.is_empty() {
-                    self.active_worktree_index = Some(0);
-                    let wt = &worktrees[0];
-                    let wt_path = wt.path.clone();
-                    let branch = wt.short_branch_name().to_string();
-                    if self.try_recover_then_switch(&path, &wt_path, &branch, cx) {
-                        return;
-                    }
-                    self.switch_to_worktree(&wt_path, &branch, cx);
+            if !worktrees.is_empty() {
+                self.active_worktree_index = Some(0);
+                let wt = &worktrees[0];
+                let wt_path = wt.path.clone();
+                let branch = wt.short_branch_name().to_string();
+                if self.try_recover_then_switch(&path, &wt_path, &branch, cx) {
                     return;
                 }
+                self.switch_to_worktree(&wt_path, &branch, cx);
+                return;
             }
             if self.try_recover_then_start(&path, &name, cx) {
                 return;
@@ -287,7 +296,7 @@ impl AppRoot {
                     blocking::unblock(|| std::thread::sleep(Duration::from_millis(16))).await;
 
                     // Process new terminal bytes
-                    engine.advance_bytes();
+                    let content_changed = engine.advance_bytes();
 
                     // Event-driven status detection (no polling loop)
                     // Check status whenever terminal content changes
@@ -319,7 +328,7 @@ impl AppRoot {
                         }
                     }
 
-                    if entity.update(cx, |_, cx| cx.notify()).is_err() {
+                    if content_changed && entity.update(cx, |_, cx| cx.notify()).is_err() {
                         break;
                     }
                 }
@@ -361,7 +370,7 @@ impl AppRoot {
             cx.spawn(async move |entity, cx| {
                 loop {
                     blocking::unblock(|| std::thread::sleep(Duration::from_millis(16))).await;
-                    engine.advance_bytes();
+                    let content_changed = engine.advance_bytes();
                     if let Some(ref pub_) = status_publisher {
                         let shell_info = crate::shell_integration::ShellPhaseInfo {
                             phase: engine.shell_phase(),
@@ -387,7 +396,7 @@ impl AppRoot {
                             );
                         }
                     }
-                    if entity.update(cx, |_, cx| cx.notify()).is_err() {
+                    if content_changed && entity.update(cx, |_, cx| cx.notify()).is_err() {
                         break;
                     }
                 }
@@ -517,16 +526,14 @@ impl AppRoot {
 
                         // Start tmux session + polling (use first worktree if any)
                         this.active_worktree_index = None;
-                        if let Ok(worktrees) = crate::worktree::discover_worktrees(&path) {
-                            if !worktrees.is_empty() {
-                                this.active_worktree_index = Some(0);
-                                let wt = &worktrees[0];
-                                let wt_path = wt.path.clone();
-                                let branch = wt.short_branch_name().to_string();
-                                this.switch_to_worktree(&wt_path, &branch, cx);
-                            } else {
-                                this.start_local_session(&path, "main", cx);
-                            }
+                        this.refresh_worktrees_for_repo(&path);
+                        let worktrees = &this.cached_worktrees;
+                        if !worktrees.is_empty() {
+                            this.active_worktree_index = Some(0);
+                            let wt = &worktrees[0];
+                            let wt_path = wt.path.clone();
+                            let branch = wt.short_branch_name().to_string();
+                            this.switch_to_worktree(&wt_path, &branch, cx);
                         } else {
                             this.start_local_session(&path, "main", cx);
                         }
@@ -556,37 +563,35 @@ impl AppRoot {
 
         if let Some(tab) = self.workspace_manager.active_tab() {
             let repo_path = tab.path.clone();
+            self.refresh_worktrees_for_repo(&repo_path);
+            let worktrees = &self.cached_worktrees;
 
             // Restore active_worktree_index for this repo
             let restored_idx = self.per_repo_worktree_index.get(&repo_path).copied();
 
             if let Some(awi) = restored_idx {
-                if let Ok(worktrees) = crate::worktree::discover_worktrees(&repo_path) {
-                    if awi < worktrees.len() {
-                        self.active_worktree_index = Some(awi);
-                        if let Some(wt) = worktrees.get(awi) {
-                            let path = wt.path.clone();
-                            let branch = wt.short_branch_name().to_string();
-                            self.switch_to_worktree(&path, &branch, cx);
-                            cx.notify();
-                            return;
-                        }
+                if awi < worktrees.len() {
+                    self.active_worktree_index = Some(awi);
+                    if let Some(wt) = worktrees.get(awi) {
+                        let path = wt.path.clone();
+                        let branch = wt.short_branch_name().to_string();
+                        self.switch_to_worktree(&path, &branch, cx);
+                        cx.notify();
+                        return;
                     }
                 }
             }
 
             // No saved worktree or invalid index: use first worktree if any
             self.active_worktree_index = None;
-            if let Ok(worktrees) = crate::worktree::discover_worktrees(&repo_path) {
-                if !worktrees.is_empty() {
-                    self.active_worktree_index = Some(0);
-                    let wt = &worktrees[0];
-                    let wt_path = wt.path.clone();
-                    let branch = wt.short_branch_name().to_string();
-                    self.switch_to_worktree(&wt_path, &branch, cx);
-                    cx.notify();
-                    return;
-                }
+            if !worktrees.is_empty() {
+                self.active_worktree_index = Some(0);
+                let wt = &worktrees[0];
+                let wt_path = wt.path.clone();
+                let branch = wt.short_branch_name().to_string();
+                self.switch_to_worktree(&wt_path, &branch, cx);
+                cx.notify();
+                return;
             }
             self.start_local_session(&repo_path, "main", cx);
         }
@@ -598,34 +603,29 @@ impl AppRoot {
     fn start_session_for_active_tab(&mut self, cx: &mut Context<Self>) {
         if let Some(tab) = self.workspace_manager.active_tab() {
             let repo_path = tab.path.clone();
+            self.refresh_worktrees_for_repo(&repo_path);
+            let worktrees = &self.cached_worktrees;
             let restored_idx = self.per_repo_worktree_index.get(&repo_path).copied();
 
             if let Some(awi) = restored_idx {
-                if let Ok(worktrees) = crate::worktree::discover_worktrees(&repo_path) {
-                    if awi < worktrees.len() {
-                        self.active_worktree_index = Some(awi);
-                        if let Some(wt) = worktrees.get(awi) {
-                            let path = wt.path.clone();
-                            let branch = wt.short_branch_name().to_string();
-                            self.switch_to_worktree(&path, &branch, cx);
-                            cx.notify();
-                            return;
-                        }
+                if awi < worktrees.len() {
+                    self.active_worktree_index = Some(awi);
+                    if let Some(wt) = worktrees.get(awi) {
+                        let path = wt.path.clone();
+                        let branch = wt.short_branch_name().to_string();
+                        self.switch_to_worktree(&path, &branch, cx);
+                        cx.notify();
+                        return;
                     }
                 }
             }
 
             self.active_worktree_index = None;
-            if let Ok(worktrees) = crate::worktree::discover_worktrees(&repo_path) {
-                if !worktrees.is_empty() {
-                    self.active_worktree_index = Some(0);
-                    let wt = &worktrees[0];
-                    let wt_path = wt.path.clone();
-                    let branch = wt.short_branch_name().to_string();
-                    self.switch_to_worktree(&wt_path, &branch, cx);
-                } else {
-                    self.start_local_session(&repo_path, "main", cx);
-                }
+            if !worktrees.is_empty() {
+                let wt = &worktrees[0];
+                let wt_path = wt.path.clone();
+                let branch = wt.short_branch_name().to_string();
+                self.switch_to_worktree(&wt_path, &branch, cx);
             } else {
                 self.start_local_session(&repo_path, "main", cx);
             }
@@ -889,22 +889,97 @@ impl AppRoot {
         self.attach_runtime(runtime, pane_target, worktree_path, branch_name, cx, None);
     }
 
-    /// Process pending worktree selection (called from render context)
+    /// Process pending worktree selection (called from render context).
+    /// Runs runtime creation in background; shows loading state immediately.
     fn process_pending_worktree_selection(&mut self, cx: &mut Context<Self>) {
-        if let Some(idx) = self.pending_worktree_selection.take() {
-            // Get the current repo path and discover worktrees
-            if let Some(tab) = self.workspace_manager.active_tab() {
-                let repo_path = tab.path.clone();
-                if let Ok(worktrees) = crate::worktree::discover_worktrees(&repo_path) {
-                    if let Some(worktree) = worktrees.get(idx) {
-                        let path = worktree.path.clone();
-                        let branch = worktree.short_branch_name().to_string();
-                        println!("Processing worktree selection: {} (branch: {})", path.display(), branch);
-                        self.active_worktree_index = Some(idx);
-                        self.switch_to_worktree(&path, &branch, cx);
-                    }
+        let idx = match self.pending_worktree_selection.take() {
+            Some(i) => i,
+            None => return,
+        };
+        let (repo_path, path, branch) = {
+            let tab = match self.workspace_manager.active_tab() {
+                Some(t) => t,
+                None => return,
+            };
+            let repo_path = tab.path.clone();
+            self.refresh_worktrees_for_repo(&repo_path);
+            let worktree = match self.cached_worktrees.get(idx) {
+                Some(w) => w,
+                None => return,
+            };
+            (
+                repo_path,
+                worktree.path.clone(),
+                worktree.short_branch_name().to_string(),
+            )
+        };
+
+        self.active_worktree_index = Some(idx);
+        self.worktree_switch_loading = Some(idx);
+        self.stop_current_session();
+        cx.notify();
+
+        let workspace_path = self
+            .workspace_manager
+            .active_tab()
+            .map(|t| t.path.clone())
+            .unwrap_or_else(|| repo_path.clone());
+        let config = Config::load().ok();
+        let entity = cx.entity();
+        cx.spawn(async move |entity, cx| {
+            let path_clone = path.clone();
+            let branch_clone = branch.clone();
+            let result = blocking::unblock(move || {
+                create_runtime_from_env(&workspace_path, &path_clone, &branch_clone, 80, 24, config.as_ref())
+            })
+            .await;
+
+            match result {
+                Ok(runtime) => {
+                    let pane_target = runtime
+                        .primary_pane_id()
+                        .unwrap_or_else(|| format!("local:{}", path.display()));
+                    let _ = entity.update(cx, |this: &mut AppRoot, cx| {
+                        this.worktree_switch_loading = None;
+                        this.attach_runtime(runtime, pane_target, &path, &branch, cx, None);
+                        cx.notify();
+                    });
+                }
+                Err(e) => {
+                    let _ = entity.update(cx, |this: &mut AppRoot, cx| {
+                        this.worktree_switch_loading = None;
+                        this.state.error_message = Some(format!("Runtime error: {}", e));
+                        cx.notify();
+                    });
                 }
             }
+        })
+        .detach();
+    }
+
+    /// Refresh worktree cache for the given repo. Call when:
+    /// - Switching workspace tab
+    /// - After create_branch / delete worktree
+    /// - On explicit user refresh (future)
+    fn refresh_worktrees_for_repo(&mut self, repo_path: &Path) {
+        match crate::worktree::discover_worktrees(repo_path) {
+            Ok(wt) => {
+                self.cached_worktrees = wt;
+                self.cached_worktrees_repo = Some(repo_path.to_path_buf());
+            }
+            Err(_) => {
+                self.cached_worktrees.clear();
+                self.cached_worktrees_repo = None;
+            }
+        }
+    }
+
+    /// Get worktrees for current repo (from cache). Call from render.
+    fn worktrees_for_render(&self, repo_path: &Path) -> &[crate::worktree::WorktreeInfo] {
+        if self.cached_worktrees_repo.as_deref() == Some(repo_path) {
+            &self.cached_worktrees
+        } else {
+            &[]
         }
     }
 
@@ -1034,7 +1109,8 @@ impl AppRoot {
                     let target = target.to_string();
                     let bytes = bytes.to_vec();
                     cx.spawn(async move |_entity, _cx| {
-                        if let Err(e) = blocking::unblock(move || rt.send_input(&target, &bytes)).await {
+                        let result = blocking::unblock(move || rt.send_input(&target, &bytes)).await;
+                        if let Err(e) = result {
                             eprintln!("pmux: send_input failed: {}", e);
                         }
                     })
@@ -1090,14 +1166,12 @@ impl AppRoot {
     fn save_current_worktree_runtime_state(&mut self) {
         let (workspace_path, worktree_path, branch_name) = {
             let Some(tab) = self.workspace_manager.active_tab() else { return };
+            let repo_path = tab.path.clone();
             let Some(awi) = self.active_worktree_index else { return };
-            let worktrees = match crate::worktree::discover_worktrees(&tab.path) {
-                Ok(w) => w,
-                Err(_) => return,
-            };
-            let Some(wt) = worktrees.get(awi) else { return };
+            self.refresh_worktrees_for_repo(&repo_path);
+            let Some(wt) = self.cached_worktrees.get(awi) else { return };
             (
-                tab.path.clone(),
+                repo_path,
                 wt.path.clone(),
                 wt.short_branch_name().to_string(),
             )
@@ -1116,10 +1190,8 @@ impl AppRoot {
             .map(|t| t.path.clone())
             .unwrap_or_else(|| PathBuf::from("."));
 
-        let worktrees = match crate::worktree::discover_worktrees(&repo_path) {
-            Ok(w) => w,
-            Err(_) => return,
-        };
+        self.refresh_worktrees_for_repo(&repo_path);
+        let worktrees = &self.cached_worktrees;
 
         let idx = worktree_idx.unwrap_or(0);
         let worktree = match worktrees.get(idx) {
@@ -1231,12 +1303,11 @@ impl AppRoot {
             .map(|t| t.path.clone())
             .unwrap_or_else(|| PathBuf::from("."));
         if let Some(idx) = self.active_worktree_index {
-            if let Ok(worktrees) = crate::worktree::discover_worktrees(&worktree_path) {
-                if let Some(wt) = worktrees.get(idx) {
-                    let path = wt.path.clone();
-                    let br = wt.short_branch_name().to_string();
-                    self.switch_to_worktree(&path, &br, cx);
-                }
+            self.refresh_worktrees_for_repo(&worktree_path);
+            if let Some(wt) = self.cached_worktrees.get(idx) {
+                let path = wt.path.clone();
+                let br = wt.short_branch_name().to_string();
+                self.switch_to_worktree(&path, &br, cx);
             }
         }
         cx.notify();
@@ -1287,7 +1358,9 @@ impl AppRoot {
                 match result {
                     CreationResult::Success { worktree_path, branch_name: _ } => {
                         this.new_branch_dialog.complete_creating(true);
-                        // Refresh sidebar
+                        if let Some(repo_path) = this.workspace_manager.active_tab().map(|t| t.path.clone()) {
+                            this.refresh_worktrees_for_repo(&repo_path);
+                        }
                         this.refresh_sidebar(cx);
                         println!("Successfully created worktree at: {:?}", worktree_path);
                     }
@@ -1358,17 +1431,17 @@ impl AppRoot {
                 let repo_path = self.workspace_manager.active_tab()
                     .map(|t| t.path.clone())
                     .unwrap_or_else(|| PathBuf::from("."));
-                if let Ok(worktrees) = crate::worktree::discover_worktrees(&repo_path) {
-                    if worktrees.is_empty() {
-                        self.active_worktree_index = None;
-                        self.stop_current_session();
-                    } else {
-                        self.active_worktree_index = Some(0);
-                        if let Some(wt) = worktrees.first() {
-                            let path = wt.path.clone();
-                            let branch = wt.short_branch_name().to_string();
-                            self.switch_to_worktree(&path, &branch, cx);
-                        }
+                self.refresh_worktrees_for_repo(&repo_path);
+                let worktrees = &self.cached_worktrees;
+                if worktrees.is_empty() {
+                    self.active_worktree_index = None;
+                    self.stop_current_session();
+                } else {
+                    self.active_worktree_index = Some(0);
+                    if let Some(wt) = worktrees.first() {
+                        let path = wt.path.clone();
+                        let branch = wt.short_branch_name().to_string();
+                        self.switch_to_worktree(&path, &branch, cx);
                     }
                 }
             }
@@ -1545,12 +1618,11 @@ impl AppRoot {
         let sidebar_visible = self.sidebar_visible;
         let show_notifications = self.show_notification_panel;
         let workspace_manager = self.workspace_manager.clone();
-        let terminal_buffers = self.terminal_buffers.lock()
-            .map(|g| g.clone())
-            .unwrap_or_default();
+        let terminal_buffers = Arc::clone(&self.terminal_buffers);
         let split_tree = self.split_tree.clone();
         let focused_pane_index = self.focused_pane_index;
         let split_divider_drag = self.split_divider_drag.clone();
+        let worktree_switch_loading = self.worktree_switch_loading;
         let _status_counts = self.status_counts.clone();
         let pane_statuses = self.pane_statuses.clone();
         let app_root_entity = cx.entity();
@@ -1592,8 +1664,8 @@ impl AppRoot {
             })
             .with_notification_count(notification_unread);
 
-        // Load worktrees from git and sync Sidebar selection with active worktree
-        let worktrees = crate::worktree::discover_worktrees(&repo_path).unwrap_or_default();
+        // Use cached worktrees (never call git in render)
+        let worktrees = self.worktrees_for_render(&repo_path).to_vec();
         if !worktrees.is_empty() {
             sidebar.set_worktrees(worktrees);
             if let Some(idx) = self.active_worktree_index {
@@ -1643,10 +1715,9 @@ impl AppRoot {
         sidebar.on_delete(move |idx, _window, cx| {
             let _ = cx.update_entity(&app_root_entity_for_delete, |this: &mut AppRoot, cx| {
                 this.sidebar_context_menu_index = None;
-                if let Ok(worktrees) = crate::worktree::discover_worktrees(&repo_path_for_delete) {
-                    if let Some(wt) = worktrees.get(idx) {
-                        this.show_delete_dialog(wt.clone(), cx);
-                    }
+                this.refresh_worktrees_for_repo(&repo_path_for_delete);
+                if let Some(wt) = this.cached_worktrees.get(idx) {
+                    this.show_delete_dialog(wt.clone(), cx);
                 }
             });
         });
@@ -1814,7 +1885,19 @@ impl AppRoot {
                                         window.focus(&terminal_focus_for_click, cx);
                                     })
                                     .child(
-                                        SplitPaneContainer::new(
+                                        if worktree_switch_loading.is_some() {
+                                            div()
+                                                .size_full()
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .bg(rgb(0x1e1e1e))
+                                                .text_color(rgb(0x888888))
+                                                .text_size(px(14.))
+                                                .child("Connecting to worktree...")
+                                                .into_any_element()
+                                        } else {
+                                            SplitPaneContainer::new(
                                             split_tree,
                                             terminal_buffers.clone(),
                                             focused_pane_index,
@@ -1857,17 +1940,19 @@ impl AppRoot {
                                             });
                                             window.focus(&terminal_focus_for_pane, cx);
                                         })
+                                            .into_any_element()
+                                        }
                                     )
                             })
                     )
             )
             .child({
-                let worktree_branch = self.workspace_manager.active_tab()
-                    .and_then(|t| crate::worktree::discover_worktrees(&t.path).ok())
-                    .and_then(|wts| {
-                        let idx = self.active_worktree_index?;
-                        wts.get(idx).map(|w| w.short_branch_name().to_string())
-                    });
+                let repo_path = self.workspace_manager.active_tab().map(|t| t.path.clone());
+                let worktree_branch = repo_path.and_then(|p| {
+                    let wts = self.worktrees_for_render(&p);
+                    let idx = self.active_worktree_index?;
+                    wts.get(idx).map(|w| w.short_branch_name().to_string())
+                });
                 {
                     let backend = resolve_backend(Config::load().ok().as_ref());
                     StatusBar::from_context(
@@ -1927,9 +2012,11 @@ impl AppRoot {
             .child(new_branch_dialog)
             .when(self.diff_overlay_open.is_some(), |el| {
                 if let Some((branch, window_name, session, pane_target)) = &self.diff_overlay_open {
-                    let buffer = terminal_buffers.get(pane_target).cloned().unwrap_or_else(|| {
-                        TerminalBuffer::new_empty_term(80, 24)
-                    });
+                    let buffer = terminal_buffers
+                        .lock()
+                        .ok()
+                        .and_then(|g| g.get(pane_target).cloned())
+                        .unwrap_or_else(|| TerminalBuffer::new_empty_term(80, 24));
                     let branch = branch.clone();
                     let window_name = window_name.clone();
                     let session = session.clone();

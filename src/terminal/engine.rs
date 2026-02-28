@@ -62,16 +62,21 @@ impl TerminalEngine {
     /// Process all pending bytes from the PTY channel.
     /// Drains byte_rx with try_recv() until empty, advancing each chunk through the VTE processor.
     /// Uses try_lock() to avoid blocking the render thread - if terminal is locked, skips this cycle.
-    pub fn advance_bytes(&self) {
+    pub fn advance_bytes(&self) -> bool {
         let Ok(mut term) = self.terminal.try_lock() else {
-            return; // Terminal locked by render thread, skip this cycle
+            return false; // Terminal locked by render thread, skip this cycle
         };
         let Ok(mut processor) = self.processor.try_lock() else {
-            return; // Processor locked, skip this cycle
+            return false; // Processor locked, skip this cycle
         };
+        let mut changed = false;
         while let Ok(bytes) = self.byte_rx.try_recv() {
-            processor.advance(&mut *term, &bytes);
+            if !bytes.is_empty() {
+                processor.advance(&mut *term, &bytes);
+                changed = true;
+            }
         }
+        changed
     }
 
     /// Process bytes through Osc133Parser and VTE, updating shell markers and phase.

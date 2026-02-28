@@ -5,7 +5,7 @@ use gpui::prelude::*;
 use gpui::{relative, CursorStyle, *};
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 const DIVIDER_WIDTH: f32 = 4.0;
 const RATIO_SENSITIVITY: f32 = 0.002; // pixels to ratio: 500px drag = 1.0 ratio change
@@ -13,7 +13,7 @@ const RATIO_SENSITIVITY: f32 = 0.002; // pixels to ratio: 500px drag = 1.0 ratio
 /// Split pane container - recursively renders SplitNode tree with draggable dividers
 pub struct SplitPaneContainer {
     split_tree: SplitNode,
-    terminal_buffers: HashMap<String, TerminalBuffer>,
+    terminal_buffers: Arc<Mutex<HashMap<String, TerminalBuffer>>>,
     focused_pane_index: usize,
     repo_name: String,
     /// When true, cursor is in "visible" phase of blink
@@ -33,7 +33,7 @@ pub struct SplitPaneContainer {
 impl SplitPaneContainer {
     pub fn new(
         split_tree: SplitNode,
-        terminal_buffers: HashMap<String, TerminalBuffer>,
+        terminal_buffers: Arc<Mutex<HashMap<String, TerminalBuffer>>>,
         focused_pane_index: usize,
         repo_name: &str,
     ) -> Self {
@@ -107,7 +107,11 @@ impl IntoElement for SplitPaneContainer {
 impl RenderOnce for SplitPaneContainer {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let split_tree = self.split_tree.clone();
-        let terminal_buffers = self.terminal_buffers.clone();
+        let terminal_buffers_guard = self
+            .terminal_buffers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let terminal_buffers: &HashMap<String, TerminalBuffer> = &terminal_buffers_guard;
         let focused_pane_index = self.focused_pane_index;
         let repo_name = self.repo_name.clone();
         let on_ratio_change = self.on_ratio_change.clone();

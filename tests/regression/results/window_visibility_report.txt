@@ -1,0 +1,14 @@
+Window Visibility Report
+========================
+Test Time: Sat Feb 28 16:59:09 CST 2026
+
+Screenshot: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/window_visibility_20260228_165906.png
+Result: True
+Reason: ok
+Avg Brightness: 115.8
+Variance: 7726.6
+Size: 3840x2160
+
+Notes:
+- PASS: Window shows dark theme (pmux UI) with visible content
+- FAIL reasons: window_too_small, window_too_bright (blank/transparent), window_too_flat (no content)

@@ -3,90 +3,106 @@
 
 use pmux::agent_status::AgentStatus;
 use pmux::shell_integration::{MarkerKind, ParsedMarker, ShellMarker, ShellPhase, ShellPhaseInfo};
-use pmux::status_detector::StatusDetector;
+use pmux::status_detector::{ProcessStatus, StatusDetector};
 use pmux::terminal::TerminalEngine;
 
 #[test]
-fn test_detect_with_shell_phase_running() {
+fn test_detect_with_process_exited() {
+    let detector = StatusDetector::new();
+    let status = detector.detect(ProcessStatus::Exited, None, "any content");
+    assert_eq!(status, AgentStatus::Exited);
+}
+
+#[test]
+fn test_detect_with_process_error() {
+    let detector = StatusDetector::new();
+    let status = detector.detect(ProcessStatus::Error, None, "any content");
+    assert_eq!(status, AgentStatus::Error);
+}
+
+#[test]
+fn test_detect_with_osc133_running() {
     let detector = StatusDetector::new();
     let info = ShellPhaseInfo {
         phase: ShellPhase::Running,
         last_post_exec_exit_code: None,
     };
-    let status = detector.detect_with_shell_phase("$ ls -la\nsome output", Some(info));
+    let status = detector.detect(ProcessStatus::Running, Some(info), "$ ls -la\nsome output");
     assert_eq!(status, AgentStatus::Running);
 }
 
 #[test]
-fn test_detect_with_shell_phase_output_error() {
+fn test_detect_with_osc133_output_error() {
     let detector = StatusDetector::new();
     let info = ShellPhaseInfo {
         phase: ShellPhase::Output,
         last_post_exec_exit_code: Some(1),
     };
-    let status = detector.detect_with_shell_phase("command output", Some(info));
+    let status = detector.detect(ProcessStatus::Running, Some(info), "command output");
     assert_eq!(status, AgentStatus::Error);
 }
 
 #[test]
-fn test_detect_with_shell_phase_output_success() {
+fn test_detect_with_osc133_output_success() {
     let detector = StatusDetector::new();
     let info = ShellPhaseInfo {
         phase: ShellPhase::Output,
         last_post_exec_exit_code: Some(0),
     };
-    let status = detector.detect_with_shell_phase("$ echo done\ndone", Some(info));
+    let status = detector.detect(ProcessStatus::Running, Some(info), "$ echo done\ndone");
     assert_eq!(status, AgentStatus::Idle);
 }
 
 #[test]
-fn test_detect_with_shell_phase_unknown_fallback() {
+fn test_detect_with_osc133_input_waiting() {
     let detector = StatusDetector::new();
     let info = ShellPhaseInfo {
-        phase: ShellPhase::Unknown,
+        phase: ShellPhase::Input,
         last_post_exec_exit_code: None,
     };
+    let status = detector.detect(ProcessStatus::Running, Some(info), "$ ");
+    assert_eq!(status, AgentStatus::Waiting);
+}
+
+#[test]
+fn test_detect_text_fallback() {
+    let detector = StatusDetector::new();
     assert_eq!(
-        detector.detect_with_shell_phase("AI is thinking", Some(info)),
+        detector.detect(ProcessStatus::Unknown, None, "AI is thinking"),
         AgentStatus::Running
     );
     assert_eq!(
-        detector.detect_with_shell_phase("? What next?", Some(info)),
+        detector.detect(ProcessStatus::Unknown, None, "? What next?"),
         AgentStatus::Waiting
     );
 }
 
 #[test]
-fn test_detect_with_shell_phase_none_fallback() {
-    let detector = StatusDetector::new();
-    assert_eq!(
-        detector.detect_with_shell_phase("AI is thinking", None),
-        detector.detect("AI is thinking")
-    );
-}
-
-#[test]
-fn test_detect_with_shell_phase_priority_running_over_text() {
+fn test_process_overrides_osc133() {
     let detector = StatusDetector::new();
     let info = ShellPhaseInfo {
         phase: ShellPhase::Running,
         last_post_exec_exit_code: None,
     };
-    let status = detector.detect_with_shell_phase("error in log", Some(info));
-    assert_eq!(status, AgentStatus::Running);
+    // Process Exited overrides OSC 133 Running
+    let status = detector.detect(ProcessStatus::Exited, Some(info), "any content");
+    assert_eq!(status, AgentStatus::Exited);
+    
+    // Process Error overrides OSC 133 Running
+    let status = detector.detect(ProcessStatus::Error, Some(info), "any content");
+    assert_eq!(status, AgentStatus::Error);
 }
 
 #[test]
-fn test_detect_with_shell_phase_output_exit_2() {
+fn test_osc133_overrides_text() {
     let detector = StatusDetector::new();
     let info = ShellPhaseInfo {
-        phase: ShellPhase::Output,
-        last_post_exec_exit_code: Some(2),
+        phase: ShellPhase::Running,
+        last_post_exec_exit_code: None,
     };
-    assert_eq!(
-        detector.detect_with_shell_phase("any content", Some(info)),
-        AgentStatus::Error
-    );
+    // OSC 133 Running should override text "error" pattern
+    let status = detector.detect(ProcessStatus::Running, Some(info), "error in log");
+    assert_eq!(status, AgentStatus::Running);
 }
 
 #[test]
@@ -102,10 +118,8 @@ fn test_integration_with_terminal_engine() {
         last_post_exec_exit_code: engine.last_post_exec_exit_code(),
     };
     assert_eq!(info.phase, ShellPhase::Unknown);
-    assert_eq!(
-        detector.detect_with_shell_phase("hello", Some(info)),
-        AgentStatus::Idle
-    );
+    let status = detector.detect(ProcessStatus::Running, Some(info), "hello");
+    assert_eq!(status, AgentStatus::Idle);
 
     {
         let mut state = engine.shell_state();
@@ -124,10 +138,8 @@ fn test_integration_with_terminal_engine() {
         last_post_exec_exit_code: engine.last_post_exec_exit_code(),
     };
     assert_eq!(info.phase, ShellPhase::Running);
-    assert_eq!(
-        detector.detect_with_shell_phase("any content", Some(info)),
-        AgentStatus::Running
-    );
+    let status = detector.detect(ProcessStatus::Running, Some(info), "any content");
+    assert_eq!(status, AgentStatus::Running);
 
     {
         let mut state = engine.shell_state();
@@ -147,8 +159,6 @@ fn test_integration_with_terminal_engine() {
     };
     assert_eq!(info.phase, ShellPhase::Output);
     assert_eq!(info.last_post_exec_exit_code, Some(1));
-    assert_eq!(
-        detector.detect_with_shell_phase("output", Some(info)),
-        AgentStatus::Error
-    );
+    let status = detector.detect(ProcessStatus::Running, Some(info), "output");
+    assert_eq!(status, AgentStatus::Error);
 }

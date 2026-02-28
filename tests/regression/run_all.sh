@@ -51,9 +51,10 @@ while [[ $# -gt 0 ]]; do
             echo "  -h, --help      显示帮助"
             echo ""
             echo "回归测试仅包含核心的自动化视觉验证："
-            echo "  1. Sidebar 状态颜色检测"
-            echo "  2. 终端光标位置检测"
-            echo "  3. ANSI 颜色显示检测"
+            echo "  1. 窗口可见性检测（启动后截图验证）"
+            echo "  2. Sidebar 状态颜色检测"
+            echo "  3. 终端光标位置检测"
+            echo "  4. ANSI 颜色显示检测"
             exit 0
             ;;
         *)
@@ -79,8 +80,9 @@ fi
 # 初始化报告
 init_report "regression" "pmux Regression Tests (Core)"
 
-# 定义核心回归测试
+# 定义核心回归测试（窗口可见性放首位，其他测试依赖窗口正常显示）
 CORE_TESTS=(
+    "test_window_visibility_auto.sh:窗口可见性检测"
     "test_sidebar_status_auto.sh:Sidebar 状态颜色检测"
     "test_cursor_position_auto.sh:终端光标位置检测"
     "test_colors_auto.sh:ANSI 颜色显示检测"
