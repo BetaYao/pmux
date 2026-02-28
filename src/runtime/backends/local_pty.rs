@@ -99,16 +99,26 @@ impl AgentRuntime for LocalPtyRuntime {
         if pane_id != &self.pane_id {
             return Err(RuntimeError::PaneNotFound(pane_id.clone()));
         }
-        let mut guard = self.writer.lock().map_err(|e| RuntimeError::Backend(e.to_string()))?;
+        let mut guard = self
+            .writer
+            .lock()
+            .map_err(|e| RuntimeError::Backend(e.to_string()))?;
         let w = guard
             .as_mut()
             .ok_or_else(|| RuntimeError::Backend("writer already taken".to_string()))?;
-        w.write_all(bytes).map_err(|e| RuntimeError::Backend(e.to_string()))?;
-        w.flush().map_err(|e| RuntimeError::Backend(e.to_string()))?;
+        w.write_all(bytes)
+            .map_err(|e| RuntimeError::Backend(e.to_string()))?;
+        w.flush()
+            .map_err(|e| RuntimeError::Backend(e.to_string()))?;
         Ok(())
     }
 
-    fn send_key(&self, pane_id: &PaneId, key: &str, _use_literal: bool) -> Result<(), RuntimeError> {
+    fn send_key(
+        &self,
+        pane_id: &PaneId,
+        key: &str,
+        _use_literal: bool,
+    ) -> Result<(), RuntimeError> {
         self.send_input(pane_id, key.as_bytes())
     }
 
@@ -118,7 +128,10 @@ impl AgentRuntime for LocalPtyRuntime {
         }
         self.cols.store(cols, Ordering::SeqCst);
         self.rows.store(rows, Ordering::SeqCst);
-        let guard = self.master.lock().map_err(|e| RuntimeError::Backend(e.to_string()))?;
+        let guard = self
+            .master
+            .lock()
+            .map_err(|e| RuntimeError::Backend(e.to_string()))?;
         guard
             .resize(PtySize {
                 rows,
@@ -179,7 +192,11 @@ impl AgentRuntime for LocalPtyRuntime {
         }
     }
 
-    fn open_diff(&self, _worktree: &Path, _pane_id: Option<&PaneId>) -> Result<String, RuntimeError> {
+    fn open_diff(
+        &self,
+        _worktree: &Path,
+        _pane_id: Option<&PaneId>,
+    ) -> Result<String, RuntimeError> {
         Err(RuntimeError::Backend(
             "open_diff not implemented in local PTY backend".to_string(),
         ))

@@ -266,9 +266,13 @@ impl AppRoot {
         let (cols, rows) = runtime.get_pane_dimensions(&pane_target.to_string());
         if let Ok(mut buffers) = self.terminal_buffers.lock() {
             buffers.clear();
+            let cache_size = Config::load().unwrap_or_default().terminal_row_cache_size();
             buffers.insert(
                 pane_target.to_string(),
-                TerminalBuffer::Term(Arc::new(Mutex::new(TermBridge::new(cols as usize, rows as usize)))),
+                TerminalBuffer::new_term_with_cache_size(
+                    TermBridge::new(cols as usize, rows as usize),
+                    cache_size,
+                ),
             );
         }
 
@@ -284,7 +288,7 @@ impl AppRoot {
                     match bytes {
                         Ok(b) => {
                             if let Ok(mut buffers) = terminal_buffers.lock() {
-                                if let Some(TerminalBuffer::Term(t)) = buffers.get_mut(&pane_target_clone) {
+                                if let Some(TerminalBuffer::Term(t, _)) = buffers.get_mut(&pane_target_clone) {
                                     if let Ok(guard) = t.lock() {
                                         guard.advance(&b);
                                     }
@@ -825,14 +829,15 @@ impl AppRoot {
         ) {
             self.split_tree = new_tree;
             if let Ok(mut buffers) = self.terminal_buffers.lock() {
-                let use_term = buffers.values().any(|b| matches!(b, TerminalBuffer::Term(_)));
+                let use_term = buffers.values().any(|b| matches!(b, TerminalBuffer::Term(_, _)));
+                let cache_size = Config::load().unwrap_or_default().terminal_row_cache_size();
                 buffers.insert(
                     new_target.clone(),
                     if use_term {
                         let (cols, rows) = self.runtime.as_ref().map(|r| r.get_pane_dimensions(&new_target)).unwrap_or((80, 24));
-                        TerminalBuffer::Term(Arc::new(Mutex::new(TermBridge::new(cols as usize, rows as usize))))
+                        TerminalBuffer::new_term_with_cache_size(TermBridge::new(cols as usize, rows as usize), cache_size)
                     } else {
-                        TerminalBuffer::Term(Arc::new(Mutex::new(TermBridge::new(80, 24))))
+                        TerminalBuffer::new_term_with_cache_size(TermBridge::new(80, 24), cache_size)
                     },
                 );
             }
@@ -915,8 +920,9 @@ impl AppRoot {
 
         // Add buffer for overlay pane (streaming will populate)
         if let Ok(mut buffers) = self.terminal_buffers.lock() {
+            let cache_size = Config::load().unwrap_or_default().terminal_row_cache_size();
             buffers.entry(pane_target.clone()).or_insert_with(|| {
-                TerminalBuffer::Term(Arc::new(Mutex::new(TermBridge::new(80, 24))))
+                TerminalBuffer::new_term_with_cache_size(TermBridge::new(80, 24), cache_size)
             });
         }
 
@@ -1660,8 +1666,9 @@ impl AppRoot {
             .child(new_branch_dialog)
             .when(self.diff_overlay_open.is_some(), |el| {
                 if let Some((branch, window_name, pane_target)) = &self.diff_overlay_open {
+                    let cache_size = Config::load().unwrap_or_default().terminal_row_cache_size();
                     let buffer = terminal_buffers.get(pane_target).cloned().unwrap_or_else(|| {
-                        TerminalBuffer::Term(Arc::new(Mutex::new(TermBridge::new(80, 24))))
+                        TerminalBuffer::new_term_with_cache_size(TermBridge::new(80, 24), cache_size)
                     });
                     let branch = branch.clone();
                     let window_name = window_name.clone();
@@ -1712,7 +1719,7 @@ impl Render for AppRoot {
                 }
                 if let Ok(mut buffers) = self.terminal_buffers.lock() {
                     for buf in buffers.values_mut() {
-                        if let TerminalBuffer::Term(t) = buf {
+                        if let TerminalBuffer::Term(t, _) = buf {
                             if let Ok(guard) = t.lock() {
                                 guard.resize(cols as usize, rows as usize);
                             }
