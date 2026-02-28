@@ -1,6 +1,6 @@
 // ui/terminal_view.rs - Terminal view component with GPUI render
 // Renders via renderable_content().display_iter() with style-run batching.
-use crate::terminal::TermBridge;
+use crate::terminal::TerminalEngine;
 use crate::ui::terminal_rendering::{group_cells_into_segments, hash_row_content, render_batch_row, StyledSegment};
 use alacritty_terminal::term::cell::Flags;
 use gpui::prelude::*;
@@ -12,13 +12,13 @@ use std::sync::{Arc, Mutex};
 /// Default row cache size (Task 4.4). Configurable via config in future.
 pub const DEFAULT_ROW_CACHE_SIZE: usize = 200;
 
-/// Content source for TerminalView - streaming (Term) or error placeholder (Error).
+/// Content source for TerminalView - streaming (TerminalEngine) or error placeholder (Error).
 #[derive(Clone)]
 pub enum TerminalBuffer {
     /// Error: static message when streaming unavailable (no screen snapshot)
     Error(String),
-    /// Streaming: Term + row cache for rendering optimization
-    Term(Arc<Mutex<TermBridge>>, Arc<Mutex<LruCache<u64, Vec<StyledSegment>>>>),
+    /// Streaming: TerminalEngine (byte processor with is_tui_active) + row cache for rendering optimization
+    Term(Arc<TerminalEngine>, Arc<Mutex<LruCache<u64, Vec<StyledSegment>>>>),
 }
 
 fn extract_text_from_display_iter<'a>(
@@ -50,27 +50,35 @@ fn extract_text_from_display_iter<'a>(
 impl TerminalBuffer {
     /// Create a Term buffer with row cache. Use for new panes.
     /// `cache_size`: LRU capacity, default 200. Uses config.terminal_row_cache_size when set.
-    pub fn new_term(term: TermBridge) -> Self {
-        Self::new_term_with_cache_size(term, DEFAULT_ROW_CACHE_SIZE)
+    pub fn new_term(engine: TerminalEngine) -> Self {
+        Self::new_term_with_cache_size(Arc::new(engine), DEFAULT_ROW_CACHE_SIZE)
     }
 
     /// Create a Term buffer with configurable row cache size.
-    pub fn new_term_with_cache_size(term: TermBridge, cache_size: usize) -> Self {
+    /// Accepts Arc<TerminalEngine> so the same engine can be used for byte processing (e.g. advance_bytes) and rendering.
+    pub fn new_term_with_cache_size(engine: Arc<TerminalEngine>, cache_size: usize) -> Self {
         let cap = NonZeroUsize::new(cache_size.max(1)).unwrap_or(NonZeroUsize::new(1).unwrap());
         Self::Term(
-            Arc::new(Mutex::new(term)),
+            engine,
             Arc::new(Mutex::new(LruCache::new(cap))),
         )
+    }
+
+    /// Create an empty Term buffer (no byte stream). Use for placeholders when pane has no buffer yet.
+    pub fn new_empty_term(cols: usize, rows: usize) -> Self {
+        let (_tx, rx) = flume::unbounded();
+        let engine = TerminalEngine::new(cols, rows, rx);
+        Self::new_term_with_cache_size(Arc::new(engine), DEFAULT_ROW_CACHE_SIZE)
     }
 
     /// Extract text for status detection. Source: stream (Term) only—never capture-pane.
     pub fn content_for_status_detection(&self) -> Option<String> {
         match self {
-            TerminalBuffer::Term(t, _) => t.lock().ok().map(|term| {
-                term.with_renderable_content(|_content, display_iter, _screen_lines| {
+            TerminalBuffer::Term(engine, _) => Some(
+                engine.with_renderable_content(|_content, display_iter, _screen_lines| {
                     extract_text_from_display_iter(display_iter)
-                })
-            }),
+                }),
+            ),
             TerminalBuffer::Error(s) => Some(s.clone()),
         }
     }
@@ -93,20 +101,20 @@ impl TerminalView {
         Self {
             pane_id: pane_id.to_string(),
             title: title.to_string(),
-            buffer: TerminalBuffer::new_term(TermBridge::new(80, 24)),
+            buffer: TerminalBuffer::new_empty_term(80, 24),
             scroll_offset: 0,
             is_focused: false,
             cursor_visible: true,
         }
     }
 
-    /// Create with TermBridge (for pipe-pane / control mode streaming)
-    pub fn with_term(pane_id: &str, title: &str, term: Arc<Mutex<TermBridge>>) -> Self {
+    /// Create with TerminalEngine (for pipe-pane / control mode streaming)
+    pub fn with_engine(pane_id: &str, title: &str, engine: Arc<TerminalEngine>) -> Self {
         let cap = NonZeroUsize::new(DEFAULT_ROW_CACHE_SIZE).unwrap_or(NonZeroUsize::new(1).unwrap());
         Self {
             pane_id: pane_id.to_string(),
             title: title.to_string(),
-            buffer: TerminalBuffer::Term(term, Arc::new(Mutex::new(LruCache::new(cap)))),
+            buffer: TerminalBuffer::Term(engine, Arc::new(Mutex::new(LruCache::new(cap)))),
             scroll_offset: 0,
             is_focused: false,
             cursor_visible: true,
@@ -145,7 +153,16 @@ impl TerminalView {
     pub fn reset_scroll(&mut self) { self.scroll_offset = 0; }
 
     fn should_show_cursor(&self) -> bool {
-        self.is_focused && self.cursor_visible
+        let tui_active = match &self.buffer {
+            TerminalBuffer::Term(engine, _) => engine.is_tui_active(),
+            TerminalBuffer::Error(_) => false,
+        };
+        !tui_active && self.is_focused && self.cursor_visible
+    }
+
+    #[cfg(test)]
+    pub fn test_should_show_cursor(&self) -> bool {
+        self.should_show_cursor()
     }
 
     fn render_error(&self, msg: &str) -> Vec<AnyElement> {
@@ -267,10 +284,9 @@ impl RenderOnce for TerminalView {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let line_elements: Vec<AnyElement> = match &self.buffer {
             TerminalBuffer::Error(msg) => self.render_error(msg),
-            TerminalBuffer::Term(term, cache) => {
-                let term_guard = term.lock().unwrap();
+            TerminalBuffer::Term(engine, cache) => {
                 let mut cache_guard = cache.lock().unwrap();
-                term_guard.with_renderable_content(|content, display_iter, screen_lines| {
+                engine.with_renderable_content(|content, display_iter, screen_lines| {
                     self.render_from_display_iter(content, display_iter, screen_lines, &mut cache_guard)
                 })
             }
@@ -356,5 +372,36 @@ mod tests {
     fn test_buffer_content_for_status_detection() {
         let buf = TerminalBuffer::Error("Streaming unavailable".to_string());
         assert_eq!(buf.content_for_status_detection(), Some("Streaming unavailable".to_string()));
+    }
+
+    #[test]
+    fn test_cursor_hidden_when_tui_active() {
+        // Enter alternate screen (vim/neovim)
+        let (tx, rx) = flume::unbounded();
+        let engine_tui = Arc::new(TerminalEngine::new(80, 24, rx));
+        tx.send(b"\x1b[?1049h".to_vec()).unwrap();
+        engine_tui.advance_bytes();
+        drop(tx);
+        let buffer = TerminalBuffer::new_term_with_cache_size(engine_tui, DEFAULT_ROW_CACHE_SIZE);
+        let view = TerminalView::with_buffer("pane-1", "vim", buffer)
+            .with_focused(true)
+            .with_cursor_visible(true);
+        assert!(!view.test_should_show_cursor(), "cursor should be hidden when TUI (alt screen) is active");
+    }
+
+    #[test]
+    fn test_cursor_shows_when_normal_shell() {
+        let view = TerminalView::new("pane-1", "zsh")
+            .with_focused(true)
+            .with_cursor_visible(true);
+        assert!(view.test_should_show_cursor(), "cursor should show when focused in normal shell");
+    }
+
+    #[test]
+    fn test_cursor_hidden_when_not_focused() {
+        let view = TerminalView::new("pane-1", "zsh")
+            .with_focused(false)
+            .with_cursor_visible(true);
+        assert!(!view.test_should_show_cursor(), "cursor should be hidden when pane not focused");
     }
 }

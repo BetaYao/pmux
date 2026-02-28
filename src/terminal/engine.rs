@@ -126,18 +126,20 @@ impl TerminalEngine {
     }
 
     /// Get renderable content for frame loop rendering.
-    /// Calls `f` with (content, display_iter). Use the iterator for cells; content provides colors and cursor.
+    /// Calls `f` with (content, display_iter, screen_lines). Use the iterator for cells; content provides colors and cursor.
     pub fn with_renderable_content<F, R>(&self, f: F) -> R
     where
         F: FnOnce(
             &alacritty_terminal::term::RenderableContent<'_>,
             alacritty_terminal::grid::GridIterator<'_, Cell>,
+            usize,
         ) -> R,
     {
         let term = self.terminal.lock().unwrap();
         let content = term.renderable_content();
         let display_iter = term.grid().display_iter();
-        f(&content, display_iter)
+        let screen_lines = term.grid().screen_lines();
+        f(&content, display_iter, screen_lines)
     }
 
     /// Returns true when a TUI app (vim, neovim, Claude Code, etc.) is active.
@@ -349,6 +351,27 @@ mod tests {
         assert_eq!(state.markers.len(), 2);
         assert_eq!(state.markers[0].kind, MarkerKind::PromptStart);
         assert_eq!(state.markers[1].kind, MarkerKind::PromptEnd);
+    }
+
+    #[test]
+    fn test_is_tui_active_alt_screen() {
+        let (tx, rx) = flume::unbounded();
+        let engine = TerminalEngine::new(80, 24, rx);
+        // Enter alternate screen (vim, neovim, etc. use this)
+        tx.send(b"\x1b[?1049h".to_vec()).unwrap();
+        engine.advance_bytes();
+        assert!(engine.is_tui_active(), "ALT_SCREEN mode should make is_tui_active true");
+        drop(tx);
+    }
+
+    #[test]
+    fn test_is_tui_active_normal_shell() {
+        let (tx, rx) = flume::unbounded();
+        let engine = TerminalEngine::new(80, 24, rx);
+        tx.send(b"$ ls".to_vec()).unwrap();
+        engine.advance_bytes();
+        assert!(!engine.is_tui_active(), "normal shell output should not trigger TUI mode");
+        drop(tx);
     }
 
     #[test]

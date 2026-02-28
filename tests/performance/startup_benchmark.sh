@@ -4,7 +4,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/lib/test_utils.sh"
+source "$SCRIPT_DIR/../regression/lib/test_utils.sh"
 
 echo "================================"
 echo "Startup Performance Benchmark"
@@ -28,7 +28,7 @@ for i in $(seq 1 $ITERATIONS); do
     
     # 测量启动时间
     START_TIME=$(date +%s.%N)
-    ./target/debug/pmux &
+    "$PMUX_ROOT/target/debug/pmux" &
     PID=$!
     
     # 等待窗口出现

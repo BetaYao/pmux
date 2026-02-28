@@ -4,6 +4,7 @@ use crate::shell_integration::{ShellPhase, ShellPhaseInfo};
 use regex::Regex;
 
 /// Detects agent status from terminal content
+#[derive(Clone)]
 pub struct StatusDetector {
     /// Keywords that indicate Running status
     running_patterns: Vec<Regex>,
@@ -225,7 +226,12 @@ impl DebouncedStatusTracker {
     /// Update with new content, returns true if status changed
     pub fn update(&mut self, content: &str) -> bool {
         let detected = self.detector.detect(content);
-        
+        self.update_with_status(detected)
+    }
+
+    /// Update with a pre-detected status, returns true if status changed.
+    /// Used by StatusPublisher when status is already detected via shell phase.
+    pub fn update_with_status(&mut self, detected: AgentStatus) -> bool {
         // Error status always updates immediately
         if detected == AgentStatus::Error {
             if self.current_status != AgentStatus::Error {
@@ -236,11 +242,11 @@ impl DebouncedStatusTracker {
             }
             return false;
         }
-        
+
         // Check if this matches pending status
         if Some(detected) == self.pending_status {
             self.pending_count += 1;
-            
+
             // If we've seen this enough times, commit the change
             if self.pending_count >= self.debounce_threshold {
                 if self.current_status != detected {
@@ -255,7 +261,7 @@ impl DebouncedStatusTracker {
             self.pending_status = Some(detected);
             self.pending_count = 1;
         }
-        
+
         false
     }
 

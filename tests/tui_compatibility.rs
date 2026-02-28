@@ -14,7 +14,7 @@ use std::time::Duration;
 
 /// Extract visible text from engine via renderable_content.
 fn engine_content_text(engine: &TerminalEngine) -> String {
-    engine.with_renderable_content(|_content, display_iter| {
+    engine.with_renderable_content(|_content, display_iter, _screen_lines| {
         let mut chars = Vec::new();
         for indexed in display_iter {
             if !indexed.cell.flags.contains(Flags::WIDE_CHAR_SPACER) && indexed.cell.c != '\0' {

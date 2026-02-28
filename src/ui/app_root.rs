@@ -7,9 +7,9 @@ use crate::git_utils::{is_git_repository, get_git_error_message, GitError};
 use crate::notification::NotificationType;
 use crate::notification_manager::NotificationManager;
 use crate::system_notifier;
-use crate::terminal::TermBridge;
+use crate::terminal::TerminalEngine;
 use crate::runtime::{AgentRuntime, EventBus, RuntimeEvent, StatusPublisher};
-use crate::runtime::backends::create_runtime;
+use crate::runtime::backends::create_runtime_from_env;
 use crate::runtime::{RuntimeState, WorktreeState};
 use crate::ui::{AppState, sidebar::Sidebar, workspace_tabbar::WorkspaceTabBar, terminal_view::TerminalBuffer, notification_panel::{NotificationPanel, NotificationItem}, new_branch_dialog_ui::NewBranchDialogUi, delete_worktree_dialog_ui::DeleteWorktreeDialogUi, split_pane_container::SplitPaneContainer, diff_overlay::DiffOverlay, status_bar::StatusBar};
 use crate::split_tree::SplitNode;
@@ -264,45 +264,66 @@ impl AppRoot {
 
     fn setup_local_terminal(&mut self, runtime: Arc<dyn AgentRuntime>, pane_target: &str, cx: &mut Context<Self>) {
         let (cols, rows) = runtime.get_pane_dimensions(&pane_target.to_string());
-        if let Ok(mut buffers) = self.terminal_buffers.lock() {
-            buffers.clear();
-            let cache_size = Config::load().unwrap_or_default().terminal_row_cache_size();
-            buffers.insert(
-                pane_target.to_string(),
-                TerminalBuffer::new_term_with_cache_size(
-                    TermBridge::new(cols as usize, rows as usize),
-                    cache_size,
-                ),
-            );
-        }
+        let cache_size = Config::load().unwrap_or_default().terminal_row_cache_size();
 
         if let Some(rx) = runtime.subscribe_output(&pane_target.to_string()) {
-            let terminal_buffers = self.terminal_buffers.clone();
+            let engine = Arc::new(TerminalEngine::new(cols as usize, rows as usize, rx));
+            let buffer = TerminalBuffer::new_term_with_cache_size(engine.clone(), cache_size);
+            if let Ok(mut buffers) = self.terminal_buffers.lock() {
+                buffers.clear();
+                buffers.insert(pane_target.to_string(), buffer);
+            }
+
+            // Clone for status detection
+            let status_publisher = self.status_publisher.clone();
             let pane_target_clone = pane_target.to_string();
-            let rx = std::sync::Arc::new(std::sync::Mutex::new(rx));
+
             let _entity = cx.entity();
             cx.spawn(async move |entity, cx| {
                 loop {
-                    let rx_clone = rx.clone();
-                    let bytes = blocking::unblock(move || rx_clone.lock().unwrap().recv()).await;
-                    match bytes {
-                        Ok(b) => {
-                            if let Ok(mut buffers) = terminal_buffers.lock() {
-                                if let Some(TerminalBuffer::Term(t, _)) = buffers.get_mut(&pane_target_clone) {
-                                    if let Ok(guard) = t.lock() {
-                                        guard.advance(&b);
-                                    }
+                    blocking::unblock(|| std::thread::sleep(Duration::from_millis(16))).await;
+
+                    // Process new terminal bytes
+                    engine.advance_bytes();
+
+                    // Event-driven status detection (no polling loop)
+                    // Check status whenever terminal content changes
+                    if let Some(ref pub_) = status_publisher {
+                        // Get shell phase info from OSC 133 markers (if available)
+                        let shell_info = crate::shell_integration::ShellPhaseInfo {
+                            phase: engine.shell_phase(),
+                            last_post_exec_exit_code: engine.last_post_exec_exit_code(),
+                        };
+
+                        // Get terminal content for text-based detection
+                        let content: Option<String> = entity.update(cx, |this, _cx| {
+                            if let Ok(buffers) = this.terminal_buffers.lock() {
+                                if let Some(buffer) = buffers.get(&pane_target_clone) {
+                                    return buffer.content_for_status_detection();
                                 }
                             }
-                            let _ = entity.update(cx, |_, cx| cx.notify());
+                            None
+                        }).ok().flatten();
+
+                        // Detect and publish status if changed
+                        if let Some(content_str) = content {
+                            let _ = pub_.check_status(
+                                &pane_target_clone,
+                                &content_str,
+                                Some(shell_info),
+                            );
                         }
-                        Err(_) => break,
+                    }
+
+                    if entity.update(cx, |_, cx| cx.notify()).is_err() {
+                        break;
                     }
                 }
             })
             .detach();
         } else {
             if let Ok(mut buffers) = self.terminal_buffers.lock() {
+                buffers.clear();
                 buffers.insert(
                     pane_target.to_string(),
                     TerminalBuffer::Error("Streaming unavailable.".to_string()),
@@ -313,12 +334,13 @@ impl AppRoot {
     }
 
     /// Start local PTY session for the given repo
-    /// Sets up terminal content polling, status polling, and input handling
+    /// Sets up terminal content polling, status polling, and input handling.
+    /// Backend is selected via PMUX_BACKEND env var (local or tmux).
     fn start_local_session(&mut self, worktree_path: &Path, branch_name: &str, cx: &mut Context<Self>) {
-        let runtime = match create_runtime(worktree_path, 80, 24) {
+        let runtime = match create_runtime_from_env(worktree_path, 80, 24) {
             Ok(rt) => rt,
             Err(e) => {
-                self.state.error_message = Some(format!("PTY error: {}", e));
+                self.state.error_message = Some(format!("Runtime error: {}", e));
                 return;
             }
         };
@@ -339,14 +361,10 @@ impl AppRoot {
 
         self.ensure_event_bus_subscription(cx);
 
-        // Initialize StatusPublisher (publishes to EventBus)
-        // Status from stream (Term) only—no capture-pane / screen snapshot
-        let mut status_publisher = StatusPublisher::new(Arc::clone(&self.event_bus));
+        // Initialize StatusPublisher (event-driven, no polling)
+        // Status is detected when terminal content changes, not on a timer
+        let status_publisher = StatusPublisher::new(Arc::clone(&self.event_bus));
         status_publisher.register_pane(&pane_target);
-        let buffers = self.terminal_buffers.clone();
-        status_publisher.start(move |pane_id| {
-            buffers.lock().ok().and_then(|guard| guard.get(pane_id).and_then(|buf| buf.content_for_status_detection()))
-        });
         self.status_publisher = Some(status_publisher);
 
         self.setup_local_terminal(runtime, &pane_target, cx);
@@ -590,31 +608,47 @@ impl AppRoot {
     fn save_runtime_state(&mut self, workspace_path: &Path, worktree_path: &Path, branch_name: &str) {
         let Some(rt) = &self.runtime else { return };
         let Some(_tab) = self.workspace_manager.active_tab() else { return };
+
         let agent_id = rt.primary_pane_id().unwrap_or_else(|| format!("local:{}", worktree_path.display()));
         let panes = rt.list_panes(&agent_id);
         let pane_ids: Vec<String> = panes.iter().cloned().collect();
+
+        // Detect backend type and get session info for tmux
+        let backend = rt.backend_type();
+        let (backend_session_id, backend_window_id) = if backend == "tmux" {
+            // Downcast to TmuxRuntime to get session/window names
+            if let Some(tmux_rt) = rt.as_any().downcast_ref::<crate::runtime::backends::TmuxRuntime>() {
+                (tmux_rt.session_name().to_string(), tmux_rt.window_name().to_string())
+            } else {
+                (worktree_path.to_string_lossy().to_string(), branch_name.to_string())
+            }
+        } else {
+            (worktree_path.to_string_lossy().to_string(), branch_name.to_string())
+        };
+
         let wt = WorktreeState {
             branch: branch_name.to_string(),
             path: worktree_path.to_path_buf(),
             agent_id: agent_id.clone(),
             pane_ids: pane_ids.clone(),
-            backend: "local".to_string(),
-            backend_session_id: worktree_path.to_string_lossy().to_string(),
-            backend_window_id: branch_name.to_string(),
+            backend: backend.to_string(),
+            backend_session_id,
+            backend_window_id,
         };
         let mut state = RuntimeState::load().unwrap_or_default();
         state.upsert_worktree(workspace_path.to_path_buf(), wt);
         let _ = state.save();
     }
 
-    /// Switch to a specific worktree (local PTY: spawn new shell for worktree)
+    /// Switch to a specific worktree (spawn new shell for worktree).
+    /// Backend is selected via PMUX_BACKEND env var (local or tmux).
     fn switch_to_worktree(&mut self, worktree_path: &Path, branch_name: &str, cx: &mut Context<Self>) {
         self.stop_current_session();
 
-        let runtime = match create_runtime(worktree_path, 80, 24) {
+        let runtime = match create_runtime_from_env(worktree_path, 80, 24) {
             Ok(rt) => rt,
             Err(e) => {
-                self.state.error_message = Some(format!("PTY error for worktree {}: {}", worktree_path.display(), e));
+                self.state.error_message = Some(format!("Runtime error for worktree {}: {}", worktree_path.display(), e));
                 return;
             }
         };
@@ -635,12 +669,10 @@ impl AppRoot {
 
         self.ensure_event_bus_subscription(cx);
 
-        let mut status_publisher = StatusPublisher::new(Arc::clone(&self.event_bus));
+        let status_publisher = StatusPublisher::new(Arc::clone(&self.event_bus));
         status_publisher.register_pane(&pane_target);
-        let buffers = self.terminal_buffers.clone();
-        status_publisher.start(move |pane_id| {
-            buffers.lock().ok().and_then(|guard| guard.get(pane_id).and_then(|buf| buf.content_for_status_detection()))
-        });
+        // StatusPublisher is event-driven - status checks are triggered by terminal output
+        // No need to start a polling thread; check_status() will be called when content changes
         self.status_publisher = Some(status_publisher);
 
         self.setup_local_terminal(runtime, &pane_target, cx);
@@ -682,13 +714,12 @@ impl AppRoot {
         self.status_counts = counts;
     }
 
-    /// Stop current session and status polling.
+    /// Stop current session.
     /// Does NOT clear pane_statuses - preserves last known status for worktrees we're leaving
     /// (avoids flicker: main=Idle, switch to feature/test → main stays Idle, feature/test gets its status)
     fn stop_current_session(&mut self) {
-        if let Some(mut pub_) = self.status_publisher.take() {
-            pub_.stop();
-        }
+        // StatusPublisher is event-driven (no polling thread), so just drop it
+        self.status_publisher.take();
 
         self.status_counts = StatusCounts::new();
         if let Ok(statuses) = self.pane_statuses.lock() {
@@ -781,6 +812,7 @@ impl AppRoot {
         }
 
         // Forward all other keys to terminal via Runtime (xterm escape sequences)
+        // Offload send_input to background task - never block UI thread on I/O
         let send_target = self.active_pane_target.as_deref();
         let key_name = event.keystroke.key.clone();
         let modifiers = KeyModifiers {
@@ -792,9 +824,15 @@ impl AppRoot {
         match (&self.runtime, send_target) {
             (Some(runtime), Some(target)) => {
                 if let Some(bytes) = key_to_xterm_escape(&key_name, modifiers) {
-                    if let Err(e) = runtime.send_input(&target.to_string(), &bytes) {
-                        eprintln!("pmux: send_input failed: {}", e);
-                    }
+                    let rt = runtime.clone();
+                    let target = target.to_string();
+                    let bytes = bytes.to_vec();
+                    cx.spawn(async move |_entity, _cx| {
+                        if let Err(e) = blocking::unblock(move || rt.send_input(&target, &bytes)).await {
+                            eprintln!("pmux: send_input failed: {}", e);
+                        }
+                    })
+                    .detach();
                 }
             }
             _ => {
@@ -829,16 +867,10 @@ impl AppRoot {
         ) {
             self.split_tree = new_tree;
             if let Ok(mut buffers) = self.terminal_buffers.lock() {
-                let use_term = buffers.values().any(|b| matches!(b, TerminalBuffer::Term(_, _)));
-                let cache_size = Config::load().unwrap_or_default().terminal_row_cache_size();
+                let (cols, rows) = self.runtime.as_ref().map(|r| r.get_pane_dimensions(&new_target)).unwrap_or((80, 24));
                 buffers.insert(
                     new_target.clone(),
-                    if use_term {
-                        let (cols, rows) = self.runtime.as_ref().map(|r| r.get_pane_dimensions(&new_target)).unwrap_or((80, 24));
-                        TerminalBuffer::new_term_with_cache_size(TermBridge::new(cols as usize, rows as usize), cache_size)
-                    } else {
-                        TerminalBuffer::new_term_with_cache_size(TermBridge::new(80, 24), cache_size)
-                    },
+                    TerminalBuffer::new_empty_term(cols as usize, rows as usize),
                 );
             }
             if let Ok(mut guard) = self.pane_targets_shared.lock() {
@@ -920,9 +952,8 @@ impl AppRoot {
 
         // Add buffer for overlay pane (streaming will populate)
         if let Ok(mut buffers) = self.terminal_buffers.lock() {
-            let cache_size = Config::load().unwrap_or_default().terminal_row_cache_size();
             buffers.entry(pane_target.clone()).or_insert_with(|| {
-                TerminalBuffer::new_term_with_cache_size(TermBridge::new(80, 24), cache_size)
+                TerminalBuffer::new_empty_term(80, 24)
             });
         }
 
@@ -1666,9 +1697,8 @@ impl AppRoot {
             .child(new_branch_dialog)
             .when(self.diff_overlay_open.is_some(), |el| {
                 if let Some((branch, window_name, pane_target)) = &self.diff_overlay_open {
-                    let cache_size = Config::load().unwrap_or_default().terminal_row_cache_size();
                     let buffer = terminal_buffers.get(pane_target).cloned().unwrap_or_else(|| {
-                        TerminalBuffer::new_term_with_cache_size(TermBridge::new(80, 24), cache_size)
+                        TerminalBuffer::new_empty_term(80, 24)
                     });
                     let branch = branch.clone();
                     let window_name = window_name.clone();
@@ -1719,10 +1749,8 @@ impl Render for AppRoot {
                 }
                 if let Ok(mut buffers) = self.terminal_buffers.lock() {
                     for buf in buffers.values_mut() {
-                        if let TerminalBuffer::Term(t, _) = buf {
-                            if let Ok(guard) = t.lock() {
-                                guard.resize(cols as usize, rows as usize);
-                            }
+                        if let TerminalBuffer::Term(engine, _) = buf {
+                            engine.resize(cols as usize, rows as usize);
                         }
                     }
                 }

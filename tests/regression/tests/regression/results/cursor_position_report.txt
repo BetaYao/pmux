@@ -1,0 +1,23 @@
+Cursor Position Detection Report
+=================================
+Test Time: Sat Feb 28 11:16:39 CST 2026
+
+Screenshots:
+1. Basic: [0;32m[INFO][0m Screenshot saved: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/cursor_basic_20260228_111635.png
+   Cursor: (, )
+
+2. After 'hello': [0;32m[INFO][0m Screenshot saved: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/cursor_after_hello_20260228_111636.png
+   Cursor: (, )
+
+3. After '/': [0;32m[INFO][0m Screenshot saved: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/cursor_slash_20260228_111638.png
+   Cursor: (, )
+
+4. After '/clear': [0;32m[INFO][0m Screenshot saved: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/cursor_slash_clear_20260228_111639.png
+   Cursor: (, )
+
+Analysis:
+- Cursor movement detected: N/A
+- Cursor appears to be correctly positioned after text input
+
+Note: Automated cursor detection looks for bright pixel blocks.
+Manual verification recommended for precise cursor alignment.

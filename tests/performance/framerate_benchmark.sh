@@ -4,7 +4,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/lib/test_utils.sh"
+source "$SCRIPT_DIR/../regression/lib/test_utils.sh"
 
 echo "================================"
 echo "Frame Rate Performance Test"

@@ -190,9 +190,7 @@ impl SplitPaneContainer {
                 let buffer = terminal_buffers
                     .get(target)
                     .cloned()
-                    .unwrap_or_else(|| {
-                        TerminalBuffer::new_term(crate::terminal::TermBridge::new(80, 24))
-                    });
+                    .unwrap_or_else(|| TerminalBuffer::new_empty_term(80, 24));
                 let title = self.pane_title(target);
                 let is_focused = pane_index_offset == focused_pane_index;
                 let pane_idx = pane_index_offset;

@@ -5,6 +5,7 @@
 use std::path::Path;
 
 use crate::agent_status::AgentStatus;
+use downcast_rs::DowncastSync;
 use thiserror::Error;
 
 pub type AgentId = String;
@@ -34,7 +35,10 @@ pub enum RuntimeError {
 }
 
 /// AgentRuntime trait - UI 通过此 API 操作终端。
-pub trait AgentRuntime: Send + Sync {
+pub trait AgentRuntime: Send + Sync + DowncastSync {
+    /// Return the backend type identifier (e.g., "local", "tmux").
+    fn backend_type(&self) -> &'static str;
+
     /// Primary pane ID for this runtime (e.g. single pane for local PTY).
     fn primary_pane_id(&self) -> Option<PaneId> {
         self.list_panes(&String::new()).first().cloned()
@@ -55,6 +59,8 @@ pub trait AgentRuntime: Send + Sync {
     fn open_review(&self, worktree: &Path) -> Result<String, RuntimeError>;
     fn kill_window(&self, window_target: &str) -> Result<(), RuntimeError>;
 }
+
+downcast_rs::impl_downcast!(sync AgentRuntime);
 
 #[cfg(test)]
 mod tests {

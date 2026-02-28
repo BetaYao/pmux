@@ -13,11 +13,14 @@ use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use crate::runtime::agent_runtime::{AgentId, AgentRuntime, PaneId, RuntimeError};
 
 /// Local PTY runtime - one shell per worktree, direct PTY read/write.
+/// Input is queued via flume channel; a dedicated writer thread drains the queue
+/// and writes to the PTY, so send_input never blocks the UI thread.
 pub struct LocalPtyRuntime {
     worktree_path: std::path::PathBuf,
     pane_id: PaneId,
     master: Mutex<Box<dyn portable_pty::MasterPty + Send>>,
-    writer: Mutex<Option<Box<dyn Write + Send>>>,
+    /// Sender for input queue - writer thread owns the receiver and PTY writer
+    input_tx: flume::Sender<Vec<u8>>,
     output_rx: Mutex<Option<flume::Receiver<Vec<u8>>>>,
     cols: AtomicU16,
     rows: AtomicU16,
@@ -51,12 +54,14 @@ impl LocalPtyRuntime {
             .take_writer()
             .map_err(|e| RuntimeError::Backend(e.to_string()))?;
 
-        let (tx, rx) = flume::unbounded();
+        let (output_tx, output_rx) = flume::unbounded();
         let reader = master
             .try_clone_reader()
             .map_err(|e| RuntimeError::Backend(e.to_string()))?;
 
         let pane_id = format!("local:{}", worktree_path.display());
+
+        // Reader thread: PTY output -> output_tx
         thread::spawn(move || {
             let mut buf = [0u8; 4096];
             let mut reader = reader;
@@ -64,7 +69,7 @@ impl LocalPtyRuntime {
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
-                        if tx.send(buf[..n].to_vec()).is_err() {
+                        if output_tx.send(buf[..n].to_vec()).is_err() {
                             break;
                         }
                     }
@@ -73,12 +78,23 @@ impl LocalPtyRuntime {
             }
         });
 
+        // Input queue + writer thread: input_rx -> PTY (non-blocking send_input)
+        let (input_tx, input_rx) = flume::unbounded::<Vec<u8>>();
+        thread::spawn(move || {
+            let mut writer = writer;
+            while let Ok(bytes) = input_rx.recv() {
+                if writer.write_all(&bytes).is_err() || writer.flush().is_err() {
+                    break;
+                }
+            }
+        });
+
         Ok(Self {
             worktree_path: worktree_path.to_path_buf(),
             pane_id: pane_id.clone(),
             master: Mutex::new(master),
-            writer: Mutex::new(Some(writer)),
-            output_rx: Mutex::new(Some(rx)),
+            input_tx,
+            output_rx: Mutex::new(Some(output_rx)),
             cols: AtomicU16::new(cols),
             rows: AtomicU16::new(rows),
             _child: Mutex::new(Some(child)),
@@ -95,22 +111,17 @@ impl LocalPtyRuntime {
 }
 
 impl AgentRuntime for LocalPtyRuntime {
+    fn backend_type(&self) -> &'static str {
+        "local"
+    }
+
     fn send_input(&self, pane_id: &PaneId, bytes: &[u8]) -> Result<(), RuntimeError> {
         if pane_id != &self.pane_id {
             return Err(RuntimeError::PaneNotFound(pane_id.clone()));
         }
-        let mut guard = self
-            .writer
-            .lock()
-            .map_err(|e| RuntimeError::Backend(e.to_string()))?;
-        let w = guard
-            .as_mut()
-            .ok_or_else(|| RuntimeError::Backend("writer already taken".to_string()))?;
-        w.write_all(bytes)
-            .map_err(|e| RuntimeError::Backend(e.to_string()))?;
-        w.flush()
-            .map_err(|e| RuntimeError::Backend(e.to_string()))?;
-        Ok(())
+        self.input_tx
+            .send(bytes.to_vec())
+            .map_err(|e| RuntimeError::Backend(e.to_string()))
     }
 
     fn send_key(
@@ -210,5 +221,49 @@ impl AgentRuntime for LocalPtyRuntime {
 
     fn kill_window(&self, _window_target: &str) -> Result<(), RuntimeError> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::AgentRuntime;
+    use std::time::Instant;
+
+    #[test]
+    fn test_send_input_does_not_block() {
+        let dir = tempfile::tempdir().unwrap();
+        let rt = LocalPtyRuntime::new(dir.path(), 80, 24).unwrap();
+        let pane_id = rt.pane_id().to_string();
+
+        let start = Instant::now();
+        for _ in 0..100 {
+            rt.send_input(&pane_id, b"x").unwrap();
+        }
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed.as_millis() < 50,
+            "send_input should not block: 100 sends took {}ms (expected < 50ms)",
+            elapsed.as_millis()
+        );
+    }
+
+    #[test]
+    fn test_rapid_keystrokes_no_contention() {
+        let dir = tempfile::tempdir().unwrap();
+        let rt = LocalPtyRuntime::new(dir.path(), 80, 24).unwrap();
+        let pane_id = rt.pane_id().to_string();
+
+        let mut ok_count = 0u32;
+        for i in 0..500 {
+            let byte = (i % 26) as u8 + b'a';
+            match rt.send_input(&pane_id, &[byte]) {
+                Ok(()) => ok_count += 1,
+                Err(e) => panic!("send_input failed at {}: {}", i, e),
+            }
+        }
+
+        assert_eq!(ok_count, 500, "all 500 rapid sends should succeed");
     }
 }

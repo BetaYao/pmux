@@ -1,26 +1,160 @@
 //! Tmux backend - uses tmux commands for session persistence.
 //!
-//! Implements AgentRuntime via tmux send-keys, pipe-pane, split-window, etc.
+//! Implements AgentRuntime via direct PTY write for input (no send-keys per keystroke),
+//! pipe-pane for output, split-window, etc.
 
+use std::collections::HashMap;
+use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use crate::runtime::agent_runtime::{AgentId, AgentRuntime, PaneId, RuntimeError};
 
+/// Write bytes to pane PTY. Uses cache to avoid re-opening. Runs in writer thread.
+#[cfg(unix)]
+fn write_to_pane_pty(
+    target: &str,
+    bytes: &[u8],
+    cache: &Mutex<HashMap<PaneId, std::fs::File>>,
+) -> Result<(), RuntimeError> {
+    let pane_id = target.split('.').last().unwrap_or(target).to_string();
+    let mut file = {
+        let mut guard = cache.lock().map_err(|e| RuntimeError::Backend(e.to_string()))?;
+        if let Some(f) = guard.remove(&pane_id) {
+            f
+        } else {
+            drop(guard);
+            let path = get_pane_tty_path_standalone(target)?;
+            let f = std::fs::OpenOptions::new()
+                .write(true)
+                .open(&path)
+                .map_err(|e| RuntimeError::Backend(format!("open {}: {}", path, e)))?;
+            let mut g = cache.lock().map_err(|e| RuntimeError::Backend(e.to_string()))?;
+            g.insert(pane_id.clone(), f);
+            g.remove(&pane_id).unwrap()
+        }
+    };
+    file.write_all(bytes)
+        .map_err(|e| RuntimeError::Backend(format!("write to PTY: {}", e)))?;
+    file.flush()
+        .map_err(|e| RuntimeError::Backend(format!("flush PTY: {}", e)))?;
+    // Re-insert into cache for next use
+    let mut guard = cache.lock().map_err(|e| RuntimeError::Backend(e.to_string()))?;
+    guard.insert(pane_id, file);
+    Ok(())
+}
+
+#[cfg(unix)]
+fn get_pane_tty_path_standalone(target: &str) -> Result<String, RuntimeError> {
+    let output = Command::new("tmux")
+        .args(["display", "-p", "-t", target, "#{pane_tty}"])
+        .output()
+        .map_err(|e| RuntimeError::Backend(format!("tmux exec failed: {}", e)))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(RuntimeError::Backend(format!(
+            "tmux display failed: {}",
+            stderr.trim()
+        )));
+    }
+    let path = String::from_utf8(output.stdout)
+        .map_err(|e| RuntimeError::Backend(format!("tmux output invalid utf8: {}", e)))?
+        .trim()
+        .to_string();
+    if path.is_empty() {
+        return Err(RuntimeError::Backend("tmux returned empty pane_tty".to_string()));
+    }
+    Ok(path)
+}
+
 /// Tmux runtime - delegates to tmux commands for session persistence.
+/// Input uses direct PTY write (no process spawn per keystroke); output uses pipe-pane.
 pub struct TmuxRuntime {
     session_name: String,
     window_name: String,
+    /// Input channel: (pane_id, bytes). Writer thread drains and writes to pane PTYs.
+    input_tx: flume::Sender<(PaneId, Vec<u8>)>,
 }
 
 impl TmuxRuntime {
+    /// Get the tmux session name.
+    pub fn session_name(&self) -> &str {
+        &self.session_name
+    }
+
+    /// Get the tmux window name.
+    pub fn window_name(&self) -> &str {
+        &self.window_name
+    }
+
     /// Create a new TmuxRuntime for the given session and window.
+    /// Creates the tmux session and window if they don't exist.
+    /// Spawns a writer thread that drains input to pane PTYs via direct write (no send-keys).
     pub fn new(session_name: impl Into<String>, window_name: impl Into<String>) -> Self {
+        let session_name = session_name.into();
+        let window_name = window_name.into();
+
+        // Create tmux session and window if they don't exist
+        Self::ensure_session_and_window(&session_name, &window_name);
+
+        let (input_tx, input_rx) = flume::unbounded::<(PaneId, Vec<u8>)>();
+        let pty_cache: Arc<Mutex<HashMap<PaneId, std::fs::File>>> = Arc::new(Mutex::new(HashMap::new()));
+
+        let session_clone = session_name.clone();
+        let window_clone = window_name.clone();
+        let cache_clone = pty_cache.clone();
+        thread::spawn(move || {
+            while let Ok((pane_id, bytes)) = input_rx.recv() {
+                let target = format!("{}:{}.{}", session_clone, window_clone, pane_id);
+                if let Err(_) = write_to_pane_pty(&target, &bytes, &cache_clone) {
+                    // On error, clear cache for this pane so next send retries
+                    let _ = cache_clone.lock().map(|mut g| g.remove(&pane_id));
+                }
+            }
+        });
+
         Self {
-            session_name: session_name.into(),
-            window_name: window_name.into(),
+            session_name,
+            window_name,
+            input_tx,
+        }
+    }
+
+    /// Ensure tmux session and window exist, creating them if necessary.
+    fn ensure_session_and_window(session_name: &str, window_name: &str) {
+        // First, try to create the session (detached, with the named window)
+        // This will fail if the session already exists, which is fine
+        let _ = Command::new("tmux")
+            .args([
+                "new-session",
+                "-d",
+                "-s",
+                session_name,
+                "-n",
+                window_name,
+            ])
+            .output();
+
+        // Check if the window exists in the session
+        let window_target = format!("{}:{}", session_name, window_name);
+        let check = Command::new("tmux")
+            .args(["list-windows", "-t", &window_target])
+            .output();
+
+        // If window doesn't exist, create it
+        if check.is_err() || !check.map(|o| o.status.success()).unwrap_or(false) {
+            let _ = Command::new("tmux")
+                .args([
+                    "new-window",
+                    "-t",
+                    session_name,
+                    "-n",
+                    window_name,
+                ])
+                .output();
         }
     }
 
@@ -73,6 +207,30 @@ impl TmuxRuntime {
         Ok(())
     }
 
+    /// Get pane PTY path via tmux display. Returns path like /dev/pts/N.
+    #[allow(dead_code)]
+    fn get_pane_tty_path(&self, target: &str) -> Result<String, RuntimeError> {
+        let output = Command::new("tmux")
+            .args(["display", "-p", "-t", target, "#{pane_tty}"])
+            .output()
+            .map_err(|e| RuntimeError::Backend(format!("tmux exec failed: {}", e)))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(RuntimeError::Backend(format!(
+                "tmux display failed: {}",
+                stderr.trim()
+            )));
+        }
+        let path = String::from_utf8(output.stdout)
+            .map_err(|e| RuntimeError::Backend(format!("tmux output invalid utf8: {}", e)))?
+            .trim()
+            .to_string();
+        if path.is_empty() {
+            return Err(RuntimeError::Backend("tmux returned empty pane_tty".to_string()));
+        }
+        Ok(path)
+    }
+
     /// Run tmux command and capture stdout.
     fn tmux_cmd_output(&self, args: &[&str]) -> Result<String, RuntimeError> {
         let output = Command::new("tmux")
@@ -106,23 +264,25 @@ impl TmuxRuntime {
 }
 
 impl AgentRuntime for TmuxRuntime {
+    fn backend_type(&self) -> &'static str {
+        "tmux"
+    }
+
     fn send_input(&self, pane_id: &PaneId, bytes: &[u8]) -> Result<(), RuntimeError> {
-        let target = self.pane_target(pane_id);
-        // tmux send-keys -t {target} -l {literal} for raw bytes
-        // We need to escape/encode bytes for tmux. For UTF-8 text, pass as -l literal.
-        let s = String::from_utf8_lossy(bytes);
-        let escaped = escape_for_tmux_send_keys(&s);
-        self.tmux_cmd(&["send-keys", "-t", &target, "-l", &escaped])
+        // Route through input channel → writer thread → direct PTY write (no process spawn)
+        self.input_tx
+            .send((pane_id.clone(), bytes.to_vec()))
+            .map_err(|e| RuntimeError::Backend(e.to_string()))
     }
 
     fn send_key(&self, pane_id: &PaneId, key: &str, use_literal: bool) -> Result<(), RuntimeError> {
-        let target = self.pane_target(pane_id);
-        if use_literal {
-            let escaped = escape_for_tmux_send_keys(key);
-            self.tmux_cmd(&["send-keys", "-t", &target, "-l", &escaped])
+        let bytes = if use_literal {
+            key.as_bytes().to_vec()
         } else {
-            self.tmux_cmd(&["send-keys", "-t", &target, key])
-        }
+            // Map tmux key names to xterm byte sequences (avoids process spawn)
+            tmux_key_to_bytes(key).unwrap_or_else(|| key.as_bytes().to_vec())
+        };
+        self.send_input(pane_id, &bytes)
     }
 
     fn resize(&self, pane_id: &PaneId, cols: u16, rows: u16) -> Result<(), RuntimeError> {
@@ -284,8 +444,45 @@ impl AgentRuntime for TmuxRuntime {
 }
 
 /// Escape string for tmux send-keys -l (literal mode).
+/// Kept for potential send-keys fallback on non-Unix.
+#[allow(dead_code)]
 fn escape_for_tmux_send_keys(s: &str) -> String {
     s.replace('\\', "\\\\").replace('\'', "\\'")
+}
+
+/// Map tmux key names to xterm byte sequences for direct PTY write.
+/// Returns None for unknown keys (caller falls back to literal).
+fn tmux_key_to_bytes(key: &str) -> Option<Vec<u8>> {
+    Some(match key {
+        "Enter" | "Return" => vec![b'\r'],
+        "Tab" => vec![b'\t'],
+        "Space" => vec![b' '],
+        "BackSpace" | "BS" => vec![0x7f],
+        "Escape" => vec![0x1b],
+        "Up" => vec![0x1b, b'[', b'A'],
+        "Down" => vec![0x1b, b'[', b'B'],
+        "Right" => vec![0x1b, b'[', b'C'],
+        "Left" => vec![0x1b, b'[', b'D'],
+        "Home" => vec![0x1b, b'[', b'H'],
+        "End" => vec![0x1b, b'[', b'F'],
+        "PageDown" | "Page_Down" => vec![0x1b, b'[', b'6', b'~'],
+        "PageUp" | "Page_Up" => vec![0x1b, b'[', b'5', b'~'],
+        "Delete" => vec![0x1b, b'[', b'3', b'~'],
+        "Insert" => vec![0x1b, b'[', b'2', b'~'],
+        "F1" => vec![0x1b, b'O', b'P'],
+        "F2" => vec![0x1b, b'O', b'Q'],
+        "F3" => vec![0x1b, b'O', b'R'],
+        "F4" => vec![0x1b, b'O', b'S'],
+        "F5" => vec![0x1b, b'[', b'1', b'5', b'~'],
+        "F6" => vec![0x1b, b'[', b'1', b'7', b'~'],
+        "F7" => vec![0x1b, b'[', b'1', b'8', b'~'],
+        "F8" => vec![0x1b, b'[', b'1', b'9', b'~'],
+        "F9" => vec![0x1b, b'[', b'2', b'0', b'~'],
+        "F10" => vec![0x1b, b'[', b'2', b'1', b'~'],
+        "F11" => vec![0x1b, b'[', b'2', b'3', b'~'],
+        "F12" => vec![0x1b, b'[', b'2', b'4', b'~'],
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
@@ -318,6 +515,36 @@ mod tests {
     }
 
     #[test]
+    fn test_tmux_key_to_bytes() {
+        assert_eq!(tmux_key_to_bytes("Enter"), Some(vec![b'\r']));
+        assert_eq!(tmux_key_to_bytes("Tab"), Some(vec![b'\t']));
+        assert_eq!(tmux_key_to_bytes("Up"), Some(vec![0x1b, b'[', b'A']));
+        assert_eq!(tmux_key_to_bytes("Down"), Some(vec![0x1b, b'[', b'B']));
+        assert_eq!(tmux_key_to_bytes("Escape"), Some(vec![0x1b]));
+        assert_eq!(tmux_key_to_bytes("unknown"), None);
+    }
+
+    #[test]
+    fn test_send_input_no_process_spawn() {
+        use std::time::Instant;
+        // send_input queues to channel - no process spawn per keystroke
+        let rt = TmuxRuntime::new("sdlc-test", "main");
+        let pane_id = "%0".to_string();
+
+        let start = Instant::now();
+        for _ in 0..100 {
+            rt.send_input(&pane_id, b"x").unwrap();
+        }
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed.as_millis() < 50,
+            "send_input should not block: 100 sends took {}ms (expected < 50ms, no process spawn)",
+            elapsed.as_millis()
+        );
+    }
+
+    #[test]
     fn test_tmux_runtime_list_panes_requires_tmux() {
         if !tmux_available() {
             return;
@@ -328,13 +555,11 @@ mod tests {
     }
 
     #[test]
-    fn test_tmux_runtime_send_key_requires_tmux() {
-        if !tmux_available() {
-            return;
-        }
+    fn test_tmux_runtime_send_key_no_process_spawn() {
+        // send_key queues to input channel (no tmux process spawn); returns Ok immediately
         let rt = TmuxRuntime::new("nonexistent-session-xyz", "nonexistent-window");
-        let err = rt.send_key(&"%0".to_string(), "Enter", false);
-        assert!(err.is_err());
+        let result = rt.send_key(&"%0".to_string(), "Enter", false);
+        assert!(result.is_ok(), "send_key should succeed (queue to channel, no blocking)");
     }
 
     #[test]
