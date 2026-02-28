@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// When true, AppRoot will set show_settings=true and clear this flag at start of render.
 /// Used by menu action (open_settings) to open Settings from main.rs without window access.
@@ -113,6 +113,14 @@ pub struct AppRoot {
     /// ResizeController: debounced window bounds → (cols, rows) for engine/runtime resize.
     /// Resize is driven here, NOT by TerminalElement/TerminalView request_layout/prepaint/paint.
     resize_controller: ResizeController,
+    /// When true, show the Settings modal overlay
+    show_settings: bool,
+    /// Draft config when Settings is open; None when closed. Updated on open and by toggles.
+    settings_draft: Option<Config>,
+    /// Draft secrets when Settings is open; None when closed.
+    settings_secrets_draft: Option<Secrets>,
+    /// Which channel config panel is open: "discord", "kook", "feishu"
+    settings_configuring_channel: Option<String>,
     /// StatusCountsModel - TopBar/StatusBar observe this for entity-scoped re-render (Phase 0 spike)
     status_counts_model: Option<Entity<StatusCountsModel>>,
     /// TopBar Entity - observes StatusCountsModel, re-renders only when status changes
@@ -231,6 +239,10 @@ impl AppRoot {
             terminal_needs_focus: false,
             terminal_focus: None,
             resize_controller: ResizeController::new(),
+            show_settings: false,
+            settings_draft: None,
+            settings_secrets_draft: None,
+            settings_configuring_channel: None,
             status_counts_model: None,
             topbar_entity: None,
             notification_panel_model: None,
@@ -527,54 +539,33 @@ impl AppRoot {
             let terminal_area_entity = terminal_area_entity;
 
             cx.spawn(async move |entity, cx| {
-                const THROTTLE_MS: u64 = 16;
-                macro_rules! do_notify {
-                    () => {
-                        if let Some(ref pub_) = status_publisher {
-                            let shell_info = crate::shell_integration::ShellPhaseInfo {
-                                phase: engine.shell_phase(),
-                                last_post_exec_exit_code: engine.last_post_exec_exit_code(),
-                            };
-                            let content: Option<String> = entity.update(cx, |this, _cx| {
-                                if let Ok(buffers) = this.terminal_buffers.lock() {
-                                    if let Some(buffer) = buffers.get(&pane_target_clone) {
-                                        return buffer.content_for_status_detection();
-                                    }
-                                }
-                                None
-                            }).ok().flatten();
-                            if let Some(content_str) = content {
-                                let _ = pub_.check_status(
-                                    &pane_target_clone,
-                                    crate::status_detector::ProcessStatus::Running,
-                                    Some(shell_info),
-                                    &content_str,
-                                );
-                            }
-                        }
-                        let _ = entity.update(cx, |_, cx| cx.notify());
-                        last_notify_ms_clone.store(
-                            std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64,
-                            Ordering::SeqCst,
-                        );
-                    };
-                }
                 loop {
-                    select! {
-                        result = dirty_rx.recv_async().fuse() => {
-                            if result.is_err() { break; }
-                            has_pending_clone.store(true, Ordering::SeqCst);
-                            while dirty_rx.try_recv().is_ok() {}
-                            let now_ms = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-                            if now_ms.saturating_sub(last_notify_ms_clone.load(Ordering::SeqCst)) >= THROTTLE_MS {
-                                has_pending_clone.store(false, Ordering::SeqCst);
-                                do_notify!();
+                    blocking::unblock(|| std::thread::sleep(Duration::from_millis(16))).await;
+
+                    let content_changed = engine.advance_bytes();
+
+                    if let Some(ref pub_) = status_publisher {
+                        let shell_info = crate::shell_integration::ShellPhaseInfo {
+                            phase: engine.shell_phase(),
+                            last_post_exec_exit_code: engine.last_post_exec_exit_code(),
+                        };
+
+                        let content: Option<String> = entity.update(cx, |this, _cx| {
+                            if let Ok(buffers) = this.terminal_buffers.lock() {
+                                if let Some(buffer) = buffers.get(&pane_target_clone) {
+                                    return buffer.content_for_status_detection();
+                                }
                             }
-                        }
-                        _ = cx.background_executor().timer(Duration::from_millis(THROTTLE_MS)).fuse() => {
-                            if has_pending_clone.swap(false, Ordering::SeqCst) {
-                                do_notify!();
-                            }
+                            None
+                        }).ok().flatten();
+
+                        if let Some(content_str) = content {
+                            let _ = pub_.check_status(
+                                &pane_target_clone,
+                                crate::status_detector::ProcessStatus::Running,
+                                Some(shell_info),
+                                &content_str,
+                            );
                         }
                     }
 
@@ -620,76 +611,36 @@ impl AppRoot {
                 buffers.insert(pane_target.to_string(), buffer);
             }
 
-            let (dirty_tx, dirty_rx) = flume::unbounded::<()>();
-            let engine_thread = engine.clone();
-            std::thread::spawn(move || {
-                const OUTPUT_POLL_MS: u64 = 4;
-                loop {
-                    match engine_thread.advance_bytes_with_timeout(Duration::from_millis(OUTPUT_POLL_MS)) {
-                        Some(true) => {
-                            let _ = dirty_tx.send(());
-                        }
-                        Some(false) => {
-                            // Lock contention: send dirty to ensure render continues
-                            let _ = dirty_tx.send(());
-                        }
-                        None => break,
-                    }
-                }
-            });
-
             let status_publisher = self.status_publisher.clone();
             let pane_target_clone = pane_target.to_string();
             let terminal_area_entity = terminal_area_entity;
             cx.spawn(async move |entity, cx| {
-                const THROTTLE_MS: u64 = 16;
-                macro_rules! do_notify {
-                    () => {
-                        if let Some(ref pub_) = status_publisher {
-                            let shell_info = crate::shell_integration::ShellPhaseInfo {
-                                phase: engine.shell_phase(),
-                                last_post_exec_exit_code: engine.last_post_exec_exit_code(),
-                            };
-                            let content: Option<String> = entity.update(cx, |this, _cx| {
+                loop {
+                    blocking::unblock(|| std::thread::sleep(Duration::from_millis(16))).await;
+                    let content_changed = engine.advance_bytes();
+                    if let Some(ref pub_) = status_publisher {
+                        let shell_info = crate::shell_integration::ShellPhaseInfo {
+                            phase: engine.shell_phase(),
+                            last_post_exec_exit_code: engine.last_post_exec_exit_code(),
+                        };
+                        let content: Option<String> = entity
+                            .update(cx, |this, _cx| {
                                 if let Ok(buffers) = this.terminal_buffers.lock() {
                                     if let Some(buffer) = buffers.get(&pane_target_clone) {
                                         return buffer.content_for_status_detection();
                                     }
                                 }
                                 None
-                            }).ok().flatten();
-                            if let Some(content_str) = content {
-                                let _ = pub_.check_status(
-                                    &pane_target_clone,
-                                    crate::status_detector::ProcessStatus::Running,
-                                    Some(shell_info),
-                                    &content_str,
-                                );
-                            }
-                        }
-                        let _ = entity.update(cx, |_, cx| cx.notify());
-                        last_notify_ms_clone.store(
-                            std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64,
-                            Ordering::SeqCst,
-                        );
-                    };
-                }
-                loop {
-                    select! {
-                        result = dirty_rx.recv_async().fuse() => {
-                            if result.is_err() { break; }
-                            has_pending_clone.store(true, Ordering::SeqCst);
-                            while dirty_rx.try_recv().is_ok() {}
-                            let now_ms = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-                            if now_ms.saturating_sub(last_notify_ms_clone.load(Ordering::SeqCst)) >= THROTTLE_MS {
-                                has_pending_clone.store(false, Ordering::SeqCst);
-                                do_notify!();
-                            }
-                        }
-                        _ = cx.background_executor().timer(Duration::from_millis(THROTTLE_MS)).fuse() => {
-                            if has_pending_clone.swap(false, Ordering::SeqCst) {
-                                do_notify!();
-                            }
+                            })
+                            .ok()
+                            .flatten();
+                        if let Some(content_str) = content {
+                            let _ = pub_.check_status(
+                                &pane_target_clone,
+                                crate::status_detector::ProcessStatus::Running,
+                                Some(shell_info),
+                                &content_str,
+                            );
                         }
                     }
                     if content_changed {
