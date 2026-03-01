@@ -27,6 +27,7 @@ struct LocalPtyPane {
 /// Local PTY runtime - one shell per worktree, direct PTY read/write.
 /// Input is queued via flume channel; a dedicated writer thread drains the queue
 /// and writes to the PTY, so send_input never blocks the UI thread.
+#[deprecated(note = "Use LocalPtyAgent instead — supports multi-pane, diff, and review")]
 pub struct LocalPtyRuntime {
     worktree_path: std::path::PathBuf,
     pane_id: PaneId,
@@ -249,18 +250,19 @@ impl AgentRuntime for LocalPtyAgent {
         }
     }
 
-    fn open_diff(&self, _worktree: &Path, pane_id: Option<&PaneId>) -> Result<String, RuntimeError> {
-        // Get the target pane or primary pane
-        let target_pane_id = pane_id
-            .map(|p| p.to_string())
-            .or_else(|| self.primary_pane_id())
-            .ok_or_else(|| RuntimeError::Backend("No pane available".to_string()))?;
+    fn open_diff(&self, worktree: &Path, _pane_id: Option<&PaneId>) -> Result<String, RuntimeError> {
+        let idx = self.pane_counter.fetch_add(1, Ordering::SeqCst);
+        let diff_pane_id = self.create_pane(&format!("diff{}", idx))?;
 
-        // Send git diff command to the pane
-        let cmd = format!("git diff main...HEAD --color=always\n");
-        self.send_input(&target_pane_id, cmd.as_bytes())?;
+        let worktree_str = worktree.to_string_lossy();
+        // Try nvim diffview first, fallback to git diff | less
+        let cmd = format!(
+            "nvim -c 'DiffviewOpen main...HEAD' '{}' 2>/dev/null || git diff main...HEAD --color=always | less -R\n",
+            worktree_str
+        );
+        self.send_input(&diff_pane_id, cmd.as_bytes())?;
 
-        Ok(format!("Diff displayed in pane {}", target_pane_id))
+        Ok(diff_pane_id)
     }
 
     fn open_review(&self, worktree: &Path) -> Result<String, RuntimeError> {
@@ -517,6 +519,7 @@ mod tests {
     use crate::runtime::AgentRuntime;
     use std::time::Instant;
 
+    #[allow(deprecated)]
     #[test]
     fn test_send_input_does_not_block() {
         let dir = tempfile::tempdir().unwrap();
@@ -536,6 +539,7 @@ mod tests {
         );
     }
 
+    #[allow(deprecated)]
     #[test]
     fn test_rapid_keystrokes_no_contention() {
         let dir = tempfile::tempdir().unwrap();
@@ -604,5 +608,29 @@ mod tests {
 
         // Should succeed (command sent to pane)
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_open_diff_creates_new_pane() {
+        let dir = tempfile::tempdir().unwrap();
+        // Initialize git repo
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(dir.path())
+            .output()
+            .ok();
+        let agent = LocalPtyAgent::new(dir.path(), 80, 24).unwrap();
+
+        let panes_before = agent.list_panes(&String::new()).len();
+        let result = agent.open_diff(dir.path(), None);
+        assert!(result.is_ok(), "open_diff should succeed, got: {:?}", result);
+        let panes_after = agent.list_panes(&String::new()).len();
+        assert_eq!(
+            panes_after,
+            panes_before + 1,
+            "open_diff should create a new pane (before={}, after={})",
+            panes_before,
+            panes_after
+        );
     }
 }
