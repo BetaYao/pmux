@@ -151,10 +151,11 @@ impl Config {
         const VALID_BACKENDS: [&str; 2] = ["local", "tmux"];
         if !VALID_BACKENDS.contains(&config.backend.as_str()) {
             eprintln!(
-                "pmux: invalid backend '{}' in config, using 'local'. Valid: local, tmux",
-                config.backend
+                "pmux: invalid backend '{}' in config, using '{}'. Valid: local, tmux",
+                config.backend,
+                default_backend()
             );
-            config.backend = "local".to_string();
+            config.backend = default_backend();
         }
         config.migrate_from_legacy();
         Ok(config)
@@ -407,14 +408,14 @@ mod tests {
         assert_eq!(loaded_per_repo.get(&PathBuf::from("/path/repo2")), Some(&0));
     }
 
-    /// Test: Config invalid backend falls back to local
+    /// Test: Config invalid backend falls back to default (local)
     #[test]
     fn test_config_load_invalid_backend_fallback() {
         let temp_dir = TempDir::new().unwrap();
         let path = temp_dir.path().join("config.json");
         std::fs::write(&path, r#"{"backend": "docker"}"#).unwrap();
         let config = Config::load_from_path(&path).unwrap();
-        assert_eq!(config.backend, "local");
+        assert_eq!(config.backend, default_backend());
     }
 
     /// Test: Config backend field is loaded from JSON

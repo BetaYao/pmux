@@ -24,7 +24,7 @@ pub const PMUX_BACKEND_ENV: &str = "PMUX_BACKEND";
 pub const DEFAULT_BACKEND: &str = "local";
 
 /// Resolve backend: PMUX_BACKEND env > config.backend > "local".
-/// Invalid values (non-local/tmux) fall back to "local".
+/// Invalid values (non-local/tmux) fall back to DEFAULT_BACKEND.
 pub fn resolve_backend(config: Option<&Config>) -> String {
     const VALID: [&str; 2] = ["local", "tmux"];
     let from_env = std::env::var(PMUX_BACKEND_ENV).ok();
@@ -67,6 +67,28 @@ pub fn window_target(workspace_path: &Path, window_name: &str) -> String {
     format!("{}:{}", session_name_for_workspace(workspace_path), window_name)
 }
 
+/// Check if tmux is available (installed and runnable).
+#[cfg(unix)]
+pub fn tmux_available() -> bool {
+    std::process::Command::new("tmux")
+        .arg("-V")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+pub fn tmux_available() -> bool {
+    false
+}
+
+/// Result of runtime creation; may include fallback message when tmux was requested but unavailable.
+pub struct RuntimeCreationResult {
+    pub runtime: Arc<dyn AgentRuntime>,
+    /// Set when backend was tmux but tmux unavailable, so we fell back to local.
+    pub fallback_message: Option<String>,
+}
+
 /// Create a runtime for the given worktree.
 /// Backend resolution: PMUX_BACKEND env > config.backend > "local".
 ///
@@ -83,23 +105,39 @@ pub fn create_runtime_from_env(
     cols: u16,
     rows: u16,
     config: Option<&Config>,
-) -> Result<Arc<dyn AgentRuntime>, RuntimeError> {
+) -> Result<RuntimeCreationResult, RuntimeError> {
     let backend = resolve_backend(config);
 
     match backend.as_str() {
         "tmux" => {
             #[cfg(unix)]
             {
+                if !tmux_available() {
+                    let rt = create_runtime(worktree_path, cols, rows)?;
+                    return Ok(RuntimeCreationResult {
+                        runtime: rt,
+                        fallback_message: Some("tmux 不可用，已回退到 local".to_string()),
+                    });
+                }
                 let session_name = session_name_for_workspace(workspace_path);
                 let window_name = window_name_for_worktree(worktree_path, branch_name);
-                Ok(create_tmux_runtime(session_name, window_name))
+                Ok(RuntimeCreationResult {
+                    runtime: create_tmux_runtime(session_name, window_name, worktree_path),
+                    fallback_message: None,
+                })
             }
             #[cfg(not(unix))]
             Err(RuntimeError::Backend(
                 "tmux backend not supported on non-Unix platforms".into(),
             ))
         }
-        "local" | _ => create_runtime(worktree_path, cols, rows),
+        "local" | _ => {
+            let rt = create_runtime(worktree_path, cols, rows)?;
+            Ok(RuntimeCreationResult {
+                runtime: rt,
+                fallback_message: None,
+            })
+        }
     }
 }
 
@@ -120,8 +158,9 @@ pub fn create_runtime(
 pub fn create_tmux_runtime(
     session_name: impl Into<String>,
     window_name: impl Into<String>,
+    worktree_path: &Path,
 ) -> Arc<dyn AgentRuntime> {
-    let rt = TmuxRuntime::new(session_name, window_name);
+    let rt = TmuxRuntime::new(session_name, window_name, Some(worktree_path));
     Arc::new(rt)
 }
 
@@ -130,6 +169,7 @@ pub fn create_tmux_runtime(
 pub fn create_tmux_runtime(
     _session_name: impl Into<String>,
     _window_name: impl Into<String>,
+    _worktree_path: &Path,
 ) -> Arc<dyn AgentRuntime> {
     panic!("tmux backend not supported on non-Unix platforms")
 }
@@ -190,6 +230,18 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
+    fn test_default_backend_is_local() {
+        assert_eq!(DEFAULT_BACKEND, "local");
+    }
+
+    #[test]
+    fn test_resolve_backend_defaults_to_local() {
+        std::env::remove_var("PMUX_BACKEND");
+        let backend = resolve_backend(None);
+        assert_eq!(backend, "local");
+    }
+
+    #[test]
     fn test_resolve_backend_env_overrides_config() {
         std::env::set_var(PMUX_BACKEND_ENV, "tmux");
         let config = Config {
@@ -211,13 +263,32 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_backend_respects_config() {
+        std::env::remove_var("PMUX_BACKEND");
+        let mut config = crate::config::Config::default();
+        config.backend = "tmux".to_string();
+        let backend = resolve_backend(Some(&config));
+        assert_eq!(backend, "tmux");
+    }
+
+    #[test]
+    fn test_resolve_backend_env_overrides_config_local() {
+        std::env::set_var("PMUX_BACKEND", "local");
+        let mut config = crate::config::Config::default();
+        config.backend = "tmux".to_string();
+        let backend = resolve_backend(Some(&config));
+        assert_eq!(backend, "local");
+        std::env::remove_var("PMUX_BACKEND");
+    }
+
+    #[test]
     fn test_resolve_backend_invalid_fallback() {
         std::env::remove_var(PMUX_BACKEND_ENV);
         let config = Config {
             backend: "docker".into(),
             ..Config::default()
         };
-        assert_eq!(resolve_backend(Some(&config)), "local");
+        assert_eq!(resolve_backend(Some(&config)), DEFAULT_BACKEND);
     }
 
     #[test]
@@ -255,7 +326,7 @@ mod tests {
 
     #[test]
     fn test_create_tmux_runtime_unix() {
-        let rt = create_tmux_runtime("pmux-test-session", "test-window");
+        let rt = create_tmux_runtime("pmux-test-session", "test-window", Path::new("."));
         // Just verify it creates without panicking
         // The actual tmux operations require tmux binary
         let _ = rt.primary_pane_id();
