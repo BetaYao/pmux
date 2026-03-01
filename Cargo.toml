@@ -32,9 +32,11 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "blo
 open = "5"
 tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
 futures-util = "0.3"
+gpui-terminal = { path = "vendor/gpui-terminal" }
 
 [dev-dependencies]
 tempfile = "3.8"
+flume = "0.11"
 
 [[bin]]
 name = "pmux"
@@ -53,3 +55,7 @@ copyright = "Copyright (c) 2025"
 category = "Developer Tool"
 short_description = "AI Agent multi-branch development workbench"
 long_description = """A native desktop GUI application for managing multiple AI agents working in parallel with real-time monitoring and notifications."""
+
+[patch.crates-io]
+gpui = { git = "https://github.com/zed-industries/zed" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit"] }
