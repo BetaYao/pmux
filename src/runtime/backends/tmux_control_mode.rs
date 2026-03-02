@@ -703,7 +703,6 @@ impl AgentRuntime for TmuxControlModeRuntime {
         // line starts at the left margin.
         let with_crlf = trimmed.replace('\n', "\r\n");
         result.extend_from_slice(with_crlf.as_bytes());
-        result.extend_from_slice(b"\r\n");
         Some(result)
     }
 
