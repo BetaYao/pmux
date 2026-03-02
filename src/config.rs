@@ -159,10 +159,10 @@ impl Config {
 
         let content = std::fs::read_to_string(path)?;
         let mut config: Config = serde_json::from_str(&content)?;
-        const VALID_BACKENDS: [&str; 3] = ["local", "tmux", "tmux-cc"];
+        const VALID_BACKENDS: [&str; 5] = ["local", "tmux", "tmux-cc", "dtach", "screen"];
         if !VALID_BACKENDS.contains(&config.backend.as_str()) {
             eprintln!(
-                "pmux: invalid backend '{}' in config, using '{}'. Valid: local, tmux, tmux-cc",
+                "pmux: invalid backend '{}' in config, using '{}'. Valid: local, tmux, tmux-cc, dtach, screen",
                 config.backend,
                 default_backend()
             );

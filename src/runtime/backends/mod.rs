@@ -3,7 +3,7 @@
 //! Supports both Local PTY (direct shell spawn) and Tmux (session persistence).
 
 pub mod session_backend;
-pub use session_backend::{SessionBackend, ResolvedBackend};
+pub use session_backend::{ResolvedBackend, SessionBackend};
 
 mod dtach;
 mod local_pty;
@@ -25,7 +25,7 @@ use crate::config::Config;
 use crate::runtime::agent_runtime::{AgentRuntime, RuntimeError};
 use crate::runtime::WorktreeState;
 
-/// Environment variable to select backend. Valid values: "local", "tmux".
+/// Environment variable to select backend. Valid values: "local", "tmux", "dtach", "screen".
 pub const PMUX_BACKEND_ENV: &str = "PMUX_BACKEND";
 
 /// Default backend when environment variable is not set.
@@ -33,19 +33,39 @@ pub const PMUX_BACKEND_ENV: &str = "PMUX_BACKEND";
 /// Falls back to local PTY automatically when tmux is not installed.
 pub const DEFAULT_BACKEND: &str = "tmux";
 
-/// Resolve backend: PMUX_BACKEND env > config.backend > DEFAULT_BACKEND ("tmux").
-/// Invalid values fall back to DEFAULT_BACKEND.
-pub fn resolve_backend(config: Option<&Config>) -> String {
-    const VALID: [&str; 3] = ["local", "tmux", "tmux-cc"];
-    let from_env = std::env::var(PMUX_BACKEND_ENV).ok();
-    let from_config = config.map(|c| c.backend.as_str());
-    let raw = from_env.as_deref().or(from_config).unwrap_or(DEFAULT_BACKEND);
-    if VALID.contains(&raw) {
-        raw.to_string()
-    } else {
-        DEFAULT_BACKEND.to_string()
+/// Effective SessionBackend: PMUX_BACKEND env > config.session_backend (with config.backend fallback when Auto).
+fn effective_session_backend(config: Option<&Config>) -> SessionBackend {
+    if let Ok(env_val) = std::env::var(PMUX_BACKEND_ENV) {
+        return match env_val.as_str() {
+            "dtach" => SessionBackend::Dtach,
+            "tmux" | "tmux-cc" => SessionBackend::Tmux,
+            "screen" => SessionBackend::Screen,
+            "local" => SessionBackend::Local,
+            _ => config.map(|c| c.session_backend).unwrap_or(SessionBackend::Tmux),
+        };
     }
+    let sb = config.map(|c| c.session_backend).unwrap_or(SessionBackend::Tmux);
+    if sb == SessionBackend::Auto {
+        if let Some(c) = config {
+            return match c.backend.as_str() {
+                "dtach" => SessionBackend::Dtach,
+                "tmux" | "tmux-cc" => SessionBackend::Tmux,
+                "screen" => SessionBackend::Screen,
+                "local" => SessionBackend::Local,
+                _ => SessionBackend::Tmux, // invalid: fall back to default
+            };
+        }
+    }
+    sb
 }
+
+/// Resolve backend to string: PMUX_BACKEND env > config.session_backend > config.backend > default.
+/// Returns the resolved backend string (dtach, tmux, screen, or local) for display.
+pub fn resolve_backend(config: Option<&Config>) -> String {
+    let session_backend = effective_session_backend(config);
+    session_backend.resolve().as_str().to_string()
+}
+
 
 /// Session naming for tmux backend. One workspace (repo) = one session.
 /// Example: /foo/repo -> "pmux-repo"
@@ -100,13 +120,13 @@ pub struct RuntimeCreationResult {
 }
 
 /// Create a runtime for the given worktree.
-/// Backend resolution: PMUX_BACKEND env > config.backend > "tmux".
-///
-/// Tmux: one workspace = one session, one worktree = one window.
+/// Backend resolution: PMUX_BACKEND env > config.session_backend > config.backend.
+/// Auto resolves: dtach > tmux > screen > local by availability.
 ///
 /// # Examples
 /// ```bash
 /// PMUX_BACKEND=tmux pmux
+/// PMUX_BACKEND=dtach pmux
 /// ```
 pub fn create_runtime_from_env(
     workspace_path: &Path,
@@ -116,26 +136,40 @@ pub fn create_runtime_from_env(
     rows: u16,
     config: Option<&Config>,
 ) -> Result<RuntimeCreationResult, RuntimeError> {
-    let backend = resolve_backend(config);
+    let session_backend = effective_session_backend(config);
+    let resolved = session_backend.resolve();
+
+    log::info!(
+        "Session backend: {:?} (resolved from {:?})",
+        resolved,
+        session_backend
+    );
 
     // #region agent log
     crate::debug_log::dbg_session_log(
         "mod.rs:create_runtime_from_env",
         "backend resolved",
         &serde_json::json!({
-            "backend": &backend,
-            "tmux_available": tmux_available(),
+            "resolved": resolved.as_str(),
+            "session_backend": session_backend.as_str(),
             "workspace_path": workspace_path.to_string_lossy(),
             "worktree_path": worktree_path.to_string_lossy(),
             "branch_name": branch_name,
-            "config_backend": config.map(|c| c.backend.as_str()).unwrap_or("none"),
         }),
         "H_backend",
     );
     // #endregion
 
-    match backend.as_str() {
-        "tmux" | "tmux-cc" => {
+    match resolved {
+        ResolvedBackend::Dtach => {
+            let rt = DtachRuntime::new(worktree_path, cols, rows)
+                .map_err(|e| RuntimeError::Backend(format!("dtach: {}", e)))?;
+            Ok(RuntimeCreationResult {
+                runtime: Arc::new(rt),
+                fallback_message: None,
+            })
+        }
+        ResolvedBackend::Tmux => {
             #[cfg(unix)]
             {
                 if !tmux_available() {
@@ -151,14 +185,6 @@ pub fn create_runtime_from_env(
                 }
                 let session_name = session_name_for_workspace(workspace_path);
                 let window_name = window_name_for_worktree(worktree_path, branch_name);
-                // #region agent log
-                crate::debug_log::dbg_session_log(
-                    "mod.rs:create_runtime_from_env",
-                    "creating TmuxControlModeRuntime",
-                    &serde_json::json!({"session_name": &session_name, "window_name": &window_name}),
-                    "H_backend",
-                );
-                // #endregion
                 let tmux_result = tmux_control_mode::TmuxControlModeRuntime::new(
                     &session_name,
                     &window_name,
@@ -166,14 +192,6 @@ pub fn create_runtime_from_env(
                     cols,
                     rows,
                 );
-                // #region agent log
-                crate::debug_log::dbg_session_log(
-                    "mod.rs:create_runtime_from_env",
-                    "TmuxControlModeRuntime::new result",
-                    &serde_json::json!({"ok": tmux_result.is_ok(), "err": tmux_result.as_ref().err().map(|e| e.to_string())}),
-                    "H_backend",
-                );
-                // #endregion
                 let runtime = Arc::new(
                     tmux_result.map_err(|e| RuntimeError::Backend(format!("tmux: {}", e)))?,
                 );
@@ -193,7 +211,15 @@ pub fn create_runtime_from_env(
                 })
             }
         }
-        "local" | _ => {
+        ResolvedBackend::Screen => {
+            let rt = ScreenRuntime::new(worktree_path, cols, rows)
+                .map_err(|e| RuntimeError::Backend(format!("screen: {}", e)))?;
+            Ok(RuntimeCreationResult {
+                runtime: Arc::new(rt),
+                fallback_message: None,
+            })
+        }
+        ResolvedBackend::Local => {
             let rt = create_runtime(worktree_path, cols, rows)?;
             Ok(RuntimeCreationResult {
                 runtime: rt,
@@ -251,6 +277,12 @@ pub fn recover_runtime(
         "local" | "local_pty" => Err(RuntimeError::Backend(
             "local_pty does not support session recovery".into(),
         )),
+        "dtach" => Err(RuntimeError::Backend(
+            "dtach does not support session recovery".into(),
+        )),
+        "screen" => Err(RuntimeError::Backend(
+            "screen does not support session recovery".into(),
+        )),
         "tmux" | "tmux-cc" => {
             let runtime = tmux_control_mode::TmuxControlModeRuntime::new(
                 &state.backend_session_id,
@@ -282,6 +314,12 @@ pub fn recover_runtime(
         "local" | "local_pty" => Err(RuntimeError::Backend(
             "local_pty does not support session recovery".into(),
         )),
+        "dtach" => Err(RuntimeError::Backend(
+            "dtach does not support session recovery".into(),
+        )),
+        "screen" => Err(RuntimeError::Backend(
+            "screen does not support session recovery".into(),
+        )),
         "tmux" | "tmux-cc" => Err(RuntimeError::Backend(
             "tmux not supported on non-Unix platforms".into(),
         )),
@@ -305,10 +343,15 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_backend_defaults_to_tmux() {
+    fn test_resolve_backend_defaults_to_tmux_or_local() {
         std::env::remove_var("PMUX_BACKEND");
         let backend = resolve_backend(None);
-        assert_eq!(backend, "tmux");
+        // With no config, we default to Tmux; resolve returns tmux if available else local
+        assert!(
+            backend == "tmux" || backend == "local",
+            "expected tmux or local, got {}",
+            backend
+        );
     }
 
     #[test]
@@ -355,7 +398,12 @@ mod tests {
     fn test_resolve_backend_accepts_tmux_cc() {
         std::env::set_var("PMUX_BACKEND", "tmux-cc");
         let backend = resolve_backend(None);
-        assert_eq!(backend, "tmux-cc");
+        // tmux-cc maps to Tmux; resolve returns tmux if available else local
+        assert!(
+            backend == "tmux" || backend == "local",
+            "expected tmux or local, got {}",
+            backend
+        );
         std::env::remove_var("PMUX_BACKEND");
     }
 
