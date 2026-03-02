@@ -1,6 +1,6 @@
 //! ContentExtractor parses terminal output to extract shell phase (OSC 133) and visible text.
 //!
-//! Used in the status pipeline: tee_output(rx) → ContentExtractor::feed → StatusPublisher.
+//! Used in the status pipeline: PTY output → ContentExtractor::feed → StatusPublisher.
 
 use crate::shell_integration::{MarkerKind, Osc133Parser, ShellPhase};
 
