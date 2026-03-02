@@ -7,12 +7,14 @@ pub use session_backend::{SessionBackend, ResolvedBackend};
 
 mod dtach;
 mod local_pty;
+mod screen;
 #[cfg(unix)]
 mod tmux;
 pub mod tmux_control_mode;
 
 pub use dtach::DtachRuntime;
 pub use local_pty::LocalPtyRuntime;
+pub use screen::ScreenRuntime;
 #[cfg(unix)]
 pub use tmux::TmuxRuntime;
 
