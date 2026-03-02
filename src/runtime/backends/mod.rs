@@ -2,6 +2,9 @@
 //!
 //! Supports both Local PTY (direct shell spawn) and Tmux (session persistence).
 
+pub mod session_backend;
+pub use session_backend::{SessionBackend, ResolvedBackend};
+
 mod local_pty;
 #[cfg(unix)]
 mod tmux;

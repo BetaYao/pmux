@@ -1,4 +1,5 @@
 // config.rs - Configuration management for pmux
+use crate::runtime::backends::SessionBackend;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -82,6 +83,7 @@ impl Default for Config {
             active_workspace_index: 0,
             per_repo_worktree_index: HashMap::new(),
             backend: default_backend(),
+            session_backend: SessionBackend::default(),
             remote_channels: RemoteChannelsConfig::default(),
             last_terminal_cols: None,
             last_terminal_rows: None,
@@ -121,6 +123,9 @@ pub struct Config {
     /// Runtime backend: "local" (PTY) or "tmux". Env PMUX_BACKEND overrides.
     #[serde(default = "default_backend")]
     pub backend: String,
+    /// Session backend: auto/dtach/tmux/screen/local. Auto resolves by availability.
+    #[serde(default)]
+    pub session_backend: SessionBackend,
     /// Remote notification channels (Discord, KOOK)
     #[serde(default)]
     pub remote_channels: RemoteChannelsConfig,
