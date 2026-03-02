@@ -681,7 +681,7 @@ impl AppRoot {
             let terminal_for_output = terminal.clone();
             let mut ext = ContentExtractor::new();
 
-            cx.spawn(async move |_entity, _cx| {
+            cx.spawn(async move |entity, cx| {
                 loop {
                     let chunk = match rx.recv_async().await {
                         Ok(c) => c,
@@ -702,6 +702,8 @@ impl AppRoot {
                             &content_str,
                         );
                     }
+                    // Trigger UI repaint so TerminalElement re-renders with new content
+                    let _ = entity.update(cx, |_, cx| cx.notify());
                 }
             })
             .detach();
@@ -775,7 +777,7 @@ impl AppRoot {
             let terminal_for_output = terminal.clone();
             let mut ext = ContentExtractor::new();
 
-            cx.spawn(async move |_entity, _cx| {
+            cx.spawn(async move |entity, cx| {
                 loop {
                     let chunk = match rx.recv_async().await {
                         Ok(c) => c,
@@ -796,6 +798,8 @@ impl AppRoot {
                             &content_str,
                         );
                     }
+                    // Trigger UI repaint so TerminalElement re-renders with new content
+                    let _ = entity.update(cx, |_, cx| cx.notify());
                 }
             })
             .detach();

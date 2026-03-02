@@ -65,6 +65,8 @@ pub struct Terminal {
     has_bell: Arc<Mutex<bool>>,
     dirty: AtomicBool,
     pub pty_write_rx: flume::Receiver<Vec<u8>>,
+    /// Keep sender to maintain channel liveness; TermEventProxy uses a clone.
+    #[allow(dead_code)]
     pty_write_tx: flume::Sender<Vec<u8>>,
 }
 

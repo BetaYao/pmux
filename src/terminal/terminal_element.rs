@@ -12,6 +12,8 @@ use std::sync::Arc;
 
 pub struct TerminalElement {
     terminal: Arc<Terminal>,
+    /// Kept for future click-to-focus; focus is currently managed at AppRoot level.
+    #[allow(dead_code)]
     focus_handle: FocusHandle,
     palette: ColorPalette,
     on_resize: Option<Box<dyn Fn(u16, u16) + Send + Sync>>,
