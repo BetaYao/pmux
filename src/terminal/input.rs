@@ -98,9 +98,17 @@ pub fn key_to_bytes(event: &KeyDownEvent, mode: TermMode) -> Option<Vec<u8>> {
         _ => {}
     }
 
-    // Text-producing keystrokes go via InputHandler (IME path)
-    if keystroke.key_char.is_some() {
-        return None;
+    // Text-producing keystrokes: send key_char bytes directly.
+    // We don't implement InputHandler/IME, so handle text here.
+    if let Some(ref ch) = keystroke.key_char {
+        if !ch.is_empty() {
+            if mods.alt {
+                let mut bytes = vec![0x1b];
+                bytes.extend_from_slice(ch.as_bytes());
+                return Some(bytes);
+            }
+            return Some(ch.as_bytes().to_vec());
+        }
     }
 
     // Special keys
@@ -171,7 +179,6 @@ mod tests {
                     platform: false,
                     function: false,
                 },
-                ime_key: None,
             },
             is_held: false,
         }
@@ -216,9 +223,9 @@ mod tests {
     }
 
     #[test]
-    fn test_key_char_returns_none() {
+    fn test_key_char_sends_bytes() {
         let mut ev = make_event("a", false, false, false);
-        ev.keystroke.key_char = Some('a');
-        assert_eq!(key_to_bytes(&ev, empty_mode()), None);
+        ev.keystroke.key_char = Some("a".to_string());
+        assert_eq!(key_to_bytes(&ev, empty_mode()), Some(b"a".to_vec()));
     }
 }

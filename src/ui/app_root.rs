@@ -649,6 +649,13 @@ impl AppRoot {
                 }
             });
 
+            // Feed existing pane content (prompt, history) into the Terminal before streaming
+            if let Some(initial) = runtime.capture_initial_content(&pane_target_str) {
+                if !initial.is_empty() {
+                    terminal.process_output(&initial);
+                }
+            }
+
             let focus_handle = self.terminal_focus.get_or_insert_with(|| cx.focus_handle()).clone();
             if let Ok(mut buffers) = self.terminal_buffers.lock() {
                 buffers.clear();
@@ -759,6 +766,13 @@ impl AppRoot {
                 Arc::new(move |cols, rows| {
                     let _ = runtime_for_resize.resize(&pane_for_resize, cols, rows);
                 });
+
+            // Feed existing pane content into the Terminal before streaming
+            if let Some(initial) = runtime.capture_initial_content(&pane_target_str) {
+                if !initial.is_empty() {
+                    terminal.process_output(&initial);
+                }
+            }
 
             let focus_handle = self.terminal_focus.get_or_insert_with(|| cx.focus_handle()).clone();
             if let Ok(mut buffers) = self.terminal_buffers.lock() {
