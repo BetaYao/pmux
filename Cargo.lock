@@ -4107,6 +4107,7 @@ checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 name = "pmux"
 version = "0.1.0"
 dependencies = [
+ "alacritty_terminal",
  "anyhow",
  "blocking",
  "dirs 5.0.1",
@@ -4121,6 +4122,7 @@ dependencies = [
  "nix 0.27.1",
  "notify-rust",
  "open",
+ "parking_lot",
  "portable-pty 0.8.1",
  "regex",
  "reqwest",

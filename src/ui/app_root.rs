@@ -10,7 +10,7 @@ use crate::notification::NotificationType;
 use crate::notification_manager::NotificationManager;
 use crate::system_notifier;
 use crate::shell_integration::ShellPhaseInfo;
-use crate::terminal::{ContentExtractor, RuntimeReader, RuntimeWriter, tee_output};
+use crate::terminal::ContentExtractor;
 use crate::runtime::{AgentRuntime, EventBus, RuntimeEvent, StatusPublisher};
 use crate::runtime::backends::{create_runtime_from_env, recover_runtime, resolve_backend, session_name_for_workspace, window_name_for_worktree, window_target};
 use crate::runtime::{RuntimeState, WorktreeState};
@@ -587,9 +587,7 @@ impl AppRoot {
         // #endregion
 
         if let Some(rx) = runtime.subscribe_output(&pane_target_str) {
-            let (rx1, rx2) = tee_output(rx);
-            let reader = RuntimeReader::new(rx1);
-            let writer = RuntimeWriter::new(runtime.clone(), pane_target_str.clone());
+            use crate::terminal::{Terminal, TerminalSize};
 
             // #region agent log
             crate::debug_log::dbg_session_log(
@@ -600,21 +598,30 @@ impl AppRoot {
             );
             // #endregion
 
-            let config = TerminalConfig {
-                cols: cols as usize,
-                rows: rows as usize,
-                font_family: "Menlo".into(),
-                font_size: px(12.0),
-                scrollback: 10000,
-                line_height_multiplier: 1.0,
-                padding: Edges::all(px(0.0)),
-                colors: ColorPalette::default(),
-            };
+            let terminal = Arc::new(Terminal::new(
+                pane_target_str.clone(),
+                TerminalSize {
+                    cols: cols as u16,
+                    rows: rows as u16,
+                    cell_width: 8.0,
+                    cell_height: 16.0,
+                },
+            ));
+
+            // Forward PTY write-back (terminal sequences like OSC response that need to go back to PTY)
+            let pty_write_rx = terminal.pty_write_rx.clone();
+            let runtime_for_pty = runtime.clone();
+            let pane_for_pty = pane_target_str.clone();
+            std::thread::spawn(move || {
+                while let Ok(data) = pty_write_rx.recv() {
+                    let _ = runtime_for_pty.send_input(&pane_for_pty, &data);
+                }
+            });
 
             let runtime_for_resize = runtime.clone();
             let pane_for_resize = pane_target_str.clone();
             let shared_dims_for_resize = Arc::clone(&self.shared_terminal_dims);
-            let resize_callback = move |cols: usize, rows: usize| {
+            let resize_callback: Arc<dyn Fn(u16, u16) + Send + Sync> = Arc::new(move |cols, rows| {
                 // #region agent log
                 crate::debug_log::dbg_session_log(
                     "app_root.rs:resize_callback(setup_local)",
@@ -623,25 +630,28 @@ impl AppRoot {
                     "H15",
                 );
                 // #endregion
-                let _ = runtime_for_resize.resize(&pane_for_resize, cols as u16, rows as u16);
+                let _ = runtime_for_resize.resize(&pane_for_resize, cols, rows);
                 if let Ok(mut dims) = shared_dims_for_resize.lock() {
-                    *dims = Some((cols as u16, rows as u16));
+                    *dims = Some((cols, rows));
                 }
                 if let Ok(mut cfg) = Config::load() {
-                    cfg.last_terminal_cols = Some(cols as u16);
-                    cfg.last_terminal_rows = Some(rows as u16);
+                    cfg.last_terminal_cols = Some(cols);
+                    cfg.last_terminal_rows = Some(rows);
                     let _ = cfg.save();
                 }
-            };
-
-            let gpui_terminal_entity = cx.new(|cx| {
-                gpui_terminal::TerminalView::new(writer, reader, config, cx)
-                    .with_resize_callback(resize_callback)
             });
 
+            let focus_handle = self.terminal_focus.get_or_insert_with(|| cx.focus_handle()).clone();
             if let Ok(mut buffers) = self.terminal_buffers.lock() {
                 buffers.clear();
-                buffers.insert(pane_target_str.clone(), TerminalBuffer::GpuiTerminal(gpui_terminal_entity));
+                buffers.insert(
+                    pane_target_str.clone(),
+                    TerminalBuffer::Terminal {
+                        terminal: terminal.clone(),
+                        focus_handle: focus_handle.clone(),
+                        resize_callback: Some(resize_callback),
+                    },
+                );
             }
 
             // When capture was skipped (resize failed), send C-l to make
@@ -660,14 +670,16 @@ impl AppRoot {
 
             let status_publisher = self.status_publisher.clone();
             let pane_target_clone = pane_target_str.clone();
+            let terminal_for_output = terminal.clone();
             let mut ext = ContentExtractor::new();
 
             cx.spawn(async move |_entity, _cx| {
                 loop {
-                    let chunk = match rx2.recv_async().await {
+                    let chunk = match rx.recv_async().await {
                         Ok(c) => c,
                         Err(_) => break,
                     };
+                    terminal_for_output.process_output(&chunk);
                     ext.feed(&chunk);
                     let shell_info = ShellPhaseInfo {
                         phase: ext.shell_phase(),
@@ -682,10 +694,6 @@ impl AppRoot {
                             &content_str,
                         );
                     }
-                    // Don't notify terminal_area_entity on every chunk - causes rapid re-renders
-                    // that can make the terminal appear to disappear (Bug: Enter key). Terminal
-                    // display is driven by gpui_terminal's own reader (rx1); status updates
-                    // flow via StatusPublisher -> EventBus -> sidebar/status bar.
                 }
             })
             .detach();
@@ -714,46 +722,58 @@ impl AppRoot {
         let (cols, rows) = runtime.get_pane_dimensions(&pane_target_str);
 
         if let Some(rx) = runtime.subscribe_output(&pane_target_str) {
-            let (rx1, rx2) = tee_output(rx);
-            let reader = RuntimeReader::new(rx1);
-            let writer = RuntimeWriter::new(runtime.clone(), pane_target_str.clone());
+            use crate::terminal::{Terminal, TerminalSize};
 
-            let config = TerminalConfig {
-                cols: cols as usize,
-                rows: rows as usize,
-                font_family: "Menlo".into(),
-                font_size: px(12.0),
-                scrollback: 10000,
-                line_height_multiplier: 1.0,
-                padding: Edges::all(px(0.0)),
-                colors: ColorPalette::default(),
-            };
+            let terminal = Arc::new(Terminal::new(
+                pane_target_str.clone(),
+                TerminalSize {
+                    cols: cols as u16,
+                    rows: rows as u16,
+                    cell_width: 8.0,
+                    cell_height: 16.0,
+                },
+            ));
+
+            let pty_write_rx = terminal.pty_write_rx.clone();
+            let runtime_for_pty = runtime.clone();
+            let pane_for_pty = pane_target_str.clone();
+            std::thread::spawn(move || {
+                while let Ok(data) = pty_write_rx.recv() {
+                    let _ = runtime_for_pty.send_input(&pane_for_pty, &data);
+                }
+            });
 
             let runtime_for_resize = runtime.clone();
             let pane_for_resize = pane_target_str.clone();
-            let resize_callback = move |cols: usize, rows: usize| {
-                let _ = runtime_for_resize.resize(&pane_for_resize, cols as u16, rows as u16);
-            };
+            let resize_callback: Arc<dyn Fn(u16, u16) + Send + Sync> =
+                Arc::new(move |cols, rows| {
+                    let _ = runtime_for_resize.resize(&pane_for_resize, cols, rows);
+                });
 
-            let gpui_terminal_entity = cx.new(|cx| {
-                gpui_terminal::TerminalView::new(writer, reader, config, cx)
-                    .with_resize_callback(resize_callback)
-            });
-
+            let focus_handle = self.terminal_focus.get_or_insert_with(|| cx.focus_handle()).clone();
             if let Ok(mut buffers) = self.terminal_buffers.lock() {
-                buffers.insert(pane_target_str.clone(), TerminalBuffer::GpuiTerminal(gpui_terminal_entity));
+                buffers.insert(
+                    pane_target_str.clone(),
+                    TerminalBuffer::Terminal {
+                        terminal: terminal.clone(),
+                        focus_handle: focus_handle.clone(),
+                        resize_callback: Some(resize_callback),
+                    },
+                );
             }
 
             let status_publisher = self.status_publisher.clone();
             let pane_target_clone = pane_target_str.clone();
+            let terminal_for_output = terminal.clone();
             let mut ext = ContentExtractor::new();
 
             cx.spawn(async move |_entity, _cx| {
                 loop {
-                    let chunk = match rx2.recv_async().await {
+                    let chunk = match rx.recv_async().await {
                         Ok(c) => c,
                         Err(_) => break,
                     };
+                    terminal_for_output.process_output(&chunk);
                     ext.feed(&chunk);
                     let shell_info = ShellPhaseInfo {
                         phase: ext.shell_phase(),
@@ -768,10 +788,6 @@ impl AppRoot {
                             &content_str,
                         );
                     }
-                    // Don't notify terminal_area_entity on every chunk - causes rapid re-renders
-                    // that can make the terminal appear to disappear (Bug: Enter key). Terminal
-                    // display is driven by gpui_terminal's own reader (rx1); status updates
-                    // flow via StatusPublisher -> EventBus -> sidebar/status bar.
                 }
             })
             .detach();
@@ -910,7 +926,9 @@ impl AppRoot {
                     }
                     this.terminal_needs_focus = false;
                     if let Ok(buffers) = this.terminal_buffers.lock() {
-                        if let Some(TerminalBuffer::GpuiTerminal(entity)) = buffers.get(&target) {
+                        if let Some(TerminalBuffer::Terminal { focus_handle, .. }) = buffers.get(&target) {
+                            window.focus(focus_handle, cx);
+                        } else if let Some(TerminalBuffer::GpuiTerminal(entity)) = buffers.get(&target) {
                             let entity = entity.clone();
                             drop(buffers);
                             entity.update(cx, |term, cx| {
@@ -2012,12 +2030,19 @@ impl AppRoot {
         };
         match (&self.runtime, self.active_pane_target.as_ref()) {
             (Some(runtime), Some(target)) => {
-                let bytes_opt = key_to_xterm_escape(&key_name, modifiers);
+                let bytes_opt = if let Ok(buffers) = self.terminal_buffers.lock() {
+                    if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
+                        crate::terminal::key_to_bytes(&event, terminal.mode())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                let bytes_opt = bytes_opt.or_else(|| key_to_xterm_escape(&key_name, modifiers));
+
                 if let Some(bytes) = bytes_opt {
-                    // When GpuiTerminal is focused, it handles keys via RuntimeWriter and they
-                    // bubble up here — skip to avoid duplication. When AppRoot has focus (e.g.
-                    // auto-focus didn't reach gpui_terminal, or user clicked outside), forward
-                    // the keys so input still works.
                     if let Ok(buffers) = self.terminal_buffers.lock() {
                         if let Some(TerminalBuffer::GpuiTerminal(entity)) = buffers.get(target) {
                             let focused = entity.read(cx).focus_handle().is_focused(window);
@@ -2940,9 +2965,10 @@ impl AppRoot {
                                                             *guard = target.clone();
                                                         }
                                                         this.terminal_needs_focus = false;
-                                                        // Focus gpui_terminal so it receives keys (avoids duplication + broken Enter)
                                                         if let Ok(buffers) = this.terminal_buffers.lock() {
-                                                            if let Some(TerminalBuffer::GpuiTerminal(entity)) = buffers.get(&target) {
+                                                            if let Some(TerminalBuffer::Terminal { focus_handle, .. }) = buffers.get(&target) {
+                                                                window.focus(focus_handle, cx);
+                                                            } else if let Some(TerminalBuffer::GpuiTerminal(entity)) = buffers.get(&target) {
                                                                 let entity = entity.clone();
                                                                 drop(buffers);
                                                                 entity.update(cx, |term, cx| {
@@ -3087,10 +3113,13 @@ impl Render for AppRoot {
                 let buffers = buffers.clone();
                 let terminal_focus_for_inner = terminal_focus_for_frame.clone();
                 window.on_next_frame(move |window, cx| {
-                    // If active pane has GpuiTerminal, focus it so it receives keys
                     let buf = target.as_ref().and_then(|t| {
                         buffers.lock().ok().and_then(|g| g.get(t).cloned())
                     });
+                    if let Some(TerminalBuffer::Terminal { focus_handle, .. }) = buf {
+                        window.focus(&focus_handle, cx);
+                        return;
+                    }
                     if let Some(TerminalBuffer::GpuiTerminal(entity)) = buf {
                         let entity = entity.clone();
                         entity.update(cx, |term, cx| {
@@ -3098,7 +3127,6 @@ impl Render for AppRoot {
                         });
                         return;
                     }
-                    // Fallback: focus app root (handle_key_down will forward to send_input)
                     window.focus(&terminal_focus_for_inner, cx);
                 });
             });

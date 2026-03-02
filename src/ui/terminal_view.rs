@@ -1,9 +1,10 @@
 // ui/terminal_view.rs - Terminal view component with GPUI render
-// Renders via gpui-terminal (GpuiTerminal), simple div for Error, or placeholder for Empty.
+// Renders via gpui-terminal (GpuiTerminal), self-built Terminal, simple div for Error, or placeholder for Empty.
 use gpui::prelude::*;
 use gpui::*;
+use std::sync::Arc;
 
-/// Content source for TerminalView - gpui-terminal, error placeholder, or empty.
+/// Content source for TerminalView - gpui-terminal, self-built terminal, error placeholder, or empty.
 #[derive(Clone)]
 pub enum TerminalBuffer {
     /// Placeholder when pane has no buffer yet (gray bg, "—")
@@ -12,17 +13,24 @@ pub enum TerminalBuffer {
     Error(String),
     /// gpui-terminal: embedded TerminalView entity (tee_output → RuntimeReader + ContentExtractor pipeline)
     GpuiTerminal(gpui::Entity<gpui_terminal::TerminalView>),
+    /// Self-built terminal: Arc<Terminal> + dedicated FocusHandle
+    Terminal {
+        terminal: Arc<crate::terminal::Terminal>,
+        focus_handle: gpui::FocusHandle,
+        resize_callback: Option<Arc<dyn Fn(u16, u16) + Send + Sync>>,
+    },
 }
 
 impl TerminalBuffer {
     /// Extract text for status detection.
-    /// GpuiTerminal: returns None (status is published from ContentExtractor background task).
+    /// GpuiTerminal/Terminal: returns None (status is published from ContentExtractor background task).
     /// Empty: returns None. Error: returns Some(msg).
     pub fn content_for_status_detection(&self) -> Option<String> {
         match self {
             TerminalBuffer::Empty => None,
             TerminalBuffer::Error(s) => Some(s.clone()),
             TerminalBuffer::GpuiTerminal(_) => None,
+            TerminalBuffer::Terminal { .. } => None,
         }
     }
 }
@@ -125,6 +133,20 @@ impl RenderOnce for TerminalView {
         let content_elem: AnyElement = match &self.buffer {
             TerminalBuffer::GpuiTerminal(entity) => {
                 div().size_full().child(entity.clone()).into_any_element()
+            }
+            TerminalBuffer::Terminal { terminal, focus_handle, resize_callback } => {
+                use crate::terminal::terminal_element::TerminalElement;
+                use crate::terminal::ColorPalette;
+                let mut elem = TerminalElement::new(
+                    terminal.clone(),
+                    focus_handle.clone(),
+                    ColorPalette::default(),
+                );
+                if let Some(cb) = resize_callback {
+                    let cb = cb.clone();
+                    elem = elem.with_resize_callback(move |cols, rows| cb(cols, rows));
+                }
+                div().size_full().child(elem).into_any_element()
             }
             TerminalBuffer::Error(msg) => {
                 self.render_error(msg).into_any_element()
