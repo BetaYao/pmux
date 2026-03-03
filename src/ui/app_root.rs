@@ -2213,7 +2213,15 @@ impl AppRoot {
                     None
                 };
 
-                let bytes_opt = bytes_opt.or_else(|| key_to_xterm_escape(&key_name, modifiers));
+                // Only fall back to xterm_escape for non-text keys.
+                // Text characters (key_char present) are handled by InputHandler;
+                // using xterm_escape as fallback would double-send them.
+                let has_text_char = event.keystroke.key_char.as_ref().is_some_and(|c| !c.is_empty());
+                let bytes_opt = if has_text_char {
+                    bytes_opt
+                } else {
+                    bytes_opt.or_else(|| key_to_xterm_escape(&key_name, modifiers))
+                };
 
                 if let Some(bytes) = bytes_opt {
                     let send_result = runtime.send_input(target, &bytes);
