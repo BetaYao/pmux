@@ -79,15 +79,13 @@ impl InputHandler for TerminalInputHandler {
     fn replace_and_mark_text_in_range(
         &mut self,
         _range_utf16: Option<Range<usize>>,
-        new_text: &str,
+        _new_text: &str,
         _new_selected_range: Option<Range<usize>>,
         _window: &mut Window,
         _cx: &mut App,
     ) {
-        // IME composing state — send the text as-is for live preview
-        if !new_text.is_empty() {
-            (self.send_input)(new_text.as_bytes());
-        }
+        // IME composing state — do NOT send to PTY.
+        // The final committed text arrives via replace_text_in_range.
     }
 
     fn unmark_text(&mut self, _window: &mut Window, _cx: &mut App) {}
