@@ -63,7 +63,7 @@ impl BatchedTextRun {
         };
         let shaped = window
             .text_system()
-            .shape_line(self.text.clone().into(), font_size, &[run_style], None);
+            .shape_line(self.text.clone().into(), font_size, &[run_style], Some(cell_width));
         let _ = shaped.paint(pos, line_height, TextAlign::Left, None, window, cx);
     }
 }

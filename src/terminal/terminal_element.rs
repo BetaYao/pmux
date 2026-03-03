@@ -137,30 +137,38 @@ impl Element for TerminalElement {
         window: &mut Window,
         _cx: &mut App,
     ) -> Self::PrepaintState {
-        let font = make_font(FontWeight::NORMAL, FontStyle::Normal);
-        let text_run = TextRun {
-            len: "│".len(),
-            font: font.clone(),
-            color: gpui::black(),
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        };
-        let fs = font_size();
-        let shaped = window
-            .text_system()
-            .shape_line("│".into(), fs, &[text_run], None);
+        use std::cell::Cell;
+        thread_local! {
+            static CELL_SIZE_CACHE: Cell<Option<(Pixels, Pixels)>> = const { Cell::new(None) };
+        }
 
-        let cell_width = if shaped.width > px(0.0) {
-            shaped.width
-        } else {
-            fs * 0.6
-        };
-        let line_height = if shaped.ascent + shaped.descent > px(0.0) {
-            (shaped.ascent + shaped.descent).ceil()
-        } else {
-            fs * 1.4
-        };
+        let (cell_width, line_height) = CELL_SIZE_CACHE.with(|cache| {
+            if let Some(cached) = cache.get() {
+                return cached;
+            }
+            let font = make_font(FontWeight::NORMAL, FontStyle::Normal);
+            let text_run = TextRun {
+                len: "│".len(),
+                font: font.clone(),
+                color: gpui::black(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            let fs = font_size();
+            let shaped = window
+                .text_system()
+                .shape_line("│".into(), fs, &[text_run], None);
+
+            let cw = if shaped.width > px(0.0) { shaped.width } else { fs * 0.6 };
+            let lh = if shaped.ascent + shaped.descent > px(0.0) {
+                (shaped.ascent + shaped.descent).ceil()
+            } else {
+                fs * 1.4
+            };
+            cache.set(Some((cw, lh)));
+            (cw, lh)
+        });
 
         let width_f32: f32 = bounds.size.width.into();
         let height_f32: f32 = bounds.size.height.into();
@@ -244,9 +252,25 @@ impl Element for TerminalElement {
                 for col_idx in 0..num_cols {
                     let col = Column(col_idx);
                     let point = AlacPoint::new(line, col);
-                    let cell = grid[point].clone();
+                    let cell = &grid[point];
 
                     if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                        continue;
+                    }
+
+                    // Fast-path: skip blank cells with default bg and no decorations
+                    if (cell.c == ' ' || cell.c == '\0')
+                        && is_default_bg(&cell.bg)
+                        && !cell.flags.contains(Flags::UNDERLINE)
+                        && !cell.flags.contains(Flags::STRIKEOUT)
+                        && !cell.flags.contains(Flags::INVERSE)
+                    {
+                        if let Some(run) = current_run.take() {
+                            text_runs.push(run);
+                        }
+                        if let Some(rect) = current_bg.take() {
+                            layout_rects.push(rect);
+                        }
                         continue;
                     }
 
