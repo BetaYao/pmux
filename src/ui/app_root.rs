@@ -420,14 +420,22 @@ impl AppRoot {
                 let focus = focus.clone();
                 let app_root_entity = cx.entity();
                 let app_root_for_close = app_root_entity.clone();
+                let entity_holder: std::sync::Arc<parking_lot::Mutex<Option<Entity<NewBranchDialogEntity>>>> =
+                    Arc::new(parking_lot::Mutex::new(None));
                 let on_create = {
                     let model = model.clone();
+                    let entity_holder = Arc::clone(&entity_holder);
                     Arc::new(move |_window: &mut Window, cx: &mut App| {
-                        let branch_name = model.read(cx).branch_name.clone();
+                        let branch_name = entity_holder
+                            .lock()
+                            .as_ref()
+                            .map(|e| e.update(cx, |this, _| this.branch_name().to_string()))
+                            .unwrap_or_else(|| model.read(cx).branch_name.clone());
                         if branch_name.trim().is_empty() {
                             return;
                         }
                         let _ = cx.update_entity(&model, |m: &mut NewBranchDialogModel, cx| {
+                            m.set_branch_name(&branch_name);
                             m.start_creating();
                             cx.notify();
                         });
@@ -450,13 +458,14 @@ impl AppRoot {
                     }) as Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>
                 };
                 let on_branch_name_change = {
-                    let model = model.clone();
+                    let entity_holder = Arc::clone(&entity_holder);
                     Arc::new(move |new_value: String, _window: &mut Window, cx: &mut App| {
-                        let _ = cx.update_entity(&model, |m: &mut NewBranchDialogModel, cx| {
-                            m.set_branch_name(&new_value);
-                            m.validate();
-                            cx.notify();
-                        });
+                        if let Some(ref entity) = *entity_holder.lock() {
+                            let _ = entity.update(cx, |this, cx| {
+                                this.set_branch_name(new_value);
+                                cx.notify();
+                            });
+                        }
                     }) as Arc<dyn Fn(String, &mut Window, &mut App) + Send + Sync>
                 };
                 let entity = cx.new(move |cx| {
@@ -469,6 +478,7 @@ impl AppRoot {
                         cx,
                     )
                 });
+                *entity_holder.lock() = Some(entity.clone());
                 self.new_branch_dialog_entity = Some(entity);
             }
         }
@@ -2208,6 +2218,34 @@ impl AppRoot {
                     if event.keystroke.modifiers.shift {
                         self.open_diff_view(cx);
                     }
+                }
+                "v" => {
+                    if let Some(clipboard) = cx.read_from_clipboard() {
+                        let text = clipboard.text().unwrap_or_default();
+                        if !text.is_empty() {
+                            if let (Some(runtime), Some(target)) = (&self.runtime, self.active_pane_target.as_ref()) {
+                                let bracketed = if let Ok(buffers) = self.terminal_buffers.lock() {
+                                    if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
+                                        if terminal.display_offset() > 0 {
+                                            terminal.scroll_to_bottom();
+                                        }
+                                        terminal.mode().contains(alacritty_terminal::term::TermMode::BRACKETED_PASTE)
+                                    } else { false }
+                                } else { false };
+
+                                let mut bytes = Vec::with_capacity(text.len() + 12);
+                                if bracketed {
+                                    bytes.extend_from_slice(b"\x1b[200~");
+                                }
+                                bytes.extend_from_slice(text.replace('\n', "\r").as_bytes());
+                                if bracketed {
+                                    bytes.extend_from_slice(b"\x1b[201~");
+                                }
+                                let _ = runtime.send_input(target, &bytes);
+                            }
+                        }
+                    }
+                    return;
                 }
                 "w" => {
                     if let Some((branch, window_name, session, pane_target)) = self.diff_overlay_open.clone() {
