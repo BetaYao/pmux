@@ -67,10 +67,18 @@ log_info "Step 2: Send command via tmux (tests output rendering pipeline)"
 WORKSPACE_DIR="saas-mono"
 TMUX_SESSION="pmux-${WORKSPACE_DIR}"
 
-# Find the target pane in the session
-TMUX_TARGET=$(tmux list-panes -t "$TMUX_SESSION" -F "#{session_name}:#{window_name}.#{pane_id}" 2>/dev/null | head -1)
+# Poll for tmux session to appear (pmux needs time to create it after fresh start)
+TMUX_TARGET=""
+for attempt in $(seq 1 10); do
+    TMUX_TARGET=$(tmux list-panes -t "$TMUX_SESSION" -F "#{session_name}:#{window_name}.#{pane_id}" 2>/dev/null | head -1)
+    if [ -n "$TMUX_TARGET" ]; then
+        break
+    fi
+    log_info "Waiting for tmux session '$TMUX_SESSION' (attempt $attempt/10)..."
+    sleep 2
+done
 if [ -z "$TMUX_TARGET" ]; then
-    log_error "Could not find tmux pane in session '$TMUX_SESSION'"
+    log_error "Could not find tmux pane in session '$TMUX_SESSION' after 20s"
     add_report_result "Echo Output" "FAIL" "No tmux session"
     stop_pmux
     exit 1

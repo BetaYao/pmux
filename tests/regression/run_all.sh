@@ -106,6 +106,11 @@ for test_info in "${CORE_TESTS[@]}"; do
     
     test_path="$SCRIPT_DIR/$test_file"
     if [ -f "$test_path" ]; then
+        # 清理残留 tmux session + stale socket，避免干扰下一个测试
+        tmux kill-server 2>/dev/null || true
+        rm -rf "/tmp/tmux-$(id -u)" 2>/dev/null || true
+        sleep 1
+
         # 运行测试
         if bash "$test_path" 2>&1 | tee /tmp/last_test_output.log; then
             log_info "✓ $test_name: PASS"
