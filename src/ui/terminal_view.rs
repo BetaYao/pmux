@@ -171,7 +171,7 @@ impl RenderOnce for TerminalView {
                     let cb = cb.clone();
                     elem = elem.with_resize_callback(move |cols, rows| cb(cols, rows));
                 }
-                div().size_full().child(elem).into_any_element()
+                elem.size_full().into_any_element()
             }
             TerminalBuffer::Error(msg) => {
                 self.render_error(msg).into_any_element()

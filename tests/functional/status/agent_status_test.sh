@@ -15,9 +15,7 @@ echo ""
 test_status_sidebar_visible() {
     log_info "Test: Status sidebar is visible"
     
-    # 截图并分析
-    SCREENSHOT_FILE="$REPORT_DIR/status_sidebar_test.png"
-    capture_screenshot "$SCREENSHOT_FILE"
+    SCREENSHOT_FILE=$(take_screenshot "status_sidebar_test")
     
     if [ -f "$SCREENSHOT_FILE" ]; then
         log_info "✓ Screenshot captured for status analysis"
@@ -83,15 +81,14 @@ test_input_indicator() {
 test_status_colors_auto() {
     log_info "Test: Automated status color detection"
     
-    SCREENSHOT_FILE="$REPORT_DIR/status_colors.png"
-    capture_screenshot "$SCREENSHOT_FILE"
+    SCREENSHOT_FILE=$(take_screenshot "status_colors")
     
+    IMAGE_ANALYSIS_SCRIPT="$SCRIPT_DIR/../../regression/lib/image_analysis.py"
     if [ -f "$IMAGE_ANALYSIS_SCRIPT" ] && [ -f "$SCREENSHOT_FILE" ]; then
         log_info "Running color analysis..."
-        
-        # 检查是否有多种颜色
-        RESULT=$(python3 "$IMAGE_ANALYSIS_SCRIPT" "$SCREENSHOT_FILE" colors 2>/dev/null)
-        if [ "$RESULT" = "true" ]; then
+        RESULT=$(python3 "$IMAGE_ANALYSIS_SCRIPT" "$SCREENSHOT_FILE" check_colors 0 0 500 1400 2>/dev/null) || true
+        HAS_COLORS=$(echo "$RESULT" | grep "^HAS_MULTIPLE_COLORS:" | cut -d':' -f2)
+        if [ "$HAS_COLORS" = "True" ]; then
             log_info "✓ Multiple colors detected (status indicators likely present)"
             add_report_result "Status Colors (Auto)" "PASS" "Colors detected"
         else

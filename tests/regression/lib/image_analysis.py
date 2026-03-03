@@ -252,20 +252,33 @@ def has_multiple_colors(image_path, region, min_colors=3):
         print(f"Error checking colors: {e}", file=sys.stderr)
         return {'has_multiple_colors': False, 'color_count': 0}
 
-def ocr_image(image_path):
+def ocr_image(image_path, region=None):
     """
     使用 tesseract 对图片进行 OCR 识别，返回提取的文字。
+    region: optional (x, y, w, h) to crop before OCR.
     输出格式（供 shell 解析）:
       OK:True 或 OK:False
       TEXT:识别出的文字...
     """
     try:
+        actual_path = image_path
+        if region:
+            x, y, w, h = region
+            img = Image.open(image_path)
+            cropped = img.crop((x, y, x + w, y + h))
+            import tempfile, os
+            fd, actual_path = tempfile.mkstemp(suffix='.png')
+            os.close(fd)
+            cropped.save(actual_path)
         result = subprocess.run(
-            ['tesseract', image_path, 'stdout', '-l', 'eng'],
+            ['tesseract', actual_path, 'stdout', '-l', 'eng'],
             capture_output=True,
             text=True,
             timeout=10,
         )
+        if region and actual_path != image_path:
+            import os
+            os.unlink(actual_path)
         if result.returncode != 0:
             return {'ok': False, 'text': result.stderr or 'tesseract failed'}
         return {'ok': True, 'text': (result.stdout or '').strip()}
@@ -283,6 +296,7 @@ if __name__ == '__main__':
         print("")
         print("Commands:")
         print("  ocr <image>                              - OCR extract text (requires tesseract)")
+        print("  ocr_region <image> <x> <y> <w> <h>      - OCR a cropped region")
         print("  verify_window <image> [min_w] [min_h]   - Verify pmux window is visible/normal")
         print("  analyze_region <image> <x> <y> <w> <h>  - Analyze region variance (terminal content check)")
         print("  sidebar_status <image> <x> <y> <w> <h>  - Detect sidebar status color")
@@ -296,6 +310,17 @@ if __name__ == '__main__':
         print("Usage: python3 image_analysis.py <command> <image_path> [args...]", file=sys.stderr)
         sys.exit(1)
     image_path = sys.argv[2] if len(sys.argv) > 2 else None
+
+    if cmd == 'ocr_region':
+        if len(sys.argv) < 7:
+            print("Usage: python3 image_analysis.py ocr_region <image> <x> <y> <w> <h>", file=sys.stderr)
+            sys.exit(1)
+        x, y, w, h = map(int, sys.argv[3:7])
+        result = ocr_image(sys.argv[2], region=(x, y, w, h))
+        print(f"OK:{result['ok']}")
+        text_safe = (result['text'] or '').replace('\n', ' ')
+        print(f"TEXT:{text_safe}")
+        sys.exit(0 if result['ok'] else 1)
 
     if cmd == 'ocr':
         if len(sys.argv) < 3:

@@ -187,7 +187,25 @@ get_memory_usage() {
     fi
 }
 
-# 截图函数
+# Get the CGWindowID for the pmux window (for screencapture -l)
+get_pmux_window_id() {
+    swift -e '
+import CoreGraphics
+let options = CGWindowListOption(arrayLiteral: .optionOnScreenOnly, .excludeDesktopElements)
+if let list = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] {
+    for w in list {
+        if let name = w["kCGWindowOwnerName"] as? String, name == "pmux",
+           let layer = w["kCGWindowLayer"] as? Int, layer == 0,
+           let num = w["kCGWindowNumber"] as? Int {
+            print(num)
+            break
+        }
+    }
+}
+' 2>/dev/null
+}
+
+# 截图函数 — captures only the pmux window (not the full desktop)
 take_screenshot() {
     local name="$1"
     local output_dir="$SCRIPT_DIR/../results/screenshots"
@@ -195,17 +213,19 @@ take_screenshot() {
     
     local timestamp=$(date +%Y%m%d_%H%M%S)
     local filename="${name}_${timestamp}.png"
-    
-    # Try to capture specific window, fallback to full screen
-    local win_id=$(osascript -e 'tell app "pmux" to get id of window 1' 2>/dev/null)
+    local filepath="$output_dir/$filename"
+
+    # Get the CGWindowID and capture just the pmux window layer
+    local win_id
+    win_id=$(get_pmux_window_id)
     if [ -n "$win_id" ]; then
-        screencapture -l"$win_id" "$output_dir/$filename" 2>/dev/null || \
-            screencapture "$output_dir/$filename"
+        screencapture -l"$win_id" "$filepath" 2>/dev/null || \
+            screencapture "$filepath"
     else
-        screencapture "$output_dir/$filename"
+        log_warn "Could not get pmux window ID, falling back to full screen" >&2
+        screencapture "$filepath"
     fi
     
-    local filepath="$output_dir/$filename"
     log_info "Screenshot saved: $filepath" >&2
     echo "$filepath"
 }

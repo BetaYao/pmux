@@ -1,0 +1,24 @@
+{
+  "embeddingProvider": "openai",
+  "embeddingModel": "compass-embedding-v4",
+  "embeddingDimensions": 2560,
+  "embeddingApiKey": null,
+  "embeddingBaseUrl": "https://compass.llm.shopee.io/compass-api/v1",
+  "chunkSize": 800,
+  "chunkOverlap": 100,
+  "autoIndex": true,
+  "knowledgeDirs": [
+    "knowledge"
+  ],
+  "hybridWeight": 0.7,
+  "rerankEnabled": false,
+  "rerankProvider": "jina",
+  "rerankModel": "jina-reranker-v2-base-multilingual",
+  "rerankApiKey": null,
+  "rerankTopK": 20,
+  "fileWatcherEnabled": true,
+  "autoInjectEnabled": true,
+  "autoInjectThreshold": 0.7,
+  "autoInjectTopK": 3,
+  "autoInjectMaxTokens": 2000
+}

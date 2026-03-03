@@ -46,8 +46,8 @@ WIN_W=$(echo "$WINDOW_INFO" | cut -d',' -f3 | tr -d ' ')
 WIN_H=$(echo "$WINDOW_INFO" | cut -d',' -f4 | tr -d ' ')
 
 # 估算 sidebar 区域（左侧 250px）
-SIDEBAR_X=$WIN_X
-SIDEBAR_Y=$((WIN_Y + 50))  # 顶部标题栏偏移
+SIDEBAR_X=0
+SIDEBAR_Y=50  # 顶部标题栏偏移
 SIDEBAR_W=250
 SIDEBAR_H=$((WIN_H - 100))
 

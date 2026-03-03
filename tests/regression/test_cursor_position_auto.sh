@@ -44,8 +44,8 @@ WIN_H=$(echo "$WINDOW_INFO" | cut -d',' -f4 | tr -d ' ')
 
 # 估算 terminal 区域（右侧，sidebar 之外）
 SIDEBAR_W=250
-TERM_X=$((WIN_X + SIDEBAR_W + 10))
-TERM_Y=$((WIN_Y + 80))  # 顶部工具栏偏移
+TERM_X=$((SIDEBAR_W + 10))
+TERM_Y=80  # 顶部工具栏偏移
 TERM_W=$((WIN_W - SIDEBAR_W - 20))
 TERM_H=$((WIN_H - 150))
 

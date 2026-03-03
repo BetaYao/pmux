@@ -1,0 +1,59 @@
+{
+  "index_settings": {
+    "docstore_compression": "lz4",
+    "docstore_blocksize": 16384
+  },
+  "segments": [],
+  "schema": [
+    {
+      "name": "chunk_id",
+      "type": "i64",
+      "options": {
+        "indexed": true,
+        "fieldnorms": true,
+        "fast": false,
+        "stored": true
+      }
+    },
+    {
+      "name": "content",
+      "type": "text",
+      "options": {
+        "indexing": {
+          "record": "position",
+          "fieldnorms": true,
+          "tokenizer": "ngram3"
+        },
+        "stored": true,
+        "fast": false
+      }
+    },
+    {
+      "name": "title",
+      "type": "text",
+      "options": {
+        "indexing": {
+          "record": "position",
+          "fieldnorms": true,
+          "tokenizer": "ngram3"
+        },
+        "stored": true,
+        "fast": false
+      }
+    },
+    {
+      "name": "heading",
+      "type": "text",
+      "options": {
+        "indexing": {
+          "record": "position",
+          "fieldnorms": true,
+          "tokenizer": "ngram3"
+        },
+        "stored": true,
+        "fast": false
+      }
+    }
+  ],
+  "opstamp": 0
+}

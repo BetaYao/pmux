@@ -1,0 +1,11 @@
+Echo Output Verification Report
+===============================
+Test Time: Tue Mar  3 00:22:58 CST 2026
+
+Screenshot: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/echo_output_20260303_002257.png
+OCR OK: True
+OCR Text: CQ terminat  + saas-mono git:(main) x echo hello world hello world * saas-mono git:(main) x ff  o—test
+
+Expected:
+  - "hello world" appears >= 2 times (once in typed command, once in output)
+  - "echo" appears >= 1 time (the typed command)

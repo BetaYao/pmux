@@ -686,6 +686,7 @@ impl AppRoot {
             let status_publisher = self.status_publisher.clone();
             let pane_target_clone = pane_target_str.clone();
             let terminal_for_output = terminal.clone();
+            let term_area_entity = self.terminal_area_entity.clone();
             let mut ext = ContentExtractor::new();
 
             cx.spawn(async move |entity, cx| {
@@ -709,8 +710,10 @@ impl AppRoot {
                             &content_str,
                         );
                     }
-                    // Trigger UI repaint so TerminalElement re-renders with new content
                     let _ = entity.update(cx, |_, cx| cx.notify());
+                    if let Some(ref tae) = term_area_entity {
+                        let _ = cx.update_entity(tae, |_, cx| cx.notify());
+                    }
                 }
             })
             .detach();
@@ -789,6 +792,7 @@ impl AppRoot {
             let status_publisher = self.status_publisher.clone();
             let pane_target_clone = pane_target_str.clone();
             let terminal_for_output = terminal.clone();
+            let term_area_entity = self.terminal_area_entity.clone();
             let mut ext = ContentExtractor::new();
 
             cx.spawn(async move |entity, cx| {
@@ -812,8 +816,10 @@ impl AppRoot {
                             &content_str,
                         );
                     }
-                    // Trigger UI repaint so TerminalElement re-renders with new content
                     let _ = entity.update(cx, |_, cx| cx.notify());
+                    if let Some(ref tae) = term_area_entity {
+                        let _ = cx.update_entity(tae, |_, cx| cx.notify());
+                    }
                 }
             })
             .detach();
@@ -1960,7 +1966,7 @@ impl AppRoot {
     }
 
     /// Handle keyboard events
-    fn handle_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn handle_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         // Check for Alt+Cmd+arrows (pane focus switch)
         if event.keystroke.modifiers.platform && event.keystroke.modifiers.alt {
             let pane_count = self.split_tree.pane_count();
@@ -2135,7 +2141,6 @@ impl AppRoot {
         }
 
         // Forward all other keys to terminal via Runtime (xterm escape sequences)
-        // Zed-style: synchronous channel send (writer thread does PTY write), no spawn/blocking
         let key_name = event.keystroke.key.clone();
         let modifiers = KeyModifiers {
             platform: event.keystroke.modifiers.platform,
@@ -2143,6 +2148,7 @@ impl AppRoot {
             alt: event.keystroke.modifiers.alt,
             ctrl: event.keystroke.modifiers.control,
         };
+
         match (&self.runtime, self.active_pane_target.as_ref()) {
             (Some(runtime), Some(target)) => {
                 let bytes_opt = if let Ok(buffers) = self.terminal_buffers.lock() {

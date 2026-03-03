@@ -207,6 +207,7 @@ impl Element for TerminalElement {
         let line_height = state.line_height;
         let font_size = state.font_size;
 
+
         let default_bg = self.palette.background();
         window.paint_quad(quad(
             bounds,
@@ -223,6 +224,8 @@ impl Element for TerminalElement {
             let num_cols = grid.columns();
             let display_offset = grid.display_offset() as i32;
             let colors = term.colors();
+
+
 
             let mut layout_rects: Vec<LayoutRect> = Vec::new();
             let mut text_runs: Vec<BatchedTextRun> = Vec::new();
@@ -334,7 +337,9 @@ impl Element for TerminalElement {
                             ));
                         }
                     } else {
-                        current_run = None;
+                        if let Some(run) = current_run.take() {
+                            text_runs.push(run);
+                        }
                     }
                 }
 

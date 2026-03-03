@@ -79,12 +79,13 @@ test_colors_auto() {
     
     sleep 1
     
-    SCREENSHOT_FILE="$REPORT_DIR/colors_auto.png"
-    capture_screenshot "$SCREENSHOT_FILE"
+    SCREENSHOT_FILE=$(take_screenshot "colors_auto")
     
+    IMAGE_ANALYSIS_SCRIPT="$SCRIPT_DIR/../../regression/lib/image_analysis.py"
     if [ -f "$IMAGE_ANALYSIS_SCRIPT" ] && [ -f "$SCREENSHOT_FILE" ]; then
-        RESULT=$(python3 "$IMAGE_ANALYSIS_SCRIPT" "$SCREENSHOT_FILE" colors 2>/dev/null)
-        if [ "$RESULT" = "true" ]; then
+        RESULT=$(python3 "$IMAGE_ANALYSIS_SCRIPT" "$SCREENSHOT_FILE" check_colors 0 0 2000 1600 2>/dev/null) || true
+        HAS_COLORS=$(echo "$RESULT" | grep "^HAS_MULTIPLE_COLORS:" | cut -d':' -f2)
+        if [ "$HAS_COLORS" = "True" ]; then
             log_info "✓ Colors detected in screenshot"
             add_report_result "Colors (Auto)" "PASS"
         else

@@ -49,8 +49,8 @@ WIN_W=$(echo "$WINDOW_INFO" | cut -d',' -f3 | tr -d ' ')
 WIN_H=$(echo "$WINDOW_INFO" | cut -d',' -f4 | tr -d ' ')
 
 SIDEBAR_W=250
-TERM_X=$((WIN_X + SIDEBAR_W + 10))
-TERM_Y=$((WIN_Y + 80))
+TERM_X=$((SIDEBAR_W + 10))
+TERM_Y=80
 TERM_W=$((WIN_W - SIDEBAR_W - 20))
 TERM_H=$((WIN_H - 150))
 

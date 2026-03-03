@@ -67,11 +67,11 @@ for cmd in "${COMMANDS_TO_TEST[@]}"; do
     if test_command_execution "$cmd"; then
         log_info "✓ Command passed: $cmd"
         add_report_result "Command: $cmd" "PASS"
-        ((PASSED++))
+        PASSED=$((PASSED + 1))
     else
         log_error "✗ Command failed: $cmd"
         add_report_result "Command: $cmd" "FAIL"
-        ((FAILED++))
+        FAILED=$((FAILED + 1))
     fi
 done
 
