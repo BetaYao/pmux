@@ -160,6 +160,7 @@ impl RenderOnce for TerminalView {
                     }
                 });
                 let links = terminal.detect_links_cached();
+                let selection_range = terminal.selection_range();
                 let mut elem = TerminalElement::new(
                     terminal.clone(),
                     focus_handle.clone(),
@@ -167,7 +168,8 @@ impl RenderOnce for TerminalView {
                 )
                 .with_focused(self.is_focused)
                 .with_search(matches, search_current)
-                .with_links(links, None);
+                .with_links(links, None)
+                .with_selection(selection_range);
                 if let Some(cb) = resize_callback {
                     let cb = cb.clone();
                     elem = elem.with_resize_callback(move |cols, rows| cb(cols, rows));
