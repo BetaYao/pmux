@@ -663,6 +663,11 @@ impl AppRoot {
                 Arc::new(move |bytes: &[u8]| {
                     let _ = runtime_for_input.send_input(&pane_for_input, bytes);
                 });
+            let terminal_for_preedit = terminal.clone();
+            let preedit_callback: Arc<dyn Fn(Option<String>) + Send + Sync> =
+                Arc::new(move |text: Option<String>| {
+                    terminal_for_preedit.set_preedit_text(text);
+                });
             if let Ok(mut buffers) = self.terminal_buffers.lock() {
                 buffers.clear();
                 buffers.insert(
@@ -672,6 +677,7 @@ impl AppRoot {
                         focus_handle: focus_handle.clone(),
                         resize_callback: Some(resize_callback),
                         input_callback: Some(input_callback),
+                        preedit_callback: Some(preedit_callback),
                     },
                 );
             }
@@ -701,8 +707,8 @@ impl AppRoot {
                 let mut last_status_check = Instant::now();
                 let mut last_phase = ext.shell_phase();
                 let status_interval = Duration::from_millis(200);
-
                 loop {
+                    // Process the first event immediately (low latency for first char)
                     let chunk = match rx.recv_async().await {
                         Ok(c) => c,
                         Err(_) => break,
@@ -710,7 +716,9 @@ impl AppRoot {
                     terminal_for_output.process_output(&chunk);
                     ext.feed(&chunk);
 
-                    // Drain all immediately available chunks before notifying UI
+                    // Drain all immediately available chunks before notifying UI.
+                    // During fast output, many chunks queue up during the previous
+                    // notify→paint cycle, so try_recv batches them efficiently.
                     while let Ok(next) = rx.try_recv() {
                         terminal_for_output.process_output(&next);
                         ext.feed(&next);
@@ -810,6 +818,11 @@ impl AppRoot {
                 Arc::new(move |bytes: &[u8]| {
                     let _ = runtime_for_input.send_input(&pane_for_input, bytes);
                 });
+            let terminal_for_preedit = terminal.clone();
+            let preedit_callback: Arc<dyn Fn(Option<String>) + Send + Sync> =
+                Arc::new(move |text: Option<String>| {
+                    terminal_for_preedit.set_preedit_text(text);
+                });
             if let Ok(mut buffers) = self.terminal_buffers.lock() {
                 buffers.insert(
                     pane_target_str.clone(),
@@ -818,6 +831,7 @@ impl AppRoot {
                         focus_handle: focus_handle.clone(),
                         resize_callback: Some(resize_callback),
                         input_callback: Some(input_callback),
+                        preedit_callback: Some(preedit_callback),
                     },
                 );
             }
@@ -833,8 +847,8 @@ impl AppRoot {
                 let mut last_status_check = Instant::now();
                 let mut last_phase = ext.shell_phase();
                 let status_interval = Duration::from_millis(200);
-
                 loop {
+                    // Process the first event immediately (low latency for first char)
                     let chunk = match rx.recv_async().await {
                         Ok(c) => c,
                         Err(_) => break,

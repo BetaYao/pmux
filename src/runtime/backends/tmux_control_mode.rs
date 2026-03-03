@@ -479,32 +479,53 @@ impl TmuxControlModeRuntime {
         let pty_master_fd_dup = unsafe { libc::dup(master_fd) };
         let pty_writer = Arc::new(Mutex::new(master_writer));
 
-        // Async input channel + writer thread (like LocalPtyAgent pattern).
-        // send_input enqueues here; the writer thread batches and writes via send-keys.
+        // Async input channel + writer thread with merged send-keys.
+        // Merges consecutive keystrokes to the same pane into one send-keys command
+        // for ~10x better throughput (3ms per command regardless of char count).
         let (input_tx, input_rx) = flume::unbounded::<(String, Vec<u8>)>();
         let pty_writer_for_input = pty_writer.clone();
         thread::spawn(move || {
+            use std::io::Write;
+            let mut cmd_buf = Vec::<u8>::with_capacity(256);
             loop {
                 let (first_pane, first_bytes) = match input_rx.recv() {
                     Ok(v) => v,
                     Err(_) => break,
                 };
-                let mut batch: Vec<(String, Vec<u8>)> = vec![(first_pane, first_bytes)];
-                while let Ok(item) = input_rx.try_recv() {
-                    batch.push(item);
+
+                // Drain all immediately available inputs, merging by pane_id.
+                // During paste or fast typing, multiple keystrokes queue up while
+                // the previous flush is in progress — merge them into one command.
+                let mut merged: Vec<(String, Vec<u8>)> = vec![(first_pane, first_bytes)];
+                while let Ok((pane, bytes)) = input_rx.try_recv() {
+                    if let Some(last) = merged.last_mut() {
+                        if last.0 == pane {
+                            last.1.extend_from_slice(&bytes);
+                            continue;
+                        }
+                    }
+                    merged.push((pane, bytes));
                 }
+
                 let mut writer = match pty_writer_for_input.lock() {
                     Ok(w) => w,
                     Err(_) => break,
                 };
-                for (pane_id, bytes) in &batch {
+
+                // Write all commands into a single buffer, then write_all + flush once
+                cmd_buf.clear();
+                for (pane_id, bytes) in &merged {
                     for cmd in build_send_keys_commands(pane_id, bytes) {
-                        if writeln!(writer, "{}", cmd).is_err() {
-                            return;
-                        }
+                        cmd_buf.extend_from_slice(cmd.as_bytes());
+                        cmd_buf.push(b'\n');
                     }
                 }
-                let _ = writer.flush();
+                if !cmd_buf.is_empty() {
+                    if writer.write_all(&cmd_buf).is_err() {
+                        return;
+                    }
+                    let _ = writer.flush();
+                }
             }
         });
 
