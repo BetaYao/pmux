@@ -154,6 +154,27 @@ pub fn key_to_bytes(event: &KeyDownEvent, mode: TermMode) -> Option<Vec<u8>> {
     }
 }
 
+/// SGR mouse press: \x1b[<button;col;rowM (col/row are 1-indexed)
+pub fn sgr_mouse_press(button: u8, col: usize, row: usize) -> Vec<u8> {
+    format!("\x1b[<{};{};{}M", button, col + 1, row + 1).into_bytes()
+}
+
+/// SGR mouse release: \x1b[<button;col;rowm
+pub fn sgr_mouse_release(button: u8, col: usize, row: usize) -> Vec<u8> {
+    format!("\x1b[<{};{};{}m", button, col + 1, row + 1).into_bytes()
+}
+
+/// SGR mouse motion: button + 32 (motion flag), \x1b[<btn;col;rowM
+pub fn sgr_mouse_motion(button: u8, col: usize, row: usize) -> Vec<u8> {
+    format!("\x1b[<{};{};{}M", button + 32, col + 1, row + 1).into_bytes()
+}
+
+/// SGR mouse scroll: up=64, down=65
+pub fn sgr_mouse_scroll(up: bool, col: usize, row: usize) -> Vec<u8> {
+    let button: u8 = if up { 64 } else { 65 };
+    format!("\x1b[<{};{};{}M", button, col + 1, row + 1).into_bytes()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,5 +248,35 @@ mod tests {
         let mut ev = make_event("a", false, false, false);
         ev.keystroke.key_char = Some("a".to_string());
         assert_eq!(key_to_bytes(&ev, empty_mode()), Some(b"a".to_vec()));
+    }
+
+    #[test]
+    fn test_sgr_mouse_press() {
+        let bytes = sgr_mouse_press(0, 10, 5);
+        assert_eq!(bytes, b"\x1b[<0;11;6M");
+    }
+
+    #[test]
+    fn test_sgr_mouse_release() {
+        let bytes = sgr_mouse_release(0, 10, 5);
+        assert_eq!(bytes, b"\x1b[<0;11;6m");
+    }
+
+    #[test]
+    fn test_sgr_mouse_scroll_up() {
+        let bytes = sgr_mouse_scroll(true, 5, 3);
+        assert_eq!(bytes, b"\x1b[<64;6;4M");
+    }
+
+    #[test]
+    fn test_sgr_mouse_scroll_down() {
+        let bytes = sgr_mouse_scroll(false, 5, 3);
+        assert_eq!(bytes, b"\x1b[<65;6;4M");
+    }
+
+    #[test]
+    fn test_sgr_mouse_motion() {
+        let bytes = sgr_mouse_motion(0, 20, 10);
+        assert_eq!(bytes, b"\x1b[<32;21;11M");
     }
 }

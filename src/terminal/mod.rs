@@ -13,3 +13,7 @@ pub use input::key_to_bytes;
 pub use terminal_element::TerminalElement;
 pub use content_extractor::ContentExtractor;
 pub use terminal_core::{DetectedLink, SearchMatch, Terminal, TerminalSize};
+
+pub use alacritty_terminal::selection::SelectionType;
+pub use alacritty_terminal::index::Side;
+pub use input::{sgr_mouse_press, sgr_mouse_release, sgr_mouse_motion, sgr_mouse_scroll};

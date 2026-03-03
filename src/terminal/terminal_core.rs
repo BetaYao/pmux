@@ -2,6 +2,9 @@
 //! Core terminal state wrapping alacritty_terminal directly.
 
 use alacritty_terminal::event::{Event as TermEvent, EventListener};
+use alacritty_terminal::grid::Scroll;
+use alacritty_terminal::index::Side;
+use alacritty_terminal::selection::{Selection, SelectionRange, SelectionType};
 use alacritty_terminal::term::test::TermSize;
 use alacritty_terminal::term::{Config as TermConfig, Term, TermMode};
 use alacritty_terminal::vte::ansi::Processor;
@@ -291,9 +294,63 @@ impl Terminal {
     }
 }
 
+impl Terminal {
+    pub fn scroll_display(&self, delta: i32) {
+        let mut term = self.term.lock();
+        term.scroll_display(Scroll::Delta(delta));
+        self.dirty.store(true, Ordering::Relaxed);
+    }
+
+    pub fn scroll_to_bottom(&self) {
+        let mut term = self.term.lock();
+        term.scroll_display(Scroll::Bottom);
+        self.dirty.store(true, Ordering::Relaxed);
+    }
+
+    pub fn display_offset(&self) -> usize {
+        self.term.lock().grid().display_offset()
+    }
+
+    pub fn start_selection(
+        &self,
+        point: alacritty_terminal::index::Point,
+        side: Side,
+        ty: SelectionType,
+    ) {
+        let mut term = self.term.lock();
+        term.selection = Some(Selection::new(ty, point, side));
+    }
+
+    pub fn update_selection(&self, point: alacritty_terminal::index::Point, side: Side) {
+        let mut term = self.term.lock();
+        if let Some(ref mut sel) = term.selection {
+            sel.update(point, side);
+        }
+    }
+
+    pub fn clear_selection(&self) {
+        self.term.lock().selection = None;
+    }
+
+    pub fn has_selection(&self) -> bool {
+        self.term.lock().selection.is_some()
+    }
+
+    pub fn selection_text(&self) -> Option<String> {
+        self.term.lock().selection_to_string()
+    }
+
+    pub fn selection_range(&self) -> Option<SelectionRange> {
+        let term = self.term.lock();
+        term.selection.as_ref().and_then(|s| s.to_range(&term))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alacritty_terminal::index::{Column, Line, Point, Side};
+    use alacritty_terminal::selection::SelectionType;
 
     #[test]
     fn test_terminal_new_default_size() {
@@ -350,5 +407,56 @@ mod tests {
         let term = Terminal::new("t".into(), TerminalSize::default());
         let matches = term.search("zzz_no_match");
         assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn test_scroll_display_up_down() {
+        let term = Terminal::new(
+            "scroll-1".into(),
+            TerminalSize { cols: 80, rows: 24, cell_width: 8.0, cell_height: 16.0 },
+        );
+        let mut data = Vec::new();
+        for i in 0..50 {
+            data.extend_from_slice(format!("line {}\r\n", i).as_bytes());
+        }
+        term.process_output(&data);
+
+        assert_eq!(term.display_offset(), 0);
+        term.scroll_display(5);
+        assert_eq!(term.display_offset(), 5);
+        term.scroll_display(-3);
+        assert_eq!(term.display_offset(), 2);
+        term.scroll_to_bottom();
+        assert_eq!(term.display_offset(), 0);
+    }
+
+    #[test]
+    fn test_scroll_display_clamps() {
+        let term = Terminal::new("scroll-2".into(), TerminalSize::default());
+        term.scroll_display(100);
+        assert_eq!(term.display_offset(), 0);
+        term.scroll_display(-100);
+        assert_eq!(term.display_offset(), 0);
+    }
+
+    #[test]
+    fn test_selection_basic() {
+        let term = Terminal::new("sel-1".into(), TerminalSize::default());
+        term.process_output(b"Hello World\r\n");
+
+        assert!(!term.has_selection());
+        term.start_selection(
+            Point::new(Line(0), Column(0)),
+            Side::Left,
+            SelectionType::Simple,
+        );
+        assert!(term.has_selection());
+        term.update_selection(Point::new(Line(0), Column(4)), Side::Right);
+        let text = term.selection_text();
+        assert!(text.is_some());
+        assert_eq!(text.unwrap(), "Hello");
+
+        term.clear_selection();
+        assert!(!term.has_selection());
     }
 }
