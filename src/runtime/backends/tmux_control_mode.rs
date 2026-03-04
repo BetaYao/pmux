@@ -1055,14 +1055,11 @@ impl AgentRuntime for TmuxControlModeRuntime {
             if let Some(dir) = start_dir.and_then(|p| p.to_str()) {
                 win_args.extend(["-c".to_string(), dir.to_string()]);
             }
+            if Self::is_default_shell_zsh() {
+                win_args.extend(["zsh".to_string(), "-o".to_string(), "nopromptsp".to_string()]);
+            }
             let args_ref: Vec<&str> = win_args.iter().map(|s| s.as_str()).collect();
             let _ = Command::new("tmux").args(&args_ref).output();
-
-            // Disable PROMPT_SP in the new window's shell (same reason as in new())
-            let pane_target = format!("{}:{}", self.session_name, window_name);
-            let _ = Command::new("tmux")
-                .args(["send-keys", "-t", &pane_target, " unsetopt PROMPT_SP 2>/dev/null; clear", "Enter"])
-                .output();
         }
 
         // Update window_name BEFORE any pane queries so list_panes targets the

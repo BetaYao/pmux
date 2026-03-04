@@ -75,9 +75,8 @@ alwaysApply: false
 
 ## PROMPT_SP Handling
 
-- pmux 在创建 session 和 new-window 时通过 `send-keys` 发送 ` unsetopt PROMPT_SP 2>/dev/null; clear` 禁用 zsh 的 `%` 指示符并清屏
-- 命令前加空格（` unsetopt ...`）避免写入 shell history
-- `send-keys` 由 tmux 立即入队，无需 sleep——PTY 建立 + `-CC attach` 的耗时足够 shell 处理完
+- pmux 在创建 session 和 new-window 时，若 tmux 的 default-shell 为 zsh，则传入 `zsh -o nopromptsp` 作为 command，在 shell 启动时禁用 PROMPT_SP，避免 send-keys 回显闪烁
+- 若 default-shell 非 zsh（如 bash/fish），则不处理 PROMPT_SP（这些 shell 无此选项）
 - 回归测试用 `printf` (无 trailing newline) 验证 PROMPT_SP 已被禁用：capture-pane 不应出现 `MARKER%`
 
 ## True Color & Terminal Capabilities
