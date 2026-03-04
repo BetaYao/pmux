@@ -366,6 +366,22 @@ fn open_raw_pty(cols: u16, rows: u16) -> Result<(i32, i32), RuntimeError> {
 }
 
 impl TmuxControlModeRuntime {
+    /// Returns true if tmux's default-shell is zsh. Used to decide whether to pass
+    /// `zsh -o nopromptsp` as the new-session/new-window command (avoids send-keys echo flash).
+    fn is_default_shell_zsh() -> bool {
+        let out = Command::new("tmux")
+            .args(["show", "-g", "default-shell"])
+            .output();
+        match out {
+            Ok(o) if o.status.success() => {
+                let s = String::from_utf8_lossy(&o.stdout);
+                let path = s.trim().to_lowercase();
+                path.ends_with("zsh") || path.contains("/zsh")
+            }
+            _ => false,
+        }
+    }
+
     /// Query the current (active) window name of a session. Used when attaching without specifying a window.
     /// If the tmux command fails with "server exited unexpectedly", removes the stale socket so the next
     /// create path can start a fresh server.
