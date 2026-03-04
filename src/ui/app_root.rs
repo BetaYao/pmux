@@ -3175,11 +3175,16 @@ impl AppRoot {
             }).detach();
         });
         sidebar.on_close_orphan(move |window_name, _window, cx: &mut App| {
-            let _ = cx.update_entity(&app_root_entity_for_close_orphan, |this: &mut AppRoot, cx| {
-                let _ = kill_tmux_window(&repo_path_for_close_orphan, window_name);
-                this.refresh_sidebar(cx);
-                cx.notify();
-            });
+            let repo_path = repo_path_for_close_orphan.clone();
+            let entity = app_root_entity_for_close_orphan.clone();
+            let window_name = window_name.to_string();
+            cx.spawn(async move |cx| {
+                let _ = blocking::unblock(move || kill_tmux_window(&repo_path, &window_name)).await;
+                let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx: &mut _| {
+                    this.cached_tmux_windows = None;
+                    cx.notify();
+                });
+            }).detach();
         });
         sidebar.on_view_diff(move |idx, _window, cx| {
             let _ = cx.update_entity(&app_root_entity_for_view_diff, |this: &mut AppRoot, cx| {
