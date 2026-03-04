@@ -455,6 +455,9 @@ impl TmuxControlModeRuntime {
                 dir_owned = dir.to_string();
                 create_args.extend(["-c", &dir_owned]);
             }
+            if Self::is_default_shell_zsh() {
+                create_args.extend(["zsh", "-o", "nopromptsp"]);
+            }
             let mut new_sess = Command::new("tmux").args(&create_args).output();
             if let Ok(ref o) = new_sess {
                 if !o.status.success() {
@@ -486,6 +489,9 @@ impl TmuxControlModeRuntime {
                             if let Some(dir) = start_dir.and_then(|p| p.to_str()) {
                                 win_args.extend(["-c", dir]);
                             }
+                            if Self::is_default_shell_zsh() {
+                                win_args.extend(["zsh", "-o", "nopromptsp"]);
+                            }
                             let _ = Command::new("tmux").args(&win_args).output();
                         }
                     }
@@ -497,13 +503,6 @@ impl TmuxControlModeRuntime {
         let _ = Command::new("tmux").args(["set", "-g", "default-terminal", "xterm-256color"]).output();
         let _ = Command::new("tmux").args(["set", "-as", "terminal-features", ",xterm-256color:RGB"]).output();
         let _ = Command::new("tmux").args(["set", "-s", "escape-time", "10"]).output();
-
-        if !skip_create_and_send_keys {
-            let pane_target = format!("{}:{}", session_name, window_name);
-            let _ = Command::new("tmux")
-                .args(["send-keys", "-t", &pane_target, " unsetopt PROMPT_SP 2>/dev/null; clear", "Enter"])
-                .output();
-        }
 
         // Open raw PTY at the target size — tmux reads the PTY winsize to set client dims
         let (master_fd, slave_fd) = open_raw_pty(initial_cols, initial_rows)?;
