@@ -27,11 +27,12 @@ impl Default for TerminalSize {
     }
 }
 
-/// Event listener bridge: captures title changes, bell, and PTY write-back
+/// Event listener bridge: captures title changes, bell, PTY write-back, and OSC 52 clipboard
 pub struct TermEventProxy {
     title: Arc<Mutex<Option<String>>>,
     has_bell: Arc<Mutex<bool>>,
     pty_write_tx: flume::Sender<Vec<u8>>,
+    clipboard_store_tx: flume::Sender<String>,
 }
 
 impl TermEventProxy {
@@ -39,8 +40,9 @@ impl TermEventProxy {
         title: Arc<Mutex<Option<String>>>,
         has_bell: Arc<Mutex<bool>>,
         pty_write_tx: flume::Sender<Vec<u8>>,
+        clipboard_store_tx: flume::Sender<String>,
     ) -> Self {
-        Self { title, has_bell, pty_write_tx }
+        Self { title, has_bell, pty_write_tx, clipboard_store_tx }
     }
 }
 
@@ -52,6 +54,10 @@ impl EventListener for TermEventProxy {
             TermEvent::Bell => { *self.has_bell.lock() = true; }
             TermEvent::PtyWrite(data) => {
                 let _ = self.pty_write_tx.send(data.into_bytes());
+            }
+            // OSC 52: terminal app requests clipboard write (e.g. opencode, tmux copy-mode)
+            TermEvent::ClipboardStore(_ty, text) => {
+                let _ = self.clipboard_store_tx.send(text);
             }
             _ => {}
         }
@@ -71,6 +77,10 @@ pub struct Terminal {
     /// Keep sender to maintain channel liveness; TermEventProxy uses a clone.
     #[allow(dead_code)]
     pty_write_tx: flume::Sender<Vec<u8>>,
+    /// OSC 52 clipboard store requests from terminal apps (e.g. opencode, tmux).
+    pub clipboard_store_rx: flume::Receiver<String>,
+    #[allow(dead_code)]
+    clipboard_store_tx: flume::Sender<String>,
     cached_links: Mutex<Option<Vec<DetectedLink>>>,
     cached_search: Mutex<Option<(String, Vec<SearchMatch>)>>,
     scroll_pixel_remainder: Mutex<f32>,
@@ -83,11 +93,13 @@ impl Terminal {
         let title = Arc::new(Mutex::new(None));
         let has_bell = Arc::new(Mutex::new(false));
         let (pty_write_tx, pty_write_rx) = flume::unbounded();
+        let (clipboard_store_tx, clipboard_store_rx) = flume::unbounded();
 
         let event_proxy = TermEventProxy::new(
             title.clone(),
             has_bell.clone(),
             pty_write_tx.clone(),
+            clipboard_store_tx.clone(),
         );
         let term = Term::new(config, &term_size, event_proxy);
 
@@ -101,6 +113,8 @@ impl Terminal {
             dirty: AtomicBool::new(false),
             pty_write_rx,
             pty_write_tx,
+            clipboard_store_rx,
+            clipboard_store_tx,
             cached_links: Mutex::new(None),
             cached_search: Mutex::new(None),
             scroll_pixel_remainder: Mutex::new(0.0),

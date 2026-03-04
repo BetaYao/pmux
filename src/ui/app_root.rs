@@ -9,7 +9,7 @@ use crate::git_utils::{is_git_repository, get_git_error_message, GitError};
 use crate::notification::NotificationType;
 use crate::notification_manager::NotificationManager;
 use crate::system_notifier;
-use crate::shell_integration::ShellPhaseInfo;
+use crate::shell_integration::{ShellPhase, ShellPhaseInfo};
 use crate::terminal::ContentExtractor;
 use crate::runtime::{AgentRuntime, EventBus, RuntimeEvent, StatusPublisher};
 use crate::runtime::backends::{create_runtime_from_env, kill_tmux_window, list_tmux_windows, recover_runtime, resolve_backend, session_name_for_workspace, window_name_for_worktree, window_target};
@@ -36,10 +36,9 @@ pub static OPEN_SETTINGS_REQUESTED: AtomicBool = AtomicBool::new(false);
 /// work on huge buffers in large/active panes (e.g. big monorepos), keeping input responsive.
 const MAX_STATUS_CONTENT_LEN: usize = 32_768;
 
-/// Max output chunks processed per async loop iteration. Capping yields to the executor often
-/// so scroll/selection (which need the terminal lock) stay responsive in workspaces with heavy
-/// output (e.g. prompt git status in large repos).
-const TERMINAL_OUTPUT_MAX_CHUNKS_PER_BATCH: usize = 24;
+/// Min output chunks per batch (interactive typing). Max scales up under backpressure.
+const TERMINAL_OUTPUT_MIN_BATCH: usize = 24;
+const TERMINAL_OUTPUT_MAX_BATCH: usize = 256;
 
 /// Notification sender that forwards to AppRoot's NotificationManager
 struct AppNotificationSender {
@@ -629,6 +628,23 @@ impl AppRoot {
                 }
             });
 
+            // Handle OSC 52 clipboard store requests (e.g. from opencode, tmux copy-mode)
+            let clipboard_rx = terminal.clipboard_store_rx.clone();
+            std::thread::spawn(move || {
+                while let Ok(text) = clipboard_rx.recv() {
+                    use std::io::Write;
+                    if let Ok(mut child) = std::process::Command::new("pbcopy")
+                        .stdin(std::process::Stdio::piped())
+                        .spawn()
+                    {
+                        if let Some(stdin) = child.stdin.as_mut() {
+                            let _ = stdin.write_all(text.as_bytes());
+                        }
+                        let _ = child.wait();
+                    }
+                }
+            });
+
             let runtime_for_resize = runtime.clone();
             let pane_for_resize = pane_target_str.clone();
             let shared_dims_for_resize = Arc::clone(&self.shared_terminal_dims);
@@ -718,10 +734,11 @@ impl AppRoot {
                     terminal_for_output.process_output(&chunk);
                     ext.feed(&chunk);
 
-                    // Drain up to N chunks so we yield often; keeps scroll/selection responsive
-                    // when output is heavy (e.g. prompt git status in large repos).
+                    // Adaptive batching: drain more under backpressure, yield often when idle
+                    let pending = rx.len();
+                    let batch_limit = if pending > 100 { TERMINAL_OUTPUT_MAX_BATCH } else { TERMINAL_OUTPUT_MIN_BATCH };
                     let mut batch_count = 1usize;
-                    while batch_count < TERMINAL_OUTPUT_MAX_CHUNKS_PER_BATCH {
+                    while batch_count < batch_limit {
                         match rx.try_recv() {
                             Ok(next) => {
                                 terminal_for_output.process_output(&next);
@@ -734,7 +751,35 @@ impl AppRoot {
 
                     // Throttle status detection: only run on phase change or every 200ms
                     let now = Instant::now();
-                    let phase = ext.shell_phase();
+                    let mut phase = ext.shell_phase();
+                    let term_mode = terminal_for_output.mode();
+                    let alt_screen = term_mode.contains(alacritty_terminal::term::TermMode::ALT_SCREEN);
+                    // Detect non-shell programs running in the terminal:
+                    // 1. TUI apps using alternate screen (e.g., vim, htop)
+                    // 2. For tmux panes: query pane_current_command (opencode, aider, etc.)
+                    // process_detected: reliable signal that bypasses debounce
+                    let mut process_detected = false;
+                    if phase == ShellPhase::Unknown {
+                        if alt_screen {
+                            phase = ShellPhase::Running;
+                            process_detected = true;
+                        } else if pane_target_clone.starts_with('%') {
+                            if let Ok(output) = std::process::Command::new("tmux")
+                                .args(["display-message", "-p", "-t", &pane_target_clone,
+                                       "#{pane_current_command}"])
+                                .output()
+                            {
+                                let cmd = String::from_utf8_lossy(&output.stdout);
+                                let cmd = cmd.trim();
+                                if !cmd.is_empty()
+                                    && !matches!(cmd, "zsh" | "bash" | "fish" | "sh" | "dash" | "ksh")
+                                {
+                                    phase = ShellPhase::Running;
+                                    process_detected = true;
+                                }
+                            }
+                        }
+                    }
                     if phase != last_phase || now.duration_since(last_status_check) >= status_interval {
                         last_status_check = now;
                         last_phase = phase;
@@ -748,13 +793,37 @@ impl AppRoot {
                         } else {
                             content_str.as_str()
                         };
+                        // DEBUG: trace status detection
+                        crate::debug_log::dbg_session_log(
+                            "app_root.rs:output_loop",
+                            "status_check",
+                            &serde_json::json!({
+                                "pane": &pane_target_clone,
+                                "osc133_phase": format!("{:?}", ext.shell_phase()),
+                                "effective_phase": format!("{:?}", phase),
+                                "alt_screen": alt_screen,
+                                "content_len": content_for_status.len(),
+                                "content_tail": &content_for_status[content_for_status.len().saturating_sub(200)..],
+                            }),
+                            "DBG_STATUS",
+                        );
                         if let Some(ref pub_) = status_publisher {
                             let _ = pub_.check_status(
                                 &pane_target_clone,
                                 crate::status_detector::ProcessStatus::Running,
-                                Some(shell_info),
+                                Some(shell_info.clone()),
                                 content_for_status,
                             );
+                            // Process-level detection (alt screen / tmux pane_current_command)
+                            // is reliable — call again to satisfy debounce threshold immediately
+                            if process_detected {
+                                let _ = pub_.check_status(
+                                    &pane_target_clone,
+                                    crate::status_detector::ProcessStatus::Running,
+                                    Some(shell_info),
+                                    content_for_status,
+                                );
+                            }
                         }
                     }
                     // Skip terminal area notify when a modal (e.g. new branch dialog) is open so
@@ -820,6 +889,23 @@ impl AppRoot {
                 }
             });
 
+            // Handle OSC 52 clipboard store requests (e.g. from opencode, tmux copy-mode)
+            let clipboard_rx = terminal.clipboard_store_rx.clone();
+            std::thread::spawn(move || {
+                while let Ok(text) = clipboard_rx.recv() {
+                    use std::io::Write;
+                    if let Ok(mut child) = std::process::Command::new("pbcopy")
+                        .stdin(std::process::Stdio::piped())
+                        .spawn()
+                    {
+                        if let Some(stdin) = child.stdin.as_mut() {
+                            let _ = stdin.write_all(text.as_bytes());
+                        }
+                        let _ = child.wait();
+                    }
+                }
+            });
+
             let runtime_for_resize = runtime.clone();
             let pane_for_resize = pane_target_str.clone();
             let resize_callback: Arc<dyn Fn(u16, u16) + Send + Sync> =
@@ -878,8 +964,10 @@ impl AppRoot {
                     terminal_for_output.process_output(&chunk);
                     ext.feed(&chunk);
 
+                    let pending = rx.len();
+                    let batch_limit = if pending > 100 { TERMINAL_OUTPUT_MAX_BATCH } else { TERMINAL_OUTPUT_MIN_BATCH };
                     let mut batch_count = 1usize;
-                    while batch_count < TERMINAL_OUTPUT_MAX_CHUNKS_PER_BATCH {
+                    while batch_count < batch_limit {
                         match rx.try_recv() {
                             Ok(next) => {
                                 terminal_for_output.process_output(&next);
@@ -892,7 +980,35 @@ impl AppRoot {
 
                     // Throttle status detection: only run on phase change or every 200ms
                     let now = Instant::now();
-                    let phase = ext.shell_phase();
+                    let mut phase = ext.shell_phase();
+                    let term_mode = terminal_for_output.mode();
+                    let alt_screen = term_mode.contains(alacritty_terminal::term::TermMode::ALT_SCREEN);
+                    // Detect non-shell programs running in the terminal:
+                    // 1. TUI apps using alternate screen (e.g., vim, htop)
+                    // 2. For tmux panes: query pane_current_command (opencode, aider, etc.)
+                    // process_detected: reliable signal that bypasses debounce
+                    let mut process_detected = false;
+                    if phase == ShellPhase::Unknown {
+                        if alt_screen {
+                            phase = ShellPhase::Running;
+                            process_detected = true;
+                        } else if pane_target_clone.starts_with('%') {
+                            if let Ok(output) = std::process::Command::new("tmux")
+                                .args(["display-message", "-p", "-t", &pane_target_clone,
+                                       "#{pane_current_command}"])
+                                .output()
+                            {
+                                let cmd = String::from_utf8_lossy(&output.stdout);
+                                let cmd = cmd.trim();
+                                if !cmd.is_empty()
+                                    && !matches!(cmd, "zsh" | "bash" | "fish" | "sh" | "dash" | "ksh")
+                                {
+                                    phase = ShellPhase::Running;
+                                    process_detected = true;
+                                }
+                            }
+                        }
+                    }
                     if phase != last_phase || now.duration_since(last_status_check) >= status_interval {
                         last_status_check = now;
                         last_phase = phase;
@@ -906,13 +1022,34 @@ impl AppRoot {
                         } else {
                             content_str.as_str()
                         };
+                        // DEBUG: trace status detection (split pane)
+                        crate::debug_log::dbg_session_log(
+                            "app_root.rs:pane_output_loop",
+                            "status_check",
+                            &serde_json::json!({
+                                "pane": &pane_target_clone,
+                                "osc133_phase": format!("{:?}", ext.shell_phase()),
+                                "effective_phase": format!("{:?}", phase),
+                                "alt_screen": alt_screen,
+                                "content_len": content_for_status.len(),
+                            }),
+                            "DBG_STATUS",
+                        );
                         if let Some(ref pub_) = status_publisher {
                             let _ = pub_.check_status(
                                 &pane_target_clone,
                                 crate::status_detector::ProcessStatus::Running,
-                                Some(shell_info),
+                                Some(shell_info.clone()),
                                 content_for_status,
                             );
+                            if process_detected {
+                                let _ = pub_.check_status(
+                                    &pane_target_clone,
+                                    crate::status_detector::ProcessStatus::Running,
+                                    Some(shell_info),
+                                    content_for_status,
+                                );
+                            }
                         }
                     }
                     if modal_open.load(Ordering::Relaxed) {
@@ -1488,9 +1625,8 @@ impl AppRoot {
                                     }
                                 }
                                 if updated {
-                                    let _ = entity.update(cx, |this, cx| {
+                                    let _ = entity.update(cx, |this, _cx| {
                                         this.update_status_counts();
-                                        cx.notify();
                                     });
                                 }
                             }
@@ -1520,7 +1656,6 @@ impl AppRoot {
                                 cx.notify();
                             });
                         }
-                        let _ = entity.update(cx, |_, cx| cx.notify());
                     }
                     Err(_) => break,
                     _ => {}
@@ -1690,8 +1825,21 @@ impl AppRoot {
                             let pane_target = rt
                                 .primary_pane_id()
                                 .unwrap_or_else(|| format!("local:{}", path.display()));
+                            // Restore saved split tree for this worktree
+                            let saved_split_tree = RuntimeState::load()
+                                .ok()
+                                .and_then(|state| {
+                                    let ws_path = this.workspace_manager.active_tab()
+                                        .map(|t| t.path.clone())?;
+                                    state.workspaces.iter()
+                                        .find(|ws| ws.path == ws_path)?
+                                        .worktrees.iter()
+                                        .find(|w| w.path == path)
+                                        .and_then(|w| w.split_tree_json.as_deref()
+                                            .and_then(|s| serde_json::from_str::<SplitNode>(s).ok()))
+                                });
                             this.detach_ui_from_runtime();
-                            this.attach_runtime(rt, pane_target, &path, &branch_clone, cx, None);
+                            this.attach_runtime(rt, pane_target, &path, &branch_clone, cx, saved_split_tree);
                             this.save_config();
                         }
                         Err(e) => {
@@ -2537,6 +2685,23 @@ impl AppRoot {
                 }
             });
 
+            // Handle OSC 52 clipboard store requests (e.g. from opencode, tmux copy-mode)
+            let clipboard_rx = terminal.clipboard_store_rx.clone();
+            std::thread::spawn(move || {
+                while let Ok(text) = clipboard_rx.recv() {
+                    use std::io::Write;
+                    if let Ok(mut child) = std::process::Command::new("pbcopy")
+                        .stdin(std::process::Stdio::piped())
+                        .spawn()
+                    {
+                        if let Some(stdin) = child.stdin.as_mut() {
+                            let _ = stdin.write_all(text.as_bytes());
+                        }
+                        let _ = child.wait();
+                    }
+                }
+            });
+
             let runtime_for_resize = runtime.clone();
             let pane_for_resize = pane_target_str.clone();
             let resize_callback: Arc<dyn Fn(u16, u16) + Send + Sync> =
@@ -2581,8 +2746,10 @@ impl AppRoot {
                         Err(_) => break,
                     };
                     terminal_for_output.process_output(&chunk);
+                    let pending = rx.len();
+                    let batch_limit = if pending > 100 { TERMINAL_OUTPUT_MAX_BATCH } else { TERMINAL_OUTPUT_MIN_BATCH };
                     let mut batch_count = 1usize;
-                    while batch_count < TERMINAL_OUTPUT_MAX_CHUNKS_PER_BATCH {
+                    while batch_count < batch_limit {
                         match rx.try_recv() {
                             Ok(next) => {
                                 terminal_for_output.process_output(&next);
