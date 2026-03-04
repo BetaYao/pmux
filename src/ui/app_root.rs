@@ -2729,13 +2729,6 @@ impl AppRoot {
         cx.notify();
     }
 
-    /// Shows the delete worktree confirmation dialog
-    fn show_delete_dialog(&mut self, worktree: crate::worktree::WorktreeInfo, cx: &mut Context<Self>) {
-        let has_uncommitted = crate::worktree::has_uncommitted_changes(&worktree.path);
-        self.delete_worktree_dialog.open(worktree, has_uncommitted);
-        cx.notify();
-    }
-
     /// Closes the delete worktree dialog
     fn close_delete_dialog(&mut self, cx: &mut Context<Self>) {
         self.delete_worktree_dialog.close();
@@ -3160,11 +3153,26 @@ impl AppRoot {
         sidebar.on_delete(move |idx, _window, cx| {
             let _ = cx.update_entity(&app_root_entity_for_delete, |this: &mut AppRoot, cx| {
                 this.sidebar_context_menu_index = None;
-                this.refresh_worktrees_for_repo(&repo_path_for_delete);
-                if let Some(wt) = this.cached_worktrees.get(idx) {
-                    this.show_delete_dialog(wt.clone(), cx);
-                }
+                cx.notify();
             });
+            let repo_path = repo_path_for_delete.clone();
+            let entity = app_root_entity_for_delete.clone();
+            cx.spawn(async move |cx| {
+                let result = blocking::unblock(move || {
+                    let worktrees = crate::worktree::discover_worktrees(&repo_path).ok()?;
+                    let worktree = worktrees.get(idx).cloned()?;
+                    let has_uncommitted = crate::worktree::has_uncommitted_changes(&worktree.path);
+                    Some((worktrees, worktree, has_uncommitted, repo_path))
+                }).await;
+                if let Some((worktrees, worktree, has_uncommitted, repo_path)) = result {
+                    let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx: &mut _| {
+                        this.cached_worktrees = worktrees;
+                        this.cached_worktrees_repo = Some(repo_path);
+                        this.delete_worktree_dialog.open(worktree, has_uncommitted);
+                        cx.notify();
+                    });
+                }
+            }).detach();
         });
         sidebar.on_close_orphan(move |window_name, _window, cx: &mut App| {
             let _ = cx.update_entity(&app_root_entity_for_close_orphan, |this: &mut AppRoot, cx| {
