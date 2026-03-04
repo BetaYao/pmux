@@ -1,0 +1,7 @@
+Metric,Value,Unit,Status
+tmux_single_p50,0.609,ms,PASS
+tmux_single_p95,0.994,ms,PASS
+tmux_burst_per_char_p50,0.006,ms,PASS
+local_single_p50,0.008,ms,INFO
+ratio_p50,78.602,x,WARN
+timeouts_total,0,count,PASS

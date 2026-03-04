@@ -55,13 +55,30 @@ impl NewBranchDialogEntity {
             on_branch_name_change,
         }
     }
+
+    /// Current branch name (local state for input; synced to model on Create).
+    pub fn branch_name(&self) -> &str {
+        &self.branch_name
+    }
+
+    /// Set branch name from input (avoids updating shared model on every keystroke).
+    pub fn set_branch_name(&mut self, name: String) {
+        self.branch_name = name;
+        self.error = match crate::new_branch_dialog::validate_branch_name(self.branch_name.trim()) {
+            Ok(()) => String::new(),
+            Err(e) => e.message,
+        };
+    }
 }
 
 impl Render for NewBranchDialogEntity {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.is_open {
             return div().into_any_element();
         }
+
+        // Keep focus on dialog input so typing doesn't go to terminal (only this Entity re-renders on key, not whole app)
+        window.focus(&self.input_focus, cx);
 
         let on_close = self.on_close.clone();
         let on_create = self.on_create.clone();
@@ -72,7 +89,9 @@ impl Render for NewBranchDialogEntity {
         let _is_create_enabled = !is_creating && !branch_name.trim().is_empty() && error.is_empty();
         let input_focus = self.input_focus.clone();
 
+        // Cursor always visible (no blink) to avoid needing Tokio runtime in GPUI spawn
         let mut ui = NewBranchDialogUi::new()
+            .with_cursor_visible(true)
             .with_focus_handle(input_focus)
             .on_close(move |w, cx| on_close(w, cx))
             .on_create(move |w, cx| on_create(w, cx))
@@ -86,6 +105,12 @@ impl Render for NewBranchDialogEntity {
             ui.start_creating();
         }
 
-        div().child(ui).into_any_element()
+        // Full-size overlay so the modal covers the viewport and centers the dialog; requires app_root to have .relative()
+        div()
+            .absolute()
+            .inset(px(0.))
+            .size_full()
+            .child(ui)
+            .into_any_element()
     }
 }

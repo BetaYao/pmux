@@ -1,0 +1,11 @@
+Metric,Value,Unit,Status
+profile,strict,name,INFO
+tmux_single_p50,0.320,ms,PASS
+tmux_single_p95,0.733,ms,PASS
+tmux_burst_per_char_p50,0.005,ms,PASS
+local_single_p50,0.007,ms,INFO
+ratio_p50,42.862,x,WARN
+timeouts_total,0,count,PASS
+pmux_ui_e2e_p50,182.910,ms,INFO
+pmux_ui_e2e_p95,197.928,ms,INFO
+pmux_ui_e2e_timeouts,0,count,INFO

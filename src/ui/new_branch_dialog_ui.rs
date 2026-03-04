@@ -21,6 +21,8 @@ pub struct NewBranchDialogUi {
     on_branch_name_change: Option<BranchNameChangeCallback>,
     /// Focus handle for the branch name input - when set, used for track_focus and initial focus
     input_focus_handle: Option<gpui::FocusHandle>,
+    /// When true, show the text cursor (for blink)
+    cursor_visible: bool,
 }
 
 impl NewBranchDialogUi {
@@ -32,7 +34,14 @@ impl NewBranchDialogUi {
             on_close: None,
             on_branch_name_change: None,
             input_focus_handle: None,
+            cursor_visible: true,
         }
+    }
+
+    /// Sets whether the text cursor is visible (for blinking)
+    pub fn with_cursor_visible(mut self, visible: bool) -> Self {
+        self.cursor_visible = visible;
+        self
     }
 
     /// Sets the focus handle for the branch name input (for track_focus and initial focus on open)
@@ -146,6 +155,7 @@ impl IntoElement for NewBranchDialogUi {
         let is_creating = self.is_creating();
         let is_create_enabled = self.is_create_enabled();
         let on_close = self.on_close.clone();
+        let on_close_for_escape = on_close.clone();
         let on_branch_name_change = self.on_branch_name_change.clone();
         let input_focus_handle = self.input_focus_handle.clone();
 
@@ -210,11 +220,46 @@ impl IntoElement for NewBranchDialogUi {
             .text_color(rgb(0xcccccc))
             .child("Branch Name");
 
-        // Editable text input - focusable div with on_key_down for branch name entry
-        let input_text: SharedString = if branch_name.is_empty() {
-            "e.g., feature/my-new-feature".into()
+        // Editable text input - placeholder when empty, then caret at start; when not empty, text then caret at end
+        let placeholder: SharedString = "e.g., feature/my-new-feature".into();
+        let text_color = if branch_name.is_empty() { rgb(0x666666) } else { rgb(0xffffff) };
+        let caret_color = if self.cursor_visible {
+            rgb(0xffffff)
         } else {
-            branch_name.clone().into()
+            rgba(0xffffff00u32)
+        };
+        let caret = div()
+            .w(px(2.))
+            .h(px(16.))
+            .bg(caret_color)
+            .flex_shrink();
+        // When empty: [blinking caret] [placeholder]. When not empty: [text] [caret]
+        let input_inner = if branch_name.is_empty() {
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(0.))
+                .child(caret)
+                .child(
+                    div()
+                        .text_size(px(14.))
+                        .text_color(text_color)
+                        .child(placeholder)
+                )
+        } else {
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(0.))
+                .child(
+                    div()
+                        .text_size(px(14.))
+                        .text_color(text_color)
+                        .child(SharedString::from(branch_name.clone()))
+                )
+                .child(caret)
         };
         let mut input_field = div()
             .id("new-branch-input")
@@ -228,12 +273,7 @@ impl IntoElement for NewBranchDialogUi {
             .flex()
             .items_center()
             .cursor(gpui::CursorStyle::IBeam)
-            .child(
-                div()
-                    .text_size(px(14.))
-                    .text_color(if branch_name.is_empty() { rgb(0x666666) } else { rgb(0xffffff) })
-                    .child(input_text)
-            );
+            .child(input_inner);
         // Make input editable when not creating and callback is set
         if !is_creating {
             if let Some(ref on_change) = on_branch_name_change {
@@ -246,6 +286,13 @@ impl IntoElement for NewBranchDialogUi {
                 }
                 input_field = input_field
                     .on_key_down(move |event, window, cx| {
+                        if event.keystroke.key.as_str() == "escape" {
+                            if let Some(ref close_cb) = on_close_for_escape {
+                                close_cb(window, cx);
+                            }
+                            window.prevent_default();
+                            return;
+                        }
                         let new_value = match event.keystroke.key.as_str() {
                             "backspace" => {
                                 let mut s = branch_name_for_keys.clone();

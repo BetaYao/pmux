@@ -1,8 +1,8 @@
 Echo Output Verification Report
 ===============================
-Test Time: Tue Mar  3 00:22:58 CST 2026
+Test Time: Tue Mar  3 18:41:34 CST 2026
 
-Screenshot: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/echo_output_20260303_002257.png
+Screenshot: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/echo_output_20260303_184133.png
 OCR OK: True
 OCR Text: CQ terminat  + saas-mono git:(main) x echo hello world hello world * saas-mono git:(main) x ff  o—test
 

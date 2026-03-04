@@ -98,6 +98,10 @@ pub struct Sidebar {
     notification_count: usize,
     /// For last message and timestamp per worktree
     notification_manager: Option<Arc<Mutex<NotificationManager>>>,
+    /// Orphan tmux window names (session exists but worktree was removed externally). Shown with close button.
+    orphan_windows: Arc<Mutex<Vec<String>>>,
+    /// Callback when user closes an orphan window (window_name).
+    on_close_orphan: Option<Arc<dyn Fn(&str, &mut Window, &mut App) + Send + Sync>>,
 }
 
 impl Sidebar {
@@ -121,6 +125,8 @@ impl Sidebar {
             on_add_workspace: None,
             notification_count: 0,
             notification_manager: None,
+            orphan_windows: Arc::new(Mutex::new(Vec::new())),
+            on_close_orphan: None,
         }
     }
 
@@ -190,6 +196,17 @@ impl Sidebar {
 
     pub fn on_right_click<F: Fn(usize, &mut Window, &mut App) + Send + Sync + 'static>(&mut self, callback: F) {
         self.on_right_click = Some(Arc::new(callback));
+    }
+
+    /// Set orphan tmux window names to show in sidebar (windows whose worktree was removed externally).
+    pub fn set_orphan_windows(&mut self, window_names: Vec<String>) {
+        if let Ok(mut guard) = self.orphan_windows.lock() {
+            *guard = window_names;
+        }
+    }
+
+    pub fn on_close_orphan<F: Fn(&str, &mut Window, &mut App) + Send + Sync + 'static>(&mut self, callback: F) {
+        self.on_close_orphan = Some(Arc::new(callback));
     }
 
     pub fn with_context_menu(mut self, index: Option<usize>) -> Self {
@@ -588,6 +605,8 @@ impl RenderOnce for Sidebar {
         let on_add_workspace = self.on_add_workspace.clone();
         let notification_count = self.notification_count;
         let notification_manager = self.notification_manager.clone();
+        let orphan_windows = self.orphan_windows.lock().unwrap().clone();
+        let on_close_orphan = self.on_close_orphan.clone();
 
         let has_top_controls = on_toggle_sidebar.is_some() || on_toggle_notifications.is_some() || on_add_workspace.is_some();
         let top_section = if has_top_controls {
@@ -696,6 +715,49 @@ impl RenderOnce for Sidebar {
             if context_menu_for == Some(idx) {
                 let menu_row = Self::render_context_menu(idx, on_view_diff.clone(), on_delete.clone(), &worktrees_info);
                 rows.push(menu_row.into_any_element());
+            }
+        }
+
+        // Orphan tmux windows (worktree removed externally) — show with close button
+        if !orphan_windows.is_empty() {
+            rows.push(
+                div()
+                    .id("sidebar-orphan-section-label")
+                    .mx(px(4.)).mt(px(12.)).mb(px(4.))
+                    .text_size(px(10.)).text_color(rgb(0x888888))
+                    .child("已删除的会话 (可关闭)")
+                    .into_any_element(),
+            );
+            for win_name in &orphan_windows {
+                let win_name_owned = win_name.clone();
+                let mut row = div()
+                    .id(format!("sidebar-orphan-{}", win_name.replace(' ', "-")))
+                    .mx(px(4.)).my(px(2.)).px(px(8.)).py(px(6.))
+                    .rounded(px(4.))
+                    .flex().flex_row().items_center().gap(px(4.))
+                    .min_h(px(36.))
+                    .bg(rgb(0x2a2520))
+                    .border_1().border_color(rgb(0x4d4030))
+                    .child(
+                        div().flex_1().text_size(px(12.)).text_color(rgb(0xcccccc))
+                            .child(SharedString::from(win_name.clone())),
+                    );
+                if let Some(ref on_close) = on_close_orphan {
+                    let on_close = Arc::clone(on_close);
+                    row = row.child(
+                        div()
+                            .id(format!("sidebar-orphan-close-{}", win_name.replace(' ', "-")))
+                            .px(px(4.)).py(px(2.))
+                            .text_size(px(10.)).text_color(rgb(0x888888))
+                            .hover(|s: StyleRefinement| s.text_color(rgb(0xffffff)))
+                            .cursor_pointer()
+                            .on_click(move |_event, window, cx| {
+                                on_close(win_name_owned.as_str(), window, cx);
+                            })
+                            .child("×"),
+                    );
+                }
+                rows.push(row.into_any_element());
             }
         }
 

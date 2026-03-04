@@ -35,13 +35,20 @@ sleep 5
 activate_window
 sleep 1
 
+# 等待窗口出现（冷启动可能较慢，重试最多 15 秒）
+WINDOW_INFO=""
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+    WINDOW_INFO=$(osascript -e 'tell application "System Events" to tell process "pmux" to get {position, size} of window 1' 2>/dev/null) && break
+    sleep 1
+done
+
 # 检查窗口是否存在
-WINDOW_INFO=$(osascript -e 'tell application "System Events" to tell process "pmux" to get {position, size} of window 1' 2>/dev/null) || {
+if [ -z "$WINDOW_INFO" ]; then
     log_error "pmux window not found - process may have crashed or window failed to create"
     add_report_result "Window Visibility" "FAIL" "Window not found"
     stop_pmux
     exit 1
-}
+fi
 
 WIN_X=$(echo "$WINDOW_INFO" | cut -d',' -f1 | tr -d ' ')
 WIN_Y=$(echo "$WINDOW_INFO" | cut -d',' -f2 | tr -d ' ')

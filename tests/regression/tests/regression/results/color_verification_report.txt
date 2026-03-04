@@ -1,22 +1,22 @@
 Color Display Verification Report
 =================================
-Test Time: Sun Mar  1 11:45:51 CST 2026
+Test Time: Tue Mar  3 18:42:47 CST 2026
 
-Terminal Region: x=325, y=280, w=930, h=650
+Terminal Region: x=260, y=80, w=908, h=650
 
 Screenshots:
-1. Baseline: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/color_baseline_20260301_114545.png
+1. Baseline: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/color_baseline_20260303_184242.png
    Color count: 0
 
-2. ls --color: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/color_ls_20260301_114547.png
-   Color count: 0
-   Has multiple colors: False
-
-3. ANSI colors: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/color_ansi_20260301_114549.png
+2. ls --color: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/color_ls_20260303_184243.png
    Color count: 0
    Has multiple colors: False
 
-4. 256 colors: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/color_256_20260301_114550.png
+3. ANSI colors: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/color_ansi_20260303_184245.png
+   Color count: 0
+   Has multiple colors: False
+
+4. 256 colors: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/color_256_20260303_184246.png
    Color count: 0
 
 Summary:

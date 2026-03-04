@@ -32,6 +32,15 @@ use std::sync::{Arc, Mutex};
 /// Used by menu action (open_settings) to open Settings from main.rs without window access.
 pub static OPEN_SETTINGS_REQUESTED: AtomicBool = AtomicBool::new(false);
 
+/// Max terminal content length (chars) passed to status detection. Capping avoids O(n) regex
+/// work on huge buffers in large/active panes (e.g. big monorepos), keeping input responsive.
+const MAX_STATUS_CONTENT_LEN: usize = 32_768;
+
+/// Max output chunks processed per async loop iteration. Capping yields to the executor often
+/// so scroll/selection (which need the terminal lock) stay responsive in workspaces with heavy
+/// output (e.g. prompt git status in large repos).
+const TERMINAL_OUTPUT_MAX_CHUNKS_PER_BATCH: usize = 24;
+
 /// Notification sender that forwards to AppRoot's NotificationManager
 struct AppNotificationSender {
     manager: Arc<Mutex<NotificationManager>>,
@@ -89,13 +98,13 @@ pub struct AppRoot {
     worktree_switch_loading: Option<usize>,
     /// Current active worktree index (synced with Sidebar/TabBar)
     active_worktree_index: Option<usize>,
-    /// Per-repo active worktree index for restoring state when switching workspace tabs
-    per_repo_worktree_index: HashMap<PathBuf, usize>,
     /// Cached worktrees for active repo. Refreshed on workspace change, branch create/delete, explicit refresh.
     /// Avoids calling discover_worktrees in render path.
     cached_worktrees: Vec<crate::worktree::WorktreeInfo>,
     /// Repo path for which cached_worktrees is valid
     cached_worktrees_repo: Option<PathBuf>,
+    /// Cached tmux window names for the current repo; filled once when opening repo to avoid repeated list-windows calls.
+    cached_tmux_windows: Option<(PathBuf, Vec<String>)>,
     /// Sidebar context menu: which worktree index has menu open
     sidebar_context_menu_index: Option<usize>,
     /// Review windows: branch -> window name (stub for local PTY)
@@ -135,6 +144,11 @@ pub struct AppRoot {
     notification_panel_entity: Option<Entity<NotificationPanelEntity>>,
     /// Terminal area Entity - when content changes, notify this instead of AppRoot (Phase 4)
     terminal_area_entity: Option<Entity<TerminalAreaEntity>>,
+    /// When true, new branch (or other modal) dialog is open; terminal output loop skips
+    /// notifying terminal area so the main thread stays responsive for dialog input (e.g. in large repos).
+    modal_overlay_open: Arc<AtomicBool>,
+    /// IME: set on Enter (no Cmd/Alt); cleared when replace_text_in_range runs or after 50ms timeout. Ensures "commit + Enter" sends text then \\r (no extra newline).
+    ime_pending_enter: Arc<AtomicBool>,
     /// When true, search bar is visible and keyboard input appends to search_query
     search_active: bool,
     /// Current search query (when search_active)
@@ -149,49 +163,36 @@ impl AppRoot {
         self.sidebar_width.clamp(200, 400)
     }
 
-    /// Save workspace state to Config (multi-repo paths, active index, per-repo worktree index)
-    fn save_config(&self) {
+    /// Save workspace state to Config (paths and active tab index only; worktree selection follows tmux window name).
+    pub fn save_config(&self) {
         let mut config = Config::load().unwrap_or_default();
         let paths = self.workspace_manager.workspace_paths();
-        config.save_workspaces(
-            &paths,
-            self.workspace_manager.active_tab_index().unwrap_or(0),
-            &self.per_repo_worktree_index,
-        );
+        config.save_workspaces(&paths, self.workspace_manager.active_tab_index().unwrap_or(0));
         let _ = config.save();
     }
 
     pub fn new() -> Self {
         let config = Config::load().unwrap_or_default();
         let mut workspace_manager = WorkspaceManager::new();
-        let mut per_repo_worktree_index = config.get_per_repo_worktree_index();
 
-        // Load multi-repo workspace paths
         let workspace_paths = config.get_workspace_paths();
         for path in workspace_paths {
             if is_git_repository(&path) {
                 workspace_manager.add_workspace(path);
             } else {
                 eprintln!("AppRoot: Saved workspace is not a valid git repository: {:?}", path);
-                per_repo_worktree_index.remove(&path);
             }
         }
 
-        // Set active tab index (clamp to valid range)
         let active_idx = config.active_workspace_index.min(workspace_manager.tab_count().saturating_sub(1));
         if workspace_manager.tab_count() > 0 && active_idx < workspace_manager.tab_count() {
             workspace_manager.switch_to_tab(active_idx);
         }
 
-        // If we had invalid paths, save cleaned config
         let paths = workspace_manager.workspace_paths();
         if paths.len() != config.workspace_paths.len() {
             let mut config = Config::load().unwrap_or_default();
-            config.save_workspaces(
-                &paths,
-                workspace_manager.active_tab_index().unwrap_or(0),
-                &per_repo_worktree_index,
-            );
+            config.save_workspaces(&paths, workspace_manager.active_tab_index().unwrap_or(0));
             let _ = config.save();
         }
 
@@ -238,9 +239,9 @@ impl AppRoot {
             pending_worktree_selection: None,
             worktree_switch_loading: None,
             active_worktree_index: None,
-            per_repo_worktree_index,
             cached_worktrees: Vec::new(),
             cached_worktrees_repo: None,
+            cached_tmux_windows: None,
             sidebar_context_menu_index: None,
             review_windows: HashMap::new(),
             diff_overlay_open: None,
@@ -260,6 +261,8 @@ impl AppRoot {
             notification_panel_model: None,
             notification_panel_entity: None,
             terminal_area_entity: None,
+            modal_overlay_open: Arc::new(AtomicBool::new(false)),
+            ime_pending_enter: Arc::new(AtomicBool::new(false)),
             search_active: false,
             search_query: String::new(),
             search_current_match: 0,
@@ -301,9 +304,7 @@ impl AppRoot {
                     let _ = cx.update_entity(&app_root_entity_close, |this: &mut AppRoot, cx| {
                         let closed_path = this.workspace_manager.get_tab(idx).map(|t| t.path.clone());
                         this.workspace_manager.close_tab(idx);
-                        if let Some(path) = closed_path {
-                            this.per_repo_worktree_index.remove(&path);
-                        }
+                        let _ = closed_path;
                         if this.workspace_manager.is_empty() {
                             this.stop_current_session();
                         } else {
@@ -452,6 +453,7 @@ impl AppRoot {
                             cx.notify();
                         });
                         let _ = cx.update_entity(&app_root_for_close, |this: &mut AppRoot, cx| {
+                            this.modal_overlay_open.store(false, Ordering::Relaxed);
                             this.terminal_needs_focus = true;
                             cx.notify();
                         });
@@ -484,8 +486,8 @@ impl AppRoot {
         }
     }
 
-    /// Initialize workspace restoration (call after AppRoot is created)
-    /// Ensures all tmux sessions exist, attaches to active tab, restores per-repo worktree selection
+    /// Initialize workspace restoration (call after AppRoot is created).
+    /// Attaches to session; current worktree is derived from tmux window name (no persist).
     pub fn init_workspace_restoration(&mut self, cx: &mut Context<Self>) {
         self.ensure_entities(cx);
         if self.terminal_focus.is_none() {
@@ -496,22 +498,13 @@ impl AppRoot {
 
         if let Some(path) = repo_path {
             self.refresh_worktrees_for_repo(&path);
-            let worktrees = &self.cached_worktrees;
 
-            let restored_idx = self.per_repo_worktree_index.get(&path).copied();
-            if let Some(awi) = restored_idx {
-                if awi < worktrees.len() {
-                    self.active_worktree_index = Some(awi);
-                    if let Some(wt) = worktrees.get(awi) {
-                        let wt_path = wt.path.clone();
-                        let branch = wt.short_branch_name().to_string();
-                        self.schedule_switch_to_worktree_async(&path, &wt_path, &branch, awi, cx);
-                        return;
-                    }
-                }
+            if self.try_recover_then_switch(&path, cx) {
+                return;
             }
 
             self.active_worktree_index = None;
+            let worktrees = &self.cached_worktrees;
             if !worktrees.is_empty() {
                 self.active_worktree_index = Some(0);
                 let wt = &worktrees[0];
@@ -669,9 +662,12 @@ impl AppRoot {
             let focus_handle = self.terminal_focus.get_or_insert_with(|| cx.focus_handle()).clone();
             let runtime_for_input = runtime.clone();
             let pane_for_input = pane_target_str.clone();
+            let pending_enter = self.ime_pending_enter.clone();
             let input_callback: Arc<dyn Fn(&[u8]) + Send + Sync> =
                 Arc::new(move |bytes: &[u8]| {
                     let _ = runtime_for_input.send_input(&pane_for_input, bytes);
+                    // IME: first Enter only confirms composition; clear pending so we don't send \r (user must press Enter again to submit)
+                    let _ = pending_enter.swap(false, Ordering::SeqCst);
                 });
             if let Ok(mut buffers) = self.terminal_buffers.lock() {
                 buffers.clear();
@@ -704,6 +700,7 @@ impl AppRoot {
             let pane_target_clone = pane_target_str.clone();
             let terminal_for_output = terminal.clone();
             let term_area_entity = self.terminal_area_entity.clone();
+            let modal_open = self.modal_overlay_open.clone();
             let mut ext = ContentExtractor::new();
 
             cx.spawn(async move |_entity, cx| {
@@ -720,12 +717,18 @@ impl AppRoot {
                     terminal_for_output.process_output(&chunk);
                     ext.feed(&chunk);
 
-                    // Drain all immediately available chunks before notifying UI.
-                    // During fast output, many chunks queue up during the previous
-                    // notify→paint cycle, so try_recv batches them efficiently.
-                    while let Ok(next) = rx.try_recv() {
-                        terminal_for_output.process_output(&next);
-                        ext.feed(&next);
+                    // Drain up to N chunks so we yield often; keeps scroll/selection responsive
+                    // when output is heavy (e.g. prompt git status in large repos).
+                    let mut batch_count = 1usize;
+                    while batch_count < TERMINAL_OUTPUT_MAX_CHUNKS_PER_BATCH {
+                        match rx.try_recv() {
+                            Ok(next) => {
+                                terminal_for_output.process_output(&next);
+                                ext.feed(&next);
+                                batch_count += 1;
+                            }
+                            Err(_) => break,
+                        }
                     }
 
                     // Throttle status detection: only run on phase change or every 200ms
@@ -739,17 +742,25 @@ impl AppRoot {
                             last_post_exec_exit_code: None,
                         };
                         let content_str = ext.take_content().0;
+                        let content_for_status: &str = if content_str.len() > MAX_STATUS_CONTENT_LEN {
+                            &content_str[content_str.len() - MAX_STATUS_CONTENT_LEN..]
+                        } else {
+                            content_str.as_str()
+                        };
                         if let Some(ref pub_) = status_publisher {
                             let _ = pub_.check_status(
                                 &pane_target_clone,
                                 crate::status_detector::ProcessStatus::Running,
                                 Some(shell_info),
-                                &content_str,
+                                content_for_status,
                             );
                         }
                     }
-                    // Only notify TerminalAreaEntity (not AppRoot) for terminal content updates
-                    if let Some(ref tae) = term_area_entity {
+                    // Skip terminal area notify when a modal (e.g. new branch dialog) is open so
+                    // the main thread stays responsive for dialog input (notably in large repos).
+                    if modal_open.load(Ordering::Relaxed) {
+                        // continue without notifying; terminal will refresh on next output after modal closes
+                    } else if let Some(ref tae) = term_area_entity {
                         let _ = cx.update_entity(tae, |_, cx| cx.notify());
                     }
                 }
@@ -818,9 +829,12 @@ impl AppRoot {
             let focus_handle = self.terminal_focus.get_or_insert_with(|| cx.focus_handle()).clone();
             let runtime_for_input = runtime.clone();
             let pane_for_input = pane_target_str.clone();
+            let pending_enter = self.ime_pending_enter.clone();
             let input_callback: Arc<dyn Fn(&[u8]) + Send + Sync> =
                 Arc::new(move |bytes: &[u8]| {
                     let _ = runtime_for_input.send_input(&pane_for_input, bytes);
+                    // IME: first Enter only confirms composition; clear pending so we don't send \r (user must press Enter again to submit)
+                    let _ = pending_enter.swap(false, Ordering::SeqCst);
                 });
             if let Ok(mut buffers) = self.terminal_buffers.lock() {
                 buffers.insert(
@@ -838,6 +852,7 @@ impl AppRoot {
             let pane_target_clone = pane_target_str.clone();
             let terminal_for_output = terminal.clone();
             let term_area_entity = self.terminal_area_entity.clone();
+            let modal_open = self.modal_overlay_open.clone();
             let mut ext = ContentExtractor::new();
 
             cx.spawn(async move |_entity, cx| {
@@ -854,10 +869,16 @@ impl AppRoot {
                     terminal_for_output.process_output(&chunk);
                     ext.feed(&chunk);
 
-                    // Drain all immediately available chunks before notifying UI
-                    while let Ok(next) = rx.try_recv() {
-                        terminal_for_output.process_output(&next);
-                        ext.feed(&next);
+                    let mut batch_count = 1usize;
+                    while batch_count < TERMINAL_OUTPUT_MAX_CHUNKS_PER_BATCH {
+                        match rx.try_recv() {
+                            Ok(next) => {
+                                terminal_for_output.process_output(&next);
+                                ext.feed(&next);
+                                batch_count += 1;
+                            }
+                            Err(_) => break,
+                        }
                     }
 
                     // Throttle status detection: only run on phase change or every 200ms
@@ -871,17 +892,23 @@ impl AppRoot {
                             last_post_exec_exit_code: None,
                         };
                         let content_str = ext.take_content().0;
+                        let content_for_status: &str = if content_str.len() > MAX_STATUS_CONTENT_LEN {
+                            &content_str[content_str.len() - MAX_STATUS_CONTENT_LEN..]
+                        } else {
+                            content_str.as_str()
+                        };
                         if let Some(ref pub_) = status_publisher {
                             let _ = pub_.check_status(
                                 &pane_target_clone,
                                 crate::status_detector::ProcessStatus::Running,
                                 Some(shell_info),
-                                &content_str,
+                                content_for_status,
                             );
                         }
                     }
-                    // Only notify TerminalAreaEntity (not AppRoot) for terminal content updates
-                    if let Some(ref tae) = term_area_entity {
+                    if modal_open.load(Ordering::Relaxed) {
+                        // skip terminal notify while modal open (e.g. new branch dialog)
+                    } else if let Some(ref tae) = term_area_entity {
                         let _ = cx.update_entity(tae, |_, cx| cx.notify());
                     }
                 }
@@ -1078,7 +1105,7 @@ impl AppRoot {
 
         let term_entity_for_setup = self.terminal_area_entity.clone();
         if pane_targets.len() == 1 {
-            self.setup_local_terminal(runtime, &pane_targets[0], term_entity_for_setup, cx);
+            self.setup_local_terminal(runtime.clone(), &pane_targets[0], term_entity_for_setup, cx);
         } else {
             if let Ok(mut buffers) = self.terminal_buffers.lock() {
                 buffers.clear();
@@ -1091,6 +1118,14 @@ impl AppRoot {
         if let Some(tab) = self.workspace_manager.active_tab() {
             let wp = tab.path.clone();
             self.save_runtime_state(&wp, worktree_path, branch_name);
+        }
+        // Sync active_worktree_index from tmux current window (match by name, no persist)
+        if let Some((_, window_name)) = runtime.session_info() {
+            if self.cached_worktrees_repo.as_deref() == self.workspace_manager.active_tab().map(|t| t.path.as_path()) {
+                if let Some(idx) = Self::find_worktree_index_by_window_name(&self.cached_worktrees, &window_name) {
+                    self.active_worktree_index = Some(idx);
+                }
+            }
         }
     }
 
@@ -1145,12 +1180,6 @@ impl AppRoot {
                             this.handle_workspace_tab_switch(idx, cx);
                         }
                     } else {
-                        // Save current repo state before switching to new workspace
-                        if let Some(tab) = this.workspace_manager.active_tab() {
-                            if let Some(awi) = this.active_worktree_index {
-                                this.per_repo_worktree_index.insert(tab.path.clone(), awi);
-                            }
-                        }
                         let idx = this.workspace_manager.add_workspace(path.clone());
                         this.workspace_manager.switch_to_tab(idx);
                         this.state.error_message = None;
@@ -1190,13 +1219,6 @@ impl AppRoot {
             return;
         }
 
-        // Save current repo's active_worktree_index before switching
-        if let Some(tab) = self.workspace_manager.active_tab() {
-            if let Some(awi) = self.active_worktree_index {
-                self.per_repo_worktree_index.insert(tab.path.clone(), awi);
-            }
-        }
-
         self.workspace_manager.switch_to_tab(idx);
         self.save_config();
         self.stop_current_session();
@@ -1204,65 +1226,47 @@ impl AppRoot {
         if let Some(tab) = self.workspace_manager.active_tab() {
             let repo_path = tab.path.clone();
             self.refresh_worktrees_for_repo(&repo_path);
+
+            if self.try_recover_then_switch(&repo_path, cx) {
+                cx.notify();
+                return;
+            }
             let worktrees = &self.cached_worktrees;
-
-            // Restore active_worktree_index for this repo
-            let restored_idx = self.per_repo_worktree_index.get(&repo_path).copied();
-
             let (wt_path, branch, worktree_idx) = if worktrees.is_empty() {
                 self.schedule_start_main_session(&repo_path, cx);
+                cx.notify();
                 return;
-            } else if let Some(awi) = restored_idx {
-                if awi < worktrees.len() {
-                    let wt = &worktrees[awi];
-                    self.active_worktree_index = Some(awi);
-                    (wt.path.clone(), wt.short_branch_name().to_string(), awi)
-                } else {
-                    let wt = &worktrees[0];
-                    self.active_worktree_index = Some(0);
-                    (wt.path.clone(), wt.short_branch_name().to_string(), 0)
-                }
             } else {
                 let wt = &worktrees[0];
                 self.active_worktree_index = Some(0);
                 (wt.path.clone(), wt.short_branch_name().to_string(), 0)
             };
-
             self.schedule_switch_to_worktree_async(&repo_path, &wt_path, &branch, worktree_idx, cx);
         }
         cx.notify();
     }
 
-    /// Start tmux session for the currently active workspace tab (no state save).
-    /// Used when closing a tab to switch to the new active tab.
-    /// Uses async runtime creation to avoid UI lag.
+    /// Start tmux session for the currently active workspace tab.
+    /// Tries recover (match by tmux window name); else uses first worktree.
     fn start_session_for_active_tab(&mut self, cx: &mut Context<Self>) {
         if let Some(tab) = self.workspace_manager.active_tab() {
             let repo_path = tab.path.clone();
             self.refresh_worktrees_for_repo(&repo_path);
-            let worktrees = &self.cached_worktrees;
-            let restored_idx = self.per_repo_worktree_index.get(&repo_path).copied();
 
+            if self.try_recover_then_switch(&repo_path, cx) {
+                cx.notify();
+                return;
+            }
+            let worktrees = &self.cached_worktrees;
             if worktrees.is_empty() {
                 self.active_worktree_index = None;
                 self.schedule_start_main_session(&repo_path, cx);
             } else {
-                let (wt_path, branch, idx) = if let Some(awi) = restored_idx {
-                    if awi < worktrees.len() {
-                        let wt = &worktrees[awi];
-                        self.active_worktree_index = Some(awi);
-                        (wt.path.clone(), wt.short_branch_name().to_string(), awi)
-                    } else {
-                        let wt = &worktrees[0];
-                        self.active_worktree_index = Some(0);
-                        (wt.path.clone(), wt.short_branch_name().to_string(), 0)
-                    }
-                } else {
-                    let wt = &worktrees[0];
-                    self.active_worktree_index = Some(0);
-                    (wt.path.clone(), wt.short_branch_name().to_string(), 0)
-                };
-                self.schedule_switch_to_worktree_async(&repo_path, &wt_path, &branch, idx, cx);
+                let wt = &worktrees[0];
+                self.active_worktree_index = Some(0);
+                let wt_path = wt.path.clone();
+                let branch = wt.short_branch_name().to_string();
+                self.schedule_switch_to_worktree_async(&repo_path, &wt_path, &branch, 0, cx);
             }
         }
         cx.notify();
@@ -1297,13 +1301,12 @@ impl AppRoot {
             .unwrap_or((120, 36))
     }
 
-    /// Try recover from runtime_state. For local PTY, always returns false (no session recovery).
+    /// Try recover from runtime_state; worktree is derived from tmux current window (match by name).
+    /// For local PTY, always returns false.
     #[allow(dead_code)]
     fn try_recover_then_switch(
         &mut self,
         workspace_path: &Path,
-        worktree_path: &Path,
-        branch_name: &str,
         cx: &mut Context<Self>,
     ) -> bool {
         let backend = self.effective_backend();
@@ -1319,11 +1322,7 @@ impl AppRoot {
             Some(w) => w,
             None => return false,
         };
-        let worktree = match workspace
-            .worktrees
-            .iter()
-            .find(|w| w.path.as_path() == worktree_path)
-        {
+        let worktree = match workspace.worktrees.first() {
             Some(w) => w,
             None => return false,
         };
@@ -1339,19 +1338,37 @@ impl AppRoot {
             Ok(rt) => rt,
             Err(_) => return false,
         };
+        let current_window_name = match runtime.session_info() {
+            Some((_, wn)) => wn,
+            None => return false,
+        };
+        let worktree = match workspace
+            .worktrees
+            .iter()
+            .find(|w| window_name_for_worktree(&w.path, &w.branch) == current_window_name)
+        {
+            Some(w) => w,
+            None => workspace.worktrees.first().unwrap(),
+        };
 
-        // Always prefer live pane IDs — saved IDs may be stale after session recreation
         let pane_target = runtime
             .primary_pane_id()
             .or_else(|| worktree.pane_ids.first().cloned())
-            .unwrap_or_else(|| format!("local:{}", worktree_path.display()));
+            .unwrap_or_else(|| format!("local:{}", worktree.path.display()));
 
         let saved_split_tree = worktree
             .split_tree_json
             .as_deref()
             .and_then(|s| serde_json::from_str::<SplitNode>(s).ok());
 
-        self.attach_runtime(runtime, pane_target, worktree_path, branch_name, cx, saved_split_tree);
+        self.attach_runtime(
+            runtime,
+            pane_target,
+            &worktree.path,
+            &worktree.branch,
+            cx,
+            saved_split_tree,
+        );
         true
     }
 
@@ -1627,41 +1644,23 @@ impl AppRoot {
             )
         };
 
-        self.active_worktree_index = Some(idx);
-        self.worktree_switch_loading = Some(idx);
-
         let workspace_path = self
             .workspace_manager
             .active_tab()
             .map(|t| t.path.clone())
             .unwrap_or_else(|| repo_path.clone());
 
-        // Reuse existing runtime if switching worktrees within the same tmux session
+        // Reuse existing runtime if switching worktrees within the same tmux session.
+        // Keep current terminal visible (no loading screen); detach+attach only when switch completes.
         if self.current_runtime_matches_session(&workspace_path) {
+            self.save_current_worktree_runtime_state();
+            self.active_worktree_index = Some(idx);
+
             let runtime = self.runtime.as_ref().unwrap().clone();
             let window_name = window_name_for_worktree(&path, &branch);
-            // #region agent log
-            crate::debug_log::dbg_session_log(
-                "app_root.rs:process_pending_worktree_selection",
-                "detach_ui_from_runtime START (reuse session path)",
-                &serde_json::json!({"window_name": &window_name, "branch": &branch, "idx": idx}),
-                "H2",
-            );
-            // #endregion
-            self.detach_ui_from_runtime();
-            cx.notify();
-
             let path_clone = path.clone();
             let branch_clone = branch.clone();
             cx.spawn(async move |entity, cx| {
-                // #region agent log
-                crate::debug_log::dbg_session_log(
-                    "app_root.rs:process_pending_worktree_selection:async",
-                    "switch_window START",
-                    &serde_json::json!({"window_name": &window_name}),
-                    "H2",
-                );
-                // #endregion
                 let wn = window_name.clone();
                 let pc = path_clone.clone();
                 let switch_result = blocking::unblock(move || {
@@ -1669,30 +1668,15 @@ impl AppRoot {
                 }).await;
 
                 let _ = entity.update(cx, |this: &mut AppRoot, cx| {
-                    this.worktree_switch_loading = None;
-                    // #region agent log
-                    crate::debug_log::dbg_session_log(
-                        "app_root.rs:process_pending_worktree_selection:async",
-                        "switch_window DONE, calling attach_runtime",
-                        &serde_json::json!({"ok": switch_result.is_ok()}),
-                        "H2",
-                    );
-                    // #endregion
                     match switch_result {
                         Ok(()) => {
                             let rt = this.runtime.as_ref().unwrap().clone();
                             let pane_target = rt
                                 .primary_pane_id()
                                 .unwrap_or_else(|| format!("local:{}", path.display()));
-                            // #region agent log
-                            crate::debug_log::dbg_session_log(
-                                "app_root.rs:process_pending_worktree_selection:async",
-                                "attach_runtime with pane_target",
-                                &serde_json::json!({"pane_target": &pane_target}),
-                                "H3",
-                            );
-                            // #endregion
+                            this.detach_ui_from_runtime();
                             this.attach_runtime(rt, pane_target, &path, &branch_clone, cx, None);
+                            this.save_config();
                         }
                         Err(e) => {
                             this.state.error_message = Some(format!("Window switch error: {}", e));
@@ -1704,6 +1688,9 @@ impl AppRoot {
             return;
         }
 
+        self.save_current_worktree_runtime_state();
+        self.active_worktree_index = Some(idx);
+        self.worktree_switch_loading = Some(idx);
         self.stop_current_session();
         cx.notify();
 
@@ -1739,6 +1726,7 @@ impl AppRoot {
                             }
                         }
                         this.attach_runtime(creation.runtime, pane_target, &path, &branch, cx, None);
+                        this.save_config();
                         cx.notify();
                     });
                 }
@@ -1764,91 +1752,29 @@ impl AppRoot {
         worktree_idx: usize,
         cx: &mut Context<Self>,
     ) {
-        self.worktree_switch_loading = Some(worktree_idx);
-        cx.notify();
-
-        // #region agent log
-        {
-            let has_rt = self.runtime.is_some();
-            let rt_type = self.runtime.as_ref().map(|r| r.backend_type()).unwrap_or("none");
-            let session_match = self.current_runtime_matches_session(workspace_path);
-            crate::debug_log::dbg_session_log(
-                "app_root.rs:schedule_switch_to_worktree_async",
-                "entry",
-                &serde_json::json!({
-                    "has_runtime": has_rt,
-                    "runtime_type": rt_type,
-                    "session_match": session_match,
-                    "worktree_idx": worktree_idx,
-                    "workspace_path": workspace_path.to_string_lossy(),
-                    "worktree_path": worktree_path.to_string_lossy(),
-                }),
-                "H_backend",
-            );
-        }
-        // #endregion
-
-        // Reuse existing runtime if same tmux session
+        // Reuse existing runtime if same tmux session: no loading screen, keep current terminal until switch completes.
         if self.current_runtime_matches_session(workspace_path) {
             let runtime = self.runtime.as_ref().unwrap().clone();
             let window_name = window_name_for_worktree(worktree_path, branch_name);
-            // #region agent log
-            crate::debug_log::dbg_session_log(
-                "app_root.rs:switch_reuse",
-                "session matches – reuse path",
-                &serde_json::json!({
-                    "window_name": &window_name,
-                    "worktree_path": worktree_path.to_string_lossy(),
-                }),
-                "H_switch1",
-            );
-            // #endregion
-            self.detach_ui_from_runtime();
-
             let worktree_path = worktree_path.to_path_buf();
             let branch_name = branch_name.to_string();
             cx.spawn(async move |entity, cx| {
                 let wn = window_name.clone();
                 let pc = worktree_path.clone();
-                // #region agent log
-                let t0 = std::time::Instant::now();
-                // #endregion
                 let switch_result = blocking::unblock(move || {
                     runtime.switch_window(&wn, Some(&pc))
                 }).await;
 
                 let _ = entity.update(cx, |this: &mut AppRoot, cx| {
-                    this.worktree_switch_loading = None;
-                    // #region agent log
-                    let elapsed = t0.elapsed().as_millis();
-                    crate::debug_log::dbg_session_log(
-                        "app_root.rs:switch_reuse",
-                        "switch_window completed",
-                        &serde_json::json!({
-                            "elapsed_ms": elapsed,
-                            "ok": switch_result.is_ok(),
-                            "err": switch_result.as_ref().err().map(|e| e.to_string()),
-                        }),
-                        "H_switch2",
-                    );
-                    // #endregion
                     match switch_result {
                         Ok(()) => {
                             let rt = this.runtime.as_ref().unwrap().clone();
                             let pane_target = rt
                                 .primary_pane_id()
                                 .unwrap_or_else(|| format!("local:{}", worktree_path.display()));
-                            // #region agent log
-                            crate::debug_log::dbg_session_log(
-                                "app_root.rs:switch_reuse",
-                                "attaching after switch",
-                                &serde_json::json!({
-                                    "pane_target": &pane_target,
-                                }),
-                                "H_switch3",
-                            );
-                            // #endregion
+                            this.detach_ui_from_runtime();
                             this.attach_runtime(rt, pane_target, &worktree_path, &branch_name, cx, None);
+                            this.save_config();
                         }
                         Err(e) => {
                             this.state.error_message = Some(format!("Window switch error: {}", e));
@@ -1859,6 +1785,9 @@ impl AppRoot {
             }).detach();
             return;
         }
+
+        self.worktree_switch_loading = Some(worktree_idx);
+        cx.notify();
 
         let workspace_path = workspace_path.to_path_buf();
         let worktree_path = worktree_path.to_path_buf();
@@ -1895,6 +1824,7 @@ impl AppRoot {
                             }
                         }
                         this.attach_runtime(creation.runtime, pane_target, &worktree_path, &branch_name, cx, None);
+                        this.save_config();
                         cx.notify();
                     });
                 }
@@ -1971,12 +1901,30 @@ impl AppRoot {
             Ok(wt) => {
                 self.cached_worktrees = wt;
                 self.cached_worktrees_repo = Some(repo_path.to_path_buf());
+                // One-shot: cache tmux window list for this repo to speed up worktree switch and orphan detection
+                if self.effective_backend() == "tmux" || self.effective_backend() == "tmux-cc" {
+                    let windows = list_tmux_windows(repo_path);
+                    self.cached_tmux_windows = Some((repo_path.to_path_buf(), windows));
+                } else {
+                    self.cached_tmux_windows = None;
+                }
             }
             Err(_) => {
                 self.cached_worktrees.clear();
                 self.cached_worktrees_repo = None;
+                self.cached_tmux_windows = None;
             }
         }
+    }
+
+    /// Find worktree index whose tmux window name matches (for restore by window name).
+    fn find_worktree_index_by_window_name(
+        worktrees: &[crate::worktree::WorktreeInfo],
+        window_name: &str,
+    ) -> Option<usize> {
+        worktrees
+            .iter()
+            .position(|wt| window_name_for_worktree(&wt.path, wt.short_branch_name()) == window_name)
     }
 
     /// Get worktrees for current repo (from cache). Call from render.
@@ -1989,12 +1937,20 @@ impl AppRoot {
     }
 
     /// Tmux window names that have no corresponding worktree (worktree removed externally). Empty when not tmux backend.
+    /// Uses cached_tmux_windows when repo matches to avoid repeated list-windows calls.
     fn orphan_tmux_windows_for_repo(&self, repo_path: &Path) -> Vec<String> {
         let backend = self.effective_backend();
         if backend != "tmux" && backend != "tmux-cc" {
             return Vec::new();
         }
-        let all = list_tmux_windows(repo_path);
+        let all: Vec<String> = if self.cached_tmux_windows.as_ref().map(|(p, _)| p.as_path()) == Some(repo_path) {
+            self.cached_tmux_windows
+                .as_ref()
+                .map(|(_, w)| w.clone())
+                .unwrap_or_default()
+        } else {
+            list_tmux_windows(repo_path)
+        };
         if all.is_empty() {
             return Vec::new();
         }
@@ -2309,6 +2265,28 @@ impl AppRoot {
 
         match (&self.runtime, self.active_pane_target.as_ref()) {
             (Some(runtime), Some(target)) => {
+                // IME: defer Enter so replace_text_in_range can send committed text first; then we send \r (or 50ms timeout sends \r)
+                if (key_name == "enter" || key_name == "return" || key_name == "kp_enter")
+                    && !modifiers.shift
+                    && !modifiers.platform
+                    && !modifiers.alt
+                {
+                    self.ime_pending_enter.store(true, Ordering::SeqCst);
+                    let runtime = runtime.clone();
+                    let target = target.clone();
+                    let pending = self.ime_pending_enter.clone();
+                    cx.spawn(async move |_entity, cx| {
+                        cx.background_executor()
+                            .timer(std::time::Duration::from_millis(50))
+                            .await;
+                        if pending.swap(false, Ordering::SeqCst) {
+                            let _ = runtime.send_input(&target, b"\r");
+                        }
+                    })
+                    .detach();
+                    return;
+                }
+
                 let bytes_opt = if let Ok(buffers) = self.terminal_buffers.lock() {
                     if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
                         crate::terminal::key_to_bytes(&event, terminal.mode())
@@ -2395,7 +2373,8 @@ impl AppRoot {
     }
 
     /// Save runtime state for the current active worktree. No-op if no tab or worktree.
-    fn save_current_worktree_runtime_state(&mut self) {
+    /// Called on window close and when pane focus changes so the selected worktree restores correctly.
+    pub fn save_current_worktree_runtime_state(&mut self) {
         let (workspace_path, worktree_path, branch_name) = {
             let Some(tab) = self.workspace_manager.active_tab() else { return };
             let repo_path = tab.path.clone();
@@ -2467,23 +2446,21 @@ impl AppRoot {
         cx.notify();
     }
 
-    /// Open diff overlay (add buffer, set pane target for polling, show overlay)
+    /// Open diff overlay (add buffer, subscribe to pane output, show overlay)
     fn open_diff_overlay(&mut self, branch: &str, window_name: &str, cx: &mut Context<Self>) {
-        let session = self
-            .runtime
-            .as_ref()
-            .and_then(|rt| rt.session_info())
-            .map(|(s, _)| s);
+        let runtime = match &self.runtime {
+            Some(rt) => rt.clone(),
+            None => return,
+        };
+        let session = runtime.session_info().map(|(s, _)| s);
         let pane_target = session
             .as_ref()
             .map(|s| format!("{}:{}.0", s, window_name))
             .unwrap_or_else(|| format!("local:{}.0", window_name));
 
-        // Add buffer for overlay pane (streaming will populate)
+        // Add buffer for overlay pane; setup_diff_overlay_terminal_output will replace Empty with Terminal when stream is ready
         if let Ok(mut buffers) = self.terminal_buffers.lock() {
-            buffers.entry(pane_target.clone()).or_insert_with(|| {
-                TerminalBuffer::Empty
-            });
+            buffers.entry(pane_target.clone()).or_insert_with(|| TerminalBuffer::Empty);
         }
 
         // Add to pane_targets_shared for multi-pane tracking
@@ -2501,10 +2478,115 @@ impl AppRoot {
             pane_target.clone(),
         ));
         if let Ok(mut guard) = self.active_pane_target_shared.lock() {
-            *guard = pane_target;
+            *guard = pane_target.clone();
         }
 
+        self.setup_diff_overlay_terminal_output(runtime, &pane_target, cx);
         cx.notify();
+    }
+
+    /// Subscribe to the overlay pane's output and feed into a Terminal buffer so the diff overlay shows content.
+    fn setup_diff_overlay_terminal_output(
+        &mut self,
+        runtime: Arc<dyn AgentRuntime>,
+        pane_target: &str,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::terminal::{Terminal, TerminalSize};
+
+        let pane_target_str = pane_target.to_string();
+        let (cols, rows) = runtime.get_pane_dimensions(&pane_target_str);
+
+        if let Some(rx) = runtime.subscribe_output(&pane_target_str) {
+            let terminal = Arc::new(Terminal::new(
+                pane_target_str.clone(),
+                TerminalSize {
+                    cols: cols as u16,
+                    rows: rows as u16,
+                    cell_width: 8.0,
+                    cell_height: 16.0,
+                },
+            ));
+
+            let pty_write_rx = terminal.pty_write_rx.clone();
+            let runtime_for_pty = runtime.clone();
+            let pane_for_pty = pane_target_str.clone();
+            std::thread::spawn(move || {
+                while let Ok(data) = pty_write_rx.recv() {
+                    let _ = runtime_for_pty.send_input(&pane_for_pty, &data);
+                }
+            });
+
+            let runtime_for_resize = runtime.clone();
+            let pane_for_resize = pane_target_str.clone();
+            let resize_callback: Arc<dyn Fn(u16, u16) + Send + Sync> =
+                Arc::new(move |cols, rows| {
+                    let _ = runtime_for_resize.resize(&pane_for_resize, cols, rows);
+                });
+
+            if let Some(initial) = runtime.capture_initial_content(&pane_target_str) {
+                if !initial.is_empty() {
+                    terminal.process_output(&initial);
+                }
+            }
+
+            let focus_handle = self.terminal_focus.get_or_insert_with(|| cx.focus_handle()).clone();
+            let runtime_for_input = runtime.clone();
+            let pane_for_input = pane_target_str.clone();
+            let pending_enter = self.ime_pending_enter.clone();
+            let input_callback: Arc<dyn Fn(&[u8]) + Send + Sync> =
+                Arc::new(move |bytes: &[u8]| {
+                    let _ = runtime_for_input.send_input(&pane_for_input, bytes);
+                    let _ = pending_enter.swap(false, Ordering::SeqCst);
+                });
+
+            if let Ok(mut buffers) = self.terminal_buffers.lock() {
+                buffers.insert(
+                    pane_target_str.clone(),
+                    TerminalBuffer::Terminal {
+                        terminal: terminal.clone(),
+                        focus_handle: focus_handle.clone(),
+                        resize_callback: Some(resize_callback),
+                        input_callback: Some(input_callback),
+                    },
+                );
+            }
+
+            let app_root_entity = cx.entity();
+            let terminal_for_output = terminal.clone();
+            cx.spawn(async move |_entity, cx| {
+                loop {
+                    let chunk = match rx.recv_async().await {
+                        Ok(c) => c,
+                        Err(_) => break,
+                    };
+                    terminal_for_output.process_output(&chunk);
+                    let mut batch_count = 1usize;
+                    while batch_count < TERMINAL_OUTPUT_MAX_CHUNKS_PER_BATCH {
+                        match rx.try_recv() {
+                            Ok(next) => {
+                                terminal_for_output.process_output(&next);
+                                batch_count += 1;
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                    let _ = app_root_entity.update(cx, |this: &mut AppRoot, cx| {
+                        if this.diff_overlay_open.is_some() {
+                            cx.notify();
+                        }
+                    });
+                }
+            })
+            .detach();
+        } else {
+            if let Ok(mut buffers) = self.terminal_buffers.lock() {
+                buffers.insert(
+                    pane_target_str,
+                    TerminalBuffer::Error("Streaming unavailable.".to_string()),
+                );
+            }
+        }
     }
 
     /// Close diff overlay (kill tmux window, remove from buffers, switch back to worktree)
@@ -2548,6 +2630,7 @@ impl AppRoot {
     /// Opens the new branch dialog
     fn open_new_branch_dialog(&mut self, cx: &mut Context<Self>) {
         self.ensure_entities(cx);
+        self.modal_overlay_open.store(true, Ordering::Relaxed);
         if let Some(ref model) = self.new_branch_dialog_model {
             let _ = cx.update_entity(model, |m, cx| {
                 m.open();
@@ -2559,6 +2642,7 @@ impl AppRoot {
     /// Closes the new branch dialog
     #[allow(dead_code)]
     fn close_new_branch_dialog(&mut self, cx: &mut Context<Self>) {
+        self.modal_overlay_open.store(false, Ordering::Relaxed);
         if let Some(ref model) = self.new_branch_dialog_model {
             let _ = cx.update_entity(model, |m, cx| {
                 m.close();
@@ -2627,6 +2711,7 @@ impl AppRoot {
             }
             if matches!(result, CreationResult::Success { .. }) {
                 let _ = app_root_entity.update(cx, |this: &mut AppRoot, cx| {
+                    this.close_new_branch_dialog(cx);
                     if let Some(repo_path) = this.workspace_manager.active_tab().map(|t| t.path.clone()) {
                         this.refresh_worktrees_for_repo(&repo_path);
                     }
@@ -3188,9 +3273,7 @@ impl AppRoot {
                                             let _ = app.update_entity(&app_root_entity_for_ws_close, |this: &mut AppRoot, cx| {
                                                 let closed_path = this.workspace_manager.get_tab(idx).map(|t| t.path.clone());
                                                 this.workspace_manager.close_tab(idx);
-                                                if let Some(path) = closed_path {
-                                                    this.per_repo_worktree_index.remove(&path);
-                                                }
+                                                let _ = closed_path;
                                                 if this.workspace_manager.is_empty() {
                                                     this.stop_current_session();
                                                 } else {

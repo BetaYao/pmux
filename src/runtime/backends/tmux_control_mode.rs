@@ -366,68 +366,127 @@ fn open_raw_pty(cols: u16, rows: u16) -> Result<(i32, i32), RuntimeError> {
 }
 
 impl TmuxControlModeRuntime {
+    /// Query the current (active) window name of a session. Used when attaching without specifying a window.
+    /// If the tmux command fails with "server exited unexpectedly", removes the stale socket so the next
+    /// create path can start a fresh server.
+    fn current_window_name(session_name: &str) -> String {
+        let out = Command::new("tmux")
+            .args([
+                "list-windows",
+                "-t",
+                session_name,
+                "-F",
+                "#{?window_active,#{window_name},}",
+            ])
+            .output();
+        if let Ok(ref o) = out {
+            if !o.status.success() {
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                if stderr.contains("server exited unexpectedly") {
+                    Self::remove_stale_tmux_socket();
+                }
+            }
+        }
+        let stdout = match out {
+            Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
+            _ => String::new(),
+        };
+        stdout
+            .lines()
+            .find_map(|l: &str| {
+                let s = l.trim();
+                if s.is_empty() { None } else { Some(s.to_string()) }
+            })
+            .unwrap_or_else(|| "main".to_string())
+    }
+
     /// Create (or attach to) a tmux session and connect via control mode.
-    ///
-    /// Uses a raw PTY pair because `tmux -CC` requires a TTY for its client connection.
-    /// Raw mode disables echo and output processing for clean control protocol I/O.
+    /// When `window_name` is `None`, only attaches to the session and uses tmux's current window (match by name, no persist).
+    /// When `Some(name)`, ensures session/window exist (create path).
     pub fn new(
         session_name: &str,
-        window_name: &str,
+        window_name: Option<&str>,
         start_dir: Option<&Path>,
         initial_cols: u16,
         initial_rows: u16,
     ) -> Result<Self, RuntimeError> {
-        // Ensure session+window exists
-        let mut create_args = vec!["new-session", "-d", "-s", session_name, "-n", window_name];
-        let dir_owned;
-        if let Some(dir) = start_dir.and_then(|p| p.to_str()) {
-            dir_owned = dir.to_string();
-            create_args.extend(["-c", &dir_owned]);
-        }
-        let new_sess = Command::new("tmux").args(&create_args).output();
-        // #region agent log
-        if let Ok(ref o) = new_sess {
-            crate::debug_log::dbg_session_log(
-                "tmux_cc.rs:new",
-                "new-session result",
-                &serde_json::json!({
-                    "success": o.status.success(),
-                    "stdout": String::from_utf8_lossy(&o.stdout).to_string(),
-                    "stderr": String::from_utf8_lossy(&o.stderr).to_string(),
-                    "args": format!("{:?}", create_args),
-                }),
-                "H_pane_empty",
-            );
-        }
-        // #endregion
+        let (window_name, skip_create_and_send_keys) = match window_name {
+            Some(wn) => (wn.to_string(), false),
+            None => {
+                let wn = Self::current_window_name(session_name);
+                // Attach-only path: session must exist (e.g. after tmux kill-server it doesn't → caller will create).
+                let has = Command::new("tmux")
+                    .args(["has-session", "-t", session_name])
+                    .output();
+                let session_exists = has
+                    .as_ref()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false);
+                if !session_exists {
+                    return Err(RuntimeError::Backend(
+                        "tmux session does not exist (e.g. after kill-server); use create path".into(),
+                    ));
+                }
+                (wn, true)
+            }
+        };
 
-        // If session already exists, ensure the window exists
-        if let Ok(ref o) = new_sess {
-            if !o.status.success() {
-                let stderr = String::from_utf8_lossy(&o.stderr);
-                if stderr.contains("duplicate session") {
-                    // Check if window already exists before creating (avoid duplicates)
-                    let win_check = Command::new("tmux")
-                        .args(["list-windows", "-t", session_name, "-F", "#{window_name}"])
-                        .output();
-                    let window_exists = win_check
-                        .as_ref()
-                        .map(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.trim() == window_name))
-                        .unwrap_or(false);
-
-                    if !window_exists {
-                        let mut win_args = vec![
-                            "new-window", "-d", "-t", session_name, "-n", window_name,
-                        ];
-                        let win_dir_owned;
-                        if let Some(dir) = start_dir.and_then(|p| p.to_str()) {
-                            win_dir_owned = dir.to_string();
-                            win_args.extend(["-c", &win_dir_owned]);
-                        }
-                        let _ = Command::new("tmux").args(&win_args).output();
+        if !skip_create_and_send_keys {
+            // Ensure session+window exists
+            let mut create_args = vec!["new-session", "-d", "-s", session_name, "-n", &window_name];
+            let dir_owned;
+            if let Some(dir) = start_dir.and_then(|p| p.to_str()) {
+                dir_owned = dir.to_string();
+                create_args.extend(["-c", &dir_owned]);
+            }
+            let mut new_sess = Command::new("tmux").args(&create_args).output();
+            if let Ok(ref o) = new_sess {
+                if !o.status.success() {
+                    let stderr = String::from_utf8_lossy(&o.stderr);
+                    if stderr.contains("server exited unexpectedly") {
+                        Self::remove_stale_tmux_socket();
+                        new_sess = Command::new("tmux").args(&create_args).output();
                     }
                 }
             }
+            if let Ok(ref o) = new_sess {
+                if !o.status.success() {
+                    let stderr = String::from_utf8_lossy(&o.stderr);
+                    if stderr.contains("duplicate session") {
+                        let win_check = Command::new("tmux")
+                            .args(["list-windows", "-t", session_name, "-F", "#{window_name}"])
+                            .output();
+                        let window_exists = win_check
+                            .as_ref()
+                            .map(|o| {
+                                String::from_utf8_lossy(&o.stdout)
+                                    .lines()
+                                    .any(|l| l.trim() == window_name)
+                            })
+                            .unwrap_or(false);
+                        if !window_exists {
+                            let mut win_args =
+                                vec!["new-window", "-d", "-t", session_name, "-n", &window_name];
+                            if let Some(dir) = start_dir.and_then(|p| p.to_str()) {
+                                win_args.extend(["-c", dir]);
+                            }
+                            let _ = Command::new("tmux").args(&win_args).output();
+                        }
+                    }
+                }
+            }
+        }
+
+        // Configure tmux for true color, low escape-time (affects all sessions on this server).
+        let _ = Command::new("tmux").args(["set", "-g", "default-terminal", "xterm-256color"]).output();
+        let _ = Command::new("tmux").args(["set", "-as", "terminal-features", ",xterm-256color:RGB"]).output();
+        let _ = Command::new("tmux").args(["set", "-s", "escape-time", "10"]).output();
+
+        if !skip_create_and_send_keys {
+            let pane_target = format!("{}:{}", session_name, window_name);
+            let _ = Command::new("tmux")
+                .args(["send-keys", "-t", &pane_target, " unsetopt PROMPT_SP 2>/dev/null; clear", "Enter"])
+                .output();
         }
 
         // Open raw PTY at the target size — tmux reads the PTY winsize to set client dims
@@ -444,6 +503,7 @@ impl TmuxControlModeRuntime {
         let child = unsafe {
             Command::new("tmux")
                 .args(["-CC", "attach", "-t", session_name])
+                .env("TERM", "xterm-256color")
                 .stdin(Stdio::from_raw_fd(slave_fd))
                 .stdout(Stdio::from_raw_fd(slave_dup))
                 .stderr(Stdio::null())
@@ -558,7 +618,7 @@ impl TmuxControlModeRuntime {
 
         let rt = Self {
             session_name: session_name.to_string(),
-            window_name: Mutex::new(window_name.to_string()),
+            window_name: Mutex::new(window_name),
             pty_writer,
             input_tx,
             pane_outputs,
@@ -643,6 +703,13 @@ impl TmuxControlModeRuntime {
         Ok(true)
     }
 
+    fn remove_stale_tmux_socket() {
+        let uid = unsafe { libc::getuid() };
+        let socket_path = format!("/tmp/tmux-{}/default", uid);
+        if std::path::Path::new(&socket_path).exists() {
+            let _ = std::fs::remove_file(&socket_path);
+        }
+    }
 }
 
 impl Drop for TmuxControlModeRuntime {
@@ -701,13 +768,35 @@ impl AgentRuntime for TmuxControlModeRuntime {
     fn subscribe_output(&self, pane_id: &PaneId) -> Option<flume::Receiver<Vec<u8>>> {
         let (tx, rx) = flume::unbounded();
 
+        // Resolve "session:window.0" to actual pane id (%0, %1, ...) so parser's %output events find this channel.
+        let map_key = if pane_id.contains(':') {
+            let target = pane_id
+                .rsplitn(2, '.')
+                .nth(1)
+                .unwrap_or(pane_id)
+                .to_string();
+            let out = Command::new("tmux")
+                .args(["list-panes", "-t", &target, "-F", "#{pane_id}"])
+                .output()
+                .ok()?;
+            let first = String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .next()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)?;
+            first
+        } else {
+            pane_id.to_string()
+        };
+
         let skip = self.skip_next_capture.swap(false, std::sync::atomic::Ordering::SeqCst);
 
         // #region agent log
         crate::debug_log::dbg_session_log(
             "tmux_cc.rs:subscribe_output",
             "subscribe_output entry",
-            &serde_json::json!({"pane_id": pane_id, "skip_capture": skip}),
+            &serde_json::json!({"pane_id": pane_id, "map_key": &map_key, "skip_capture": skip}),
             "H_flash",
         );
         // #endregion
@@ -727,7 +816,7 @@ impl AgentRuntime for TmuxControlModeRuntime {
         }
 
         if let Ok(mut map) = self.pane_outputs.lock() {
-            map.insert(pane_id.clone(), tx);
+            map.insert(map_key, tx);
         }
 
         Some(rx)
@@ -766,7 +855,11 @@ impl AgentRuntime for TmuxControlModeRuntime {
         // capture-pane uses \n (LF) between lines, but VTE interprets LF as
         // "move cursor down" without returning to column 0. Use \r\n so each
         // line starts at the left margin.
-        let with_crlf = trimmed.replace('\n', "\r\n");
+        let mut with_crlf = trimmed.replace('\n', "\r\n");
+        // First line after attach often has no trailing space (clear/redraw timing); ensure one so cursor isn't flush with prompt.
+        if !with_crlf.is_empty() && !with_crlf.ends_with(' ') {
+            with_crlf.push(' ');
+        }
         result.extend_from_slice(with_crlf.as_bytes());
         Some(result)
     }
@@ -846,30 +939,54 @@ impl AgentRuntime for TmuxControlModeRuntime {
         worktree: &Path,
         _pane_id: Option<&PaneId>,
     ) -> Result<String, RuntimeError> {
-        let primary = self
-            .list_panes(&String::new())
-            .into_iter()
-            .next()
-            .unwrap_or_default();
-        let new_pane = self.split_pane(&primary, true)?;
+        let branch = Command::new("git")
+            .args(["branch", "--show-current"])
+            .current_dir(worktree)
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| "branch".into());
+        let safe_branch = branch.replace('/', "-").replace(' ', "-");
+        let window_name = format!("review-{}", safe_branch);
+        let worktree_str = worktree.to_string_lossy();
+        let target = format!("{}:{}", self.session_name, window_name);
+        let args_new = [
+            "new-window",
+            "-d",
+            "-t",
+            &self.session_name,
+            "-n",
+            &window_name,
+            "-c",
+            worktree_str.as_ref(),
+        ];
+        Command::new("tmux")
+            .args(&args_new)
+            .output()
+            .map_err(|e| RuntimeError::Backend(format!("tmux new-window: {}", e)))?;
         let cmd = format!(
             "nvim -c 'DiffviewOpen main...HEAD' '{}' 2>/dev/null || git diff main...HEAD --color=always | less -R\n",
             worktree.to_string_lossy()
         );
-        self.send_input(&new_pane, cmd.as_bytes())?;
-        Ok(new_pane)
+        Command::new("tmux")
+            .args(["send-keys", "-t", &target, &cmd, "Enter"])
+            .output()
+            .map_err(|e| RuntimeError::Backend(format!("tmux send-keys: {}", e)))?;
+        Ok(window_name)
     }
 
     fn open_review(&self, worktree: &Path) -> Result<String, RuntimeError> {
         self.open_diff(worktree, None)
     }
 
-    fn kill_window(&self, _window_target: &str) -> Result<(), RuntimeError> {
-        let wn = self.window_name.lock().map(|w| w.clone()).unwrap_or_default();
-        self.send_command(&format!(
-            "kill-window -t {}:{}",
-            self.session_name, wn
-        ))
+    fn kill_window(&self, window_target: &str) -> Result<(), RuntimeError> {
+        self.send_command(&format!("kill-window -t {}", window_target))
     }
 
     fn set_skip_initial_capture(&self) {
@@ -925,6 +1042,12 @@ impl AgentRuntime for TmuxControlModeRuntime {
             }
             let args_ref: Vec<&str> = win_args.iter().map(|s| s.as_str()).collect();
             let _ = Command::new("tmux").args(&args_ref).output();
+
+            // Disable PROMPT_SP in the new window's shell (same reason as in new())
+            let pane_target = format!("{}:{}", self.session_name, window_name);
+            let _ = Command::new("tmux")
+                .args(["send-keys", "-t", &pane_target, " unsetopt PROMPT_SP 2>/dev/null; clear", "Enter"])
+                .output();
         }
 
         // Update window_name BEFORE any pane queries so list_panes targets the
@@ -1080,7 +1203,7 @@ mod tests {
         }
         let dir = tempfile::tempdir().unwrap();
         let rt =
-            TmuxControlModeRuntime::new("pmux-test-cc", "main", Some(dir.path()), 80, 24)
+            TmuxControlModeRuntime::new("pmux-test-cc", Some("main"), Some(dir.path()), 80, 24)
                 .expect("should create control mode runtime");
         assert_eq!(rt.backend_type(), "tmux-cc");
 
@@ -1098,7 +1221,7 @@ mod tests {
         }
         let dir = tempfile::tempdir().unwrap();
         let rt =
-            TmuxControlModeRuntime::new("pmux-test-sub", "main", Some(dir.path()), 80, 24)
+            TmuxControlModeRuntime::new("pmux-test-sub", Some("main"), Some(dir.path()), 80, 24)
                 .expect("should create runtime");
 
         let panes = rt.list_panes(&String::new());
@@ -1120,7 +1243,7 @@ mod tests {
         }
         let dir = tempfile::tempdir().unwrap();
         let rt =
-            TmuxControlModeRuntime::new("pmux-test-info", "main-window", Some(dir.path()), 80, 24)
+            TmuxControlModeRuntime::new("pmux-test-info", Some("main-window"), Some(dir.path()), 80, 24)
                 .expect("should create runtime");
         let info = rt.session_info();
         assert_eq!(info, Some(("pmux-test-info".to_string(), "main-window".to_string())));
@@ -1138,7 +1261,7 @@ mod tests {
             return;
         }
         let dir = tempfile::tempdir().unwrap();
-        let rt = TmuxControlModeRuntime::new("pmux-test-tty", "main", Some(dir.path()), 80, 24)
+        let rt = TmuxControlModeRuntime::new("pmux-test-tty", Some("main"), Some(dir.path()), 80, 24)
             .expect("should create runtime");
         let panes = rt.list_panes(&String::new());
         let pane_id = panes.first().cloned().unwrap_or_else(|| "%0".to_string());
@@ -1156,7 +1279,7 @@ mod tests {
             return;
         }
         let dir = tempfile::tempdir().unwrap();
-        let rt = TmuxControlModeRuntime::new("pmux-test-dw", "main", Some(dir.path()), 80, 24)
+        let rt = TmuxControlModeRuntime::new("pmux-test-dw", Some("main"), Some(dir.path()), 80, 24)
             .expect("should create runtime");
         let panes = rt.list_panes(&String::new());
         let pane_id = panes.first().cloned().unwrap_or_else(|| "%0".to_string());
@@ -1243,7 +1366,7 @@ mod tests {
             return;
         }
         let dir = tempfile::tempdir().unwrap();
-        let rt = TmuxControlModeRuntime::new("pmux-test-hex", "main", Some(dir.path()), 80, 24)
+        let rt = TmuxControlModeRuntime::new("pmux-test-hex", Some("main"), Some(dir.path()), 80, 24)
             .expect("should create runtime");
 
         let panes = rt.list_panes(&String::new());

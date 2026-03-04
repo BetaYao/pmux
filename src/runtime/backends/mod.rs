@@ -8,6 +8,7 @@ pub use session_backend::{ResolvedBackend, SessionBackend};
 mod dtach;
 mod local_pty;
 mod screen;
+mod shpool;
 #[cfg(unix)]
 mod tmux;
 pub mod tmux_control_mode;
@@ -15,6 +16,7 @@ pub mod tmux_control_mode;
 pub use dtach::DtachRuntime;
 pub use local_pty::LocalPtyRuntime;
 pub use screen::ScreenRuntime;
+pub use shpool::ShpoolRuntime;
 #[cfg(unix)]
 pub use tmux::TmuxRuntime;
 
@@ -25,7 +27,7 @@ use crate::config::Config;
 use crate::runtime::agent_runtime::{AgentRuntime, RuntimeError};
 use crate::runtime::WorktreeState;
 
-/// Environment variable to select backend. Valid values: "local", "tmux", "dtach", "screen".
+/// Environment variable to select backend. Valid values: "local", "tmux", "dtach", "screen", "shpool".
 pub const PMUX_BACKEND_ENV: &str = "PMUX_BACKEND";
 
 /// Default backend when environment variable is not set.
@@ -40,6 +42,7 @@ fn effective_session_backend(config: Option<&Config>) -> SessionBackend {
             "dtach" => SessionBackend::Dtach,
             "tmux" | "tmux-cc" => SessionBackend::Tmux,
             "screen" => SessionBackend::Screen,
+            "shpool" => SessionBackend::Shpool,
             "local" => SessionBackend::Local,
             _ => config.map(|c| c.session_backend).unwrap_or(SessionBackend::Tmux),
         };
@@ -51,8 +54,9 @@ fn effective_session_backend(config: Option<&Config>) -> SessionBackend {
                 "dtach" => SessionBackend::Dtach,
                 "tmux" | "tmux-cc" => SessionBackend::Tmux,
                 "screen" => SessionBackend::Screen,
+                "shpool" => SessionBackend::Shpool,
                 "local" => SessionBackend::Local,
-                _ => SessionBackend::Tmux, // invalid: fall back to default
+                _ => SessionBackend::Tmux,
             };
         }
     }
@@ -112,6 +116,57 @@ pub fn tmux_available() -> bool {
     false
 }
 
+/// List tmux window names for the session of the given workspace.
+/// Returns empty vec if tmux is unavailable, session does not exist, or command fails.
+#[cfg(unix)]
+pub fn list_tmux_windows(workspace_path: &Path) -> Vec<String> {
+    if !tmux_available() {
+        return Vec::new();
+    }
+    let session = session_name_for_workspace(workspace_path);
+    let output = match std::process::Command::new("tmux")
+        .args(["list-windows", "-t", &session, "-F", "#{window_name}"])
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .lines()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+#[cfg(not(unix))]
+pub fn list_tmux_windows(_workspace_path: &Path) -> Vec<String> {
+    Vec::new()
+}
+
+/// Kill a tmux window by workspace path and window name (e.g. for orphan cleanup).
+#[cfg(unix)]
+pub fn kill_tmux_window(workspace_path: &Path, window_name: &str) -> Result<(), RuntimeError> {
+    let target = window_target(workspace_path, window_name);
+    let status = std::process::Command::new("tmux")
+        .args(["kill-window", "-t", &target])
+        .status()
+        .map_err(|e| RuntimeError::Backend(format!("tmux kill-window: {}", e)))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(RuntimeError::Backend(format!(
+            "tmux kill-window -t {} failed",
+            target
+        )))
+    }
+}
+
+#[cfg(not(unix))]
+pub fn kill_tmux_window(_workspace_path: &Path, _window_name: &str) -> Result<(), RuntimeError> {
+    Err(RuntimeError::Backend("tmux not supported on this platform".into()))
+}
+
 /// Result of runtime creation; may include fallback message when tmux was requested but unavailable.
 pub struct RuntimeCreationResult {
     pub runtime: Arc<dyn AgentRuntime>,
@@ -169,6 +224,14 @@ pub fn create_runtime_from_env(
                 fallback_message: None,
             })
         }
+        ResolvedBackend::Shpool => {
+            let rt = ShpoolRuntime::new(worktree_path, cols, rows)
+                .map_err(|e| RuntimeError::Backend(format!("shpool: {}", e)))?;
+            Ok(RuntimeCreationResult {
+                runtime: Arc::new(rt),
+                fallback_message: None,
+            })
+        }
         ResolvedBackend::Tmux => {
             #[cfg(unix)]
             {
@@ -187,7 +250,7 @@ pub fn create_runtime_from_env(
                 let window_name = window_name_for_worktree(worktree_path, branch_name);
                 let tmux_result = tmux_control_mode::TmuxControlModeRuntime::new(
                     &session_name,
-                    &window_name,
+                    Some(&window_name),
                     Some(worktree_path),
                     cols,
                     rows,
@@ -280,13 +343,17 @@ pub fn recover_runtime(
         "dtach" => Err(RuntimeError::Backend(
             "dtach does not support session recovery".into(),
         )),
+        "shpool" => Err(RuntimeError::Backend(
+            "shpool does not support session recovery".into(),
+        )),
         "screen" => Err(RuntimeError::Backend(
             "screen does not support session recovery".into(),
         )),
         "tmux" | "tmux-cc" => {
+            // Attach to session only; current window comes from tmux (match by name, no persist)
             let runtime = tmux_control_mode::TmuxControlModeRuntime::new(
                 &state.backend_session_id,
-                &state.backend_window_id,
+                None,
                 None,
                 cols,
                 rows,
@@ -316,6 +383,9 @@ pub fn recover_runtime(
         )),
         "dtach" => Err(RuntimeError::Backend(
             "dtach does not support session recovery".into(),
+        )),
+        "shpool" => Err(RuntimeError::Backend(
+            "shpool does not support session recovery".into(),
         )),
         "screen" => Err(RuntimeError::Backend(
             "screen does not support session recovery".into(),

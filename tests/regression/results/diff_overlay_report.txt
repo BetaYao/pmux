@@ -1,0 +1,11 @@
+Diff Overlay Test Report
+========================
+Test Time: Wed Mar  4 00:46:19 CST 2026
+Repo: /tmp/pmux-diff-repo-60562
+Session: pmux-pmux-diff-repo-60562
+Review window: review-feature-x
+Capture length: 136
+Capture (first 2k chars):
+➜  pmux-diff-repo-60562 git:(feature/x) echo DIFF_OVERLAY_TEST_CONTENT
+DIFF_OVERLAY_TEST_CONTENT
+➜  pmux-diff-repo-60562 git:(feature/x)

@@ -11,6 +11,7 @@ pub enum SessionBackend {
     Dtach,
     Tmux,
     Screen,
+    Shpool,
     Local,
 }
 
@@ -21,6 +22,7 @@ impl SessionBackend {
             Self::Dtach => "dtach",
             Self::Tmux => "tmux",
             Self::Screen => "screen",
+            Self::Shpool => "shpool",
             Self::Local => "local",
         }
     }
@@ -61,6 +63,13 @@ impl SessionBackend {
                     ResolvedBackend::Local
                 }
             }
+            Self::Shpool => {
+                if is_shpool_available() {
+                    ResolvedBackend::Shpool
+                } else {
+                    ResolvedBackend::Local
+                }
+            }
             Self::Local => ResolvedBackend::Local,
         }
     }
@@ -71,6 +80,7 @@ pub enum ResolvedBackend {
     Dtach,
     Tmux,
     Screen,
+    Shpool,
     Local,
 }
 
@@ -84,6 +94,7 @@ impl ResolvedBackend {
             Self::Dtach => "dtach",
             Self::Tmux => "tmux",
             Self::Screen => "screen",
+            Self::Shpool => "shpool",
             Self::Local => "local",
         }
     }
@@ -117,6 +128,16 @@ pub fn is_screen_available() -> bool {
         .is_ok()
 }
 
+pub fn is_shpool_available() -> bool {
+    std::process::Command::new("shpool")
+        .arg("version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 /// Path for dtach socket files
 pub fn dtach_socket_path(session_name: &str) -> PathBuf {
     let dir = dirs::runtime_dir()
@@ -147,6 +168,7 @@ mod tests {
         assert!(ResolvedBackend::Tmux.supports_persistence());
         assert!(ResolvedBackend::Dtach.supports_persistence());
         assert!(ResolvedBackend::Screen.supports_persistence());
+        assert!(ResolvedBackend::Shpool.supports_persistence());
     }
 
     #[test]

@@ -1,0 +1,97 @@
+---
+description: Terminal subsystem implementation rules — tmux lifecycle, input/output pipeline, resize, liveness, and testing conventions
+globs:
+  - src/terminal/**
+  - src/runtime/**
+  - src/ui/terminal_view.rs
+  - src/ui/app_root.rs
+  - src/shell_integration.rs
+  - src/status_detector.rs
+  - tests/regression/**
+  - tests/functional/**
+alwaysApply: false
+---
+
+# Terminal Implementation Rules
+
+## tmux Session Lifecycle
+
+- `new-session` 失败且 stderr 含 "server exited unexpectedly" → 调用 `remove_stale_tmux_socket()` 删除 `/tmp/tmux-<uid>/default` 后重试一次
+- 创建 session 后设置 server 选项：`default-terminal xterm-256color`、`terminal-features ,xterm-256color:RGB`（true color）、`escape-time 10`
+- `-CC attach` 命令必须 `.env("TERM", "xterm-256color")`，让 tmux 不降级 true color 序列
+- `resize-window` 会隐式设置 `window-size=manual`，**之后必须** `set-window-option -t <target> window-size latest` 恢复自动尺寸
+- attach 前必须 `list-clients` 找到并 `detach-client` 旧的 control-mode 客户端，防止输出广播给死掉的进程
+- drop 时先 `send_command("detach")` 再 `child.kill()`，避免 orphaned tmux -CC 进程
+- Session 命名：`pmux-<repo_basename>`；Window 命名：`main` 或 sanitized branch name
+
+## Input Pipeline
+
+- 输入路径：GPUI key event → `key_to_bytes()` / `TerminalInputHandler` → `runtime.send_input(pane_id, bytes)`
+- tmux-cc 的 `send_input` 使用 `send-keys -H`（hex 编码），chunk 上限 `HEX_SEND_KEYS_CHUNK = 512` bytes
+- Writer thread 合并同一 pane 的连续输入为一条 `send-keys -H` 命令（~3ms/cmd 不论字符数）
+- `direct_write` 写入 `#{pane_tty}` 是写给 slave PTY，**不能**用于 shell stdin 输入（数据会丢失）
+- Ctrl+letter → 0x01–0x1A；`\r`/`\n` → `\r`；Backspace → 0x7F
+- IME：composition 保持为 preedit，只有 committed text 才发送到 PTY；过滤 U+F700–U+F8FF（macOS function keys）
+
+## Output Pipeline
+
+- Parser thread 从 PTY master 读取 → `ControlModeParser.feed()` → `%output` 事件 → per-pane `flume::unbounded` channel
+- `unescape_tmux_output()` 解码八进制 `\xxx` 和 `\\`
+- `strip_tmux_title_sequences()` 移除 ESCk…ESC\ 避免 VTE 显示 tmux window title
+- 输出合并：VTE thread `recv()` + `try_recv()` drain；repaint 用 `flume::bounded::<()>(1)` + `try_send` 合并高频更新
+- `subscribe_output` 首次调用 `capture_initial_content`（`capture-pane -p -e`），除非 `skip_next_capture` 已设
+
+## Resize Handling
+
+- **单一权威来源**：`TerminalElement::request_layout()` 用实际字体度量（Menlo 14px → ~8.4px 宽）计算 cols/rows，然后通过 `with_resize_callback` → `runtime.resize()` 通知 tmux。**禁止**从窗口 bounds 用硬编码字符尺寸计算 cols/rows 再调 `runtime.resize()`——两者尺寸不同会导致程序画的长行折行
+- **忽略 degenerate 尺寸**：`cols < 10 || rows < 4` 的 resize callback 直接 return，防止 GPUI 布局过渡值污染状态
+- `resolve_terminal_dims()` 优先级：`preferred_terminal_dims` → `shared_terminal_dims` → Config → `(120, 36)`（仅用于 session 创建时的初始尺寸，首帧 paint 后由 TerminalElement 修正）
+- Resize 后 150ms sleep 等 SIGWINCH 传播，再检查尺寸是否一致；不一致则 `set_skip_initial_capture()` + 发送 C-l 刷新
+
+## Runtime Liveness & Recovery
+
+- `is_alive()`：先查 `connection_dead` AtomicBool（快路径），再 fallback `tmux has-session -t <session>`
+- Parser thread 在 EOF 或 `%exit` 时设置 `connection_dead = true`
+- `attach_runtime` 中为 tmux-cc 启动 watcher thread：每 2s 检查 `connection_dead`，dead 时通过 flume channel 通知 async task 执行 `stop_current_session()` + `start_session_for_active_tab()`
+- `current_runtime_matches_session()` 必须同时检查 session name **和** `is_alive()`
+
+## Shell Integration (OSC 133)
+
+- 标记：A=PromptStart, B=PromptEnd, C=PreExec, D=PostExec（可带 exit code）
+- `ContentExtractor.feed()` → `Osc133Parser` → `ShellPhaseInfo` → `StatusPublisher.check_status()`
+- 优先级：进程生命周期 > OSC 133 > 文本模式匹配
+- OSC 133 不可用时回退到文本模式（"thinking", "?" 等 pattern）
+
+## Regression Testing
+
+- **每个测试前**：`tmux kill-server` + `rm -rf /tmp/tmux-$(id -u)` + sleep 1s
+- 输入必须通过 AppleScript 模拟 UI 键盘（`send_keystroke` / `send_keycode`），不能直接 `tmux send-keys`
+- `click_terminal_area` 确保终端获得焦点（点击窗口中心 50%x50%，兼容有无 sidebar 的布局）
+- **IME warmup**：首次 keystroke 会被 macOS TSM/IMK 吞掉，必须先调用 `warmup_ime`（发送 `x` + Delete 吸收 TSM 初始化）
+- `ensure_english_input`（Swift TISSelectInputSource）切换到 ABC/US 输入法
+- 验证用 `tmux capture-pane -p`，**不用 OCR**
+- `capture-pane` 的局限：看不到 VTE 渲染残留（如 zsh PROMPT_SP 的 `%`），只能看 tmux buffer 最终状态
+- Prompt 检测 pattern：`➜|❯|→|\$|%`
+
+## PROMPT_SP Handling
+
+- pmux 在创建 session 和 new-window 时通过 `send-keys` 发送 ` unsetopt PROMPT_SP 2>/dev/null; clear` 禁用 zsh 的 `%` 指示符并清屏
+- 命令前加空格（` unsetopt ...`）避免写入 shell history
+- `send-keys` 由 tmux 立即入队，无需 sleep——PTY 建立 + `-CC attach` 的耗时足够 shell 处理完
+- 回归测试用 `printf` (无 trailing newline) 验证 PROMPT_SP 已被禁用：capture-pane 不应出现 `MARKER%`
+
+## True Color & Terminal Capabilities
+
+- tmux 默认 `TERM=tmux-256color`，不支持 24-bit RGB → 必须设 `default-terminal xterm-256color` + `terminal-features ,xterm-256color:RGB`
+- `-CC attach` 子进程必须 `.env("TERM", "xterm-256color")`，否则 tmux 根据客户端 TERM 降级色彩序列（把 RGB 转为 256 色近似值）
+- pmux 的 VTE（alacritty_terminal）原生支持 true color，瓶颈在 tmux 的色彩转换层
+- 已有 tmux 会话不会自动获取新的 server 选项，修改后需 `tmux kill-server` 重启
+- cursor 渲染由 `TerminalElement::paint()` 在 `TermMode::SHOW_CURSOR` 时绘制白色方块；TUI 程序（如 Claude Code）会主动隐藏光标，这是正常行为
+
+## Known Gotchas
+
+- zsh `PROMPT_SP` 的 `%` 不出现在 `pipe-pane` 原始输出中，但会出现在 `tmux capture-pane`（仅限无 `\n` 结尾的命令）和 pmux VTE 渲染中
+- `tmux kill-server` 后 stale socket 行为是**间歇性的**（有时 macOS 内核回收 socket，有时不回收）
+- GPUI 在布局过渡期会发出 `rows=1` 的 resize 事件，必须过滤
+- `resize-window` 的 `window-size=manual` 副作用容易被遗忘，导致 pane 尺寸不匹配
+- **切勿**在 `render()` 中用硬编码字符尺寸（如 8x16）计算 cols/rows 然后调 `runtime.resize()`，会覆盖 TerminalElement 的正确值

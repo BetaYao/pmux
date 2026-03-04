@@ -113,6 +113,9 @@ fn main() {
                     if let Some(Some(root)) = window.root::<AppRoot>() {
                         root.update(app, |app_root, _| {
                             state.sidebar_width = app_root.sidebar_width();
+                            // Persist current worktree and config so the selected worktree restores correctly
+                            app_root.save_current_worktree_runtime_state();
+                            app_root.save_config();
                         });
                     }
                     let _ = state.save();

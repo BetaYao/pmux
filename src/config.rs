@@ -1,7 +1,6 @@
 // config.rs - Configuration management for pmux
 use crate::runtime::backends::SessionBackend;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 fn default_terminal_row_cache_size() -> usize {
     200
@@ -81,7 +80,6 @@ impl Default for Config {
             recent_workspace: None,
             workspace_paths: vec![],
             active_workspace_index: 0,
-            per_repo_worktree_index: HashMap::new(),
             backend: default_backend(),
             session_backend: SessionBackend::default(),
             remote_channels: RemoteChannelsConfig::default(),
@@ -117,9 +115,6 @@ pub struct Config {
     /// Currently active workspace tab index
     #[serde(default)]
     pub active_workspace_index: usize,
-    /// Per-repo worktree index: path string -> worktree index
-    #[serde(default)]
-    pub per_repo_worktree_index: HashMap<String, usize>,
     /// Runtime backend: "local" (PTY) or "tmux". Env PMUX_BACKEND overrides.
     #[serde(default = "default_backend")]
     pub backend: String,
@@ -159,10 +154,10 @@ impl Config {
 
         let content = std::fs::read_to_string(path)?;
         let mut config: Config = serde_json::from_str(&content)?;
-        const VALID_BACKENDS: [&str; 5] = ["local", "tmux", "tmux-cc", "dtach", "screen"];
+        const VALID_BACKENDS: [&str; 6] = ["local", "tmux", "tmux-cc", "dtach", "screen", "shpool"];
         if !VALID_BACKENDS.contains(&config.backend.as_str()) {
             eprintln!(
-                "pmux: invalid backend '{}' in config, using '{}'. Valid: local, tmux, tmux-cc, dtach, screen",
+                "pmux: invalid backend '{}' in config, using '{}'. Valid: local, tmux, tmux-cc, dtach, screen, shpool",
                 config.backend,
                 default_backend()
             );
@@ -206,29 +201,19 @@ impl Config {
         if path.is_empty() {
             self.workspace_paths.clear();
             self.active_workspace_index = 0;
-            self.per_repo_worktree_index.clear();
         } else if !self.workspace_paths.contains(&path.to_string()) {
             self.workspace_paths = vec![path.to_string()];
             self.active_workspace_index = 0;
         }
     }
 
-    /// Save multi-repo workspace state
-    pub fn save_workspaces(
-        &mut self,
-        paths: &[PathBuf],
-        active_index: usize,
-        per_repo_worktree_index: &HashMap<PathBuf, usize>,
-    ) {
+    /// Save multi-repo workspace state (paths and active tab index only; worktree selection is by tmux window name, not persisted).
+    pub fn save_workspaces(&mut self, paths: &[PathBuf], active_index: usize) {
         self.workspace_paths = paths
             .iter()
             .filter_map(|p| p.to_str().map(String::from))
             .collect();
         self.active_workspace_index = active_index.min(paths.len().saturating_sub(1));
-        self.per_repo_worktree_index = per_repo_worktree_index
-            .iter()
-            .filter_map(|(k, v)| k.to_str().map(|s| (s.to_string(), *v)))
-            .collect();
         self.recent_workspace = self.workspace_paths.first().cloned();
     }
 
@@ -239,14 +224,6 @@ impl Config {
         } else {
             self.terminal_row_cache_size
         }
-    }
-
-    /// Get per-repo worktree index as PathBuf -> usize
-    pub fn get_per_repo_worktree_index(&self) -> HashMap<PathBuf, usize> {
-        self.per_repo_worktree_index
-            .iter()
-            .map(|(k, v)| (PathBuf::from(k), *v))
-            .collect()
     }
 
     /// Get the default config path (~/.config/pmux/config.json)
@@ -404,19 +381,12 @@ mod tests {
             PathBuf::from("/path/repo1"),
             PathBuf::from("/path/repo2"),
         ];
-        let mut per_repo = HashMap::new();
-        per_repo.insert(PathBuf::from("/path/repo1"), 1);
-        per_repo.insert(PathBuf::from("/path/repo2"), 0);
-
-        config.save_workspaces(&paths, 1, &per_repo);
+        config.save_workspaces(&paths, 1);
         config.save_to_path(&config_path).unwrap();
 
         let loaded = Config::load_from_path(&config_path).unwrap();
         assert_eq!(loaded.workspace_paths.len(), 2);
         assert_eq!(loaded.active_workspace_index, 1);
-        let loaded_per_repo = loaded.get_per_repo_worktree_index();
-        assert_eq!(loaded_per_repo.get(&PathBuf::from("/path/repo1")), Some(&1));
-        assert_eq!(loaded_per_repo.get(&PathBuf::from("/path/repo2")), Some(&0));
     }
 
     /// Test: Config invalid backend falls back to default (tmux)
@@ -473,7 +443,6 @@ mod tests {
             recent_workspace: Some("/home/user/project".to_string()),
             workspace_paths: vec![],
             active_workspace_index: 0,
-            per_repo_worktree_index: HashMap::new(),
             ..Default::default()
         };
 
