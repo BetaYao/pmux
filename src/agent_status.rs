@@ -120,6 +120,26 @@ impl AgentStatus {
     pub fn higher_priority_than(&self, other: &AgentStatus) -> bool {
         self.priority() > other.priority()
     }
+
+    /// Find the highest-priority AgentStatus across all panes whose key matches the given prefix.
+    ///
+    /// Matching rule: key equals `prefix` OR key starts with `"{prefix}:"`.
+    /// This correctly matches "local:/path/feat" and "local:/path/feat:split-0"
+    /// but NOT "local:/path/feature-long".
+    ///
+    /// Returns `AgentStatus::Unknown` if no matching keys exist.
+    pub fn highest_priority_for_prefix(
+        statuses: &std::collections::HashMap<String, AgentStatus>,
+        prefix: &str,
+    ) -> AgentStatus {
+        let colon_prefix = format!("{}:", prefix);
+        statuses
+            .iter()
+            .filter(|(k, _)| *k == prefix || k.starts_with(&colon_prefix))
+            .map(|(_, v)| *v)
+            .max_by_key(|s| s.priority())
+            .unwrap_or(AgentStatus::Unknown)
+    }
 }
 
 impl Default for AgentStatus {
@@ -408,5 +428,39 @@ mod tests {
         // Add error - should take precedence due to priority
         counts.increment(&AgentStatus::Error);
         assert_eq!(counts.most_prevalent(), Some(AgentStatus::Error));
+    }
+
+    #[test]
+    fn test_highest_priority_for_worktree_prefix() {
+        use std::collections::HashMap;
+
+        let mut statuses: HashMap<String, AgentStatus> = HashMap::new();
+        statuses.insert("local:/path/feat".to_string(), AgentStatus::Idle);
+        statuses.insert("local:/path/feat:split-0".to_string(), AgentStatus::Error);
+        statuses.insert("local:/path/feat:split-1".to_string(), AgentStatus::Running);
+        statuses.insert("local:/path/other".to_string(), AgentStatus::Waiting); // different worktree
+
+        let result = AgentStatus::highest_priority_for_prefix(&statuses, "local:/path/feat");
+        assert_eq!(result, AgentStatus::Error); // Error has priority 6 > Running 3 > Idle 2
+    }
+
+    #[test]
+    fn test_highest_priority_falls_back_to_unknown() {
+        use std::collections::HashMap;
+        let statuses: HashMap<String, AgentStatus> = HashMap::new();
+        let result = AgentStatus::highest_priority_for_prefix(&statuses, "local:/path/feat");
+        assert_eq!(result, AgentStatus::Unknown);
+    }
+
+    #[test]
+    fn test_highest_priority_prefix_does_not_cross_worktrees() {
+        use std::collections::HashMap;
+        let mut statuses: HashMap<String, AgentStatus> = HashMap::new();
+        // "local:/path/feature-long" must NOT match prefix "local:/path/feat"
+        statuses.insert("local:/path/feature-long".to_string(), AgentStatus::Error);
+        statuses.insert("local:/path/feat".to_string(), AgentStatus::Idle);
+
+        let result = AgentStatus::highest_priority_for_prefix(&statuses, "local:/path/feat");
+        assert_eq!(result, AgentStatus::Idle);
     }
 }
