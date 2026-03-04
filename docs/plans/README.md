@@ -65,6 +65,12 @@
 
 **参考:** [2026-03-gpui-terminal-refactor-default-tmux.md](2026-03-gpui-terminal-refactor-default-tmux.md)（brainstorming 方案）
 
+## Terminal UX
+
+| 计划 | 目标 | 预估 |
+|------|------|------|
+| [2026-03-04-eliminate-prompt-sp-flash.md](2026-03-04-eliminate-prompt-sp-flash.md) | 消除 worktree 切换时 PROMPT_SP send-keys 闪烁 | ~0.5 天 |
+
 ## Terminal 性能优化
 
 | 计划 | 目标 | 预估 |

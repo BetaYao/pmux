@@ -763,7 +763,10 @@ impl AppRoot {
                         // continue without notifying; terminal will refresh on next output after modal closes
                     } else if let Some(ref tae) = term_area_entity {
                         let now = Instant::now();
-                        if now.duration_since(last_notify) >= Duration::from_millis(16) {
+                        // Always notify on single-chunk (user typing) for low latency; throttle bursts (e.g. cat bigfile)
+                        let should_notify = batch_count == 1
+                            || now.duration_since(last_notify) >= Duration::from_millis(8);
+                        if should_notify {
                             last_notify = now;
                             let _ = cx.update_entity(tae, |_, cx| cx.notify());
                         }
@@ -916,7 +919,10 @@ impl AppRoot {
                         // skip terminal notify while modal open (e.g. new branch dialog)
                     } else if let Some(ref tae) = term_area_entity {
                         let now = Instant::now();
-                        if now.duration_since(last_notify) >= Duration::from_millis(16) {
+                        // Always notify on single-chunk (user typing) for low latency; throttle bursts
+                        let should_notify = batch_count == 1
+                            || now.duration_since(last_notify) >= Duration::from_millis(8);
+                        if should_notify {
                             last_notify = now;
                             let _ = cx.update_entity(tae, |_, cx| cx.notify());
                         }
