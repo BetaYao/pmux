@@ -1,148 +1,122 @@
-# pmux - AI Agent 多分支开发工作台
+# pmux
 
-pmux 是一个原生桌面应用，用于管理多个 AI Agent 并行工作（每个 agent 一个 git worktree），实时监控 agent 状态，主动通知，以及快速 Review Diff。
+A native desktop workbench for running multiple AI agents in parallel — one per git worktree — with real-time status monitoring, notifications, and quick diff review.
 
-## 当前状态：规格 1 完成 ✅
+Built with [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) (Zed's GPU-accelerated UI framework) and tmux control mode for persistent terminal sessions.
 
-规格 1 实现了默认启动页（选择工作区）功能：
+## Features
 
-- ✅ 首次启动时显示友好的启动页面
-- ✅ 支持选择 Git 仓库作为工作区
-- ✅ 自动验证所选目录是否为 Git 仓库
-- ✅ 保存工作区配置，下次启动自动加载
-- ✅ 完整的错误处理和用户提示
+- **Multi-worktree management** — switch between branches/worktrees; each gets its own persistent terminal session
+- **Real-time agent status** — detects when an AI agent (Claude Code, opencode, etc.) is Running / Waiting / Idle / Error
+- **OSC 133 shell integration** — accurate status detection via shell prompt markers (zsh/bash/fish)
+- **Split panes** — divide the terminal area into multiple panes per worktree
+- **Embedded terminal** — GPU-rendered terminal with full VTE support, CJK wide-character handling, search, clickable links
+- **Notifications** — desktop and in-app notifications when an agent finishes or needs attention
+- **Diff review** — open `git diff` or `nvim -c DiffviewOpen` directly from the sidebar
+- **Multi-workspace tabs** — manage several repositories in one window
 
-## 快速开始
+## Screenshot
 
-### macOS 构建依赖
+> _Screenshots coming soon_
 
-在 Apple Silicon (M1/M2/M3) 上首次构建需要：
+## Requirements
 
-1. **Xcode**：完整安装（非仅 Command Line Tools）
-2. **Metal Toolchain**：若 `cargo run` 报错 `cannot execute tool 'metal'`，运行：
-   ```bash
-   xcodebuild -downloadComponent MetalToolchain
-   ```
-   或使用 `./scripts/run.sh` 自动检测并下载。
+- **macOS** (Apple Silicon or Intel) — Linux support is possible but untested
+- **tmux ≥ 3.2** — used in control mode (`-CC`) for persistent sessions
+- **Rust toolchain** — stable channel (`rustup install stable`)
+- **Xcode** — full installation required for Metal GPU rendering on macOS
+  ```bash
+  xcode-select --install
+  xcodebuild -downloadComponent MetalToolchain   # if 'metal' tool is missing
+  ```
 
-### 运行测试
-
-```bash
-cargo test
-```
-
-### 运行应用程序
-
-```bash
-cargo run
-```
-
-或使用脚本（会自动检查 Metal 依赖）：
+## Build
 
 ```bash
-./scripts/run.sh
-```
+# Clone
+git clone https://github.com/<your-username>/pmux
+cd pmux
 
-这将启动 pmux GUI，您可以：
-1. 选择工作区（打开文件选择器）
-2. 查看当前工作区
-3. 更换工作区
-4. 退出应用
+# Run (debug)
+RUSTUP_TOOLCHAIN=stable cargo run
 
-### 构建发布版本
-
-```bash
+# Build release binary
 cargo build --release
+# Binary: ./target/release/pmux
 ```
 
-### 应用图标与打包
-
-应用图标使用布丁 logo（`布丁logo_极简线条.png`）。打包前需先生成图标：
+### Bundle as a macOS .app
 
 ```bash
-# 安装依赖（首次）
-python3 -m venv .venv-icon && .venv-icon/bin/pip install -r resources/requirements.txt
-
-# 生成标准图标
-.venv-icon/bin/python resources/generate_icon.py
-
-# 生成 dev 模式图标（带 DEV 角标）
-.venv-icon/bin/python resources/generate_icon.py --dev
+./scripts/bundle.sh          # standard build
+./scripts/bundle.sh --dev    # adds a DEV badge to the icon
 ```
 
-打包为 .app（macOS）：
+## Configuration
 
+Config is stored at `~/.config/pmux/config.json` and is created automatically on first run.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `workspace_path` | — | Last opened repository path |
+| `backend` | `"tmux"` | Terminal backend: `"tmux"` or `"local"` |
+| `last_terminal_cols` | — | Saved terminal width (restored on next launch) |
+| `last_terminal_rows` | — | Saved terminal height |
+
+Override backend at runtime:
 ```bash
-# 标准版
-./scripts/bundle.sh
-
-# dev 版（图标带 DEV 角标）
-./scripts/bundle.sh --dev
+PMUX_BACKEND=local cargo run   # use local PTY instead of tmux
 ```
 
-## Backend 配置
+## Shell Integration (OSC 133)
 
-- **config.json**：`~/.config/pmux/config.json` 中可设置 `"backend": "tmux"` 或 `"backend": "local"`（默认 local）
-- **环境变量**：`PMUX_BACKEND=tmux` 或 `PMUX_BACKEND=local` 可覆盖 config
-- **优先级**：环境变量 > config > 默认 (local)
+For accurate agent status detection, add OSC 133 markers to your shell prompt. This lets pmux know when a command starts/finishes and its exit code.
 
-## 项目结构
+See [`docs/shell-integration.md`](docs/shell-integration.md) for setup instructions (zsh / bash / fish).
+
+## Architecture
 
 ```
 src/
-├── lib.rs           # 库入口
-├── main.rs          # 应用程序入口（CLI 主循环）
-├── app.rs           # 应用逻辑和状态管理
-├── config.rs        # 配置管理（读写 ~/.config/pmux/config.json）
-├── git_utils.rs     # Git 仓库验证
-├── file_selector.rs # 跨平台文件选择器（使用 rfd）
-└── ui/
-    └── mod.rs       # UI 渲染（CLI 版本使用 ASCII 艺术）
+├── main.rs                     # Entry point
+├── ui/
+│   ├── app_root.rs             # Root component, state management, runtime lifecycle
+│   ├── sidebar.rs              # Worktree list with status icons
+│   ├── tabbar.rs               # Multi-workspace tab bar
+│   ├── terminal_area_entity.rs # Split-pane terminal container
+│   └── terminal_view.rs        # Single terminal pane renderer
+├── terminal/
+│   ├── terminal_core.rs        # alacritty_terminal wrapper
+│   ├── terminal_element.rs     # GPUI paint element for terminal grid
+│   └── content_extractor.rs    # OSC 133 parser → ShellPhaseInfo
+├── runtime/backends/
+│   ├── tmux_control_mode.rs    # tmux -CC control mode (default backend)
+│   └── local_pty.rs            # Direct PTY backend (fallback)
+├── agent_status.rs             # AgentStatus enum (Running/Waiting/Idle/Error)
+├── status_detector.rs          # Text + OSC 133 based status detection
+├── worktree.rs                 # Git worktree discovery
+└── config.rs                   # Config persistence
 ```
 
-## 技术栈
+## Tech Stack
 
-- **Rust** - 主要编程语言
-- **serde** - JSON 序列化/反序列化
-- **rfd** - 跨平台文件选择器
-- **thiserror** - 错误处理
-- **tempfile** - 测试用的临时文件（dev dependency）
+| Crate | Purpose |
+|-------|---------|
+| [gpui](https://github.com/zed-industries/zed/tree/main/crates/gpui) | GPU-accelerated native UI (Zed's framework) |
+| [alacritty_terminal](https://github.com/alacritty/alacritty) | VTE parser + terminal grid |
+| [flume](https://github.com/zesterer/flume) | Lock-free channel for terminal output |
+| [serde](https://serde.rs) | JSON config serialization |
+| [rfd](https://github.com/PolyMeilex/rfd) | Native file dialog |
+| [thiserror](https://github.com/dtolnay/thiserror) | Structured error types |
 
-## 开发方法：TDD
+## Contributing
 
-本项目严格遵循测试驱动开发（TDD）原则：
+Issues and pull requests are welcome. Please:
 
-1. **RED**: 先写测试，确保测试失败
-2. **GREEN**: 写最小代码使测试通过
-3. **REFACTOR**: 重构代码，保持测试通过
+1. Check existing issues before filing a new one
+2. For larger changes, open an issue first to discuss the approach
+3. Run `cargo check` and `cargo test` before submitting
 
-### 测试统计
+## License
 
-| 模块 | 测试数 | 状态 |
-|------|--------|------|
-| config | 6 | ✅ 通过 |
-| git_utils | 8 | ✅ 通过 |
-| file_selector | 1 | ✅ 通过 |
-| app | 4 | ✅ 通过 |
-| main | 1 | ✅ 通过 |
-| **总计** | **20** | **✅ 全部通过** |
-
-## 规格说明
-
-详见 `openspec/changes/spec-1-start-page/` 目录：
-
-- `proposal.md` - 提案文档
-- `design.md` - 设计文档
-- `specs/workspace-selection/spec.md` - 详细规格
-- `tasks.md` - 任务清单（全部完成）
-
-## 下一步
-
-规格 2 将实现：
-- 单仓主分支 + Sidebar
-- tmux session 集成
-- 终端渲染
-
-## 许可证
-
-MIT
+MIT — see [LICENSE](LICENSE)

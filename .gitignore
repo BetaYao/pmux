@@ -89,3 +89,6 @@ temp/
 
 # Git worktrees (using-git-worktrees skill)
 .worktrees/
+
+# Claude Code local settings (permissions, user-specific)
+.claude/settings.local.json
