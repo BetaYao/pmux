@@ -8,11 +8,19 @@ use std::sync::Arc;
 
 pub struct TerminalInputHandler {
     send_input: Arc<dyn Fn(&[u8]) + Send + Sync>,
+    /// Screen-space bounds of the terminal cursor, used to position the IME
+    /// candidate window. Passed from terminal_element.rs at paint time.
+    cursor_bounds: Option<Bounds<Pixels>>,
 }
 
 impl TerminalInputHandler {
     pub fn new(send_input: Arc<dyn Fn(&[u8]) + Send + Sync>) -> Self {
-        Self { send_input }
+        Self { send_input, cursor_bounds: None }
+    }
+
+    pub fn with_cursor_bounds(mut self, bounds: Option<Bounds<Pixels>>) -> Self {
+        self.cursor_bounds = bounds;
+        self
     }
 }
 
@@ -96,7 +104,10 @@ impl InputHandler for TerminalInputHandler {
         _window: &mut Window,
         _cx: &mut App,
     ) -> Option<Bounds<Pixels>> {
-        None
+        // Return the cursor's screen bounds so macOS positions the IME
+        // candidate window next to the terminal cursor rather than the
+        // default bottom-left corner of the screen.
+        self.cursor_bounds
     }
 
     fn character_index_for_point(

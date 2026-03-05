@@ -11,7 +11,8 @@ use crate::runtime::event_bus::{
     AgentStateChange, EventBus, Notification, NotificationType, RuntimeEvent,
 };
 use crate::shell_integration::ShellPhaseInfo;
-use crate::status_detector::{DebouncedStatusTracker, ProcessStatus, StatusDetector};
+use crate::status_detector::{DebouncedStatusTracker, ProcessContext, ProcessStatus, StatusDetector};
+use crate::terminal::extract_last_line;
 
 /// Publishes agent status changes to EventBus (event-driven, no polling loop).
 ///
@@ -57,6 +58,7 @@ impl StatusPublisher {
     /// * `process_status` - Process lifecycle status from runtime
     /// * `shell_info` - Optional shell phase info from OSC 133 markers
     /// * `content` - Current terminal content for text-based fallback detection
+    /// * `process_ctx` - Context about the running process (for fallback logic)
     ///
     /// # Returns
     /// `true` if status changed and was published
@@ -66,6 +68,7 @@ impl StatusPublisher {
         process_status: ProcessStatus,
         shell_info: Option<ShellPhaseInfo>,
         content: &str,
+        process_ctx: ProcessContext,
     ) -> bool {
         let mut tracker_guard = match self.tracker.lock() {
             Ok(g) => g,
@@ -77,8 +80,11 @@ impl StatusPublisher {
             None => return false,
         };
 
-        // Detect status with full context (process > OSC 133 > text fallback)
-        let new_status = self.detector.detect(process_status, shell_info, content);
+        // Save previous status before update
+        let prev_status = tracker.current_status();
+
+        // Detect status with full context (process > OSC 133 > text + ProcessContext fallback)
+        let new_status = self.detector.detect(process_status, shell_info, content, process_ctx);
 
         // Check if status changed (with debouncing)
         let changed = tracker.update_with_status(new_status);
@@ -86,28 +92,51 @@ impl StatusPublisher {
         if changed {
             let current_status = tracker.current_status();
             let agent_id = pane_id.split(':').next().unwrap_or(pane_id).to_string();
+            let last_line = extract_last_line(content, 80);
+            let last_line_opt = if last_line.is_empty() {
+                None
+            } else {
+                Some(last_line.clone())
+            };
 
-            // Publish state change event
+            // Publish state change event (with prev_state and last_line)
             self.event_bus
                 .publish(RuntimeEvent::AgentStateChange(AgentStateChange {
                     agent_id: agent_id.clone(),
                     pane_id: Some(pane_id.to_string()),
                     state: current_status,
+                    prev_state: Some(prev_status),
+                    last_line: last_line_opt,
                 }));
 
-            // Publish notification for urgent states
-            if current_status.is_urgent() {
+            // Determine if notification should fire
+            let should_notify = matches!(
+                (prev_status, current_status),
+                (AgentStatus::Running, AgentStatus::Idle)
+                    | (_, AgentStatus::Waiting)
+                    | (_, AgentStatus::WaitingConfirm)
+                    | (_, AgentStatus::Error)
+                    | (_, AgentStatus::Exited)
+            );
+
+            if should_notify {
                 let notif_type = match current_status {
                     AgentStatus::Error => NotificationType::Error,
                     AgentStatus::Waiting => NotificationType::WaitingInput,
                     AgentStatus::WaitingConfirm => NotificationType::WaitingConfirm,
+                    AgentStatus::Idle | AgentStatus::Exited => NotificationType::Info,
                     _ => return true,
+                };
+                let message = if last_line.is_empty() {
+                    current_status.display_text().to_string()
+                } else {
+                    last_line
                 };
                 self.event_bus
                     .publish(RuntimeEvent::Notification(Notification {
                         agent_id,
                         pane_id: Some(pane_id.to_string()),
-                        message: current_status.display_text().to_string(),
+                        message,
                         notif_type,
                     }));
             }
@@ -131,7 +160,7 @@ impl StatusPublisher {
 mod tests {
     use super::*;
     use crate::shell_integration::{ShellPhase, ShellPhaseInfo};
-    use crate::status_detector::ProcessStatus;
+    use crate::status_detector::{ProcessContext, ProcessStatus};
 
     #[test]
     fn test_status_publisher_new() {
@@ -148,7 +177,7 @@ mod tests {
         pub_.register_pane("pane-1");
 
         // First call sets pending (debounce)
-        let changed1 = pub_.check_status("pane-1", ProcessStatus::Running, None, "AI is thinking");
+        let changed1 = pub_.check_status("pane-1", ProcessStatus::Running, None, "AI is thinking", ProcessContext::default());
         assert!(!changed1);
 
         // Second call with same status commits
@@ -157,6 +186,7 @@ mod tests {
             ProcessStatus::Running,
             None,
             "AI is still thinking",
+            ProcessContext::default(),
         );
         assert!(changed2);
         assert_eq!(pub_.current_status("pane-1"), AgentStatus::Running);
@@ -175,7 +205,7 @@ mod tests {
 
         // Running phase should return Running
         let changed1 =
-            pub_.check_status("pane-1", ProcessStatus::Running, Some(info), "any content");
+            pub_.check_status("pane-1", ProcessStatus::Running, Some(info), "any content", ProcessContext::default());
         assert!(!changed1);
 
         let changed2 = pub_.check_status(
@@ -183,6 +213,7 @@ mod tests {
             ProcessStatus::Running,
             Some(info),
             "still running",
+            ProcessContext::default(),
         );
         assert!(changed2);
         assert_eq!(pub_.current_status("pane-1"), AgentStatus::Running);
@@ -195,12 +226,12 @@ mod tests {
         pub_.register_pane("pane-1");
 
         // Set to Running first
-        pub_.check_status("pane-1", ProcessStatus::Running, None, "AI is thinking");
-        pub_.check_status("pane-1", ProcessStatus::Running, None, "AI is thinking");
+        pub_.check_status("pane-1", ProcessStatus::Running, None, "AI is thinking", ProcessContext::default());
+        pub_.check_status("pane-1", ProcessStatus::Running, None, "AI is thinking", ProcessContext::default());
         assert_eq!(pub_.current_status("pane-1"), AgentStatus::Running);
 
         // Error should bypass debounce
-        let changed = pub_.check_status("pane-1", ProcessStatus::Unknown, None, "Error occurred!");
+        let changed = pub_.check_status("pane-1", ProcessStatus::Unknown, None, "Error occurred!", ProcessContext::default());
         assert!(changed);
         assert_eq!(pub_.current_status("pane-1"), AgentStatus::Error);
     }
@@ -212,12 +243,12 @@ mod tests {
         pub_.register_pane("pane-1");
 
         // Set to Running first
-        pub_.check_status("pane-1", ProcessStatus::Running, None, "AI is thinking");
-        pub_.check_status("pane-1", ProcessStatus::Running, None, "AI is thinking");
+        pub_.check_status("pane-1", ProcessStatus::Running, None, "AI is thinking", ProcessContext::default());
+        pub_.check_status("pane-1", ProcessStatus::Running, None, "AI is thinking", ProcessContext::default());
         assert_eq!(pub_.current_status("pane-1"), AgentStatus::Running);
 
         // Exited should bypass debounce
-        let changed = pub_.check_status("pane-1", ProcessStatus::Exited, None, "any content");
+        let changed = pub_.check_status("pane-1", ProcessStatus::Exited, None, "any content", ProcessContext::default());
         assert!(changed);
         assert_eq!(pub_.current_status("pane-1"), AgentStatus::Exited);
     }
@@ -228,6 +259,39 @@ mod tests {
         let bus = Arc::new(EventBus::new(8));
         let pub_ = StatusPublisher::new(bus);
         pub_.register_pane("test");
-        pub_.check_status("test", ProcessStatus::Running, None, "content");
+        pub_.check_status("test", ProcessStatus::Running, None, "content", ProcessContext::default());
+    }
+
+    #[test]
+    fn test_running_to_idle_publishes_notification() {
+        let bus = Arc::new(EventBus::new(32));
+        let rx = bus.subscribe();
+        let pub_ = StatusPublisher::new(Arc::clone(&bus));
+        pub_.register_pane("pane-1");
+
+        // Get to Running (2 calls for debounce)
+        pub_.check_status("pane-1", ProcessStatus::Running, None, "AI is thinking", ProcessContext::default());
+        pub_.check_status("pane-1", ProcessStatus::Running, None, "AI is thinking", ProcessContext::default());
+        // drain events
+        while rx.try_recv().is_ok() {}
+
+        // Now transition to Idle via shell phase PostExec
+        let info = ShellPhaseInfo {
+            phase: ShellPhase::Output,
+            last_post_exec_exit_code: Some(0),
+        };
+        pub_.check_status("pane-1", ProcessStatus::Running, Some(info), "Done: 3 files changed", ProcessContext::default());
+        pub_.check_status("pane-1", ProcessStatus::Running, Some(info), "Done: 3 files changed", ProcessContext::default());
+
+        // Collect events
+        let mut found_notification = false;
+        while let Ok(ev) = rx.try_recv() {
+            if let RuntimeEvent::Notification(n) = ev {
+                found_notification = true;
+                assert!(matches!(n.notif_type, NotificationType::Info));
+                assert!(n.message.contains("Done") || n.message.contains("Idle"));
+            }
+        }
+        assert!(found_notification, "Running→Idle should publish Info notification");
     }
 }

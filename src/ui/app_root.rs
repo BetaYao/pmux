@@ -14,7 +14,7 @@ use crate::terminal::ContentExtractor;
 use crate::runtime::{AgentRuntime, EventBus, RuntimeEvent, StatusPublisher};
 use crate::runtime::backends::{create_runtime_from_env, kill_tmux_window, list_tmux_windows, recover_runtime, resolve_backend, session_name_for_workspace, window_name_for_worktree, window_target};
 use crate::runtime::{RuntimeState, WorktreeState};
-use crate::ui::{AppState, sidebar::Sidebar, workspace_tabbar::WorkspaceTabBar, terminal_controller::ResizeController, terminal_view::TerminalBuffer, terminal_area_entity::TerminalAreaEntity, notification_panel_entity::NotificationPanelEntity, new_branch_dialog_entity::NewBranchDialogEntity, delete_worktree_dialog_ui::DeleteWorktreeDialogUi, split_pane_container::SplitPaneContainer, diff_overlay::DiffOverlay, status_bar::StatusBar, models::{StatusCountsModel, NotificationPanelModel, NewBranchDialogModel}, topbar_entity::TopBarEntity};
+use crate::ui::{AppState, sidebar::Sidebar, workspace_tabbar::WorkspaceTabBar, terminal_controller::ResizeController, terminal_view::TerminalBuffer, terminal_area_entity::TerminalAreaEntity, notification_panel_entity::NotificationPanelEntity, new_branch_dialog_entity::NewBranchDialogEntity, delete_worktree_dialog_ui::DeleteWorktreeDialogUi, split_pane_container::SplitPaneContainer, diff_overlay::DiffOverlay, status_bar::StatusBar, models::{StatusCountsModel, NotificationPanelModel, NewBranchDialogModel, PaneSummaryModel}, topbar_entity::TopBarEntity};
 use crate::split_tree::SplitNode;
 use crate::workspace_manager::WorkspaceManager;
 use crate::input::{key_to_xterm_escape, KeyModifiers};
@@ -82,6 +82,8 @@ pub struct AppRoot {
     event_bus: Arc<EventBus>,
     /// Status publisher (publishes to EventBus, replaces StatusPoller)
     status_publisher: Option<StatusPublisher>,
+    /// Status key base for current worktree (e.g. "local:/path/to/worktree")
+    status_key_base: Option<String>,
     /// Whether EventBus subscription has been started (spawn once)
     event_bus_subscription_started: bool,
     /// NewBranchDialogModel + Entity - dialog state; Entity observes, re-renders only when model notifies
@@ -154,7 +156,15 @@ pub struct AppRoot {
     search_query: String,
     /// Index of current match when cycling (Enter/Cmd+G)
     search_current_match: usize,
+    /// PaneSummaryModel - per-pane last_line + status_since for Sidebar
+    pane_summary_model: Option<Entity<PaneSummaryModel>>,
+    /// Running animation frame index (cycles through RUNNING_FRAMES)
+    running_animation_frame: usize,
+    /// Running animation timer task (250ms tick)
+    running_animation_task: Option<gpui::Task<()>>,
 }
+
+const RUNNING_ANIMATION_INTERVAL_MS: u64 = 250;
 
 impl AppRoot {
     /// Get sidebar width for persistence (clamped 200-400)
@@ -230,6 +240,7 @@ impl AppRoot {
             pane_statuses: Arc::new(Mutex::new(HashMap::new())),
             event_bus: Arc::new(EventBus::default()),
             status_publisher: None,
+            status_key_base: None,
         event_bus_subscription_started: false,
         new_branch_dialog_model: None,
         new_branch_dialog_entity: None,
@@ -265,6 +276,9 @@ impl AppRoot {
             search_active: false,
             search_query: String::new(),
             search_current_match: 0,
+            pane_summary_model: None,
+            running_animation_frame: 0,
+            running_animation_task: None,
         }
     }
 
@@ -281,6 +295,10 @@ impl AppRoot {
             let pane_statuses = Arc::clone(&self.pane_statuses);
             let model = cx.new(move |_cx| StatusCountsModel::new(pane_statuses));
             self.status_counts_model = Some(model);
+        }
+        if self.pane_summary_model.is_none() {
+            let model = cx.new(|_cx| PaneSummaryModel::new());
+            self.pane_summary_model = Some(model);
         }
         if self.topbar_entity.is_none() {
             if let Some(ref model) = self.status_counts_model {
@@ -520,6 +538,7 @@ impl AppRoot {
         &mut self,
         runtime: Arc<dyn AgentRuntime>,
         pane_target: &str,
+        status_key: &str,
         _terminal_area_entity: Option<Entity<TerminalAreaEntity>>,
         cx: &mut Context<Self>,
     ) {
@@ -571,11 +590,29 @@ impl AppRoot {
             // Without this, capture-pane grabs content with stale cursor positions.
             std::thread::sleep(std::time::Duration::from_millis(150));
         }
-        let _ = runtime.resize(&pane_target_str, cols, rows);
 
-        // Check if pane is now at the correct size after the resize attempts
-        let post_resize_dims = runtime.get_pane_dimensions(&pane_target_str);
-        let resize_succeeded = post_resize_dims == (cols, rows);
+        // Check pane dims after subprocess resize (or reuse actual_dims when already correct).
+        // Avoid calling runtime.resize() when the pane is already at the target size: even a
+        // no-op resize-pane sends SIGWINCH to the foreground process, causing it to redraw.
+        // That redraw arrives via %output events AFTER the initial capture-pane snapshot,
+        // making the terminal flash between old-layout and new-layout content (visible "shake"
+        // on every worktree or tab switch). Only fall back to CC resize when subprocess resize
+        // failed to achieve the target dimensions.
+        let post_subprocess_dims = if dims_match {
+            actual_dims
+        } else {
+            runtime.get_pane_dimensions(&pane_target_str)
+        };
+        let resize_succeeded = if post_subprocess_dims == (cols, rows) {
+            // Pane is already at the correct size — skip runtime.resize() to avoid SIGWINCH.
+            true
+        } else {
+            // Subprocess resize failed or was skipped; use CC resize as a last resort.
+            let _ = runtime.resize(&pane_target_str, cols, rows);
+            let final_dims = runtime.get_pane_dimensions(&pane_target_str);
+            final_dims == (cols, rows)
+        };
+        let post_resize_dims = if resize_succeeded { (cols, rows) } else { post_subprocess_dims };
 
         if !resize_succeeded {
             runtime.set_skip_initial_capture();
@@ -617,6 +654,18 @@ impl AppRoot {
                     cell_height: 16.0,
                 },
             ));
+
+            // Pre-populate the terminal with the initial capture-pane snapshot synchronously
+            // so the very first GPUI render frame already shows real content instead of a
+            // blank screen with the cursor at position (0,0). subscribe_output() puts the
+            // snapshot into the channel before returning; try_recv() drains it immediately
+            // without any blocking. The async output task below then receives only the live
+            // %output events going forward.
+            let mut ext = ContentExtractor::new();
+            if let Ok(initial_chunk) = rx.try_recv() {
+                terminal.process_output(&initial_chunk);
+                ext.feed(&initial_chunk);
+            }
 
             // Forward PTY write-back (terminal sequences like OSC response that need to go back to PTY)
             let pty_write_rx = terminal.pty_write_rx.clone();
@@ -668,13 +717,6 @@ impl AppRoot {
                 }
             });
 
-            // Feed existing pane content (prompt, history) into the Terminal before streaming
-            if let Some(initial) = runtime.capture_initial_content(&pane_target_str) {
-                if !initial.is_empty() {
-                    terminal.process_output(&initial);
-                }
-            }
-
             let focus_handle = self.terminal_focus.get_or_insert_with(|| cx.focus_handle()).clone();
             let runtime_for_input = runtime.clone();
             let pane_for_input = pane_target_str.clone();
@@ -714,10 +756,11 @@ impl AppRoot {
 
             let status_publisher = self.status_publisher.clone();
             let pane_target_clone = pane_target_str.clone();
+            let status_key_clone = status_key.to_string();
             let terminal_for_output = terminal.clone();
             let term_area_entity = self.terminal_area_entity.clone();
             let modal_open = self.modal_overlay_open.clone();
-            let mut ext = ContentExtractor::new();
+            // ext was created and pre-seeded with the initial snapshot above.
 
             cx.spawn(async move |_entity, cx| {
                 use std::time::{Duration, Instant};
@@ -751,18 +794,13 @@ impl AppRoot {
 
                     // Throttle status detection: only run on phase change or every 200ms
                     let now = Instant::now();
-                    let mut phase = ext.shell_phase();
+                    let phase = ext.shell_phase();
                     let term_mode = terminal_for_output.mode();
                     let alt_screen = term_mode.contains(alacritty_terminal::term::TermMode::ALT_SCREEN);
-                    // Detect non-shell programs running in the terminal:
-                    // 1. TUI apps using alternate screen (e.g., vim, htop)
-                    // 2. For tmux panes: query pane_current_command (opencode, aider, etc.)
-                    // process_detected: reliable signal that bypasses debounce
-                    let mut process_detected = false;
-                    if phase == ShellPhase::Unknown {
+                    // Build ProcessContext: detect non-shell programs without forcing phase
+                    let process_active = if phase == ShellPhase::Unknown {
                         if alt_screen {
-                            phase = ShellPhase::Running;
-                            process_detected = true;
+                            true
                         } else if pane_target_clone.starts_with('%') {
                             if let Ok(output) = std::process::Command::new("tmux")
                                 .args(["display-message", "-p", "-t", &pane_target_clone,
@@ -770,16 +808,14 @@ impl AppRoot {
                                 .output()
                             {
                                 let cmd = String::from_utf8_lossy(&output.stdout);
-                                let cmd = cmd.trim();
-                                if !cmd.is_empty()
-                                    && !matches!(cmd, "zsh" | "bash" | "fish" | "sh" | "dash" | "ksh")
-                                {
-                                    phase = ShellPhase::Running;
-                                    process_detected = true;
-                                }
-                            }
-                        }
-                    }
+                                let cmd = cmd.trim().to_string();
+                                !cmd.is_empty()
+                                    && !matches!(cmd.as_str(), "zsh" | "bash" | "fish" | "sh" | "dash" | "ksh")
+                            } else { false }
+                        } else { false }
+                    } else { false };
+                    let process_ctx = crate::status_detector::ProcessContext { process_active, alt_screen };
+
                     if phase != last_phase || now.duration_since(last_status_check) >= status_interval {
                         last_status_check = now;
                         last_phase = phase;
@@ -793,35 +829,23 @@ impl AppRoot {
                         } else {
                             content_str.as_str()
                         };
-                        // DEBUG: trace status detection
-                        crate::debug_log::dbg_session_log(
-                            "app_root.rs:output_loop",
-                            "status_check",
-                            &serde_json::json!({
-                                "pane": &pane_target_clone,
-                                "osc133_phase": format!("{:?}", ext.shell_phase()),
-                                "effective_phase": format!("{:?}", phase),
-                                "alt_screen": alt_screen,
-                                "content_len": content_for_status.len(),
-                                "content_tail": &content_for_status[content_for_status.len().saturating_sub(200)..],
-                            }),
-                            "DBG_STATUS",
-                        );
                         if let Some(ref pub_) = status_publisher {
                             let _ = pub_.check_status(
-                                &pane_target_clone,
+                                &status_key_clone,
                                 crate::status_detector::ProcessStatus::Running,
                                 Some(shell_info.clone()),
                                 content_for_status,
+                                process_ctx,
                             );
-                            // Process-level detection (alt screen / tmux pane_current_command)
-                            // is reliable — call again to satisfy debounce threshold immediately
-                            if process_detected {
+                            // For non-shell processes (TUI/CLI agents), call again to satisfy
+                            // debounce — safe because text detection still determines the status
+                            if process_active {
                                 let _ = pub_.check_status(
-                                    &pane_target_clone,
+                                    &status_key_clone,
                                     crate::status_detector::ProcessStatus::Running,
                                     Some(shell_info),
                                     content_for_status,
+                                    process_ctx,
                                 );
                             }
                         }
@@ -861,6 +885,7 @@ impl AppRoot {
         &mut self,
         runtime: Arc<dyn AgentRuntime>,
         pane_target: &str,
+        status_key: &str,
         _terminal_area_entity: Option<Entity<TerminalAreaEntity>>,
         cx: &mut Context<Self>,
     ) {
@@ -913,13 +938,6 @@ impl AppRoot {
                     let _ = runtime_for_resize.resize(&pane_for_resize, cols, rows);
                 });
 
-            // Feed existing pane content into the Terminal before streaming
-            if let Some(initial) = runtime.capture_initial_content(&pane_target_str) {
-                if !initial.is_empty() {
-                    terminal.process_output(&initial);
-                }
-            }
-
             let focus_handle = self.terminal_focus.get_or_insert_with(|| cx.focus_handle()).clone();
             let runtime_for_input = runtime.clone();
             let pane_for_input = pane_target_str.clone();
@@ -944,6 +962,7 @@ impl AppRoot {
 
             let status_publisher = self.status_publisher.clone();
             let pane_target_clone = pane_target_str.clone();
+            let status_key_clone = status_key.to_string();
             let terminal_for_output = terminal.clone();
             let term_area_entity = self.terminal_area_entity.clone();
             let modal_open = self.modal_overlay_open.clone();
@@ -980,18 +999,13 @@ impl AppRoot {
 
                     // Throttle status detection: only run on phase change or every 200ms
                     let now = Instant::now();
-                    let mut phase = ext.shell_phase();
+                    let phase = ext.shell_phase();
                     let term_mode = terminal_for_output.mode();
                     let alt_screen = term_mode.contains(alacritty_terminal::term::TermMode::ALT_SCREEN);
-                    // Detect non-shell programs running in the terminal:
-                    // 1. TUI apps using alternate screen (e.g., vim, htop)
-                    // 2. For tmux panes: query pane_current_command (opencode, aider, etc.)
-                    // process_detected: reliable signal that bypasses debounce
-                    let mut process_detected = false;
-                    if phase == ShellPhase::Unknown {
+                    // Build ProcessContext: detect non-shell programs without forcing phase
+                    let process_active = if phase == ShellPhase::Unknown {
                         if alt_screen {
-                            phase = ShellPhase::Running;
-                            process_detected = true;
+                            true
                         } else if pane_target_clone.starts_with('%') {
                             if let Ok(output) = std::process::Command::new("tmux")
                                 .args(["display-message", "-p", "-t", &pane_target_clone,
@@ -999,16 +1013,14 @@ impl AppRoot {
                                 .output()
                             {
                                 let cmd = String::from_utf8_lossy(&output.stdout);
-                                let cmd = cmd.trim();
-                                if !cmd.is_empty()
-                                    && !matches!(cmd, "zsh" | "bash" | "fish" | "sh" | "dash" | "ksh")
-                                {
-                                    phase = ShellPhase::Running;
-                                    process_detected = true;
-                                }
-                            }
-                        }
-                    }
+                                let cmd = cmd.trim().to_string();
+                                !cmd.is_empty()
+                                    && !matches!(cmd.as_str(), "zsh" | "bash" | "fish" | "sh" | "dash" | "ksh")
+                            } else { false }
+                        } else { false }
+                    } else { false };
+                    let process_ctx = crate::status_detector::ProcessContext { process_active, alt_screen };
+
                     if phase != last_phase || now.duration_since(last_status_check) >= status_interval {
                         last_status_check = now;
                         last_phase = phase;
@@ -1022,32 +1034,23 @@ impl AppRoot {
                         } else {
                             content_str.as_str()
                         };
-                        // DEBUG: trace status detection (split pane)
-                        crate::debug_log::dbg_session_log(
-                            "app_root.rs:pane_output_loop",
-                            "status_check",
-                            &serde_json::json!({
-                                "pane": &pane_target_clone,
-                                "osc133_phase": format!("{:?}", ext.shell_phase()),
-                                "effective_phase": format!("{:?}", phase),
-                                "alt_screen": alt_screen,
-                                "content_len": content_for_status.len(),
-                            }),
-                            "DBG_STATUS",
-                        );
                         if let Some(ref pub_) = status_publisher {
                             let _ = pub_.check_status(
-                                &pane_target_clone,
+                                &status_key_clone,
                                 crate::status_detector::ProcessStatus::Running,
                                 Some(shell_info.clone()),
                                 content_for_status,
+                                process_ctx,
                             );
-                            if process_detected {
+                            // For non-shell processes (TUI/CLI agents), call again to satisfy
+                            // debounce — safe because text detection still determines the status
+                            if process_active {
                                 let _ = pub_.check_status(
-                                    &pane_target_clone,
+                                    &status_key_clone,
                                     crate::status_detector::ProcessStatus::Running,
                                     Some(shell_info),
                                     content_for_status,
+                                    process_ctx,
                                 );
                             }
                         }
@@ -1105,8 +1108,13 @@ impl AppRoot {
         // #endregion
         self.runtime = Some(runtime.clone());
 
+        // Validate saved_split_tree against actual tmux pane count.
+        // If tmux was killed and restarted (kill-server), there is only 1 pane even if
+        // the persisted state recorded multiple. Using a stale split tree would try to
+        // subscribe to pane IDs that don't exist, leaving phantom terminal areas.
+        let actual_pane_count = runtime.list_panes(&pane_target).len().max(1);
         let (split_tree, pane_targets): (SplitNode, Vec<String>) = match saved_split_tree {
-            Some(tree) if tree.pane_count() > 1 => {
+            Some(tree) if tree.pane_count() > 1 && tree.pane_count() <= actual_pane_count => {
                 let targets: Vec<String> = tree.flatten().into_iter().map(|(t, _)| t).collect();
                 (tree, targets)
             }
@@ -1129,9 +1137,14 @@ impl AppRoot {
 
         self.ensure_event_bus_subscription(cx);
 
+        // Use "local:{worktree_path}" as the status key so sidebar can look up status
+        // by worktree path regardless of backend (tmux pane IDs vs local PTY IDs).
+        let status_key_base = format!("local:{}", worktree_path.display());
+        self.status_key_base = Some(status_key_base.clone());
         let status_publisher = StatusPublisher::new(Arc::clone(&self.event_bus));
-        for pt in &pane_targets {
-            status_publisher.register_pane(pt);
+        for (i, _pt) in pane_targets.iter().enumerate() {
+            let sk = if i == 0 { status_key_base.clone() } else { format!("{}:{}", status_key_base, i) };
+            status_publisher.register_pane(&sk);
         }
         self.status_publisher = Some(status_publisher);
 
@@ -1258,13 +1271,14 @@ impl AppRoot {
 
         let term_entity_for_setup = self.terminal_area_entity.clone();
         if pane_targets.len() == 1 {
-            self.setup_local_terminal(runtime.clone(), &pane_targets[0], term_entity_for_setup, cx);
+            self.setup_local_terminal(runtime.clone(), &pane_targets[0], &status_key_base, term_entity_for_setup, cx);
         } else {
             if let Ok(mut buffers) = self.terminal_buffers.lock() {
                 buffers.clear();
             }
-            for pt in &pane_targets {
-                self.setup_pane_terminal_output(runtime.clone(), pt, self.terminal_area_entity.clone(), cx);
+            for (i, pt) in pane_targets.iter().enumerate() {
+                let sk = if i == 0 { status_key_base.clone() } else { format!("{}:{}", status_key_base, i) };
+                self.setup_pane_terminal_output(runtime.clone(), pt, &sk, self.terminal_area_entity.clone(), cx);
             }
         }
 
@@ -1585,6 +1599,46 @@ impl AppRoot {
         true
     }
 
+    /// Start/stop running animation timer based on whether any pane is Running.
+    fn manage_running_animation(&mut self, cx: &mut Context<Self>) {
+        let has_running = self.pane_summary_model
+            .as_ref()
+            .map(|m| m.read(cx).has_running())
+            .unwrap_or(false);
+
+        if has_running && self.running_animation_task.is_none() {
+            let pane_summary_model = self.pane_summary_model.clone();
+            self.running_animation_task = Some(cx.spawn(async move |entity, cx| {
+                loop {
+                    blocking::unblock(|| std::thread::sleep(std::time::Duration::from_millis(RUNNING_ANIMATION_INTERVAL_MS))).await;
+                    let should_continue = entity.update(cx, |this, cx| {
+                        this.running_animation_frame = this.running_animation_frame.wrapping_add(1);
+                        let still_running = pane_summary_model
+                            .as_ref()
+                            .map(|m| m.read(cx).has_running())
+                            .unwrap_or(false);
+                        if still_running {
+                            cx.notify();
+                            true
+                        } else {
+                            this.running_animation_frame = 0;
+                            this.running_animation_task = None;
+                            cx.notify();
+                            false
+                        }
+                    });
+                    match should_continue {
+                        Ok(true) => continue,
+                        _ => break,
+                    }
+                }
+            }));
+        } else if !has_running && self.running_animation_task.is_some() {
+            self.running_animation_task = None;
+            self.running_animation_frame = 0;
+        }
+    }
+
     fn ensure_event_bus_subscription(&mut self, cx: &mut Context<Self>) {
         if self.event_bus_subscription_started { return; }
         self.event_bus_subscription_started = true;
@@ -1602,6 +1656,7 @@ impl AppRoot {
         let notification_manager = self.notification_manager.clone();
         let status_counts_model = self.status_counts_model.clone();
         let notification_panel_model = self.notification_panel_model.clone();
+        let pane_summary_model = self.pane_summary_model.clone();
         cx.spawn(async move |entity, cx| {
             let rx = std::sync::Arc::new(std::sync::Mutex::new(event_bus.subscribe()));
             loop {
@@ -1610,6 +1665,13 @@ impl AppRoot {
                 match ev {
                     Ok(RuntimeEvent::AgentStateChange(e)) => {
                         if let Some(ref pane_id) = e.pane_id {
+                            // Update PaneSummaryModel (last_line + status_since)
+                            if let Some(ref psm) = pane_summary_model {
+                                let _ = cx.update_entity(psm, |m, cx| {
+                                    let (changed, _) = m.update(pane_id, e.state, e.last_line.clone());
+                                    if changed { cx.notify(); }
+                                });
+                            }
                             if let Some(ref model) = status_counts_model {
                                 let _ = cx.update_entity(model, |m, cx| {
                                     m.update_pane_status(pane_id, e.state);
@@ -1630,6 +1692,10 @@ impl AppRoot {
                                     });
                                 }
                             }
+                            // Manage animation timer
+                            let _ = entity.update(cx, |this, cx| {
+                                this.manage_running_animation(cx);
+                            });
                         }
                     }
                     Ok(RuntimeEvent::Notification(n)) => {
@@ -2304,7 +2370,17 @@ impl AppRoot {
         // Check for Cmd+key shortcuts (app shortcuts)
         if event.keystroke.modifiers.platform {
             match event.keystroke.key.as_str() {
-                "b" => self.sidebar_visible = !self.sidebar_visible,
+                "b" => {
+                    self.sidebar_visible = !self.sidebar_visible;
+                    let visible = self.sidebar_visible;
+                    if let Some(ref e) = self.topbar_entity {
+                        let _ = cx.update_entity(e, |t: &mut TopBarEntity, cx| {
+                            t.set_sidebar_visible(visible);
+                            cx.notify();
+                        });
+                    }
+                    cx.notify();
+                }
                 "f" => {
                     self.search_active = true;
                     self.search_query.clear();
@@ -2522,14 +2598,20 @@ impl AppRoot {
                     cx.notify();
                 });
             }
+            // Derive status key for new pane from status_key_base + pane index
+            let pane_count = self.split_tree.pane_count();
+            let new_status_key = match &self.status_key_base {
+                Some(base) => if pane_count <= 1 { base.clone() } else { format!("{}:{}", base, pane_count - 1) },
+                None => format!("local:{}", new_target),
+            };
             if let Some(rt) = &self.runtime {
-                self.setup_pane_terminal_output(rt.clone(), &new_target, self.terminal_area_entity.clone(), cx);
+                self.setup_pane_terminal_output(rt.clone(), &new_target, &new_status_key, self.terminal_area_entity.clone(), cx);
             }
             if let Ok(mut guard) = self.pane_targets_shared.lock() {
                 *guard = self.split_tree.flatten().into_iter().map(|(t, _)| t).collect();
             }
             if let Some(ref mut pub_) = self.status_publisher {
-                pub_.register_pane(&new_target);
+                pub_.register_pane(&new_status_key);
             }
             self.save_current_worktree_runtime_state();
             cx.notify();
@@ -2708,12 +2790,6 @@ impl AppRoot {
                 Arc::new(move |cols, rows| {
                     let _ = runtime_for_resize.resize(&pane_for_resize, cols, rows);
                 });
-
-            if let Some(initial) = runtime.capture_initial_content(&pane_target_str) {
-                if !initial.is_empty() {
-                    terminal.process_output(&initial);
-                }
-            }
 
             let focus_handle = self.terminal_focus.get_or_insert_with(|| cx.focus_handle()).clone();
             let runtime_for_input = runtime.clone();
@@ -3260,14 +3336,28 @@ impl AppRoot {
         let notification_panel_model_for_toggle = self.notification_panel_model.clone();
         let app_root_entity_for_add_ws = app_root_entity.clone();
 
+        // Collect pane summaries for sidebar display
+        let pane_summaries_data = self.pane_summary_model.as_ref()
+            .map(|m| m.read(cx).summaries().clone())
+            .unwrap_or_default();
+        let running_frame = self.running_animation_frame;
+
         // Create sidebar with callbacks (cmux style: top controls in sidebar)
         let mut sidebar = Sidebar::new(&repo_name, repo_path.clone())
             .with_statuses(pane_statuses.clone())
-            .with_notification_manager(self.notification_manager.clone())
+            .with_pane_summaries(pane_summaries_data)
+            .with_running_frame(running_frame)
             .with_context_menu(self.sidebar_context_menu_index)
             .on_toggle_sidebar(move |_window, cx| {
                 let _ = cx.update_entity(&app_root_entity_for_toggle, |this: &mut AppRoot, cx| {
                     this.sidebar_visible = !this.sidebar_visible;
+                    let visible = this.sidebar_visible;
+                    if let Some(ref e) = this.topbar_entity {
+                        let _ = cx.update_entity(e, |t: &mut TopBarEntity, cx| {
+                            t.set_sidebar_visible(visible);
+                            cx.notify();
+                        });
+                    }
                     cx.notify();
                 });
             })
@@ -3303,11 +3393,18 @@ impl AppRoot {
 
         // Set up select callback
         let app_root_entity_for_sidebar = app_root_entity.clone();
-        sidebar.on_select(move |idx: usize, _window: &mut Window, cx: &mut App| {
+        let terminal_focus_for_select = terminal_focus.clone();
+        sidebar.on_select(move |idx: usize, window: &mut Window, cx: &mut App| {
             let _ = cx.update_entity(&app_root_entity_for_sidebar, |this: &mut AppRoot, cx| {
                 this.pending_worktree_selection = Some(idx);
                 this.process_pending_worktree_selection(cx);
                 cx.notify();
+            });
+            // Clicking the sidebar may defocus the terminal. Restore focus immediately
+            // so keyboard input works without waiting for the async switch to complete.
+            let focus = terminal_focus_for_select.clone();
+            window.on_next_frame(move |window, cx| {
+                window.focus(&focus, cx);
             });
         });
 
@@ -3431,7 +3528,7 @@ impl AppRoot {
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(0x1e1e1e))
+            .bg(rgb(0x21252b))
             .relative()
             .when(self.sidebar_context_menu_index.is_some(), |el| {
                 let app_root_entity_for_overlay = app_root_entity_for_clear_menu.clone();
@@ -3719,8 +3816,8 @@ impl Render for AppRoot {
             .id("app-root")
             .relative()
             .size_full()
-            .bg(rgb(0x1e1e1e))
-            .text_color(rgb(0xcccccc))
+            .bg(rgb(0x21252b))
+            .text_color(rgb(0xabb2bf))
             .font_family(".SystemUIFont")
             .focusable()
             .track_focus(&terminal_focus)

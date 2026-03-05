@@ -98,14 +98,19 @@ pub struct TerminalElementState {
 
 const FONT_FAMILY: &str = "Menlo";
 fn font_size() -> Pixels {
-    px(14.0)
+    px(12.0)
 }
 
 fn make_font(weight: FontWeight, style: FontStyle) -> Font {
+    use gpui::FontFallbacks;
     Font {
         family: FONT_FAMILY.into(),
         features: FontFeatures::default(),
-        fallbacks: None,
+        fallbacks: Some(FontFallbacks::from_fonts(vec![
+            "Apple Symbols".into(),
+            "Apple Color Emoji".into(),
+            "Helvetica Neue".into(),
+        ])),
         weight,
         style,
     }
@@ -185,10 +190,19 @@ impl Element for TerminalElement {
             if let Some(cached) = cache.get() {
                 return cached;
             }
-            let font = make_font(FontWeight::NORMAL, FontStyle::Normal);
+            // Use Menlo without fallbacks for measurement so cell_width is always
+            // based on Menlo's monospace advance — fallback fonts may have different metrics.
+            let font_no_fallback = Font {
+                family: FONT_FAMILY.into(),
+                features: FontFeatures::default(),
+                fallbacks: None,
+                weight: FontWeight::NORMAL,
+                style: FontStyle::Normal,
+            };
+            // Measure 10 identical ASCII chars and divide; more accurate than a single char.
             let text_run = TextRun {
-                len: "│".len(),
-                font: font.clone(),
+                len: 10,
+                font: font_no_fallback.clone(),
                 color: gpui::black(),
                 background_color: None,
                 underline: None,
@@ -197,9 +211,9 @@ impl Element for TerminalElement {
             let fs = font_size();
             let shaped = window
                 .text_system()
-                .shape_line("│".into(), fs, &[text_run], None);
+                .shape_line("MMMMMMMMMM".into(), fs, &[text_run], None);
 
-            let cw = if shaped.width > px(0.0) { shaped.width } else { fs * 0.6 };
+            let cw = if shaped.width > px(0.0) { shaped.width / 10.0 } else { fs * 0.6 };
             let lh = if shaped.ascent + shaped.descent > px(0.0) {
                 (shaped.ascent + shaped.descent).ceil()
             } else {
@@ -349,6 +363,13 @@ impl Element for TerminalElement {
                         }
                     } else if let Some(rect) = current_bg.take() {
                         layout_rects.push(rect);
+                    }
+
+                    // Wide characters occupy 2 terminal columns; extend background rect to cover the spacer column
+                    if cell.flags.contains(Flags::WIDE_CHAR) {
+                        if let Some(ref mut rect) = current_bg {
+                            rect.extend();
+                        }
                     }
 
                     let has_decorations = cell.flags.contains(Flags::UNDERLINE)
@@ -713,10 +734,25 @@ impl Element for TerminalElement {
             });
         }
 
-        // Register InputHandler for text input (IME path)
+        // Register InputHandler for text input (IME path).
+        // Compute cursor screen bounds here (regardless of SHOW_CURSOR mode)
+        // so the IME candidate window can be positioned next to the cursor.
         if self.focused {
             if let Some(ref send_fn) = self.on_input {
-                let handler = crate::terminal::terminal_input_handler::TerminalInputHandler::new(send_fn.clone());
+                let ime_cursor_bounds = self.terminal.with_content(|term| {
+                    let grid = term.grid();
+                    let cursor_point = grid.cursor.point;
+                    let display_offset = grid.display_offset() as i32;
+                    let visual_line = cursor_point.line.0 + display_offset;
+                    if visual_line < 0 {
+                        return None;
+                    }
+                    let cx = origin.x + cell_width * (cursor_point.column.0 as f32);
+                    let cy = origin.y + line_height * (visual_line as f32);
+                    Some(Bounds::new(Point::new(cx, cy), Size::new(cell_width, line_height)))
+                });
+                let handler = crate::terminal::terminal_input_handler::TerminalInputHandler::new(send_fn.clone())
+                    .with_cursor_bounds(ime_cursor_bounds);
                 window.handle_input(&self.focus_handle, handler, cx);
             }
         }

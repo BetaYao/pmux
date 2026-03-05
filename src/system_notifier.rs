@@ -9,7 +9,7 @@ pub fn notify(_app: &str, body: &str, notif_type: NotificationType) {
         NotificationType::Error => "pmux — Error",
         NotificationType::Waiting => "pmux — Waiting",
         NotificationType::WaitingConfirm => "pmux — Confirm",
-        NotificationType::Info => "pmux — Info",
+        NotificationType::Info => "pmux — Done",
     };
     let _ = Notification::new()
         .summary(summary)

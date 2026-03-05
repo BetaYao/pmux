@@ -7,3 +7,6 @@ pub use notification_panel_model::NotificationPanelModel;
 
 mod new_branch_dialog_model;
 pub use new_branch_dialog_model::NewBranchDialogModel;
+
+mod pane_summary_model;
+pub use pane_summary_model::{PaneSummaryModel, PaneSummary};

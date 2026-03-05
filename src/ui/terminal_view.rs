@@ -161,10 +161,16 @@ impl RenderOnce for TerminalView {
                 });
                 let links = terminal.detect_links_cached();
                 let selection_range = terminal.selection_range();
+                // Inactive panes get a slightly darker background to distinguish focus
+                let palette = if self.is_focused {
+                    ColorPalette::default()
+                } else {
+                    ColorPalette::builder().background(0x19, 0x1c, 0x22).build()
+                };
                 let mut elem = TerminalElement::new(
                     terminal.clone(),
                     focus_handle.clone(),
-                    ColorPalette::default(),
+                    palette,
                 )
                 .with_focused(self.is_focused)
                 .with_search(matches, search_current)
@@ -201,27 +207,11 @@ impl RenderOnce for TerminalView {
             .min_h_0()
             .flex()
             .flex_col()
-            .bg(rgb(0x282c34))
+            .when(self.is_focused, |el| el.bg(rgb(0x1e1e1e)))
+            .when(!self.is_focused, |el| el.bg(rgb(0x19191c)))
             .text_color(rgb(0xabb2bf))
             .font_family("Menlo")
             .text_size(px(12.))
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .px(px(8.))
-                    .py(px(6.))
-                    .bg(rgb(0x2e343e))
-                    .border_b_1()
-                    .border_color(rgb(0x3d3d3d))
-                    .child(
-                        div()
-                            .text_size(px(11.))
-                            .text_color(rgb(0x999999))
-                            .child(format!("🖥 {}", self.title)),
-                    ),
-            )
             .child(
                 div()
                     .id("terminal-content")
@@ -230,8 +220,7 @@ impl RenderOnce for TerminalView {
                     .min_w_0()
                     .w_full()
                     .p(px(4.))
-                    .overflow_y_scroll()
-                    .overflow_x_hidden()
+                    .overflow_hidden()
                     .child(content_elem),
             )
     }

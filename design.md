@@ -222,8 +222,8 @@ process lifecycle → Event Bus (AgentStateChange) → Sidebar / StatusBar / Not
 **左侧 Sidebar**
 - **Header**（在 Sidebar 内）：macOS 系统按钮（红黄绿）+ workspace 图标 + 通知 icon + 添加 workspace icon
 - **Worktree list**（可滚动）：
-  - 每项：状态图标 | **worktree 名称**（粗体）| 状态/最后消息 | 路径
-  - 示例：`hq` + "Claude is waiting for your input" + `~/fun/cmuxterm-hq`
+  - 每项两行：状态图标 | **分支名称**（粗体）| 最后更新时间（右对齐）/ 最后一条消息或状态提示
+  - 示例：`● feature/login  5m` / `  Waiting for input`
   - 选中项蓝色背景高亮
 - **[+ New Branch]**：固定在 list 下方
 
@@ -553,3 +553,197 @@ STT（语音转文字）和 TTS（文字转语音）均支持**中文 + 英文**
 - 新增：`src/voice/`（`stt.rs`、`tts.rs`、`input_handler.rs`）
 - 与现有 `Runtime.send_input`、Event Bus 对接
 - 需实现：`Runtime.spawn_default_agent(worktree)` 或等价 API
+
+---
+
+## 15. Agent 状态检测系统
+
+Agent 状态检测是 pmux 的核心能力之一。整个系统由 **检测 → 发布 → 分发 → 展示** 四个阶段组成。
+
+### 15.1 状态枚举
+
+```rust
+// src/agent_status.rs
+enum AgentStatus {
+    Running,         // 绿 ●  — Agent 正在执行
+    Waiting,         // 黄 ◐  — 等待用户输入
+    WaitingConfirm,  // 橙 ▲  — 需要人工确认（如权限审批）
+    Idle,            // 灰 ○  — 空闲，无任务
+    Error,           // 红 ✕  — 发生错误
+    Exited,          // 蓝 ✓  — 进程已退出
+    Unknown,         // 紫 ?  — 状态无法判断
+}
+```
+
+**优先级**（高→低）：Error(6) > Exited(5) = WaitingConfirm(5) > Waiting(4) > Running(3) > Idle(2) > Unknown(1)
+
+多 pane 场景（split panes）：Sidebar 按 worktree 聚合，取所有 pane 中优先级最高的状态显示（`AgentStatus::highest_priority_for_prefix()`）。
+
+### 15.2 检测链路总览
+
+```
+PTY output bytes
+       │
+       ▼
+ContentExtractor.feed(bytes)
+       │
+       ├─ Osc133Parser → ShellPhaseInfo { phase, exit_code }
+       └─ text_buf → take_content() → visible text
+       │
+       ▼
+StatusPublisher.check_status(pane_id, process_status, shell_info, content)
+       │
+       ├─ StatusDetector.detect(process, osc133, text) → AgentStatus
+       ├─ DebouncedStatusTracker → 去抖 → changed?
+       └─ extract_last_line(content, 80) → last_line
+       │
+       ▼ (if changed)
+Event Bus
+       │
+       ├─ RuntimeEvent::AgentStateChange { state, prev_state, last_line, pane_id }
+       └─ RuntimeEvent::Notification { message, notif_type }  (条件触发)
+       │
+       ▼
+AppRoot event subscription
+       │
+       ├─ StatusCountsModel  → TopBar 聚合计数
+       ├─ PaneSummaryModel   → Sidebar (last_line, status_since, status)
+       ├─ NotificationManager → 通知面板
+       ├─ system_notifier     → macOS 系统通知
+       └─ RemoteChannels      → Discord / KOOK / 飞书
+```
+
+### 15.3 检测优先级（StatusDetector）
+
+```
+文件：src/status_detector.rs
+
+Priority 1: Process lifecycle (最高)
+  ProcessStatus::Exited  → Exited
+  ProcessStatus::Error   → Error
+
+Priority 2: OSC 133 shell markers
+  ShellPhase::Running → Running
+  ShellPhase::Input / Prompt → Waiting
+  ShellPhase::Output + exit_code ≠ 0 → Error
+  ShellPhase::Output + exit_code = 0 → Idle（命令成功完成）
+
+Priority 3: Text patterns (fallback)
+  检查最后 15 行（check_line_count），先去 ANSI 转义
+  先检查最后 3 行是否匹配 Idle prompt 模式（覆盖旧 Running 文本）
+  再依次匹配：Confirm > Error > Waiting > Running > Idle > Unknown
+  内置 regex pattern 组，支持 custom_* 扩展
+```
+
+**内置文本模式**：
+
+| 类别 | 示例 pattern |
+|------|-------------|
+| Idle (prompt) | `❯`, `$`, `%`, `git:(main) ✗`, `user@host:~ $`（最后 3 行优先匹配） |
+| Running | `thinking`, `analyzing`, `writing`, `esc to interrupt` |
+| Waiting | `? `, `> `, `human:`, `press enter`, `waiting for` |
+| WaitingConfirm | `requires approval`, `Accept/Reject`, `Always allow` |
+| Error | `error`, `panic`, `traceback`, `exit code [1-9]` |
+
+### 15.4 去抖机制（DebouncedStatusTracker）
+
+```
+文件：src/status_detector.rs
+
+- 普通状态变化：需连续 2 次检测到相同新状态才提交（debounce_threshold=2）
+- 紧急状态（Error, Exited, WaitingConfirm）：跳过去抖，立即提交
+- 避免终端输出中瞬间出现的关键词导致误判
+```
+
+### 15.5 状态发布（StatusPublisher）
+
+```
+文件：src/runtime/status_publisher.rs
+
+触发：终端有新输出时调用 check_status()（事件驱动，非轮询）
+
+输入：pane_id, ProcessStatus, Option<ShellPhaseInfo>, content: &str
+
+流程：
+  1. 记录 prev_status = tracker.current_status()
+  2. StatusDetector.detect() → 新状态
+  3. DebouncedStatusTracker.update_with_status() → changed?
+  4. extract_last_line(content, 80) → last_line（最后一行有意义的终端输出）
+  5. 发布 AgentStateChange { state, prev_state, last_line, pane_id }
+  6. 条件触发 Notification（见 §15.6）
+```
+
+### 15.6 通知触发规则
+
+```
+文件：src/runtime/status_publisher.rs
+
+状态转换触发通知：
+  (Running → Idle)    → Info    "pmux — Done"     ★ agent 完成任务
+  (* → Waiting)       → WaitingInput              等待输入
+  (* → WaitingConfirm)→ WaitingConfirm            需要确认
+  (* → Error)         → Error                     错误
+  (* → Exited)        → Info                      进程退出
+
+通知消息内容 = last_line（真实终端输出），last_line 为空时 fallback 到 status.display_text()
+
+通知分发：
+  NotificationManager → UI 通知面板（30s 合并窗口去重）
+  system_notifier     → macOS 系统通知（notify-rust）
+  RemoteChannels      → Discord / KOOK / 飞书 bot
+```
+
+### 15.7 Sidebar 状态展示
+
+```
+文件：src/ui/sidebar.rs
+
+布局（每个 worktree 两行）：
+  [◓] feature-auth                          3m     ← 动画图标 + status_since
+      Writing authentication middleware...          ← last_line（真实终端输出）
+
+数据来源：
+  - PaneSummaryModel（Entity）：per-pane { status, last_line, status_since }
+  - pane_statuses（HashMap）：per-pane AgentStatus（用于聚合）
+  - running_animation_frame：Running 状态动画帧
+
+Running 动画：
+  帧序列 ◐ → ◓ → ● → ◑，250ms/帧
+  由 AppRoot.manage_running_animation() 管理 timer 生命周期：
+    - has_running=true + 无 timer → 启动
+    - has_running=false + 有 timer → 停止
+  动画帧通过 cx.notify() 驱动 Sidebar 重绘
+
+status_since 显示：
+  < 1 min → "Just now"
+  < 1 hour → "Nm"
+  < 1 day → "Nh"
+  ≥ 1 day → "Nd"
+```
+
+### 15.8 数据模型与文件
+
+| 模块 | 文件 | 职责 |
+|------|------|------|
+| AgentStatus | `src/agent_status.rs` | 状态枚举、优先级、StatusCounts 聚合 |
+| ShellIntegration | `src/shell_integration.rs` | OSC 133 解析器、ShellPhase/ShellState |
+| ContentExtractor | `src/terminal/content_extractor.rs` | 终端输出解析：OSC 133 + 可见文本提取 + `extract_last_line()` |
+| StatusDetector | `src/status_detector.rs` | 三级优先级状态检测 + DebouncedStatusTracker 去抖 |
+| StatusPublisher | `src/runtime/status_publisher.rs` | 事件驱动发布：状态变化 → EventBus（含 last_line、prev_state） |
+| EventBus | `src/runtime/event_bus.rs` | 发布/订阅：AgentStateChange、Notification、TerminalOutput |
+| PaneSummaryModel | `src/ui/models/pane_summary_model.rs` | GPUI Entity：per-pane { status, last_line, status_since } |
+| StatusCountsModel | `src/ui/models/status_counts_model.rs` | GPUI Entity：per-worktree 聚合计数（TopBar 用） |
+| NotificationManager | `src/notification_manager.rs` | 通知存储、合并去重、已读/未读 |
+| SystemNotifier | `src/system_notifier.rs` | macOS 桌面通知（notify-rust） |
+
+### 15.9 已知限制与改进方向
+
+| 问题 | 现状 | 改进方向 |
+|------|------|----------|
+| 文本检测误报 | 终端输出中含 "error"/"waiting" 等关键词可能误判 | 增加上下文权重、agent 特定模式（claude/cursor/opencode） |
+| Idle prompt 检测 | 内置 `❯$%#>` + git prompt + user@host 模式，最后 3 行匹配即 Idle | 支持 `add_idle_pattern()` 自定义 prompt 模式 |
+| 检测窗口 | 最后 15 行（check_line_count=15），旧文本快速滑出检测范围 | 可调节 `with_line_count()` |
+| OSC 133 依赖 | 需要用户 shell 配置 OSC 133 才有精确的 phase 信息 | 提供 `docs/shell-integration.md` 配置引导 |
+| 去抖延迟 | 普通状态变化需 2 次检测才提交，存在 ~500ms 延迟 | 可调节 debounce_threshold |
+| last_line 截断 | `extract_last_line` 按字节截断，多字节 UTF-8 可能断裂 | 改用 char boundary 截断 |
+| 多 agent 类型 | 当前 pattern 偏向 claude/opencode | 支持 per-agent-type pattern 配置 |

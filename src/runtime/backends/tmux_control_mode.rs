@@ -86,6 +86,63 @@ fn strip_tmux_title_sequences(data: &[u8]) -> Vec<u8> {
     result
 }
 
+/// Strip non-SGR CSI escape sequences from tmux capture-pane -e output.
+/// Keeps only \x1b[...m (SGR: color/attribute) sequences which are safe to
+/// replay into a VTE at any position. All other CSI sequences (cursor
+/// movement, erase, etc.) are removed because they reference tmux's own
+/// coordinate space and would corrupt pmux's layout.
+fn strip_non_sgr_escapes(data: &[u8]) -> Vec<u8> {
+    let mut result = Vec::with_capacity(data.len());
+    let mut i = 0;
+    while i < data.len() {
+        if data[i] == 0x1b && i + 1 < data.len() {
+            match data[i + 1] {
+                b'[' => {
+                    // CSI sequence: ESC [ <params> <final>
+                    // Final byte is in range 0x40..=0x7E
+                    let seq_start = i;
+                    i += 2;
+                    while i < data.len() && !(0x40..=0x7E).contains(&data[i]) {
+                        i += 1;
+                    }
+                    if i < data.len() {
+                        let final_byte = data[i];
+                        i += 1;
+                        if final_byte == b'm' {
+                            // SGR - keep the whole sequence
+                            result.extend_from_slice(&data[seq_start..i]);
+                        }
+                        // Otherwise drop it (cursor movement, erase, etc.)
+                    }
+                }
+                b']' => {
+                    // OSC sequence: ESC ] ... BEL or ESC backslash
+                    i += 2;
+                    while i < data.len() {
+                        if data[i] == 0x07 {
+                            i += 1;
+                            break;
+                        } else if data[i] == 0x1b && i + 1 < data.len() && data[i + 1] == b'\\' {
+                            i += 2;
+                            break;
+                        }
+                        i += 1;
+                    }
+                    // Drop OSC sequences
+                }
+                _ => {
+                    // Other two-byte ESC sequences (e.g. ESC = ESC >) - drop
+                    i += 2;
+                }
+            }
+        } else {
+            result.push(data[i]);
+            i += 1;
+        }
+    }
+    result
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ControlModeEvent {
     Output { pane_id: String, data: Vec<u8> },
@@ -725,6 +782,32 @@ impl TmuxControlModeRuntime {
             let _ = std::fs::remove_file(&socket_path);
         }
     }
+
+    /// Query the actual tmux window dimensions to use for refresh-client.
+    /// In multi-pane mode, window_width > pane_width; using window_width prevents
+    /// tmux from compressing all panes when we resize a single pane.
+    fn get_window_dims_for_client(&self, fallback_cols: u16, fallback_rows: u16) -> (u16, u16) {
+        let wn = self.window_name.lock().map(|w| w.clone()).unwrap_or_default();
+        if wn.is_empty() {
+            return (fallback_cols, fallback_rows);
+        }
+        let target = format!("{}:{}", self.session_name, wn);
+        if let Ok(output) = Command::new("tmux")
+            .args(["display-message", "-t", &target, "-p", "#{window_width} #{window_height}"])
+            .output()
+        {
+            let text = String::from_utf8_lossy(&output.stdout);
+            let parts: Vec<&str> = text.trim().split_whitespace().collect();
+            if parts.len() >= 2 {
+                if let (Ok(c), Ok(r)) = (parts[0].parse::<u16>(), parts[1].parse::<u16>()) {
+                    if c >= fallback_cols {
+                        return (c, r);
+                    }
+                }
+            }
+        }
+        (fallback_cols, fallback_rows)
+    }
 }
 
 impl Drop for TmuxControlModeRuntime {
@@ -763,21 +846,24 @@ impl AgentRuntime for TmuxControlModeRuntime {
     }
 
     fn resize(&self, pane_id: &PaneId, cols: u16, rows: u16) -> Result<(), RuntimeError> {
-        // Update the PTY winsize so tmux's client size stays consistent
+        self.send_command(&format!(
+            "resize-pane -t {} -x {} -y {}",
+            pane_id, cols, rows
+        ))?;
+        // Use the total window width for refresh-client, not the individual pane width.
+        // If we used pane_cols for refresh-client -C, tmux would compress the entire
+        // window (all panes) to fit within pane_cols, breaking other panes.
+        let (client_cols, client_rows) = self.get_window_dims_for_client(cols, rows);
         unsafe {
             let ws = libc::winsize {
-                ws_col: cols,
-                ws_row: rows,
+                ws_col: client_cols,
+                ws_row: client_rows,
                 ws_xpixel: 0,
                 ws_ypixel: 0,
             };
             libc::ioctl(self.pty_master_fd, libc::TIOCSWINSZ, &ws);
         }
-        self.send_command(&format!(
-            "resize-pane -t {} -x {} -y {}",
-            pane_id, cols, rows
-        ))?;
-        self.send_command(&format!("refresh-client -C {},{}", cols, rows))
+        self.send_command(&format!("refresh-client -C {},{}", client_cols, client_rows))
     }
 
     fn subscribe_output(&self, pane_id: &PaneId) -> Option<flume::Receiver<Vec<u8>>> {
@@ -838,10 +924,37 @@ impl AgentRuntime for TmuxControlModeRuntime {
     }
 
     fn capture_initial_content(&self, pane_id: &PaneId) -> Option<Vec<u8>> {
+        // Capture the visible screen with -e (SGR color sequences) so that the
+        // initial snapshot preserves colors. We then strip non-SGR escape
+        // sequences (cursor positioning, erase, etc.) to avoid layout
+        // corruption caused by tmux's absolute \x1b[row;colH sequences being
+        // re-emitted into pmux's VTE at different coordinates.
         let output = Command::new("tmux")
             .args(["capture-pane", "-t", pane_id, "-p", "-e"])
             .output()
             .ok()?;
+
+        // Also fetch the cursor position so we can restore it after feeding
+        // the snapshot. Without this the cursor appears at the wrong column.
+        let cursor_pos = Command::new("tmux")
+            .args([
+                "display-message",
+                "-t",
+                pane_id,
+                "-p",
+                "#{cursor_x},#{cursor_y}",
+            ])
+            .output()
+            .ok()
+            .and_then(|o| {
+                let s = String::from_utf8_lossy(&o.stdout);
+                let s = s.trim();
+                let mut parts = s.splitn(2, ',');
+                let x: u16 = parts.next()?.trim().parse().ok()?;
+                let y: u16 = parts.next()?.trim().parse().ok()?;
+                Some((x, y))
+            });
+
         // #region agent log
         crate::debug_log::dbg_session_log(
             "tmux_cc.rs:capture_initial_content",
@@ -851,6 +964,7 @@ impl AgentRuntime for TmuxControlModeRuntime {
                 "success": output.status.success(),
                 "stdout_len": output.stdout.len(),
                 "stderr": String::from_utf8_lossy(&output.stderr).to_string(),
+                "cursor_pos": cursor_pos.map(|(x,y)| format!("{x},{y}")),
             }),
             "H_capture",
         );
@@ -870,12 +984,23 @@ impl AgentRuntime for TmuxControlModeRuntime {
         // capture-pane uses \n (LF) between lines, but VTE interprets LF as
         // "move cursor down" without returning to column 0. Use \r\n so each
         // line starts at the left margin.
-        let mut with_crlf = trimmed.replace('\n', "\r\n");
-        // First line after attach often has no trailing space (clear/redraw timing); ensure one so cursor isn't flush with prompt.
-        if !with_crlf.is_empty() && !with_crlf.ends_with(' ') {
-            with_crlf.push(' ');
+        let with_crlf = trimmed.replace('\n', "\r\n");
+        // Strip non-SGR escape sequences (cursor positioning, erase, etc.) that
+        // reference tmux's own coordinate space and would corrupt pmux's VTE.
+        // Only SGR sequences (\x1b[...m) are kept; they carry color/attribute
+        // information that is coordinate-independent and safe to replay.
+        let filtered = strip_non_sgr_escapes(with_crlf.as_bytes());
+        result.extend_from_slice(&filtered);
+
+        // Restore cursor to its actual position (1-based CSI row;col H).
+        // tmux cursor_x/cursor_y are 0-based.
+        if let Some((cx, cy)) = cursor_pos {
+            let row = cy + 1;
+            let col = cx + 1;
+            let csi = format!("\x1b[{row};{col}H");
+            result.extend_from_slice(csi.as_bytes());
         }
-        result.extend_from_slice(with_crlf.as_bytes());
+
         Some(result)
     }
 

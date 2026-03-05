@@ -83,6 +83,11 @@ impl Render for NotificationPanelEntity {
             .on_clear_all(move |w, cx| on_clear_all(w, cx))
             .on_jump_to_pane(move |pid, w, cx| on_jump_to_pane(pid, w, cx));
 
-        div().child(panel).into_any_element()
+        div()
+            .absolute()
+            .top(px(36.))   // just below the 36px top-controls bar
+            .left(px(104.)) // aligned with notification bell icon left edge (72px pl + 28px toggle + 4px gap)
+            .child(panel)
+            .into_any_element()
     }
 }

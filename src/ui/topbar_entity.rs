@@ -16,6 +16,7 @@ pub struct TopBarEntity {
     workspace_manager: WorkspaceManager,
     on_select_tab: Arc<dyn Fn(usize, &mut Window, &mut App)>,
     on_close_tab: Arc<dyn Fn(usize, &mut Window, &mut App)>,
+    sidebar_visible: bool,
 }
 
 impl TopBarEntity {
@@ -38,11 +39,16 @@ impl TopBarEntity {
             workspace_manager,
             on_select_tab,
             on_close_tab,
+            sidebar_visible: true,
         }
     }
 
     pub fn set_workspace_manager(&mut self, wm: WorkspaceManager) {
         self.workspace_manager = wm;
+    }
+
+    pub fn set_sidebar_visible(&mut self, visible: bool) {
+        self.sidebar_visible = visible;
     }
 
     fn render_workspace_tab(
@@ -68,13 +74,11 @@ impl TopBarEntity {
             .min_w(px(80.))
             .max_w(px(200.))
             .when(is_active, |el: Stateful<Div>| {
-                el.bg(rgb(0x2d2d2d))
-                    .border_b_2()
-                    .border_color(rgb(0x0066cc))
+                el.bg(rgb(0x2c313a))
             })
             .when(!is_active, |el: Stateful<Div>| {
-                el.bg(rgb(0x1e1e1e))
-                    .hover(|style: StyleRefinement| style.bg(rgb(0x2d2d2d)))
+                el.bg(rgb(0x21252b))
+                    .hover(|style: StyleRefinement| style.bg(rgb(0x2c313a)))
             })
             .cursor_pointer()
             .on_click(move |_, window, cx| { on_select(index, window, cx); })
@@ -84,7 +88,7 @@ impl TopBarEntity {
                     .overflow_hidden()
                     .text_ellipsis()
                     .text_size(px(12.))
-                    .text_color(if is_active { rgb(0xffffff) } else { rgb(0xaaaaaa) })
+                    .text_color(if is_active { rgb(0xc0c8d5) } else { rgb(0x5c6370) })
                     .child(SharedString::from(if is_modified { format!("{} ●", name) } else { name }))
             )
             .child(
@@ -104,6 +108,8 @@ impl TopBarEntity {
 
 impl Render for TopBarEntity {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        // When sidebar is hidden, add left padding to clear macOS traffic light buttons (~80px)
+        let left_pad = if self.sidebar_visible { px(8.) } else { px(80.) };
         div()
             .id("topbar-entity")
             .w_full()
@@ -111,17 +117,12 @@ impl Render for TopBarEntity {
             .flex()
             .flex_row()
             .items_center()
-            .px(px(8.))
+            .pl(left_pad)
+            .pr(px(8.))
             .gap(px(8.))
-            .bg(rgb(0x252525))
+            .bg(rgb(0x282c34))
             .border_b_1()
-            .border_color(rgb(0x3d3d3d))
-            .child(
-                div()
-                    .text_size(px(11.))
-                    .text_color(rgb(0x888888))
-                    .child(format!("●{} ", self.counts.running))
-            )
+            .border_color(rgb(0x2a2d37))
             .child(
                 div()
                     .flex_1()

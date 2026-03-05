@@ -1,0 +1,5 @@
+Metric,Value,Unit,Status
+Single Char Latency,105.913000,ms,WARN
+Typing Throughput,319.85,chars/sec,PASS
+Large Paste Throughput,1991.41,chars/sec,PASS
+Shortcut Latency,324.295000,ms,WARN

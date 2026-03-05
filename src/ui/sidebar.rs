@@ -5,7 +5,7 @@ use gpui::{px, svg, *};
 use crate::worktree::WorktreeInfo;
 use crate::agent_status::AgentStatus;
 use crate::new_branch_orchestrator::NewBranchOrchestrator;
-use crate::notification_manager::NotificationManager;
+use crate::ui::models::PaneSummary;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -96,8 +96,10 @@ pub struct Sidebar {
     on_toggle_notifications: Option<Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
     on_add_workspace: Option<Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
     notification_count: usize,
-    /// For last message and timestamp per worktree
-    notification_manager: Option<Arc<Mutex<NotificationManager>>>,
+    /// Per-pane summaries (status, last_line, status_since) for sidebar display
+    pane_summaries: HashMap<String, PaneSummary>,
+    /// Running animation frame index (cycles through RUNNING_FRAMES)
+    running_animation_frame: usize,
     /// Orphan tmux window names (session exists but worktree was removed externally). Shown with close button.
     orphan_windows: Arc<Mutex<Vec<String>>>,
     /// Callback when user closes an orphan window (window_name).
@@ -124,14 +126,20 @@ impl Sidebar {
             on_toggle_notifications: None,
             on_add_workspace: None,
             notification_count: 0,
-            notification_manager: None,
+            pane_summaries: HashMap::new(),
+            running_animation_frame: 0,
             orphan_windows: Arc::new(Mutex::new(Vec::new())),
             on_close_orphan: None,
         }
     }
 
-    pub fn with_notification_manager(mut self, mgr: Arc<Mutex<NotificationManager>>) -> Self {
-        self.notification_manager = Some(mgr);
+    pub fn with_pane_summaries(mut self, summaries: HashMap<String, PaneSummary>) -> Self {
+        self.pane_summaries = summaries;
+        self
+    }
+
+    pub fn with_running_frame(mut self, frame: usize) -> Self {
+        self.running_animation_frame = frame;
         self
     }
 
@@ -279,11 +287,11 @@ impl Sidebar {
         div()
             .flex().flex_row().items_center()
             .px(px(12.)).py(px(10.))
-            .border_b(px(1.)).border_color(rgb(0x3d3d3d))
+            .border_b(px(1.)).border_color(rgb(0x2a2d37))
             .child(
                 div()
                     .text_size(px(13.)).font_weight(FontWeight::SEMIBOLD)
-                    .text_color(rgb(0xffffff))
+                    .text_color(rgb(0xc0c8d5))
                     .child(SharedString::from(format!("{}", repo_name)))
             )
     }
@@ -314,8 +322,8 @@ impl Sidebar {
             .pr(px(8.))
             .gap(px(4.))
             .border_b(px(1.))
-            .border_color(rgb(0x3d3d3d))
-            .bg(rgb(0x252526));
+            .border_color(rgb(0x2a2d37))
+            .bg(rgb(0x282c34));
 
         let btn_size = px(28.);
         if let Some(cb) = on_toggle_sidebar {
@@ -433,9 +441,9 @@ impl Sidebar {
             .child(inner);
 
         if is_selected {
-            row.bg(rgb(0x094771))
+            row.bg(rgb(0x2c313a))
         } else {
-            row.hover(|s: StyleRefinement| s.bg(rgb(0x2a2d2e)))
+            row.hover(|s: StyleRefinement| s.bg(rgb(0x262b33)))
         }
     }
 
@@ -525,6 +533,8 @@ impl IntoElement for Sidebar {
     fn into_element(self) -> Self::Element { Component::new(self) }
 }
 
+const RUNNING_FRAMES: &[&str] = &["\u{25d0}", "\u{25d3}", "\u{25cf}", "\u{25d1}"];
+
 /// Map worktree path to pane_id (local PTY: "local:{path}")
 fn worktree_path_to_pane_id(path: &std::path::Path) -> String {
     format!("local:{}", path.display())
@@ -562,7 +572,8 @@ impl RenderOnce for Sidebar {
         let on_toggle_notifications = self.on_toggle_notifications.clone();
         let on_add_workspace = self.on_add_workspace.clone();
         let notification_count = self.notification_count;
-        let notification_manager = self.notification_manager.clone();
+        let pane_summaries = self.pane_summaries;
+        let running_animation_frame = self.running_animation_frame;
         let orphan_windows = self.orphan_windows.lock().unwrap().clone();
         let on_close_orphan = self.on_close_orphan.clone();
 
@@ -586,24 +597,38 @@ impl RenderOnce for Sidebar {
             let text_color = if is_selected { rgb(0xffffff) } else { rgb(0xcccccc) };
             let meta_color = if is_selected { rgb(0xbbbbbb) } else { rgb(0x888888) };
 
-            let (last_message, last_time) = notification_manager.as_ref().and_then(|mgr| {
-                mgr.lock().ok().and_then(|m| {
-                    m.by_pane(&pane_prefix).first().map(|n| {
-                        (n.display_message(), format_elapsed(n.timestamp()))
-                    })
-                })
-            }).unwrap_or_else(|| (item_with_status.status_text().to_string(), "—".to_string()));
+            // Find PaneSummary for this worktree (highest-priority pane)
+            let colon_prefix = format!("{}:", pane_prefix);
+            let summary = pane_summaries.iter()
+                .filter(|(k, _)| *k == &pane_prefix || k.starts_with(&colon_prefix))
+                .max_by_key(|(_, v)| v.status.priority())
+                .map(|(_, v)| v);
+
+            let last_message = summary
+                .map(|s| if s.last_line.is_empty() { item_with_status.status_text().to_string() } else { s.last_line.clone() })
+                .unwrap_or_else(|| item_with_status.status_text().to_string());
+
+            let last_time = summary
+                .map(|s| format_elapsed(s.status_since))
+                .unwrap_or_else(|| "\u{2014}".to_string());
+
+            // Animated icon for Running status
+            let status_icon_text = if item_with_status.status == AgentStatus::Running {
+                RUNNING_FRAMES[running_animation_frame % RUNNING_FRAMES.len()]
+            } else {
+                item_with_status.status_icon()
+            };
 
             let inner = div()
-                .flex().flex_col().gap(px(2.))
+                .flex().flex_col().gap(px(2.)).overflow_hidden()
                 .child(
-                    div().flex().flex_row().items_center().gap(px(6.))
-                        .child(div().text_size(px(11.)).text_color(status_color).child(item_with_status.status_icon()))
-                        .child(div().flex_1().text_size(px(12.)).font_weight(FontWeight::SEMIBOLD).text_color(text_color)
+                    div().flex().flex_row().items_center().gap(px(6.)).overflow_hidden()
+                        .child(div().flex_shrink_0().text_size(px(11.)).text_color(status_color).child(status_icon_text))
+                        .child(div().flex_1().min_w(px(0.)).overflow_hidden().text_ellipsis().text_size(px(12.)).font_weight(FontWeight::SEMIBOLD).text_color(text_color)
                             .child(SharedString::from(item_with_status.info.short_branch_name().to_string())))
                         .child(div().text_size(px(10.)).text_color(meta_color).flex_shrink_0().child(last_time))
                 )
-                .child(div().pl(px(17.)).text_size(px(10.)).text_color(meta_color).line_height(px(14.)).child(SharedString::from(last_message)));
+                .child(div().pl(px(17.)).text_size(px(10.)).text_color(meta_color).line_height(px(14.)).overflow_hidden().text_ellipsis().child(SharedString::from(last_message)));
 
             let row_content = div()
                 .flex_1()
@@ -648,9 +673,9 @@ impl RenderOnce for Sidebar {
             }
 
             if is_selected {
-                row = row.bg(rgb(0x094771));
+                row = row.bg(rgb(0x2c313a));
             } else {
-                row = row.hover(|s: StyleRefinement| s.bg(rgb(0x2a2d2e)));
+                row = row.hover(|s: StyleRefinement| s.bg(rgb(0x262b33)));
             }
 
             if let Some(on_right_click) = &on_right_click {

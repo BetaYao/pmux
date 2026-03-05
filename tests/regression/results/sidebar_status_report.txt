@@ -1,15 +1,15 @@
 Sidebar Status Detection Report
 ==============================
-Test Time: Tue Mar  3 17:31:05 CST 2026
+Test Time: Wed Mar  4 19:47:44 CST 2026
 
 Screenshots:
-1. IDLE state: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/sidebar_idle_20260303_173059.png
+1. IDLE state: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/sidebar_idle_20260304_194738.png
    Detected: error (confidence: 0.00)
 
-2. PROGRESS state: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/sidebar_progress_20260303_173102.png
+2. PROGRESS state: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/sidebar_progress_20260304_194741.png
    Detected: error
 
-3. ERROR state: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/sidebar_error_20260303_173105.png
+3. ERROR state: /Users/matt.chow/workspace/pmux/tests/regression/../results/screenshots/sidebar_error_20260304_194744.png
    Detected: error
 
 Notes:

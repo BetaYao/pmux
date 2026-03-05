@@ -77,6 +77,12 @@
 |------|------|------|
 | [2026-03-02-tmux-input-perf-direct-pty-write.md](2026-03-02-tmux-input-perf-direct-pty-write.md) | Direct PTY write 绕过 send-keys；BatchedTextRun 替代逐字符 shape_line；清理 debug 日志；缓存 cell metrics | ~2 小时 |
 
+## Sidebar 状态修复
+
+| 计划 | 目标 |
+|------|------|
+| [2026-03-04-sidebar-multi-pane-status-fix.md](2026-03-04-sidebar-multi-pane-status-fix.md) | 修复 sidebar 只显示 primary pane 状态的 bug；添加 `highest_priority_for_prefix` 聚合多 pane；对齐 TopBar StatusCounts 语义 |
+
 ## 历史计划
 
 - [2026-02-25-spec2-implementation.md](2026-02-25-spec2-implementation.md) — Sidebar + Terminal 实现

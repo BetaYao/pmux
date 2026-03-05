@@ -18,6 +18,8 @@ pub struct AgentStateChange {
     pub agent_id: AgentId,
     pub pane_id: Option<PaneId>,
     pub state: AgentStatus,
+    pub prev_state: Option<AgentStatus>,
+    pub last_line: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -90,6 +92,8 @@ mod tests {
             agent_id: "a1".to_string(),
             pane_id: Some("%0".to_string()),
             state: AgentStatus::Running,
+            prev_state: Some(AgentStatus::Idle),
+            last_line: Some("thinking...".to_string()),
         }));
         let ev = rx.recv().unwrap();
         match ev {

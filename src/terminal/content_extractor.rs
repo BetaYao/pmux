@@ -128,3 +128,61 @@ impl Default for ContentExtractor {
         Self::new()
     }
 }
+
+/// Extract the last meaningful line from terminal content.
+/// Skips empty lines and separator-only lines (e.g. "---", "===").
+/// Truncates to `max_len` characters with "..." suffix if needed.
+pub fn extract_last_line(content: &str, max_len: usize) -> String {
+    content
+        .lines()
+        .rev()
+        .map(|l| l.trim())
+        .find(|l| {
+            !l.is_empty()
+                && l.len() > 1
+                && !l.chars().all(|c| matches!(c, '-' | '=' | '*' | '_' | '~' | '.' | ' '))
+        })
+        .map(|l| {
+            if l.len() > max_len {
+                format!("{}...", &l[..max_len])
+            } else {
+                l.to_string()
+            }
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_last_line_empty() {
+        assert_eq!(extract_last_line("", 80), "");
+        assert_eq!(extract_last_line("   \n  \n", 80), "");
+    }
+
+    #[test]
+    fn test_extract_last_line_separator_only() {
+        assert_eq!(extract_last_line("---\n===\n***\n...\n", 80), "");
+    }
+
+    #[test]
+    fn test_extract_last_line_truncation() {
+        let long = "a".repeat(100);
+        let result = extract_last_line(&long, 20);
+        assert_eq!(result, format!("{}...", "a".repeat(20)));
+    }
+
+    #[test]
+    fn test_extract_last_line_normal() {
+        let content = "first line\nsecond line\n---\n\n";
+        assert_eq!(extract_last_line(content, 80), "second line");
+    }
+
+    #[test]
+    fn test_extract_last_line_skips_single_char() {
+        let content = "hello world\n?\n";
+        assert_eq!(extract_last_line(content, 80), "hello world");
+    }
+}

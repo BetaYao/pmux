@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-const DIVIDER_WIDTH: f32 = 4.0;
+const DIVIDER_WIDTH: f32 = 1.0;
 const RATIO_SENSITIVITY: f32 = 0.002; // pixels to ratio: 500px drag = 1.0 ratio change
 
 /// Split pane container - recursively renders SplitNode tree with draggable dividers
@@ -220,9 +220,6 @@ impl SplitPaneContainer {
                     .min_w(px(0.))
                     .min_h(px(0.))
                     .cursor(gpui::CursorStyle::IBeam)
-                    .when(is_focused, |el| {
-                        el.border(px(2.)).border_color(rgb(0x0066cc))
-                    })
                     .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
                         if let Some(ref cb) = on_click {
                             cb(pane_idx, window, cx);
@@ -288,9 +285,9 @@ impl SplitPaneContainer {
                 let divider = div()
                     .w(px(DIVIDER_WIDTH))
                     .flex_shrink_0()
-                    .bg(rgb(0x3d3d3d))
+                    .bg(rgb(0x2a2d37))
                     .cursor(CursorStyle::ResizeColumn)
-                    .hover(|s: StyleRefinement| s.bg(rgb(0x4d4d4d)))
+                    .hover(|s: StyleRefinement| s.bg(rgb(0x3a3f4b)))
                     .on_mouse_down(MouseButton::Left, move |event: &MouseDownEvent, window, cx| {
                         if let Some(ref cb) = on_drag_start {
                             cb(path_clone.clone(), event.position.x.into(), ratio_val, true, window, cx);
@@ -367,9 +364,9 @@ impl SplitPaneContainer {
                 let divider = div()
                     .h(px(DIVIDER_WIDTH))
                     .flex_shrink_0()
-                    .bg(rgb(0x3d3d3d))
+                    .bg(rgb(0x2a2d37))
                     .cursor(CursorStyle::ResizeRow)
-                    .hover(|s: StyleRefinement| s.bg(rgb(0x4d4d4d)))
+                    .hover(|s: StyleRefinement| s.bg(rgb(0x3a3f4b)))
                     .on_mouse_down(MouseButton::Left, move |event: &MouseDownEvent, window, cx| {
                         if let Some(ref cb) = on_drag_start {
                             cb(path_clone.clone(), event.position.y.into(), ratio_val, false, window, cx);

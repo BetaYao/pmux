@@ -471,7 +471,7 @@ impl AgentRuntime for TmuxRuntime {
     fn capture_initial_content(&self, pane_id: &PaneId) -> Option<Vec<u8>> {
         let target = self.pane_target(pane_id);
         let out = self
-            .tmux_cmd_output(&["capture-pane", "-t", &target, "-p", "-e"])
+            .tmux_cmd_output(&["capture-pane", "-t", &target, "-p", "-e", "-S", "-"])
             .ok()?;
         Some(out.into_bytes())
     }

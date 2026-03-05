@@ -202,9 +202,6 @@ impl RenderOnce for NotificationPanel {
 
         div()
             .id("notification-panel")
-            .absolute()
-            .top(px(40.))
-            .right(px(8.))
             .w(px(320.))
             .max_h(px(400.))
             .bg(rgb(0x252525))
@@ -212,6 +209,10 @@ impl RenderOnce for NotificationPanel {
             .shadow_lg()
             .border_1()
             .border_color(rgb(0x3d3d3d))
+            .occlude()
+            .on_click(|_event, _window, cx| {
+                cx.stop_propagation();
+            })
             .flex()
             .flex_col()
             .child(
