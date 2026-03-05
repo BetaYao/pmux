@@ -22,84 +22,76 @@ ICON_SIZES = [
     (1024, 1024),  # @2x versions included
 ]
 
+def remove_white_background(image, threshold=240):
+    """Replace white/near-white pixels with transparent."""
+    img = image.convert('RGBA')
+    data = img.getdata()
+    new_data = []
+    for r, g, b, a in data:
+        if r > threshold and g > threshold and b > threshold:
+            new_data.append((r, g, b, 0))
+        else:
+            new_data.append((r, g, b, a))
+    img.putdata(new_data)
+    return img
+
+
 def crop_to_content(image, threshold=240):
     """Crop image to remove white/light borders."""
-    # Convert to RGB if needed
-    if image.mode == 'RGBA':
-        rgb_image = image.convert('RGB')
-        has_alpha = True
-    else:
-        rgb_image = image.convert('RGB') if image.mode != 'RGB' else image
-        has_alpha = False
-
+    rgb_image = image.convert('RGB')
     width, height = rgb_image.size
-
-    # Find the bounding box of non-white content
-    # We'll consider pixels with all channels > threshold as "background"
 
     def is_background(pixel):
         return all(c > threshold for c in pixel[:3])
 
-    # Find top boundary
     top = 0
     for y in range(height):
-        row_pixels = [rgb_image.getpixel((x, y)) for x in range(width)]
-        if not all(is_background(p) for p in row_pixels):
+        if not all(is_background(rgb_image.getpixel((x, y))) for x in range(width)):
             top = y
             break
 
-    # Find bottom boundary
     bottom = height - 1
     for y in range(height - 1, -1, -1):
-        row_pixels = [rgb_image.getpixel((x, y)) for x in range(width)]
-        if not all(is_background(p) for p in row_pixels):
+        if not all(is_background(rgb_image.getpixel((x, y))) for x in range(width)):
             bottom = y
             break
 
-    # Find left boundary
     left = 0
     for x in range(width):
-        col_pixels = [rgb_image.getpixel((x, y)) for y in range(height)]
-        if not all(is_background(p) for p in col_pixels):
+        if not all(is_background(rgb_image.getpixel((x, y))) for y in range(height)):
             left = x
             break
 
-    # Find right boundary
     right = width - 1
     for x in range(width - 1, -1, -1):
-        col_pixels = [rgb_image.getpixel((x, y)) for y in range(height)]
-        if not all(is_background(p) for p in col_pixels):
+        if not all(is_background(rgb_image.getpixel((x, y))) for y in range(height)):
             right = x
             break
 
-    # Add padding (5% of the smaller dimension)
     padding = int(min(width, height) * 0.08)
+    crop_box = (
+        max(0, left - padding),
+        max(0, top - padding),
+        min(width, right + padding + 1),
+        min(height, bottom + padding + 1),
+    )
+    return image.crop(crop_box)
 
-    left = max(0, left - padding)
-    top = max(0, top - padding)
-    right = min(width, right + padding)
-    bottom = min(height, bottom + padding)
 
-    # Crop the original image (preserving alpha if present)
-    crop_box = (left, top, right + 1, bottom + 1)
-    cropped = image.crop(crop_box)
-
-    return cropped
-
-def create_square_image(image, bg_color=(255, 255, 255, 0)):
-    """Create a square image with the content centered."""
+def create_square_image(image, bg_color=(255, 255, 255, 255)):
+    """Create a square image: white background with pudding centered."""
     width, height = image.size
-
-    # Determine the size of the square (max of width/height)
     size = max(width, height)
 
-    # Create new square image with transparent background
+    # White background fills entire icon area — no inner white-square artifact
     square = Image.new('RGBA', (size, size), bg_color)
 
-    # Paste the original image centered
+    # Remove white from pudding so it composites cleanly onto the white bg
+    logo = remove_white_background(image)
+
     x = (size - width) // 2
     y = (size - height) // 2
-    square.paste(image, (x, y), image if image.mode == 'RGBA' else None)
+    square.paste(logo, (x, y), logo)
 
     return square
 
