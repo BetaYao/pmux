@@ -39,7 +39,7 @@ jobs:
         run: cargo install cargo-bundle --locked
 
       - name: Build & bundle .app
-        run: cargo bundle --release --bin pmux --locked
+        run: cargo bundle --release --bin pmux
 
       - name: Package .app as zip
         run: |
