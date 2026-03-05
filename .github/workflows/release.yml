@@ -44,7 +44,13 @@ jobs:
       - name: Package .app as zip
         run: |
           VERSION="${{ github.ref_name }}"
-          APP="target/release/bundle/macos/pmux.app"
+          # cargo-bundle may place the .app under bundle/macos/ or bundle/osx/ depending on version
+          APP=$(find target/release/bundle -name "pmux.app" -type d | head -1)
+          if [ -z "$APP" ]; then
+            echo "ERROR: pmux.app not found under target/release/bundle/"
+            find target/release/bundle/ || true
+            exit 1
+          fi
           ZIP="pmux-${VERSION}-macos-arm64.zip"
           echo "Packaging $APP → $ZIP"
           ditto -c -k --keepParent "$APP" "$ZIP"
