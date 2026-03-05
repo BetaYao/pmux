@@ -1,0 +1,86 @@
+name: Release
+
+# Trigger: push a tag like v1.2.3
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTUP_TOOLCHAIN: stable
+
+jobs:
+  build-macos:
+    name: Build & Release (macOS Apple Silicon)
+    runs-on: macos-latest   # macOS 14, Apple Silicon (M-series)
+
+    permissions:
+      contents: write       # needed to create GitHub Release
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Set macOS SDK path
+        run: |
+          echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+          echo "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin" >> "$GITHUB_PATH"
+
+      - name: Install cargo-bundle
+        run: cargo install cargo-bundle --locked
+
+      - name: Build & bundle .app
+        run: cargo bundle --release --bin pmux --locked
+
+      - name: Package .app as zip
+        run: |
+          VERSION="${{ github.ref_name }}"
+          APP="target/release/bundle/macos/pmux.app"
+          ZIP="pmux-${VERSION}-macos-arm64.zip"
+          echo "Packaging $APP → $ZIP"
+          ditto -c -k --keepParent "$APP" "$ZIP"
+          echo "ZIP_NAME=$ZIP" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ github.ref_name }}"
+          ZIP="${{ env.ZIP_NAME }}"
+
+          gh release create "${VERSION}" "${ZIP}" \
+            --title "pmux ${VERSION}" \
+            --notes "## pmux ${VERSION}
+
+          ### 下载安装
+
+          1. 下载 \`${ZIP}\`
+          2. 解压，将 \`pmux.app\` 拖入 \`/Applications\`
+          3. 首次启动：右键 → 打开（跳过 Gatekeeper 未签名提示）
+
+          ### 系统要求
+
+          - macOS 13+（Apple Silicon M1/M2/M3）
+          - tmux（\`brew install tmux\`）
+
+          ---
+
+          ### Install
+
+          1. Download \`${ZIP}\`
+          2. Unzip, drag \`pmux.app\` to \`/Applications\`
+          3. First launch: right-click → Open (to bypass Gatekeeper on unsigned app)
+
+          ### Requirements
+
+          - macOS 13+ (Apple Silicon M1/M2/M3)
+          - tmux (\`brew install tmux\`)"
