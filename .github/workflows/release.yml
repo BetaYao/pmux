@@ -35,43 +35,117 @@ jobs:
           echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
           echo "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin" >> "$GITHUB_PATH"
 
-      - name: Install cargo-bundle
-        run: cargo install cargo-bundle --locked
+      - name: Install tools
+        run: |
+          cargo install cargo-bundle --locked
+          brew install create-dmg
 
       - name: Build & bundle .app
         run: cargo bundle --release --bin pmux
 
-      - name: Package .app as zip
+      - name: Verify .app bundle
         run: |
-          VERSION="${{ github.ref_name }}"
-          # cargo-bundle may place the .app under bundle/macos/ or bundle/osx/ depending on version
           APP=$(find target/release/bundle -name "pmux.app" -type d | head -1)
           if [ -z "$APP" ]; then
-            echo "ERROR: pmux.app not found under target/release/bundle/"
+            echo "ERROR: pmux.app not found"
             find target/release/bundle/ || true
             exit 1
           fi
-          ZIP="pmux-${VERSION}-macos-arm64.zip"
-          echo "Packaging $APP → $ZIP"
-          ditto -c -k --keepParent "$APP" "$ZIP"
-          echo "ZIP_NAME=$ZIP" >> "$GITHUB_ENV"
+          echo "APP_PATH=$APP" >> "$GITHUB_ENV"
+          echo "=== Bundle structure ==="
+          find "$APP" -type f
+          echo "=== CFBundleIconFile ==="
+          /usr/libexec/PlistBuddy -c "Print CFBundleIconFile" "$APP/Contents/Info.plist" 2>/dev/null || echo "(not set)"
+
+      - name: Check signing secrets
+        id: secrets
+        run: echo "has_cert=${{ secrets.APPLE_CERTIFICATE != '' }}" >> $GITHUB_OUTPUT
+
+      - name: Import signing certificate
+        if: steps.secrets.outputs.has_cert == 'true'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 20)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Sign .app
+        if: steps.secrets.outputs.has_cert == 'true'
+        run: |
+          APP="${{ env.APP_PATH }}"
+          IDENTITY=$(security find-identity -v -p codesigning \
+            | grep "Developer ID Application" | head -1 \
+            | sed 's/.*"\(.*\)".*/\1/')
+          echo "Signing $APP with identity: $IDENTITY"
+          codesign --deep --force --options runtime \
+            --entitlements resources/pmux.entitlements \
+            --sign "$IDENTITY" \
+            "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+
+      - name: Create DMG
+        run: |
+          VERSION="${{ github.ref_name }}"
+          APP="${{ env.APP_PATH }}"
+          APP_DIR=$(dirname "$APP")
+          DMG="pmux-${VERSION}-macos-arm64.dmg"
+          create-dmg \
+            --volname "pmux ${VERSION}" \
+            --volicon "resources/pmux.icns" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 128 \
+            --icon "pmux.app" 175 190 \
+            --hide-extension "pmux.app" \
+            --app-drop-link 425 190 \
+            "$DMG" \
+            "$APP_DIR"
+          echo "DMG_NAME=$DMG" >> "$GITHUB_ENV"
+
+      - name: Notarize DMG
+        if: steps.secrets.outputs.has_cert == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          DMG="${{ env.DMG_NAME }}"
+          echo "Submitting $DMG for notarization..."
+          xcrun notarytool submit "$DMG" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$DMG"
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${{ github.ref_name }}"
-          ZIP="${{ env.ZIP_NAME }}"
+          DMG="${{ env.DMG_NAME }}"
 
-          gh release create "${VERSION}" "${ZIP}" \
+          gh release create "${VERSION}" "${DMG}" \
             --title "pmux ${VERSION}" \
             --notes "## pmux ${VERSION}
 
           ### 下载安装
 
-          1. 下载 \`${ZIP}\`
-          2. 解压，将 \`pmux.app\` 拖入 \`/Applications\`
-          3. 首次启动：右键 → 打开（跳过 Gatekeeper 未签名提示）
+          1. 下载 \`${DMG}\`
+          2. 双击打开 DMG，将 \`pmux.app\` 拖入 Applications 文件夹
+          3. 首次启动：右键 → 打开，或运行 \`xattr -cr /Applications/pmux.app\`
 
           ### 系统要求
 
@@ -82,9 +156,9 @@ jobs:
 
           ### Install
 
-          1. Download \`${ZIP}\`
-          2. Unzip, drag \`pmux.app\` to \`/Applications\`
-          3. First launch: right-click → Open (to bypass Gatekeeper on unsigned app)
+          1. Download \`${DMG}\`
+          2. Open DMG, drag \`pmux.app\` to Applications
+          3. First launch: right-click → Open, or run \`xattr -cr /Applications/pmux.app\`
 
           ### Requirements
 
