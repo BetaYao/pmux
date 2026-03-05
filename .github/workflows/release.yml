@@ -43,7 +43,7 @@ jobs:
       - name: Build & bundle .app
         run: cargo bundle --release --bin pmux
 
-      - name: Verify .app bundle
+      - name: Verify and fix .app bundle
         run: |
           APP=$(find target/release/bundle -name "pmux.app" -type d | head -1)
           if [ -z "$APP" ]; then
@@ -52,10 +52,18 @@ jobs:
             exit 1
           fi
           echo "APP_PATH=$APP" >> "$GITHUB_ENV"
+
+          # cargo-bundle sometimes omits the icon; fix it manually
+          RESOURCES="$APP/Contents/Resources"
+          mkdir -p "$RESOURCES"
+          cp resources/pmux.icns "$RESOURCES/pmux.icns"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile pmux" "$APP/Contents/Info.plist" 2>/dev/null || \
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string pmux" "$APP/Contents/Info.plist"
+
           echo "=== Bundle structure ==="
           find "$APP" -type f
           echo "=== CFBundleIconFile ==="
-          /usr/libexec/PlistBuddy -c "Print CFBundleIconFile" "$APP/Contents/Info.plist" 2>/dev/null || echo "(not set)"
+          /usr/libexec/PlistBuddy -c "Print CFBundleIconFile" "$APP/Contents/Info.plist"
 
       - name: Check signing secrets
         id: secrets
