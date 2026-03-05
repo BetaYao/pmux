@@ -14,6 +14,7 @@ pub struct NotificationItem {
     pub pane_id: String,
     pub notif_type: NotificationType,
     pub message: String,
+    pub source_label: Option<String>,
     pub timestamp: Instant,
     pub read: bool,
 }
@@ -26,6 +27,7 @@ impl NotificationItem {
             pane_id: notif.pane_id().to_string(),
             notif_type: notif.notif_type(),
             message: notif.display_message(),
+            source_label: notif.source_label.clone(),
             timestamp: notif.timestamp(),
             read: notif.is_read(),
         }
@@ -71,6 +73,8 @@ pub struct NotificationPanel {
     on_mark_read: Arc<dyn Fn(Uuid, &mut Window, &mut App)>,
     on_clear_all: Arc<dyn Fn(&mut Window, &mut App)>,
     on_jump_to_pane: Arc<dyn Fn(&str, &mut Window, &mut App)>,
+    /// Called when user clicks a notification item: clears it and jumps to the source pane
+    on_dismiss_and_jump: Arc<dyn Fn(Uuid, &str, &mut Window, &mut App)>,
 }
 
 impl NotificationPanel {
@@ -82,6 +86,7 @@ impl NotificationPanel {
             on_mark_read: Arc::new(|_: Uuid, _, _| {}),
             on_clear_all: Arc::new(|_, _| {}),
             on_jump_to_pane: Arc::new(|_, _, _| {}),
+            on_dismiss_and_jump: Arc::new(|_: Uuid, _, _, _| {}),
         }
     }
 
@@ -120,55 +125,104 @@ impl NotificationPanel {
     pub fn on_jump_to_pane<F: Fn(&str, &mut Window, &mut App) + 'static>(mut self, f: F) -> Self {
         self.on_jump_to_pane = Arc::new(f); self
     }
+    pub fn on_dismiss_and_jump<F: Fn(Uuid, &str, &mut Window, &mut App) + 'static>(mut self, f: F) -> Self {
+        self.on_dismiss_and_jump = Arc::new(f); self
+    }
 
     fn render_notification(&self, item: &NotificationItem, index: usize) -> impl IntoElement {
         let icon = item.icon();
         let color = item.color();
         let time = item.formatted_time();
         let message = item.message.clone();
+        let source_label = item.source_label.clone();
         let pane_id = item.pane_id.clone();
         let is_read = item.read;
         let item_uuid = item.uuid;
         let on_mark_read = self.on_mark_read.clone();
-        let on_jump = self.on_jump_to_pane.clone();
+        let on_dismiss = self.on_dismiss_and_jump.clone();
+        let pane_id_for_click = pane_id.clone();
 
         div()
             .id(format!("notif-item-{}", index))
             .w_full()
             .px(px(12.))
-            .py(px(8.))
+            .py(px(10.))
             .border_b_1()
-            .border_color(rgb(0x3d3d3d))
-            .when(!is_read, |el: Stateful<Div>| el.bg(rgb(0x2a2520)))
-            .when(is_read, |el: Stateful<Div>| el.bg(rgb(0x252525)))
-            .hover(|s: StyleRefinement| s.bg(rgb(0x303030)))
+            .border_color(rgb(0x333333))
+            .when(!is_read, |el: Stateful<Div>| el.bg(rgb(0x252525)))
+            .when(is_read, |el: Stateful<Div>| el.bg(rgb(0x1e1e1e)))
+            .hover(|s: StyleRefinement| s.bg(rgb(0x2e2e2e)))
             .cursor_pointer()
-            .on_click(move |_, window, cx| { on_jump(&pane_id, window, cx); })
+            .on_click(move |_, window, cx| {
+                on_dismiss(item_uuid, &pane_id_for_click, window, cx);
+            })
             .child(
                 div()
                     .flex().flex_row().items_start().gap(px(8.))
-                    .child(div().text_size(px(12.)).text_color(color).child(icon))
+                    // Icon column
                     .child(
                         div()
-                            .flex_1().flex().flex_col().gap(px(2.))
+                            .flex_shrink_0()
+                            .pt(px(1.))
+                            .text_size(px(11.))
+                            .text_color(color)
+                            .child(icon)
+                    )
+                    // Content column
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.)) // allow shrinking below content width
+                            .flex()
+                            .flex_col()
+                            .gap(px(4.))
+                            // Message line (wraps naturally)
                             .child(
                                 div()
                                     .text_size(px(12.))
-                                    .text_color(if is_read { rgb(0xaaaaaa) } else { rgb(0xffffff) })
+                                    .line_height(relative(1.4))
+                                    .text_color(if is_read { rgb(0x888888) } else { rgb(0xeeeeee) })
                                     .child(message)
                             )
-                            .child(div().text_size(px(10.)).text_color(rgb(0x666666)).child(time))
+                            // Meta row: source label (left) + time (right)
+                            .child(
+                                div()
+                                    .flex().flex_row().items_center().justify_between()
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w(px(0.))
+                                            .text_size(px(10.))
+                                            .text_color(rgb(0x555555))
+                                            .when(source_label.is_some(), |el| {
+                                                el.child(source_label.unwrap_or_default())
+                                            })
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_shrink_0()
+                                            .text_size(px(10.))
+                                            .text_color(rgb(0x555555))
+                                            .child(time)
+                                    )
+                            )
                     )
+                    // Mark-read button (✓) for unread items
                     .child(
                         div()
                             .id(format!("mark-read-{}", index))
+                            .flex_shrink_0()
                             .when(!is_read, |el: Stateful<Div>| {
-                                el.px(px(4.))
-                                    .text_size(px(10.))
-                                    .text_color(rgb(0x666666))
-                                    .hover(|s: StyleRefinement| s.text_color(rgb(0xffffff)))
+                                el.pt(px(1.))
+                                    .px(px(4.))
+                                    .text_size(px(11.))
+                                    .text_color(rgb(0x555555))
+                                    .hover(|s: StyleRefinement| s.text_color(rgb(0x88cc88)))
                                     .cursor_pointer()
-                                    .on_click(move |_, window, cx| { on_mark_read(item_uuid, window, cx); })
+                                    .on_click(move |_event, window, cx| {
+                                        cx.stop_propagation();
+                                        on_mark_read(item_uuid, window, cx);
+                                    })
                                     .child("✓")
                             })
                     )
@@ -202,8 +256,8 @@ impl RenderOnce for NotificationPanel {
 
         div()
             .id("notification-panel")
-            .w(px(320.))
-            .max_h(px(400.))
+            .w(px(420.))
+            .max_h(px(480.))
             .bg(rgb(0x252525))
             .rounded(px(6.))
             .shadow_lg()
@@ -306,14 +360,14 @@ mod tests {
         let error_item = NotificationItem {
             id: "1".to_string(), uuid: Uuid::nil(), pane_id: "p1".to_string(),
             notif_type: NotificationType::Error, message: "err".to_string(),
-            timestamp: Instant::now(), read: false,
+            source_label: None, timestamp: Instant::now(), read: false,
         };
         assert_eq!(error_item.icon(), "✕");
 
         let info_item = NotificationItem {
             id: "2".to_string(), uuid: Uuid::nil(), pane_id: "p2".to_string(),
             notif_type: NotificationType::Info, message: "ok".to_string(),
-            timestamp: Instant::now(), read: false,
+            source_label: None, timestamp: Instant::now(), read: false,
         };
         assert_eq!(info_item.icon(), "ℹ");
     }
@@ -323,7 +377,7 @@ mod tests {
         let error_item = NotificationItem {
             id: "1".to_string(), uuid: Uuid::nil(), pane_id: "p1".to_string(),
             notif_type: NotificationType::Error, message: "err".to_string(),
-            timestamp: Instant::now(), read: false,
+            source_label: None, timestamp: Instant::now(), read: false,
         };
         let _ = error_item.color();
     }
@@ -333,7 +387,7 @@ mod tests {
         let item = NotificationItem {
             id: "1".to_string(), uuid: Uuid::nil(), pane_id: "p1".to_string(),
             notif_type: NotificationType::Info, message: "msg".to_string(),
-            timestamp: Instant::now(), read: false,
+            source_label: None, timestamp: Instant::now(), read: false,
         };
         assert_eq!(item.formatted_time(), "just now");
     }
@@ -357,9 +411,9 @@ mod tests {
     #[test]
     fn test_unread_count() {
         let items = vec![
-            NotificationItem { id: "1".to_string(), uuid: Uuid::nil(), pane_id: "p1".to_string(), notif_type: NotificationType::Error, message: "err".to_string(), timestamp: Instant::now(), read: false },
-            NotificationItem { id: "2".to_string(), uuid: Uuid::nil(), pane_id: "p2".to_string(), notif_type: NotificationType::Info, message: "info".to_string(), timestamp: Instant::now(), read: true },
-            NotificationItem { id: "3".to_string(), uuid: Uuid::nil(), pane_id: "p3".to_string(), notif_type: NotificationType::Waiting, message: "wait".to_string(), timestamp: Instant::now(), read: false },
+            NotificationItem { id: "1".to_string(), uuid: Uuid::nil(), pane_id: "p1".to_string(), notif_type: NotificationType::Error, message: "err".to_string(), source_label: None, timestamp: Instant::now(), read: false },
+            NotificationItem { id: "2".to_string(), uuid: Uuid::nil(), pane_id: "p2".to_string(), notif_type: NotificationType::Info, message: "info".to_string(), source_label: None, timestamp: Instant::now(), read: true },
+            NotificationItem { id: "3".to_string(), uuid: Uuid::nil(), pane_id: "p3".to_string(), notif_type: NotificationType::Waiting, message: "wait".to_string(), source_label: None, timestamp: Instant::now(), read: false },
         ];
         let panel = NotificationPanel::new().with_notifications(items);
         assert_eq!(panel.unread_count(), 2);

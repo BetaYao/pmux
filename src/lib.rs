@@ -5,6 +5,8 @@ mod debug_log;
 pub mod app_state;
 pub mod config;
 pub mod deps;
+pub mod git_diff;
+pub mod syntax_highlight;
 pub mod empty_state;
 pub mod file_selector;
 pub mod git_utils;

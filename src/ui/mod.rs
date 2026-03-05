@@ -3,6 +3,7 @@ pub mod app_root;
 pub mod models;
 pub mod delete_worktree_dialog_ui;
 pub mod diff_overlay;
+pub mod diff_view;
 pub mod new_branch_dialog_ui;
 pub mod new_branch_dialog_entity;
 pub mod notification_panel;

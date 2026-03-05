@@ -14,7 +14,7 @@ use crate::terminal::ContentExtractor;
 use crate::runtime::{AgentRuntime, EventBus, RuntimeEvent, StatusPublisher};
 use crate::runtime::backends::{create_runtime_from_env, kill_tmux_window, list_tmux_windows, recover_runtime, resolve_backend, session_name_for_workspace, window_name_for_worktree, window_target};
 use crate::runtime::{RuntimeState, WorktreeState};
-use crate::ui::{AppState, sidebar::Sidebar, workspace_tabbar::WorkspaceTabBar, terminal_controller::ResizeController, terminal_view::TerminalBuffer, terminal_area_entity::TerminalAreaEntity, notification_panel_entity::NotificationPanelEntity, new_branch_dialog_entity::NewBranchDialogEntity, delete_worktree_dialog_ui::DeleteWorktreeDialogUi, split_pane_container::SplitPaneContainer, diff_overlay::DiffOverlay, status_bar::StatusBar, models::{StatusCountsModel, NotificationPanelModel, NewBranchDialogModel, PaneSummaryModel}, topbar_entity::TopBarEntity};
+use crate::ui::{AppState, sidebar::Sidebar, workspace_tabbar::WorkspaceTabBar, terminal_controller::ResizeController, terminal_view::TerminalBuffer, terminal_area_entity::TerminalAreaEntity, notification_panel_entity::NotificationPanelEntity, new_branch_dialog_entity::NewBranchDialogEntity, delete_worktree_dialog_ui::DeleteWorktreeDialogUi, split_pane_container::SplitPaneContainer, diff_view::DiffViewOverlay, status_bar::StatusBar, models::{StatusCountsModel, NotificationPanelModel, NewBranchDialogModel, PaneSummaryModel}, topbar_entity::TopBarEntity};
 use crate::split_tree::SplitNode;
 use crate::workspace_manager::WorkspaceManager;
 use crate::input::{key_to_xterm_escape, KeyModifiers};
@@ -106,12 +106,10 @@ pub struct AppRoot {
     cached_worktrees_repo: Option<PathBuf>,
     /// Cached tmux window names for the current repo; filled once when opening repo to avoid repeated list-windows calls.
     cached_tmux_windows: Option<(PathBuf, Vec<String>)>,
-    /// Sidebar context menu: which worktree index has menu open
-    sidebar_context_menu_index: Option<usize>,
-    /// Review windows: branch -> window name (stub for local PTY)
-    review_windows: HashMap<String, String>,
-    /// When Some, diff overlay is shown: (branch, window_name, session, pane_target)
-    diff_overlay_open: Option<(String, String, Option<String>, String)>,
+    /// Sidebar context menu: which worktree index has menu open, and mouse (x, y) position
+    sidebar_context_menu: Option<(usize, f32, f32)>,
+    /// Built-in diff view entity (replaces nvim+diffview overlay)
+    diff_view_entity: Option<Entity<DiffViewOverlay>>,
     /// Sidebar width in pixels (persisted to state.json)
     sidebar_width: u32,
     /// When Some, dependency check failed - show self-check page
@@ -165,6 +163,54 @@ pub struct AppRoot {
 }
 
 const RUNNING_ANIMATION_INTERVAL_MS: u64 = 250;
+
+/// Derive a human-readable source label from a pane_id.
+/// Format: "repo / worktree" or "repo / worktree / pane N"
+/// Handles "local:/path/to/worktree" and "local:/path/to/worktree:N" formats.
+fn pane_id_to_source_label(pane_id: &str) -> String {
+    let path_str = if let Some(s) = pane_id.strip_prefix("local:") {
+        s
+    } else {
+        // For tmux or other backends, return as-is
+        return pane_id.to_string();
+    };
+
+    // Split off optional pane index suffix (e.g. ":1")
+    let (path_part, pane_num) = {
+        // Find the last ':' that is followed only by digits
+        if let Some(colon_pos) = path_str.rfind(':') {
+            let suffix = &path_str[colon_pos + 1..];
+            if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+                let idx: usize = suffix.parse().unwrap_or(0);
+                (&path_str[..colon_pos], idx + 1)
+            } else {
+                (path_str, 1usize)
+            }
+        } else {
+            (path_str, 1usize)
+        }
+    };
+
+    let path = std::path::Path::new(path_part);
+    let components: Vec<_> = path.components().collect();
+    let n = components.len();
+
+    let label = if n >= 2 {
+        let parent = components[n - 2].as_os_str().to_string_lossy();
+        let child = components[n - 1].as_os_str().to_string_lossy();
+        format!("{} / {}", parent, child)
+    } else {
+        path.file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| path_part.to_string())
+    };
+
+    if pane_num > 1 {
+        format!("{} / pane {}", label, pane_num)
+    } else {
+        label
+    }
+}
 
 impl AppRoot {
     /// Get sidebar width for persistence (clamped 200-400)
@@ -252,9 +298,8 @@ impl AppRoot {
             cached_worktrees: Vec::new(),
             cached_worktrees_repo: None,
             cached_tmux_windows: None,
-            sidebar_context_menu_index: None,
-            review_windows: HashMap::new(),
-            diff_overlay_open: None,
+            sidebar_context_menu: None,
+            diff_view_entity: None,
             sidebar_width,
             dependency_check,
             terminal_needs_focus: false,
@@ -412,6 +457,39 @@ impl AppRoot {
                         });
                     })
                 };
+                let on_dismiss_and_jump = {
+                    let entity = app_root_entity.clone();
+                    let mgr = notif_mgr.clone();
+                    let np_model = model.clone();
+                    Arc::new(move |uuid: uuid::Uuid, pane_id: &str, _window: &mut Window, cx: &mut App| {
+                        // Clear the notification
+                        let unread_after = if let Ok(mut m) = mgr.lock() {
+                            m.clear(uuid);
+                            m.unread_count()
+                        } else { 0 };
+                        // Update unread count in model
+                        let _ = cx.update_entity(&np_model, |m: &mut crate::ui::models::NotificationPanelModel, cx| {
+                            m.set_unread_count(unread_after);
+                            cx.notify();
+                        });
+                        // Jump to the source pane
+                        let pane_id = pane_id.to_string();
+                        let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
+                            if let Some(idx) = this.split_tree.flatten().into_iter().position(|(t, _)| t == pane_id) {
+                                this.focused_pane_index = idx;
+                                this.active_pane_target = Some(pane_id.clone());
+                                if let Ok(mut guard) = this.active_pane_target_shared.lock() {
+                                    *guard = pane_id.clone();
+                                }
+                                if let Some(ref rt) = this.runtime {
+                                    let _ = rt.focus_pane(&pane_id);
+                                }
+                                this.terminal_needs_focus = true;
+                            }
+                            cx.notify();
+                        });
+                    })
+                };
                 let entity = cx.new(move |cx| {
                     NotificationPanelEntity::new(
                         model,
@@ -420,6 +498,7 @@ impl AppRoot {
                         on_mark_read,
                         on_clear_all,
                         on_jump_to_pane,
+                        on_dismiss_and_jump,
                         cx,
                     )
                 });
@@ -1657,6 +1736,7 @@ impl AppRoot {
         let status_counts_model = self.status_counts_model.clone();
         let notification_panel_model = self.notification_panel_model.clone();
         let pane_summary_model = self.pane_summary_model.clone();
+        let active_pane_shared = Arc::clone(&self.active_pane_target_shared);
         cx.spawn(async move |entity, cx| {
             let rx = std::sync::Arc::new(std::sync::Mutex::new(event_bus.subscribe()));
             loop {
@@ -1700,27 +1780,36 @@ impl AppRoot {
                     }
                     Ok(RuntimeEvent::Notification(n)) => {
                         let pane_id = n.pane_id.as_deref().unwrap_or(&n.agent_id);
-                        let notif_type = match n.notif_type {
-                            crate::runtime::NotificationType::Error => NotificationType::Error,
-                            crate::runtime::NotificationType::WaitingInput => NotificationType::Waiting,
-                            crate::runtime::NotificationType::WaitingConfirm => {
-                                NotificationType::WaitingConfirm
+                        // Suppress all notifications for the currently focused pane
+                        let is_active_pane = active_pane_shared
+                            .lock()
+                            .ok()
+                            .map(|g| !g.is_empty() && g.as_str() == pane_id)
+                            .unwrap_or(false);
+                        if !is_active_pane {
+                            let notif_type = match n.notif_type {
+                                crate::runtime::NotificationType::Error => NotificationType::Error,
+                                crate::runtime::NotificationType::WaitingInput => NotificationType::Waiting,
+                                crate::runtime::NotificationType::WaitingConfirm => {
+                                    NotificationType::WaitingConfirm
+                                }
+                                crate::runtime::NotificationType::Info => NotificationType::Info,
+                            };
+                            let message = n.message.clone();
+                            let source_label = if pane_id.is_empty() { None } else { Some(pane_id_to_source_label(pane_id)) };
+                            let mut unread_after = 0usize;
+                            if let Ok(mut mgr) = notification_manager.lock() {
+                                if mgr.add_labeled(pane_id, notif_type, &message, source_label) {
+                                    system_notifier::notify("pmux", &message, notif_type);
+                                }
+                                unread_after = mgr.unread_count();
                             }
-                            crate::runtime::NotificationType::Info => NotificationType::Info,
-                        };
-                        let message = n.message.clone();
-                        let mut unread_after = 0usize;
-                        if let Ok(mut mgr) = notification_manager.lock() {
-                            if mgr.add(pane_id, notif_type, &message) {
-                                system_notifier::notify("pmux", &message, notif_type);
+                            if let Some(ref np_model) = notification_panel_model {
+                                let _ = cx.update_entity(np_model, |m, cx| {
+                                    m.set_unread_count(unread_after);
+                                    cx.notify();
+                                });
                             }
-                            unread_after = mgr.unread_count();
-                        }
-                        if let Some(ref np_model) = notification_panel_model {
-                            let _ = cx.update_entity(np_model, |m, cx| {
-                                m.set_unread_count(unread_after);
-                                cx.notify();
-                            });
                         }
                     }
                     Err(_) => break,
@@ -2444,8 +2533,9 @@ impl AppRoot {
                     return;
                 }
                 "w" => {
-                    if let Some((branch, window_name, session, pane_target)) = self.diff_overlay_open.clone() {
-                        self.close_diff_overlay(&branch, &window_name, session.as_deref(), &pane_target, cx);
+                    if self.diff_view_entity.is_some() {
+                        self.diff_view_entity = None;
+                        cx.notify();
                     }
                 }
                 "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" => {
@@ -2670,223 +2760,19 @@ impl AppRoot {
         let branch = worktree.short_branch_name().to_string();
         let worktree_path = worktree.path.clone();
 
-        let existing_window = self.review_windows.get(&branch).cloned();
-        if let Some(window_name) = existing_window {
-            self.open_diff_overlay(&branch, &window_name, cx);
-            return;
-        }
-
-        if self.active_worktree_index != Some(idx) {
-            self.switch_to_worktree(&worktree_path, &branch, cx);
-        }
-
-        let window_name = format!("review-{}", branch.replace('/', "-"));
-
-        if let Some(rt) = &self.runtime {
-            match rt.open_review(&worktree_path) {
-                Ok(_) => {
-                    self.review_windows.insert(branch.clone(), window_name.clone());
-                    self.open_diff_overlay(&branch, &window_name, cx);
-                }
-                Err(e) => {
-                    self.state.error_message = Some(format!("Failed to open diff view: {}", e));
-                }
-            }
-        }
-        cx.notify();
-    }
-
-    /// Open diff overlay (add buffer, subscribe to pane output, show overlay)
-    fn open_diff_overlay(&mut self, branch: &str, window_name: &str, cx: &mut Context<Self>) {
-        let runtime = match &self.runtime {
-            Some(rt) => rt.clone(),
-            None => return,
-        };
-        let session = runtime.session_info().map(|(s, _)| s);
-        let pane_target = session
-            .as_ref()
-            .map(|s| format!("{}:{}.0", s, window_name))
-            .unwrap_or_else(|| format!("local:{}.0", window_name));
-
-        // Add buffer for overlay pane; setup_diff_overlay_terminal_output will replace Empty with Terminal when stream is ready
-        if let Ok(mut buffers) = self.terminal_buffers.lock() {
-            buffers.entry(pane_target.clone()).or_insert_with(|| TerminalBuffer::Empty);
-        }
-
-        // Add to pane_targets_shared for multi-pane tracking
-        if let Ok(mut guard) = self.pane_targets_shared.lock() {
-            if !guard.contains(&pane_target) {
-                guard.push(pane_target.clone());
-            }
-        }
-
-        self.active_pane_target = Some(pane_target.clone());
-        self.diff_overlay_open = Some((
-            branch.to_string(),
-            window_name.to_string(),
-            session,
-            pane_target.clone(),
-        ));
-        if let Ok(mut guard) = self.active_pane_target_shared.lock() {
-            *guard = pane_target.clone();
-        }
-
-        self.setup_diff_overlay_terminal_output(runtime, &pane_target, cx);
-        cx.notify();
-    }
-
-    /// Subscribe to the overlay pane's output and feed into a Terminal buffer so the diff overlay shows content.
-    fn setup_diff_overlay_terminal_output(
-        &mut self,
-        runtime: Arc<dyn AgentRuntime>,
-        pane_target: &str,
-        cx: &mut Context<Self>,
-    ) {
-        use crate::terminal::{Terminal, TerminalSize};
-
-        let pane_target_str = pane_target.to_string();
-        let (cols, rows) = runtime.get_pane_dimensions(&pane_target_str);
-
-        if let Some(rx) = runtime.subscribe_output(&pane_target_str) {
-            let terminal = Arc::new(Terminal::new(
-                pane_target_str.clone(),
-                TerminalSize {
-                    cols: cols as u16,
-                    rows: rows as u16,
-                    cell_width: 8.0,
-                    cell_height: 16.0,
-                },
-            ));
-
-            let pty_write_rx = terminal.pty_write_rx.clone();
-            let runtime_for_pty = runtime.clone();
-            let pane_for_pty = pane_target_str.clone();
-            std::thread::spawn(move || {
-                while let Ok(data) = pty_write_rx.recv() {
-                    let _ = runtime_for_pty.send_input(&pane_for_pty, &data);
-                }
-            });
-
-            // Handle OSC 52 clipboard store requests (e.g. from opencode, tmux copy-mode)
-            let clipboard_rx = terminal.clipboard_store_rx.clone();
-            std::thread::spawn(move || {
-                while let Ok(text) = clipboard_rx.recv() {
-                    use std::io::Write;
-                    if let Ok(mut child) = std::process::Command::new("pbcopy")
-                        .stdin(std::process::Stdio::piped())
-                        .spawn()
-                    {
-                        if let Some(stdin) = child.stdin.as_mut() {
-                            let _ = stdin.write_all(text.as_bytes());
-                        }
-                        let _ = child.wait();
-                    }
-                }
-            });
-
-            let runtime_for_resize = runtime.clone();
-            let pane_for_resize = pane_target_str.clone();
-            let resize_callback: Arc<dyn Fn(u16, u16) + Send + Sync> =
-                Arc::new(move |cols, rows| {
-                    let _ = runtime_for_resize.resize(&pane_for_resize, cols, rows);
+        let app_entity = cx.entity();
+        let entity = cx.new(|cx| {
+            let mut overlay = DiffViewOverlay::new(worktree_path, branch);
+            overlay.set_on_close(Arc::new(move |_window, cx| {
+                let _ = cx.update_entity(&app_entity, |this: &mut AppRoot, cx| {
+                    this.diff_view_entity = None;
+                    cx.notify();
                 });
-
-            let focus_handle = self.terminal_focus.get_or_insert_with(|| cx.focus_handle()).clone();
-            let runtime_for_input = runtime.clone();
-            let pane_for_input = pane_target_str.clone();
-            let pending_enter = self.ime_pending_enter.clone();
-            let input_callback: Arc<dyn Fn(&[u8]) + Send + Sync> =
-                Arc::new(move |bytes: &[u8]| {
-                    let _ = runtime_for_input.send_input(&pane_for_input, bytes);
-                    let _ = pending_enter.swap(false, Ordering::SeqCst);
-                });
-
-            if let Ok(mut buffers) = self.terminal_buffers.lock() {
-                buffers.insert(
-                    pane_target_str.clone(),
-                    TerminalBuffer::Terminal {
-                        terminal: terminal.clone(),
-                        focus_handle: focus_handle.clone(),
-                        resize_callback: Some(resize_callback),
-                        input_callback: Some(input_callback),
-                    },
-                );
-            }
-
-            let app_root_entity = cx.entity();
-            let terminal_for_output = terminal.clone();
-            cx.spawn(async move |_entity, cx| {
-                loop {
-                    let chunk = match rx.recv_async().await {
-                        Ok(c) => c,
-                        Err(_) => break,
-                    };
-                    terminal_for_output.process_output(&chunk);
-                    let pending = rx.len();
-                    let batch_limit = if pending > 100 { TERMINAL_OUTPUT_MAX_BATCH } else { TERMINAL_OUTPUT_MIN_BATCH };
-                    let mut batch_count = 1usize;
-                    while batch_count < batch_limit {
-                        match rx.try_recv() {
-                            Ok(next) => {
-                                terminal_for_output.process_output(&next);
-                                batch_count += 1;
-                            }
-                            Err(_) => break,
-                        }
-                    }
-                    let _ = app_root_entity.update(cx, |this: &mut AppRoot, cx| {
-                        if this.diff_overlay_open.is_some() {
-                            cx.notify();
-                        }
-                    });
-                }
-            })
-            .detach();
-        } else {
-            if let Ok(mut buffers) = self.terminal_buffers.lock() {
-                buffers.insert(
-                    pane_target_str,
-                    TerminalBuffer::Error("Streaming unavailable.".to_string()),
-                );
-            }
-        }
-    }
-
-    /// Close diff overlay (kill tmux window, remove from buffers, switch back to worktree)
-    fn close_diff_overlay(
-        &mut self,
-        branch: &str,
-        window_name: &str,
-        session: Option<&str>,
-        pane_target: &str,
-        cx: &mut Context<Self>,
-    ) {
-        if let (Some(rt), Some(s)) = (&self.runtime, session) {
-            let target = format!("{}:{}", s, window_name);
-            let _ = rt.kill_window(&target);
-        }
-        self.review_windows.remove(branch);
-        self.diff_overlay_open = None;
-
-        // Remove from terminal_buffers and pane_targets_shared
-        if let Ok(mut buffers) = self.terminal_buffers.lock() {
-            buffers.remove(pane_target);
-        }
-        if let Ok(mut guard) = self.pane_targets_shared.lock() {
-            guard.retain(|t| t != &pane_target);
-        }
-
-        let worktree_path = self.workspace_manager.active_tab()
-            .map(|t| t.path.clone())
-            .unwrap_or_else(|| PathBuf::from("."));
-        if let Some(idx) = self.active_worktree_index {
-            self.refresh_worktrees_for_repo(&worktree_path);
-            if let Some(wt) = self.cached_worktrees.get(idx) {
-                let path = wt.path.clone();
-                let br = wt.short_branch_name().to_string();
-                self.switch_to_worktree(&path, &br, cx);
-            }
-        }
+            }));
+            overlay.start_loading(cx);
+            overlay
+        });
+        self.diff_view_entity = Some(entity);
         cx.notify();
     }
 
@@ -3334,6 +3220,10 @@ impl AppRoot {
             .unwrap_or_else(|| self.notification_manager.lock().map(|m| m.unread_count()).unwrap_or(0));
         let app_root_entity_for_toggle = app_root_entity.clone();
         let notification_panel_model_for_toggle = self.notification_panel_model.clone();
+        let notification_panel_model_for_overlay = self.notification_panel_model.clone();
+        let notification_panel_is_open = self.notification_panel_model.as_ref()
+            .map(|m| m.read(cx).show_panel)
+            .unwrap_or(false);
         let app_root_entity_for_add_ws = app_root_entity.clone();
 
         // Collect pane summaries for sidebar display
@@ -3347,7 +3237,7 @@ impl AppRoot {
             .with_statuses(pane_statuses.clone())
             .with_pane_summaries(pane_summaries_data)
             .with_running_frame(running_frame)
-            .with_context_menu(self.sidebar_context_menu_index)
+            .with_context_menu(self.sidebar_context_menu)
             .on_toggle_sidebar(move |_window, cx| {
                 let _ = cx.update_entity(&app_root_entity_for_toggle, |this: &mut AppRoot, cx| {
                     this.sidebar_visible = !this.sidebar_visible;
@@ -3435,9 +3325,14 @@ impl AppRoot {
         let repo_path_for_delete = repo_path.clone();
         let repo_path_for_close_orphan = repo_path.clone();
         let repo_path_for_view_diff = repo_path.clone();
+        // Extra clones for the root-level context menu overlay
+        let app_root_entity_for_menu_delete = app_root_entity.clone();
+        let app_root_entity_for_menu_diff = app_root_entity.clone();
+        let repo_path_for_menu_delete = repo_path.clone();
+        let repo_path_for_menu_diff = repo_path.clone();
         sidebar.on_delete(move |idx, _window, cx| {
             let _ = cx.update_entity(&app_root_entity_for_delete, |this: &mut AppRoot, cx| {
-                this.sidebar_context_menu_index = None;
+                this.sidebar_context_menu = None;
                 cx.notify();
             });
             let repo_path = repo_path_for_delete.clone();
@@ -3473,7 +3368,7 @@ impl AppRoot {
         });
         sidebar.on_view_diff(move |idx, _window, cx| {
             let _ = cx.update_entity(&app_root_entity_for_view_diff, |this: &mut AppRoot, cx| {
-                this.sidebar_context_menu_index = None;
+                this.sidebar_context_menu = None;
                 cx.notify();
             });
             let entity = app_root_entity_for_view_diff.clone();
@@ -3491,9 +3386,9 @@ impl AppRoot {
                 });
             }).detach();
         });
-        sidebar.on_right_click(move |idx, _window, cx| {
+        sidebar.on_right_click(move |idx, x, y, _window, cx| {
             let _ = cx.update_entity(&app_root_entity_for_right_click, |this: &mut AppRoot, cx| {
-                this.sidebar_context_menu_index = Some(idx);
+                this.sidebar_context_menu = Some((idx, x, y));
                 cx.notify();
             });
         });
@@ -3523,6 +3418,9 @@ impl AppRoot {
             dialog
         };
 
+        let sidebar_context_menu = self.sidebar_context_menu;
+        let cached_worktrees = self.cached_worktrees.clone();
+
         div()
             .id("workspace-view")
             .size_full()
@@ -3530,7 +3428,7 @@ impl AppRoot {
             .flex_col()
             .bg(rgb(0x21252b))
             .relative()
-            .when(self.sidebar_context_menu_index.is_some(), |el| {
+            .when(sidebar_context_menu.is_some(), |el| {
                 let app_root_entity_for_overlay = app_root_entity_for_clear_menu.clone();
                 el.child(
                     div()
@@ -3539,12 +3437,79 @@ impl AppRoot {
                         .inset(px(0.))
                         .size_full()
                         .cursor_pointer()
-                        .on_click(move |_event, _window, cx| {
+                        .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
                             let _ = cx.update_entity(&app_root_entity_for_overlay, |this: &mut AppRoot, cx| {
-                                this.sidebar_context_menu_index = None;
+                                this.sidebar_context_menu = None;
                                 cx.notify();
                             });
                         })
+                )
+            })
+            .when(sidebar_context_menu.is_some(), |el| {
+                let (idx, click_x, click_y) = sidebar_context_menu.unwrap();
+                let is_main = cached_worktrees.get(idx).map(|w| w.is_main).unwrap_or(true);
+                let on_view_diff: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>> = if !is_main {
+                    let entity = app_root_entity_for_menu_diff.clone();
+                    let repo_path = repo_path_for_menu_diff.clone();
+                    Some(Arc::new(move |idx, _window, cx| {
+                        let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
+                            this.sidebar_context_menu = None;
+                            cx.notify();
+                        });
+                        let entity2 = entity.clone();
+                        let repo_path2 = repo_path.clone();
+                        cx.spawn(async move |cx| {
+                            let result = blocking::unblock(move || {
+                                crate::worktree::discover_worktrees(&repo_path2).ok().map(|wt| (wt, repo_path2))
+                            }).await;
+                            let _ = cx.update_entity(&entity2, |this: &mut AppRoot, cx: &mut _| {
+                                if let Some((wt, rp)) = result {
+                                    this.cached_worktrees = wt;
+                                    this.cached_worktrees_repo = Some(rp);
+                                }
+                                this.open_diff_view_for_worktree_with_cache(idx, cx);
+                            });
+                        }).detach();
+                    }))
+                } else {
+                    None
+                };
+                let on_delete: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>> = {
+                    let entity = app_root_entity_for_menu_delete.clone();
+                    let repo_path = repo_path_for_menu_delete.clone();
+                    Some(Arc::new(move |idx, _window, cx| {
+                        let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
+                            this.sidebar_context_menu = None;
+                            cx.notify();
+                        });
+                        let entity2 = entity.clone();
+                        let repo_path2 = repo_path.clone();
+                        cx.spawn(async move |cx| {
+                            let result = blocking::unblock(move || {
+                                let worktrees = crate::worktree::discover_worktrees(&repo_path2).ok()?;
+                                let worktree = worktrees.get(idx).cloned()?;
+                                let has_uncommitted = crate::worktree::has_uncommitted_changes(&worktree.path);
+                                Some((worktrees, worktree, has_uncommitted, repo_path2))
+                            }).await;
+                            if let Some((worktrees, worktree, has_uncommitted, rp)) = result {
+                                let _ = cx.update_entity(&entity2, |this: &mut AppRoot, cx: &mut _| {
+                                    this.cached_worktrees = worktrees;
+                                    this.cached_worktrees_repo = Some(rp);
+                                    this.delete_worktree_dialog.open(worktree, has_uncommitted);
+                                    cx.notify();
+                                });
+                            }
+                        }).detach();
+                    }))
+                };
+                let menu = Sidebar::render_context_menu(idx, on_view_diff, on_delete, &cached_worktrees);
+                el.child(
+                    div()
+                        .id("root-context-menu-float")
+                        .absolute()
+                        .top(px(click_y))
+                        .left(px(click_x))
+                        .child(menu)
                 )
             })
             .child(
@@ -3731,6 +3696,31 @@ impl AppRoot {
                     )
                 }
             })
+            .when(notification_panel_is_open, |el: Stateful<Div>| {
+                let model_left = notification_panel_model_for_overlay.clone();
+                let model_right = notification_panel_model_for_overlay.clone();
+                let close_panel = move |cx: &mut App, model: &Option<Entity<NotificationPanelModel>>| {
+                    if let Some(ref m) = model {
+                        let _ = cx.update_entity(m, |model, cx| {
+                            model.set_show_panel(false);
+                            cx.notify();
+                        });
+                    }
+                };
+                el.child(
+                    div()
+                        .id("notification-panel-overlay")
+                        .absolute()
+                        .inset(px(0.))
+                        .size_full()
+                        .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
+                            close_panel(cx, &model_left);
+                        })
+                        .on_mouse_down(MouseButton::Right, move |_event, _window, cx| {
+                            close_panel(cx, &model_right);
+                        })
+                )
+            })
             .when(self.notification_panel_entity.is_some(), |el: Stateful<Div>| {
                 el.child(self.notification_panel_entity.as_ref().unwrap().clone())
             })
@@ -3739,29 +3729,8 @@ impl AppRoot {
             .when(self.new_branch_dialog_entity.is_some(), |el: Stateful<Div>| {
                 el.child(self.new_branch_dialog_entity.as_ref().unwrap().clone())
             })
-            .when(self.diff_overlay_open.is_some(), |el| {
-                if let Some((branch, window_name, session, pane_target)) = &self.diff_overlay_open {
-                    let buffer = terminal_buffers
-                        .lock()
-                        .ok()
-                        .and_then(|g| g.get(pane_target).cloned())
-                        .unwrap_or(TerminalBuffer::Empty);
-                    let branch = branch.clone();
-                    let window_name = window_name.clone();
-                    let session = session.clone();
-                    let pane_target = pane_target.clone();
-                    let app_root_entity_for_diff_close = app_root_entity.clone();
-                    el.child(
-                        DiffOverlay::new(&branch, &pane_target, buffer)
-                            .on_close(move |_window, cx| {
-                                let _ = cx.update_entity(&app_root_entity_for_diff_close, |this: &mut AppRoot, cx| {
-                                    this.close_diff_overlay(&branch, &window_name, session.as_deref(), &pane_target, cx);
-                                });
-                            })
-                    )
-                } else {
-                    el
-                }
+            .when(self.diff_view_entity.is_some(), |el: Stateful<Div>| {
+                el.child(self.diff_view_entity.as_ref().unwrap().clone())
             })
     }
 }

@@ -58,6 +58,8 @@ pub struct Notification {
     timestamp: Instant,
     read: bool,
     merge_count: u32,
+    /// Human-readable source: "repo / worktree" or "repo / worktree / pane N"
+    pub source_label: Option<String>,
 }
 
 impl Notification {
@@ -71,7 +73,15 @@ impl Notification {
             timestamp: Instant::now(),
             read: false,
             merge_count: 1,
+            source_label: None,
         }
+    }
+
+    /// Create a new notification with an explicit source label
+    pub fn new_with_label(pane_id: &str, notif_type: NotificationType, message: &str, source_label: String) -> Self {
+        let mut n = Self::new(pane_id, notif_type, message);
+        n.source_label = Some(source_label);
+        n
     }
 
     /// Get the notification ID

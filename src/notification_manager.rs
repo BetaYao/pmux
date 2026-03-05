@@ -39,6 +39,12 @@ impl NotificationManager {
     /// Add a notification (may merge with recent similar notification)
     /// Returns true if a new notification was added, false if merged
     pub fn add(&mut self, pane_id: &str, notif_type: NotificationType, message: &str) -> bool {
+        self.add_labeled(pane_id, notif_type, message, None)
+    }
+
+    /// Add a notification with a human-readable source label.
+    /// Returns true if a new notification was added, false if merged.
+    pub fn add_labeled(&mut self, pane_id: &str, notif_type: NotificationType, message: &str, source_label: Option<String>) -> bool {
         let group_key = format!("{}:{:?}", pane_id, notif_type);
 
         // Check for recent mergeable notification
@@ -49,7 +55,8 @@ impl NotificationManager {
         }
 
         // Create new notification
-        let notification = Notification::new(pane_id, notif_type, message);
+        let mut notification = Notification::new(pane_id, notif_type, message);
+        notification.source_label = source_label;
 
         // Add to front (most recent first)
         self.notifications.push_front(notification);

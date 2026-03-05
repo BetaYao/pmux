@@ -85,9 +85,9 @@ pub struct Sidebar {
     on_new_branch: Option<Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
     on_delete: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>>,
     on_view_diff: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>>,
-    on_right_click: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>>,
-    /// Which worktree index has context menu open (from parent state)
-    context_menu_for: Option<usize>,
+    on_right_click: Option<Arc<dyn Fn(usize, f32, f32, &mut Window, &mut App) + Send + Sync>>,
+    /// Which worktree index has context menu open, and the (x, y) position of the right-click
+    context_menu_for: Option<(usize, f32, f32)>,
     creating_branch: bool,
     /// Store original worktree info for access in callbacks
     worktrees_info: Arc<Mutex<Vec<crate::worktree::WorktreeInfo>>>,
@@ -202,7 +202,7 @@ impl Sidebar {
         self.on_view_diff = Some(Arc::new(callback));
     }
 
-    pub fn on_right_click<F: Fn(usize, &mut Window, &mut App) + Send + Sync + 'static>(&mut self, callback: F) {
+    pub fn on_right_click<F: Fn(usize, f32, f32, &mut Window, &mut App) + Send + Sync + 'static>(&mut self, callback: F) {
         self.on_right_click = Some(Arc::new(callback));
     }
 
@@ -217,7 +217,7 @@ impl Sidebar {
         self.on_close_orphan = Some(Arc::new(callback));
     }
 
-    pub fn with_context_menu(mut self, index: Option<usize>) -> Self {
+    pub fn with_context_menu(mut self, index: Option<(usize, f32, f32)>) -> Self {
         self.context_menu_for = index;
         self
     }
@@ -447,50 +447,85 @@ impl Sidebar {
         }
     }
 
-    fn render_context_menu(
+    /// Render an individual context menu item
+    fn context_menu_item(
+        id: impl Into<ElementId>,
+        icon: &'static str,
+        label: &'static str,
+        text_color: Rgba,
+        hover_bg: Rgba,
+        hover_text: Rgba,
+        on_click_fn: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> impl IntoElement {
+        div()
+            .id(id)
+            .mx(px(4.))
+            .px(px(8.)).py(px(7.))
+            .rounded(px(4.))
+            .flex().flex_row().items_center().gap(px(8.))
+            .text_size(px(13.))
+            .text_color(text_color)
+            .hover(move |s: StyleRefinement| s.bg(hover_bg).text_color(hover_text))
+            .cursor_pointer()
+            .on_click(on_click_fn)
+            .child(div().text_size(px(11.)).opacity(0.7).child(icon))
+            .child(label)
+    }
+
+    pub fn render_context_menu(
         idx: usize,
         on_view_diff: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>>,
         on_delete: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>>,
         worktrees_info: &[crate::worktree::WorktreeInfo],
     ) -> impl IntoElement {
-        let mut menu = div()
-            .id(format!("sidebar-context-menu-{}", idx))
-            .mx(px(4.)).my(px(2.)).px(px(4.)).py(px(4.))
-            .rounded(px(4.))
-            .bg(rgb(0x2d2d2d))
-            .border_1().border_color(rgb(0x3d3d3d))
-            .flex().flex_col().gap(px(2.));
-
-        // Only show View Diff for non-main worktrees (main...HEAD is empty for main branch)
         let show_view_diff = on_view_diff.is_some()
             && !worktrees_info.get(idx).map(|w| w.is_main).unwrap_or(true);
+        let has_view_diff = show_view_diff;
+        let has_delete = on_delete.is_some();
+
+        let mut menu = div()
+            .id(format!("sidebar-context-menu-{}", idx))
+            .min_w(px(180.))
+            .py(px(4.))
+            .rounded(px(6.))
+            .bg(rgb(0x282828))
+            .border_1().border_color(rgb(0x404040))
+            .shadow_lg()
+            .occlude()
+            .on_click(|_event, _window, cx| { cx.stop_propagation(); })
+            .flex().flex_col();
+
         if let Some(on_view_diff) = on_view_diff.filter(|_| show_view_diff) {
-            let item = div()
-                .id(format!("context-menu-view-diff-{}", idx))
-                .px(px(8.)).py(px(6.))
-                .text_size(px(12.)).text_color(rgb(0xcccccc))
-                .hover(|s: StyleRefinement| s.bg(rgb(0x3d3d3d)))
-                .cursor_pointer()
-                .on_click(move |_event, window, cx| {
-                    on_view_diff(idx, window, cx);
-                })
-                .child("View Diff");
-            menu = menu.child(item);
+            menu = menu.child(Self::context_menu_item(
+                format!("context-menu-view-diff-{}", idx),
+                "⊡",
+                "View Diff",
+                rgb(0xdddddd),
+                rgb(0x0d4f7a),
+                rgb(0xffffff),
+                move |_event, window, cx| { on_view_diff(idx, window, cx); },
+            ));
         }
-        if let Some(ref on_delete) = on_delete {
-            let on_delete = Arc::clone(on_delete);
-            let item = div()
-                .id(format!("context-menu-remove-{}", idx))
-                .px(px(8.)).py(px(6.))
-                .text_size(px(12.)).text_color(rgb(0xcccccc))
-                .hover(|s: StyleRefinement| s.bg(rgb(0x3d3d3d)))
-                .cursor_pointer()
-                .on_click(move |_event, window, cx| {
-                    on_delete(idx, window, cx);
-                })
-                .child("Remove Worktree");
-            menu = menu.child(item);
+
+        // Separator between sections
+        if has_view_diff && has_delete {
+            menu = menu.child(
+                div().mx(px(4.)).my(px(2.)).h(px(1.)).bg(rgb(0x3a3a3a))
+            );
         }
+
+        if let Some(on_delete) = on_delete {
+            menu = menu.child(Self::context_menu_item(
+                format!("context-menu-remove-{}", idx),
+                "⊗",
+                "Remove Worktree",
+                rgb(0xff7070),
+                rgb(0x3a1010),
+                rgb(0xff9090),
+                move |_event, window, cx| { on_delete(idx, window, cx); },
+            ));
+        }
+
         menu
     }
 
@@ -557,7 +592,6 @@ fn format_elapsed(instant: Instant) -> String {
 impl RenderOnce for Sidebar {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let worktrees = self.worktrees.lock().unwrap().clone();
-        let worktrees_info = self.worktrees_info.lock().unwrap().clone();
         let pane_statuses = self.pane_statuses.lock().unwrap().clone();
         let selected = self.selected_index;
         let repo_name = self.repo_name.clone();
@@ -565,9 +599,7 @@ impl RenderOnce for Sidebar {
         let on_new_branch_ref = self.on_new_branch.as_ref();
         let on_delete = self.on_delete.clone();
         let on_select = self.on_select.clone();
-        let on_view_diff = self.on_view_diff.clone();
         let on_right_click = self.on_right_click.clone();
-        let context_menu_for = self.context_menu_for;
         let on_toggle_sidebar = self.on_toggle_sidebar.clone();
         let on_toggle_notifications = self.on_toggle_notifications.clone();
         let on_add_workspace = self.on_add_workspace.clone();
@@ -680,17 +712,12 @@ impl RenderOnce for Sidebar {
 
             if let Some(on_right_click) = &on_right_click {
                 let on_right_click = on_right_click.clone();
-                row = row.on_mouse_down(MouseButton::Right, move |_event, window, cx| {
-                    on_right_click(idx, window, cx);
+                row = row.on_mouse_down(MouseButton::Right, move |event, window, cx| {
+                    on_right_click(idx, f32::from(event.position.x), f32::from(event.position.y), window, cx);
                 });
             }
 
             rows.push(row.into_any_element());
-
-            if context_menu_for == Some(idx) {
-                let menu_row = Self::render_context_menu(idx, on_view_diff.clone(), on_delete.clone(), &worktrees_info);
-                rows.push(menu_row.into_any_element());
-            }
         }
 
         // Orphan tmux windows (worktree removed externally) — show with close button
@@ -743,9 +770,12 @@ impl RenderOnce for Sidebar {
             .py(px(4.))
             .children(rows);
 
+        // Floating context menu: absolute positioned using the actual mouse Y from the right-click event
+
         div()
             .id("sidebar")
             .w_full().h_full().flex().flex_col()
+            .relative()
             .bg(rgb(0x252526))
             .child(top_section)
             .child(list)

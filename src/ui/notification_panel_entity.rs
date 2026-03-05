@@ -19,6 +19,7 @@ pub struct NotificationPanelEntity {
     on_mark_read: Arc<dyn Fn(Uuid, &mut Window, &mut App)>,
     on_clear_all: Arc<dyn Fn(&mut Window, &mut App)>,
     on_jump_to_pane: Arc<dyn Fn(&str, &mut Window, &mut App)>,
+    on_dismiss_and_jump: Arc<dyn Fn(Uuid, &str, &mut Window, &mut App)>,
 }
 
 impl NotificationPanelEntity {
@@ -29,6 +30,7 @@ impl NotificationPanelEntity {
         on_mark_read: Arc<dyn Fn(Uuid, &mut Window, &mut App)>,
         on_clear_all: Arc<dyn Fn(&mut Window, &mut App)>,
         on_jump_to_pane: Arc<dyn Fn(&str, &mut Window, &mut App)>,
+        on_dismiss_and_jump: Arc<dyn Fn(Uuid, &str, &mut Window, &mut App)>,
         cx: &mut Context<Self>,
     ) -> Self {
         let show_panel = model.read(cx).show_panel;
@@ -48,6 +50,7 @@ impl NotificationPanelEntity {
             on_mark_read,
             on_clear_all,
             on_jump_to_pane,
+            on_dismiss_and_jump,
         }
     }
 }
@@ -74,6 +77,7 @@ impl Render for NotificationPanelEntity {
         let on_mark_read = self.on_mark_read.clone();
         let on_clear_all = self.on_clear_all.clone();
         let on_jump_to_pane = self.on_jump_to_pane.clone();
+        let on_dismiss_and_jump = self.on_dismiss_and_jump.clone();
 
         let panel = NotificationPanel::new()
             .with_notifications(notification_items)
@@ -81,12 +85,14 @@ impl Render for NotificationPanelEntity {
             .on_close(move |w, cx| on_close(w, cx))
             .on_mark_read(move |id, w, cx| on_mark_read(id, w, cx))
             .on_clear_all(move |w, cx| on_clear_all(w, cx))
-            .on_jump_to_pane(move |pid, w, cx| on_jump_to_pane(pid, w, cx));
+            .on_jump_to_pane(move |pid, w, cx| on_jump_to_pane(pid, w, cx))
+            .on_dismiss_and_jump(move |id, pid, w, cx| on_dismiss_and_jump(id, pid, w, cx));
 
         div()
             .absolute()
             .top(px(36.))   // just below the 36px top-controls bar
             .left(px(104.)) // aligned with notification bell icon left edge (72px pl + 28px toggle + 4px gap)
+            .occlude()
             .child(panel)
             .into_any_element()
     }
