@@ -71,7 +71,7 @@ impl TopBarEntity {
             .px(px(12.))
             .py(px(8.))
             .flex_1()
-            .min_w(px(80.))
+            .min_w(px(48.))
             .max_w(px(200.))
             .when(is_active, |el: Stateful<Div>| {
                 el.bg(rgb(0x2c313a))
@@ -126,6 +126,7 @@ impl Render for TopBarEntity {
             .child(
                 div()
                     .flex_1()
+                    .min_w(px(0.))
                     .flex()
                     .flex_row()
                     .items_center()

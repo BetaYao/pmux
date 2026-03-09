@@ -8,10 +8,8 @@ use uuid::Uuid;
 pub enum NotificationType {
     /// Error occurred (highest priority)
     Error,
-    /// Waiting for user input
+    /// Waiting for user input or confirmation
     Waiting,
-    /// Waiting for confirmation/approval (e.g. permission request)
-    WaitingConfirm,
     /// General information
     Info,
 }
@@ -22,7 +20,6 @@ impl NotificationType {
         match self {
             NotificationType::Error => 3,
             NotificationType::Waiting => 2,
-            NotificationType::WaitingConfirm => 2,
             NotificationType::Info => 1,
         }
     }
@@ -32,7 +29,6 @@ impl NotificationType {
         match self {
             NotificationType::Error => "Error",
             NotificationType::Waiting => "Waiting",
-            NotificationType::WaitingConfirm => "Confirm",
             NotificationType::Info => "Info",
         }
     }
@@ -42,7 +38,6 @@ impl NotificationType {
         match self {
             NotificationType::Error => "✕",
             NotificationType::Waiting => "◐",
-            NotificationType::WaitingConfirm => "▲",
             NotificationType::Info => "ℹ",
         }
     }
@@ -58,6 +53,8 @@ pub struct Notification {
     timestamp: Instant,
     read: bool,
     merge_count: u32,
+    /// Human-readable source: "repo / worktree" or "repo / worktree / pane N"
+    pub source_label: Option<String>,
 }
 
 impl Notification {
@@ -71,7 +68,15 @@ impl Notification {
             timestamp: Instant::now(),
             read: false,
             merge_count: 1,
+            source_label: None,
         }
+    }
+
+    /// Create a new notification with an explicit source label
+    pub fn new_with_label(pane_id: &str, notif_type: NotificationType, message: &str, source_label: String) -> Self {
+        let mut n = Self::new(pane_id, notif_type, message);
+        n.source_label = Some(source_label);
+        n
     }
 
     /// Get the notification ID
@@ -157,7 +162,6 @@ pub struct NotificationSummary {
     pub unread: usize,
     pub error_count: usize,
     pub waiting_count: usize,
-    pub waiting_confirm_count: usize,
     pub info_count: usize,
 }
 
@@ -184,7 +188,7 @@ impl NotificationSummary {
 
     /// Check if there are waiting notifications (input or confirmation)
     pub fn has_waiting(&self) -> bool {
-        self.waiting_count > 0 || self.waiting_confirm_count > 0
+        self.waiting_count > 0
     }
 }
 

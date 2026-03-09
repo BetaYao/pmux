@@ -129,6 +129,30 @@ fn parse_worktree_list(output: &str) -> Result<Vec<WorktreeInfo>, WorktreeError>
     Ok(worktrees)
 }
 
+/// Get the current branch for a worktree directory.
+/// Uses `git rev-parse --abbrev-ref HEAD` (lightweight: reads .git/HEAD file).
+/// Returns full ref (e.g. "refs/heads/feature-x") to match WorktreeInfo.branch format,
+/// or "HEAD" for detached HEAD.
+pub fn get_current_branch(worktree_path: &Path) -> Result<String, WorktreeError> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(worktree_path)
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(WorktreeError::CommandFailed(stderr.to_string()));
+    }
+
+    let short_name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    if short_name == "HEAD" {
+        return Ok("HEAD".to_string());
+    }
+
+    Ok(format!("refs/heads/{}", short_name))
+}
+
 /// Get ahead/behind count for a branch
 pub fn get_ahead_behind(_repo_path: &Path, _branch: &str) -> Result<(usize, usize), WorktreeError> {
     // This would need to compare with remote tracking branch
@@ -275,6 +299,29 @@ branch refs/heads/main"#;
         let wt = WorktreeInfo::new(PathBuf::from("/some/path"), "main", "abc");
         let display = wt.display_path();
         assert!(!display.is_empty());
+    }
+
+    /// Test: get_current_branch returns refs/heads/ prefixed branch for this repo
+    #[test]
+    fn test_get_current_branch_format() {
+        let repo_root = std::env::current_dir().unwrap();
+        match get_current_branch(&repo_root) {
+            Ok(branch) => {
+                assert!(
+                    branch.starts_with("refs/heads/") || branch == "HEAD",
+                    "Expected refs/heads/... or HEAD, got: {}",
+                    branch
+                );
+            }
+            Err(_) => {} // may fail in CI or non-git environments
+        }
+    }
+
+    /// Test: get_current_branch fails gracefully on non-git dir
+    #[test]
+    fn test_get_current_branch_non_git() {
+        let result = get_current_branch(Path::new("/tmp"));
+        assert!(result.is_err());
     }
 
     /// Test: API functions exist

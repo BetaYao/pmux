@@ -41,7 +41,6 @@ pub struct Notification {
 #[derive(Clone, Debug)]
 pub enum NotificationType {
     WaitingInput,
-    WaitingConfirm,
     Error,
     Info,
 }

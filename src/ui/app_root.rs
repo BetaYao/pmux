@@ -9,12 +9,12 @@ use crate::git_utils::{is_git_repository, get_git_error_message, GitError};
 use crate::notification::NotificationType;
 use crate::notification_manager::NotificationManager;
 use crate::system_notifier;
-use crate::shell_integration::{ShellPhase, ShellPhaseInfo};
+use crate::shell_integration::ShellPhaseInfo;
 use crate::terminal::ContentExtractor;
 use crate::runtime::{AgentRuntime, EventBus, RuntimeEvent, StatusPublisher};
 use crate::runtime::backends::{create_runtime_from_env, kill_tmux_window, list_tmux_windows, recover_runtime, resolve_backend, session_name_for_workspace, window_name_for_worktree, window_target};
 use crate::runtime::{RuntimeState, WorktreeState};
-use crate::ui::{AppState, sidebar::Sidebar, workspace_tabbar::WorkspaceTabBar, terminal_controller::ResizeController, terminal_view::TerminalBuffer, terminal_area_entity::TerminalAreaEntity, notification_panel_entity::NotificationPanelEntity, new_branch_dialog_entity::NewBranchDialogEntity, delete_worktree_dialog_ui::DeleteWorktreeDialogUi, split_pane_container::SplitPaneContainer, diff_overlay::DiffOverlay, status_bar::StatusBar, models::{StatusCountsModel, NotificationPanelModel, NewBranchDialogModel, PaneSummaryModel}, topbar_entity::TopBarEntity};
+use crate::ui::{AppState, sidebar::Sidebar, workspace_tabbar::WorkspaceTabBar, terminal_controller::ResizeController, terminal_view::TerminalBuffer, terminal_area_entity::TerminalAreaEntity, notification_panel_entity::NotificationPanelEntity, new_branch_dialog_entity::NewBranchDialogEntity, delete_worktree_dialog_ui::DeleteWorktreeDialogUi, split_pane_container::SplitPaneContainer, diff_view::DiffViewOverlay, status_bar::StatusBar, models::{StatusCountsModel, NotificationPanelModel, NewBranchDialogModel, PaneSummaryModel}, topbar_entity::TopBarEntity};
 use crate::split_tree::SplitNode;
 use crate::workspace_manager::WorkspaceManager;
 use crate::input::{key_to_xterm_escape, KeyModifiers};
@@ -106,12 +106,10 @@ pub struct AppRoot {
     cached_worktrees_repo: Option<PathBuf>,
     /// Cached tmux window names for the current repo; filled once when opening repo to avoid repeated list-windows calls.
     cached_tmux_windows: Option<(PathBuf, Vec<String>)>,
-    /// Sidebar context menu: which worktree index has menu open
-    sidebar_context_menu_index: Option<usize>,
-    /// Review windows: branch -> window name (stub for local PTY)
-    review_windows: HashMap<String, String>,
-    /// When Some, diff overlay is shown: (branch, window_name, session, pane_target)
-    diff_overlay_open: Option<(String, String, Option<String>, String)>,
+    /// Sidebar context menu: which worktree index has menu open, and mouse (x, y) position
+    sidebar_context_menu: Option<(usize, f32, f32)>,
+    /// Built-in diff view entity (replaces nvim+diffview overlay)
+    diff_view_entity: Option<Entity<DiffViewOverlay>>,
     /// Sidebar width in pixels (persisted to state.json)
     sidebar_width: u32,
     /// When Some, dependency check failed - show self-check page
@@ -135,6 +133,14 @@ pub struct AppRoot {
     settings_secrets_draft: Option<Secrets>,
     /// Which channel config panel is open: "discord", "kook", "feishu"
     settings_configuring_channel: Option<String>,
+    /// Which agent is being edited in the Agent Detect settings (index into agent_detect.agents)
+    settings_editing_agent: Option<usize>,
+    /// Active settings tab: "channels" or "agent_detect"
+    settings_tab: String,
+    /// Focus handle for the settings modal (steals focus from terminal when open)
+    settings_focus: Option<FocusHandle>,
+    /// Which settings text field is focused: "agent-name-{idx}", "rule-patterns-{agent_idx}-{rule_idx}"
+    settings_focused_field: Option<String>,
     /// StatusCountsModel - TopBar/StatusBar observe this for entity-scoped re-render (Phase 0 spike)
     status_counts_model: Option<Entity<StatusCountsModel>>,
     /// TopBar Entity - observes StatusCountsModel, re-renders only when status changes
@@ -162,9 +168,80 @@ pub struct AppRoot {
     running_animation_frame: usize,
     /// Running animation timer task (250ms tick)
     running_animation_task: Option<gpui::Task<()>>,
+    /// Whether the pmux window is focused (shared with event loop for notification suppression)
+    window_focused_shared: Arc<AtomicBool>,
+    /// Timestamp of last user keyboard input (shared with event loop for notification suppression)
+    last_input_time: Arc<Mutex<std::time::Instant>>,
+    /// Available update info (set by background check)
+    update_available: Option<crate::updater::UpdateInfo>,
+    /// Whether an update download is in progress
+    update_downloading: bool,
 }
 
 const RUNNING_ANIMATION_INTERVAL_MS: u64 = 250;
+
+/// Derive a human-readable source label from a pane_id.
+/// Format: "repo / worktree" or "repo / worktree / pane N"
+/// Handles "local:/path/to/worktree" and "local:/path/to/worktree:N" formats.
+fn pane_id_to_source_label(pane_id: &str) -> String {
+    let path_str = if let Some(s) = pane_id.strip_prefix("local:") {
+        s
+    } else {
+        // For tmux or other backends, return as-is
+        return pane_id.to_string();
+    };
+
+    // Split off optional pane index suffix (e.g. ":1")
+    let (path_part, pane_num) = {
+        // Find the last ':' that is followed only by digits
+        if let Some(colon_pos) = path_str.rfind(':') {
+            let suffix = &path_str[colon_pos + 1..];
+            if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+                let idx: usize = suffix.parse().unwrap_or(0);
+                (&path_str[..colon_pos], idx + 1)
+            } else {
+                (path_str, 1usize)
+            }
+        } else {
+            (path_str, 1usize)
+        }
+    };
+
+    let path = std::path::Path::new(path_part);
+    let components: Vec<_> = path.components().collect();
+    let n = components.len();
+
+    let label = if n >= 2 {
+        let parent = components[n - 2].as_os_str().to_string_lossy();
+        let child = components[n - 1].as_os_str().to_string_lossy();
+        format!("{} / {}", parent, child)
+    } else {
+        path.file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| path_part.to_string())
+    };
+
+    if pane_num > 1 {
+        format!("{} / pane {}", label, pane_num)
+    } else {
+        label
+    }
+}
+
+/// Extract the worktree filesystem path from a pane_id.
+/// Handles: "local:/path/to/worktree" → Some("/path/to/worktree")
+///          "local:/path/to/worktree:1" → Some("/path/to/worktree")
+///          "%0" (tmux) → None
+fn extract_worktree_path_from_pane_id(pane_id: &str) -> Option<PathBuf> {
+    let path_str = pane_id.strip_prefix("local:")?;
+    if let Some(colon_pos) = path_str.rfind(':') {
+        let suffix = &path_str[colon_pos + 1..];
+        if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+            return Some(PathBuf::from(&path_str[..colon_pos]));
+        }
+    }
+    Some(PathBuf::from(path_str))
+}
 
 impl AppRoot {
     /// Get sidebar width for persistence (clamped 200-400)
@@ -252,9 +329,8 @@ impl AppRoot {
             cached_worktrees: Vec::new(),
             cached_worktrees_repo: None,
             cached_tmux_windows: None,
-            sidebar_context_menu_index: None,
-            review_windows: HashMap::new(),
-            diff_overlay_open: None,
+            sidebar_context_menu: None,
+            diff_view_entity: None,
             sidebar_width,
             dependency_check,
             terminal_needs_focus: false,
@@ -266,6 +342,10 @@ impl AppRoot {
             settings_draft: None,
             settings_secrets_draft: None,
             settings_configuring_channel: None,
+            settings_editing_agent: None,
+            settings_tab: "channels".to_string(),
+            settings_focus: None,
+            settings_focused_field: None,
             status_counts_model: None,
             topbar_entity: None,
             notification_panel_model: None,
@@ -279,6 +359,10 @@ impl AppRoot {
             pane_summary_model: None,
             running_animation_frame: 0,
             running_animation_task: None,
+            window_focused_shared: Arc::new(AtomicBool::new(true)),
+            last_input_time: Arc::new(Mutex::new(std::time::Instant::now())),
+            update_available: None,
+            update_downloading: false,
         }
     }
 
@@ -287,6 +371,9 @@ impl AppRoot {
     fn ensure_entities(&mut self, cx: &mut Context<Self>) {
         if self.dialog_input_focus.is_none() {
             self.dialog_input_focus = Some(cx.focus_handle());
+        }
+        if self.settings_focus.is_none() {
+            self.settings_focus = Some(cx.focus_handle());
         }
         if !self.has_workspaces() {
             return;
@@ -412,6 +499,39 @@ impl AppRoot {
                         });
                     })
                 };
+                let on_dismiss_and_jump = {
+                    let entity = app_root_entity.clone();
+                    let mgr = notif_mgr.clone();
+                    let np_model = model.clone();
+                    Arc::new(move |uuid: uuid::Uuid, pane_id: &str, _window: &mut Window, cx: &mut App| {
+                        // Clear the notification
+                        let unread_after = if let Ok(mut m) = mgr.lock() {
+                            m.clear(uuid);
+                            m.unread_count()
+                        } else { 0 };
+                        // Update unread count in model
+                        let _ = cx.update_entity(&np_model, |m: &mut crate::ui::models::NotificationPanelModel, cx| {
+                            m.set_unread_count(unread_after);
+                            cx.notify();
+                        });
+                        // Jump to the source pane
+                        let pane_id = pane_id.to_string();
+                        let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
+                            if let Some(idx) = this.split_tree.flatten().into_iter().position(|(t, _)| t == pane_id) {
+                                this.focused_pane_index = idx;
+                                this.active_pane_target = Some(pane_id.clone());
+                                if let Ok(mut guard) = this.active_pane_target_shared.lock() {
+                                    *guard = pane_id.clone();
+                                }
+                                if let Some(ref rt) = this.runtime {
+                                    let _ = rt.focus_pane(&pane_id);
+                                }
+                                this.terminal_needs_focus = true;
+                            }
+                            cx.notify();
+                        });
+                    })
+                };
                 let entity = cx.new(move |cx| {
                     NotificationPanelEntity::new(
                         model,
@@ -420,6 +540,7 @@ impl AppRoot {
                         on_mark_read,
                         on_clear_all,
                         on_jump_to_pane,
+                        on_dismiss_and_jump,
                         cx,
                     )
                 });
@@ -511,6 +632,9 @@ impl AppRoot {
             self.terminal_focus = Some(cx.focus_handle());
         }
 
+        // Start background update check
+        self.start_update_check(cx);
+
         let repo_path = self.workspace_manager.active_tab().map(|t| t.path.clone());
 
         if let Some(path) = repo_path {
@@ -531,6 +655,124 @@ impl AppRoot {
                 return;
             }
             self.schedule_start_main_session(&path, cx);
+        }
+    }
+
+    /// Spawn background update check (runs once per session, respects interval and config).
+    fn start_update_check(&mut self, cx: &mut Context<Self>) {
+        let config = Config::load().unwrap_or_default();
+        if !config.auto_update.enabled {
+            return;
+        }
+
+        // Check if enough time has elapsed since last check
+        if let Some(last_ts) = config.auto_update.last_check_timestamp {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let interval_secs = config.auto_update.check_interval_hours * 3600;
+            if now.saturating_sub(last_ts) < interval_secs {
+                return;
+            }
+        }
+
+        let skipped = config.auto_update.skipped_version.clone();
+        let notification_manager = Arc::clone(&self.notification_manager);
+
+        cx.spawn(async move |entity, cx| {
+            // Delay 5 seconds to not compete with startup
+            blocking::unblock(|| std::thread::sleep(std::time::Duration::from_secs(5))).await;
+
+            let result = blocking::unblock(move || {
+                crate::updater::check_for_update(skipped.as_deref())
+            })
+            .await;
+
+            // Update last check timestamp
+            if let Ok(mut cfg) = Config::load() {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                cfg.auto_update.last_check_timestamp = Some(now);
+                let _ = cfg.save();
+            }
+
+            match result {
+                Ok(crate::updater::UpdateCheckResult::UpdateAvailable(info)) => {
+                    let version = info.latest_version.display();
+                    if let Ok(mut mgr) = notification_manager.lock() {
+                        mgr.add(
+                            "__updater__",
+                            crate::notification::NotificationType::Info,
+                            &format!("New version available: {}", version),
+                        );
+                    }
+                    let _ = entity.update(cx, |this: &mut AppRoot, cx| {
+                        this.update_available = Some(info);
+                        cx.notify();
+                    });
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!("pmux: update check failed: {}", e);
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Download and install the available update, then relaunch.
+    fn trigger_update(&mut self, cx: &mut Context<Self>) {
+        let info = match &self.update_available {
+            Some(info) => info.clone(),
+            None => return,
+        };
+        self.update_downloading = true;
+        cx.notify();
+
+        cx.spawn(async move |entity, cx| {
+            let result = blocking::unblock(move || {
+                crate::updater::download_and_install(&info)
+            })
+            .await;
+
+            match result {
+                Ok(app_path) => {
+                    // Save state before relaunch
+                    let _ = entity.update(cx, |this: &mut AppRoot, _cx| {
+                        this.save_config();
+                    });
+                    crate::updater::relaunch(&app_path);
+                }
+                Err(e) => {
+                    let _ = entity.update(cx, |this: &mut AppRoot, cx| {
+                        this.update_downloading = false;
+                        if let Ok(mut mgr) = this.notification_manager.lock() {
+                            mgr.add(
+                                "__updater__",
+                                crate::notification::NotificationType::Error,
+                                &format!("Update failed: {}", e),
+                            );
+                        }
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Skip the currently available update version.
+    fn skip_update_version(&mut self) {
+        if let Some(ref info) = self.update_available {
+            let version_tag = info.latest_version.display();
+            if let Ok(mut config) = Config::load() {
+                config.auto_update.skipped_version = Some(version_tag);
+                let _ = config.save();
+            }
+            self.update_available = None;
         }
     }
 
@@ -697,23 +939,75 @@ impl AppRoot {
             let runtime_for_resize = runtime.clone();
             let pane_for_resize = pane_target_str.clone();
             let shared_dims_for_resize = Arc::clone(&self.shared_terminal_dims);
+            // Throttle PTY resize: execute first resize immediately (critical for shrinking),
+            // coalesce rapid subsequent resizes to avoid SIGWINCH flood, and always apply
+            // the final size via a trailing-edge timer.
+            let pending_resize_dims = Arc::new(std::sync::atomic::AtomicU32::new(0));
+            let last_pty_resize_ms = Arc::new(std::sync::atomic::AtomicU64::new(0));
+            const RESIZE_THROTTLE_MS: u64 = 100;
             let resize_callback: Arc<dyn Fn(u16, u16) + Send + Sync> = Arc::new(move |cols, rows| {
                 // #region agent log
                 crate::debug_log::dbg_session_log(
                     "app_root.rs:resize_callback(setup_local)",
-                    "PTY resize fired",
+                    "PTY resize requested (throttled)",
                     &serde_json::json!({"cols": cols, "rows": rows}),
                     "H15",
                 );
                 // #endregion
-                let _ = runtime_for_resize.resize(&pane_for_resize, cols, rows);
-                if let Ok(mut dims) = shared_dims_for_resize.lock() {
-                    *dims = Some((cols, rows));
-                }
-                if let Ok(mut cfg) = Config::load() {
-                    cfg.last_terminal_cols = Some(cols);
-                    cfg.last_terminal_rows = Some(rows);
-                    let _ = cfg.save();
+                let packed = ((cols as u32) << 16) | (rows as u32);
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
+                let last = last_pty_resize_ms.load(Ordering::SeqCst);
+
+                if now.saturating_sub(last) >= RESIZE_THROTTLE_MS {
+                    // Throttle window passed: execute immediately
+                    last_pty_resize_ms.store(now, Ordering::SeqCst);
+                    pending_resize_dims.store(0, Ordering::SeqCst);
+                    let _ = runtime_for_resize.resize(&pane_for_resize, cols, rows);
+                    if let Ok(mut d) = shared_dims_for_resize.lock() {
+                        *d = Some((cols, rows));
+                    }
+                    if let Ok(mut cfg) = Config::load() {
+                        cfg.last_terminal_cols = Some(cols);
+                        cfg.last_terminal_rows = Some(rows);
+                        let _ = cfg.save();
+                    }
+                } else {
+                    // Within throttle window: store pending, spawn trailing thread if needed
+                    let prev = pending_resize_dims.swap(packed, Ordering::SeqCst);
+                    if prev == 0 {
+                        let pending = pending_resize_dims.clone();
+                        let last_ms = last_pty_resize_ms.clone();
+                        let rt = runtime_for_resize.clone();
+                        let pane = pane_for_resize.clone();
+                        let shared = shared_dims_for_resize.clone();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_millis(RESIZE_THROTTLE_MS + 20));
+                            let dims = pending.swap(0, Ordering::SeqCst);
+                            if dims != 0 {
+                                let c = (dims >> 16) as u16;
+                                let r = dims as u16;
+                                last_ms.store(
+                                    std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .map(|d| d.as_millis() as u64)
+                                        .unwrap_or(0),
+                                    Ordering::SeqCst,
+                                );
+                                let _ = rt.resize(&pane, c, r);
+                                if let Ok(mut d) = shared.lock() {
+                                    *d = Some((c, r));
+                                }
+                                if let Ok(mut cfg) = Config::load() {
+                                    cfg.last_terminal_cols = Some(c);
+                                    cfg.last_terminal_rows = Some(r);
+                                    let _ = cfg.save();
+                                }
+                            }
+                        });
+                    }
                 }
             });
 
@@ -721,8 +1015,13 @@ impl AppRoot {
             let runtime_for_input = runtime.clone();
             let pane_for_input = pane_target_str.clone();
             let pending_enter = self.ime_pending_enter.clone();
+            let modal_open_for_input = self.modal_overlay_open.clone();
             let input_callback: Arc<dyn Fn(&[u8]) + Send + Sync> =
                 Arc::new(move |bytes: &[u8]| {
+                    // Block input to terminal when a modal (settings/new branch) is open
+                    if modal_open_for_input.load(Ordering::Relaxed) {
+                        return;
+                    }
                     let _ = runtime_for_input.send_input(&pane_for_input, bytes);
                     // IME: first Enter only confirms composition; clear pending so we don't send \r (user must press Enter again to submit)
                     let _ = pending_enter.swap(false, Ordering::SeqCst);
@@ -767,6 +1066,11 @@ impl AppRoot {
                 let mut last_status_check = Instant::now();
                 let mut last_notify = Instant::now();
                 let mut last_phase = ext.shell_phase();
+                let mut last_alt_screen = false;
+                let mut agent_override: Option<crate::config::AgentDef> = None;
+                let agent_detect: crate::config::AgentDetectConfig = crate::config::Config::load()
+                    .map(|c| c.agent_detect)
+                    .unwrap_or_else(|_| crate::config::Config::default().agent_detect);
                 let status_interval = Duration::from_millis(200);
                 loop {
                     // Process the first event immediately (low latency for first char)
@@ -795,57 +1099,78 @@ impl AppRoot {
                     // Throttle status detection: only run on phase change or every 200ms
                     let now = Instant::now();
                     let phase = ext.shell_phase();
-                    let term_mode = terminal_for_output.mode();
-                    let alt_screen = term_mode.contains(alacritty_terminal::term::TermMode::ALT_SCREEN);
-                    // Build ProcessContext: detect non-shell programs without forcing phase
-                    let process_active = if phase == ShellPhase::Unknown {
-                        if alt_screen {
-                            true
-                        } else if pane_target_clone.starts_with('%') {
-                            if let Ok(output) = std::process::Command::new("tmux")
-                                .args(["display-message", "-p", "-t", &pane_target_clone,
-                                       "#{pane_current_command}"])
+                    // Detect alternate screen buffer (TUI programs: vim, htop, etc.)
+                    let alt_screen = terminal_for_output.mode()
+                        .contains(alacritty_terminal::term::TermMode::ALT_SCREEN);
+                    if phase != last_phase || alt_screen != last_alt_screen
+                        || now.duration_since(last_status_check) >= status_interval
+                    {
+                        last_status_check = now;
+                        // While phase is Running and we haven't identified an agent yet,
+                        // keep querying tmux for the foreground process name. This is
+                        // necessary because OSC 133 C (PreExec) fires BEFORE the shell
+                        // actually exec's the command, so the first query may still see
+                        // the shell (zsh/bash) instead of the target CLI (claude/aider).
+                        if phase == crate::shell_integration::ShellPhase::Running
+                            && !alt_screen
+                            && agent_override.is_none()
+                        {
+                            if let Ok(out) = std::process::Command::new("tmux")
+                                .args(["display-message", "-t", &pane_target_clone, "-p", "#{pane_current_command}"])
                                 .output()
                             {
-                                let cmd = String::from_utf8_lossy(&output.stdout);
-                                let cmd = cmd.trim().to_string();
-                                !cmd.is_empty()
-                                    && !matches!(cmd.as_str(), "zsh" | "bash" | "fish" | "sh" | "dash" | "ksh")
-                            } else { false }
-                        } else { false }
-                    } else { false };
-                    let process_ctx = crate::status_detector::ProcessContext { process_active, alt_screen };
-
-                    if phase != last_phase || now.duration_since(last_status_check) >= status_interval {
-                        last_status_check = now;
+                                let cmd = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                                agent_override = agent_detect.find_agent(&cmd).cloned();
+                            }
+                        } else if phase != crate::shell_integration::ShellPhase::Running {
+                            agent_override = None;
+                        }
                         last_phase = phase;
-                        let shell_info = ShellPhaseInfo {
-                            phase,
-                            last_post_exec_exit_code: None,
-                        };
+                        last_alt_screen = alt_screen;
+
                         let content_str = ext.take_content().0;
                         let content_for_status: &str = if content_str.len() > MAX_STATUS_CONTENT_LEN {
                             &content_str[content_str.len() - MAX_STATUS_CONTENT_LEN..]
                         } else {
                             content_str.as_str()
                         };
-                        if let Some(ref pub_) = status_publisher {
-                            let _ = pub_.check_status(
-                                &status_key_clone,
-                                crate::status_detector::ProcessStatus::Running,
-                                Some(shell_info.clone()),
-                                content_for_status,
-                                process_ctx,
-                            );
-                            // For non-shell processes (TUI/CLI agents), call again to satisfy
-                            // debounce — safe because text detection still determines the status
-                            if process_active {
+
+                        if alt_screen {
+                            // Alt screen TUI (vim, htop) → force Idle
+                            let shell_info = ShellPhaseInfo {
+                                phase: crate::shell_integration::ShellPhase::Input,
+                                last_post_exec_exit_code: ext.last_exit_code(),
+                            };
+                            if let Some(ref pub_) = status_publisher {
                                 let _ = pub_.check_status(
                                     &status_key_clone,
                                     crate::status_detector::ProcessStatus::Running,
                                     Some(shell_info),
                                     content_for_status,
-                                    process_ctx,
+                                );
+                            }
+                        } else if let Some(ref agent_def) = agent_override {
+                            // Known agent CLI → detect sub-status via text patterns
+                            let detected = agent_def.detect_status(content_for_status);
+                            if let Some(ref pub_) = status_publisher {
+                                let _ = pub_.force_status(
+                                    &status_key_clone,
+                                    detected,
+                                    content_for_status,
+                                );
+                            }
+                        } else {
+                            // Normal shell command → use OSC 133 phase
+                            let shell_info = ShellPhaseInfo {
+                                phase,
+                                last_post_exec_exit_code: ext.last_exit_code(),
+                            };
+                            if let Some(ref pub_) = status_publisher {
+                                let _ = pub_.check_status(
+                                    &status_key_clone,
+                                    crate::status_detector::ProcessStatus::Running,
+                                    Some(shell_info),
+                                    content_for_status,
                                 );
                             }
                         }
@@ -933,17 +1258,60 @@ impl AppRoot {
 
             let runtime_for_resize = runtime.clone();
             let pane_for_resize = pane_target_str.clone();
+            let pending_resize_dims2 = Arc::new(std::sync::atomic::AtomicU32::new(0));
+            let last_pty_resize_ms2 = Arc::new(std::sync::atomic::AtomicU64::new(0));
+            const RESIZE_THROTTLE_MS: u64 = 100;
             let resize_callback: Arc<dyn Fn(u16, u16) + Send + Sync> =
                 Arc::new(move |cols, rows| {
-                    let _ = runtime_for_resize.resize(&pane_for_resize, cols, rows);
+                    let packed = ((cols as u32) << 16) | (rows as u32);
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0);
+                    let last = last_pty_resize_ms2.load(Ordering::SeqCst);
+
+                    if now.saturating_sub(last) >= RESIZE_THROTTLE_MS {
+                        last_pty_resize_ms2.store(now, Ordering::SeqCst);
+                        pending_resize_dims2.store(0, Ordering::SeqCst);
+                        let _ = runtime_for_resize.resize(&pane_for_resize, cols, rows);
+                    } else {
+                        let prev = pending_resize_dims2.swap(packed, Ordering::SeqCst);
+                        if prev == 0 {
+                            let pending = pending_resize_dims2.clone();
+                            let last_ms = last_pty_resize_ms2.clone();
+                            let rt = runtime_for_resize.clone();
+                            let pane = pane_for_resize.clone();
+                            std::thread::spawn(move || {
+                                std::thread::sleep(std::time::Duration::from_millis(RESIZE_THROTTLE_MS + 20));
+                                let dims = pending.swap(0, Ordering::SeqCst);
+                                if dims != 0 {
+                                    let c = (dims >> 16) as u16;
+                                    let r = dims as u16;
+                                    last_ms.store(
+                                        std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .map(|d| d.as_millis() as u64)
+                                            .unwrap_or(0),
+                                        Ordering::SeqCst,
+                                    );
+                                    let _ = rt.resize(&pane, c, r);
+                                }
+                            });
+                        }
+                    }
                 });
 
             let focus_handle = self.terminal_focus.get_or_insert_with(|| cx.focus_handle()).clone();
             let runtime_for_input = runtime.clone();
             let pane_for_input = pane_target_str.clone();
             let pending_enter = self.ime_pending_enter.clone();
+            let modal_open_for_input = self.modal_overlay_open.clone();
             let input_callback: Arc<dyn Fn(&[u8]) + Send + Sync> =
                 Arc::new(move |bytes: &[u8]| {
+                    // Block input to terminal when a modal (settings/new branch) is open
+                    if modal_open_for_input.load(Ordering::Relaxed) {
+                        return;
+                    }
                     let _ = runtime_for_input.send_input(&pane_for_input, bytes);
                     // IME: first Enter only confirms composition; clear pending so we don't send \r (user must press Enter again to submit)
                     let _ = pending_enter.swap(false, Ordering::SeqCst);
@@ -973,6 +1341,11 @@ impl AppRoot {
                 let mut last_status_check = Instant::now();
                 let mut last_notify = Instant::now();
                 let mut last_phase = ext.shell_phase();
+                let mut last_alt_screen = false;
+                let mut agent_override: Option<crate::config::AgentDef> = None;
+                let agent_detect: crate::config::AgentDetectConfig = crate::config::Config::load()
+                    .map(|c| c.agent_detect)
+                    .unwrap_or_else(|_| crate::config::Config::default().agent_detect);
                 let status_interval = Duration::from_millis(200);
                 loop {
                     // Process the first event immediately (low latency for first char)
@@ -1000,57 +1373,78 @@ impl AppRoot {
                     // Throttle status detection: only run on phase change or every 200ms
                     let now = Instant::now();
                     let phase = ext.shell_phase();
-                    let term_mode = terminal_for_output.mode();
-                    let alt_screen = term_mode.contains(alacritty_terminal::term::TermMode::ALT_SCREEN);
-                    // Build ProcessContext: detect non-shell programs without forcing phase
-                    let process_active = if phase == ShellPhase::Unknown {
-                        if alt_screen {
-                            true
-                        } else if pane_target_clone.starts_with('%') {
-                            if let Ok(output) = std::process::Command::new("tmux")
-                                .args(["display-message", "-p", "-t", &pane_target_clone,
-                                       "#{pane_current_command}"])
+                    // Detect alternate screen buffer (TUI programs: vim, htop, etc.)
+                    let alt_screen = terminal_for_output.mode()
+                        .contains(alacritty_terminal::term::TermMode::ALT_SCREEN);
+                    if phase != last_phase || alt_screen != last_alt_screen
+                        || now.duration_since(last_status_check) >= status_interval
+                    {
+                        last_status_check = now;
+                        // While phase is Running and we haven't identified an agent yet,
+                        // keep querying tmux for the foreground process name. This is
+                        // necessary because OSC 133 C (PreExec) fires BEFORE the shell
+                        // actually exec's the command, so the first query may still see
+                        // the shell (zsh/bash) instead of the target CLI (claude/aider).
+                        if phase == crate::shell_integration::ShellPhase::Running
+                            && !alt_screen
+                            && agent_override.is_none()
+                        {
+                            if let Ok(out) = std::process::Command::new("tmux")
+                                .args(["display-message", "-t", &pane_target_clone, "-p", "#{pane_current_command}"])
                                 .output()
                             {
-                                let cmd = String::from_utf8_lossy(&output.stdout);
-                                let cmd = cmd.trim().to_string();
-                                !cmd.is_empty()
-                                    && !matches!(cmd.as_str(), "zsh" | "bash" | "fish" | "sh" | "dash" | "ksh")
-                            } else { false }
-                        } else { false }
-                    } else { false };
-                    let process_ctx = crate::status_detector::ProcessContext { process_active, alt_screen };
-
-                    if phase != last_phase || now.duration_since(last_status_check) >= status_interval {
-                        last_status_check = now;
+                                let cmd = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                                agent_override = agent_detect.find_agent(&cmd).cloned();
+                            }
+                        } else if phase != crate::shell_integration::ShellPhase::Running {
+                            agent_override = None;
+                        }
                         last_phase = phase;
-                        let shell_info = ShellPhaseInfo {
-                            phase,
-                            last_post_exec_exit_code: None,
-                        };
+                        last_alt_screen = alt_screen;
+
                         let content_str = ext.take_content().0;
                         let content_for_status: &str = if content_str.len() > MAX_STATUS_CONTENT_LEN {
                             &content_str[content_str.len() - MAX_STATUS_CONTENT_LEN..]
                         } else {
                             content_str.as_str()
                         };
-                        if let Some(ref pub_) = status_publisher {
-                            let _ = pub_.check_status(
-                                &status_key_clone,
-                                crate::status_detector::ProcessStatus::Running,
-                                Some(shell_info.clone()),
-                                content_for_status,
-                                process_ctx,
-                            );
-                            // For non-shell processes (TUI/CLI agents), call again to satisfy
-                            // debounce — safe because text detection still determines the status
-                            if process_active {
+
+                        if alt_screen {
+                            // Alt screen TUI (vim, htop) → force Idle
+                            let shell_info = ShellPhaseInfo {
+                                phase: crate::shell_integration::ShellPhase::Input,
+                                last_post_exec_exit_code: ext.last_exit_code(),
+                            };
+                            if let Some(ref pub_) = status_publisher {
                                 let _ = pub_.check_status(
                                     &status_key_clone,
                                     crate::status_detector::ProcessStatus::Running,
                                     Some(shell_info),
                                     content_for_status,
-                                    process_ctx,
+                                );
+                            }
+                        } else if let Some(ref agent_def) = agent_override {
+                            // Known agent CLI → detect sub-status via text patterns
+                            let detected = agent_def.detect_status(content_for_status);
+                            if let Some(ref pub_) = status_publisher {
+                                let _ = pub_.force_status(
+                                    &status_key_clone,
+                                    detected,
+                                    content_for_status,
+                                );
+                            }
+                        } else {
+                            // Normal shell command → use OSC 133 phase
+                            let shell_info = ShellPhaseInfo {
+                                phase,
+                                last_post_exec_exit_code: ext.last_exit_code(),
+                            };
+                            if let Some(ref pub_) = status_publisher {
+                                let _ = pub_.check_status(
+                                    &status_key_clone,
+                                    crate::status_detector::ProcessStatus::Running,
+                                    Some(shell_info),
+                                    content_for_status,
                                 );
                             }
                         }
@@ -1657,8 +2051,13 @@ impl AppRoot {
         let status_counts_model = self.status_counts_model.clone();
         let notification_panel_model = self.notification_panel_model.clone();
         let pane_summary_model = self.pane_summary_model.clone();
+        let active_pane_shared = Arc::clone(&self.active_pane_target_shared);
+        let window_focused = Arc::clone(&self.window_focused_shared);
+        let last_input_time = Arc::clone(&self.last_input_time);
         cx.spawn(async move |entity, cx| {
             let rx = std::sync::Arc::new(std::sync::Mutex::new(event_bus.subscribe()));
+            let mut last_branch_check: HashMap<PathBuf, std::time::Instant> = HashMap::new();
+            let branch_check_cooldown = std::time::Duration::from_secs(2);
             loop {
                 let rx_clone = rx.clone();
                 let ev = blocking::unblock(move || rx_clone.lock().unwrap().recv()).await;
@@ -1696,31 +2095,79 @@ impl AppRoot {
                             let _ = entity.update(cx, |this, cx| {
                                 this.manage_running_animation(cx);
                             });
+
+                            // Branch refresh: when command completes, check if git branch changed
+                            if matches!(e.state, AgentStatus::Idle | AgentStatus::Waiting) {
+                                if let Some(wt_path) = extract_worktree_path_from_pane_id(pane_id) {
+                                    let now = std::time::Instant::now();
+                                    let should_check = last_branch_check
+                                        .get(&wt_path)
+                                        .map(|last| now.duration_since(*last) >= branch_check_cooldown)
+                                        .unwrap_or(true);
+                                    if should_check {
+                                        last_branch_check.insert(wt_path.clone(), now);
+                                        let wt_path_clone = wt_path.clone();
+                                        let branch_result = blocking::unblock(move || {
+                                            crate::worktree::get_current_branch(&wt_path_clone)
+                                        }).await;
+                                        if let Ok(new_branch) = branch_result {
+                                            let _ = entity.update(cx, |this, cx| {
+                                                for wt in &mut this.cached_worktrees {
+                                                    if wt.path == wt_path && wt.branch != new_branch {
+                                                        let short = new_branch.strip_prefix("refs/heads/").unwrap_or(&new_branch);
+                                                        wt.branch = new_branch.clone();
+                                                        wt.is_main = short == "main" || short == "master";
+                                                        cx.notify();
+                                                        break;
+                                                    }
+                                                }
+                                            });
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     Ok(RuntimeEvent::Notification(n)) => {
                         let pane_id = n.pane_id.as_deref().unwrap_or(&n.agent_id);
-                        let notif_type = match n.notif_type {
-                            crate::runtime::NotificationType::Error => NotificationType::Error,
-                            crate::runtime::NotificationType::WaitingInput => NotificationType::Waiting,
-                            crate::runtime::NotificationType::WaitingConfirm => {
-                                NotificationType::WaitingConfirm
+                        // Suppress all notifications for the currently focused pane
+                        let is_active_pane = active_pane_shared
+                            .lock()
+                            .ok()
+                            .map(|g| !g.is_empty() && g.as_str() == pane_id)
+                            .unwrap_or(false);
+                        if !is_active_pane {
+                            let notif_type = match n.notif_type {
+                                crate::runtime::NotificationType::Error => NotificationType::Error,
+                                crate::runtime::NotificationType::WaitingInput => NotificationType::Waiting,
+                                crate::runtime::NotificationType::Info => NotificationType::Info,
+                            };
+                            let message = n.message.clone();
+                            let source_label = if pane_id.is_empty() { None } else { Some(pane_id_to_source_label(pane_id)) };
+                            // 方案 6a: suppress system notification when window is focused
+                            let is_window_focused = window_focused.load(std::sync::atomic::Ordering::Relaxed);
+                            // 方案 6b: suppress Running→Idle notification if user was recently active
+                            let recent_user_input = last_input_time.lock().ok()
+                                .map(|t| t.elapsed() < std::time::Duration::from_secs(2))
+                                .unwrap_or(false);
+                            let is_info_notification = matches!(notif_type, NotificationType::Info);
+                            let suppress_system_notif = is_window_focused
+                                || (is_info_notification && recent_user_input);
+                            let mut unread_after = 0usize;
+                            if let Ok(mut mgr) = notification_manager.lock() {
+                                if mgr.add_labeled(pane_id, notif_type, &message, source_label) {
+                                    if !suppress_system_notif {
+                                        system_notifier::notify("pmux", &message, notif_type);
+                                    }
+                                }
+                                unread_after = mgr.unread_count();
                             }
-                            crate::runtime::NotificationType::Info => NotificationType::Info,
-                        };
-                        let message = n.message.clone();
-                        let mut unread_after = 0usize;
-                        if let Ok(mut mgr) = notification_manager.lock() {
-                            if mgr.add(pane_id, notif_type, &message) {
-                                system_notifier::notify("pmux", &message, notif_type);
+                            if let Some(ref np_model) = notification_panel_model {
+                                let _ = cx.update_entity(np_model, |m, cx| {
+                                    m.set_unread_count(unread_after);
+                                    cx.notify();
+                                });
                             }
-                            unread_after = mgr.unread_count();
-                        }
-                        if let Some(ref np_model) = notification_panel_model {
-                            let _ = cx.update_entity(np_model, |m, cx| {
-                                m.set_unread_count(unread_after);
-                                cx.notify();
-                            });
                         }
                     }
                     Err(_) => break,
@@ -1843,6 +2290,10 @@ impl AppRoot {
             Some(i) => i,
             None => return,
         };
+        // Don't switch worktrees while diff view is open
+        if self.diff_view_entity.is_some() {
+            return;
+        }
         let (repo_path, path, branch) = {
             let tab = match self.workspace_manager.active_tab() {
                 Some(t) => t,
@@ -2240,6 +2691,23 @@ impl AppRoot {
 
     /// Handle keyboard events
     fn handle_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        // Track last input time for notification suppression (方案 6b)
+        if let Ok(mut t) = self.last_input_time.lock() {
+            *t = std::time::Instant::now();
+        }
+        // Modal: when settings is open, only Escape closes it; block all other keys from reaching terminal
+        if self.show_settings {
+            if event.keystroke.key.as_str() == "escape" {
+                self.show_settings = false;
+                self.settings_draft = None;
+                self.settings_secrets_draft = None;
+                self.settings_configuring_channel = None;
+                self.settings_editing_agent = None;
+                self.settings_focused_field = None;
+                cx.notify();
+            }
+            return;
+        }
         // Modal: when new branch dialog is open, only Escape closes it; block all other keys
         if let Some(ref model_entity) = self.new_branch_dialog_model {
             if model_entity.read(cx).is_open {
@@ -2411,9 +2879,8 @@ impl AppRoot {
                     return;
                 }
                 "r" => {
-                    if event.keystroke.modifiers.shift {
-                        self.open_diff_view(cx);
-                    }
+                    self.open_diff_view(cx);
+                    return;
                 }
                 "v" => {
                     if let Some(clipboard) = cx.read_from_clipboard() {
@@ -2444,8 +2911,9 @@ impl AppRoot {
                     return;
                 }
                 "w" => {
-                    if let Some((branch, window_name, session, pane_target)) = self.diff_overlay_open.clone() {
-                        self.close_diff_overlay(&branch, &window_name, session.as_deref(), &pane_target, cx);
+                    if self.diff_view_entity.is_some() {
+                        self.diff_view_entity = None;
+                        cx.notify();
                     }
                 }
                 "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" => {
@@ -2459,6 +2927,40 @@ impl AppRoot {
                 _ => {}
             }
             return; // Don't forward Cmd+key to tmux
+        }
+
+        // When diff view is open, handle scroll keys, block everything else
+        if let Some(ref diff_entity) = self.diff_view_entity {
+            let diff_entity = diff_entity.clone();
+            let page_size: i32 = 20; // rows per page
+            match event.keystroke.key.as_str() {
+                "up" => {
+                    let _ = cx.update_entity(&diff_entity, |dv, cx| dv.scroll_diff_by(-1, cx));
+                }
+                "down" => {
+                    let _ = cx.update_entity(&diff_entity, |dv, cx| dv.scroll_diff_by(1, cx));
+                }
+                "pageup" => {
+                    let _ = cx.update_entity(&diff_entity, |dv, cx| dv.scroll_diff_by(-page_size, cx));
+                }
+                "pagedown" => {
+                    let _ = cx.update_entity(&diff_entity, |dv, cx| dv.scroll_diff_by(page_size, cx));
+                }
+                "home" => {
+                    let _ = cx.update_entity(&diff_entity, |dv, cx| dv.scroll_diff_to_top(cx));
+                }
+                "end" => {
+                    let _ = cx.update_entity(&diff_entity, |dv, cx| dv.scroll_diff_to_bottom(cx));
+                }
+                "j" => {
+                    let _ = cx.update_entity(&diff_entity, |dv, cx| dv.scroll_diff_by(1, cx));
+                }
+                "k" => {
+                    let _ = cx.update_entity(&diff_entity, |dv, cx| dv.scroll_diff_by(-1, cx));
+                }
+                _ => {}
+            }
+            return;
         }
 
         // Shift+key scroll shortcuts (no Cmd)
@@ -2670,223 +3172,19 @@ impl AppRoot {
         let branch = worktree.short_branch_name().to_string();
         let worktree_path = worktree.path.clone();
 
-        let existing_window = self.review_windows.get(&branch).cloned();
-        if let Some(window_name) = existing_window {
-            self.open_diff_overlay(&branch, &window_name, cx);
-            return;
-        }
-
-        if self.active_worktree_index != Some(idx) {
-            self.switch_to_worktree(&worktree_path, &branch, cx);
-        }
-
-        let window_name = format!("review-{}", branch.replace('/', "-"));
-
-        if let Some(rt) = &self.runtime {
-            match rt.open_review(&worktree_path) {
-                Ok(_) => {
-                    self.review_windows.insert(branch.clone(), window_name.clone());
-                    self.open_diff_overlay(&branch, &window_name, cx);
-                }
-                Err(e) => {
-                    self.state.error_message = Some(format!("Failed to open diff view: {}", e));
-                }
-            }
-        }
-        cx.notify();
-    }
-
-    /// Open diff overlay (add buffer, subscribe to pane output, show overlay)
-    fn open_diff_overlay(&mut self, branch: &str, window_name: &str, cx: &mut Context<Self>) {
-        let runtime = match &self.runtime {
-            Some(rt) => rt.clone(),
-            None => return,
-        };
-        let session = runtime.session_info().map(|(s, _)| s);
-        let pane_target = session
-            .as_ref()
-            .map(|s| format!("{}:{}.0", s, window_name))
-            .unwrap_or_else(|| format!("local:{}.0", window_name));
-
-        // Add buffer for overlay pane; setup_diff_overlay_terminal_output will replace Empty with Terminal when stream is ready
-        if let Ok(mut buffers) = self.terminal_buffers.lock() {
-            buffers.entry(pane_target.clone()).or_insert_with(|| TerminalBuffer::Empty);
-        }
-
-        // Add to pane_targets_shared for multi-pane tracking
-        if let Ok(mut guard) = self.pane_targets_shared.lock() {
-            if !guard.contains(&pane_target) {
-                guard.push(pane_target.clone());
-            }
-        }
-
-        self.active_pane_target = Some(pane_target.clone());
-        self.diff_overlay_open = Some((
-            branch.to_string(),
-            window_name.to_string(),
-            session,
-            pane_target.clone(),
-        ));
-        if let Ok(mut guard) = self.active_pane_target_shared.lock() {
-            *guard = pane_target.clone();
-        }
-
-        self.setup_diff_overlay_terminal_output(runtime, &pane_target, cx);
-        cx.notify();
-    }
-
-    /// Subscribe to the overlay pane's output and feed into a Terminal buffer so the diff overlay shows content.
-    fn setup_diff_overlay_terminal_output(
-        &mut self,
-        runtime: Arc<dyn AgentRuntime>,
-        pane_target: &str,
-        cx: &mut Context<Self>,
-    ) {
-        use crate::terminal::{Terminal, TerminalSize};
-
-        let pane_target_str = pane_target.to_string();
-        let (cols, rows) = runtime.get_pane_dimensions(&pane_target_str);
-
-        if let Some(rx) = runtime.subscribe_output(&pane_target_str) {
-            let terminal = Arc::new(Terminal::new(
-                pane_target_str.clone(),
-                TerminalSize {
-                    cols: cols as u16,
-                    rows: rows as u16,
-                    cell_width: 8.0,
-                    cell_height: 16.0,
-                },
-            ));
-
-            let pty_write_rx = terminal.pty_write_rx.clone();
-            let runtime_for_pty = runtime.clone();
-            let pane_for_pty = pane_target_str.clone();
-            std::thread::spawn(move || {
-                while let Ok(data) = pty_write_rx.recv() {
-                    let _ = runtime_for_pty.send_input(&pane_for_pty, &data);
-                }
-            });
-
-            // Handle OSC 52 clipboard store requests (e.g. from opencode, tmux copy-mode)
-            let clipboard_rx = terminal.clipboard_store_rx.clone();
-            std::thread::spawn(move || {
-                while let Ok(text) = clipboard_rx.recv() {
-                    use std::io::Write;
-                    if let Ok(mut child) = std::process::Command::new("pbcopy")
-                        .stdin(std::process::Stdio::piped())
-                        .spawn()
-                    {
-                        if let Some(stdin) = child.stdin.as_mut() {
-                            let _ = stdin.write_all(text.as_bytes());
-                        }
-                        let _ = child.wait();
-                    }
-                }
-            });
-
-            let runtime_for_resize = runtime.clone();
-            let pane_for_resize = pane_target_str.clone();
-            let resize_callback: Arc<dyn Fn(u16, u16) + Send + Sync> =
-                Arc::new(move |cols, rows| {
-                    let _ = runtime_for_resize.resize(&pane_for_resize, cols, rows);
+        let app_entity = cx.entity();
+        let entity = cx.new(|cx| {
+            let mut overlay = DiffViewOverlay::new(worktree_path, branch);
+            overlay.set_on_close(Arc::new(move |_window, cx| {
+                let _ = cx.update_entity(&app_entity, |this: &mut AppRoot, cx| {
+                    this.diff_view_entity = None;
+                    cx.notify();
                 });
-
-            let focus_handle = self.terminal_focus.get_or_insert_with(|| cx.focus_handle()).clone();
-            let runtime_for_input = runtime.clone();
-            let pane_for_input = pane_target_str.clone();
-            let pending_enter = self.ime_pending_enter.clone();
-            let input_callback: Arc<dyn Fn(&[u8]) + Send + Sync> =
-                Arc::new(move |bytes: &[u8]| {
-                    let _ = runtime_for_input.send_input(&pane_for_input, bytes);
-                    let _ = pending_enter.swap(false, Ordering::SeqCst);
-                });
-
-            if let Ok(mut buffers) = self.terminal_buffers.lock() {
-                buffers.insert(
-                    pane_target_str.clone(),
-                    TerminalBuffer::Terminal {
-                        terminal: terminal.clone(),
-                        focus_handle: focus_handle.clone(),
-                        resize_callback: Some(resize_callback),
-                        input_callback: Some(input_callback),
-                    },
-                );
-            }
-
-            let app_root_entity = cx.entity();
-            let terminal_for_output = terminal.clone();
-            cx.spawn(async move |_entity, cx| {
-                loop {
-                    let chunk = match rx.recv_async().await {
-                        Ok(c) => c,
-                        Err(_) => break,
-                    };
-                    terminal_for_output.process_output(&chunk);
-                    let pending = rx.len();
-                    let batch_limit = if pending > 100 { TERMINAL_OUTPUT_MAX_BATCH } else { TERMINAL_OUTPUT_MIN_BATCH };
-                    let mut batch_count = 1usize;
-                    while batch_count < batch_limit {
-                        match rx.try_recv() {
-                            Ok(next) => {
-                                terminal_for_output.process_output(&next);
-                                batch_count += 1;
-                            }
-                            Err(_) => break,
-                        }
-                    }
-                    let _ = app_root_entity.update(cx, |this: &mut AppRoot, cx| {
-                        if this.diff_overlay_open.is_some() {
-                            cx.notify();
-                        }
-                    });
-                }
-            })
-            .detach();
-        } else {
-            if let Ok(mut buffers) = self.terminal_buffers.lock() {
-                buffers.insert(
-                    pane_target_str,
-                    TerminalBuffer::Error("Streaming unavailable.".to_string()),
-                );
-            }
-        }
-    }
-
-    /// Close diff overlay (kill tmux window, remove from buffers, switch back to worktree)
-    fn close_diff_overlay(
-        &mut self,
-        branch: &str,
-        window_name: &str,
-        session: Option<&str>,
-        pane_target: &str,
-        cx: &mut Context<Self>,
-    ) {
-        if let (Some(rt), Some(s)) = (&self.runtime, session) {
-            let target = format!("{}:{}", s, window_name);
-            let _ = rt.kill_window(&target);
-        }
-        self.review_windows.remove(branch);
-        self.diff_overlay_open = None;
-
-        // Remove from terminal_buffers and pane_targets_shared
-        if let Ok(mut buffers) = self.terminal_buffers.lock() {
-            buffers.remove(pane_target);
-        }
-        if let Ok(mut guard) = self.pane_targets_shared.lock() {
-            guard.retain(|t| t != &pane_target);
-        }
-
-        let worktree_path = self.workspace_manager.active_tab()
-            .map(|t| t.path.clone())
-            .unwrap_or_else(|| PathBuf::from("."));
-        if let Some(idx) = self.active_worktree_index {
-            self.refresh_worktrees_for_repo(&worktree_path);
-            if let Some(wt) = self.cached_worktrees.get(idx) {
-                let path = wt.path.clone();
-                let br = wt.short_branch_name().to_string();
-                self.switch_to_worktree(&path, &br, cx);
-            }
-        }
+            }));
+            overlay.start_loading(cx);
+            overlay
+        });
+        self.diff_view_entity = Some(entity);
         cx.notify();
     }
 
@@ -3145,6 +3443,885 @@ impl AppRoot {
             )
     }
 
+    fn render_settings_modal(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let app_root_entity = cx.entity();
+        let app_root_entity_for_close = app_root_entity.clone();
+        let app_root_entity_save = app_root_entity.clone();
+        let settings_focus = self.settings_focus.get_or_insert_with(|| cx.focus_handle()).clone();
+        let active_tab = self.settings_tab.clone();
+
+        // ── Tab bar ──
+        let app_root_entity_tab_channels = app_root_entity.clone();
+        let app_root_entity_tab_agent = app_root_entity.clone();
+        let is_channels = active_tab == "channels";
+        let tab_channels = div()
+            .id("settings-tab-channels")
+            .px(px(16.))
+            .py(px(6.))
+            .rounded_t(px(6.))
+            .cursor_pointer()
+            .text_size(px(13.))
+            .font_weight(if is_channels { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
+            .text_color(if is_channels { rgb(0xffffff) } else { rgb(0x999999) })
+            .bg(if is_channels { rgb(0x3d3d3d) } else { rgb(0x2d2d2d) })
+            .hover(|style: StyleRefinement| style.bg(rgb(0x454545)))
+            .on_click(move |_event, _window, cx| {
+                let _ = cx.update_entity(&app_root_entity_tab_channels, |this: &mut AppRoot, cx| {
+                    this.settings_tab = "channels".to_string();
+                    cx.notify();
+                });
+            })
+            .child("Channels");
+        let tab_agent = div()
+            .id("settings-tab-agent-detect")
+            .px(px(16.))
+            .py(px(6.))
+            .rounded_t(px(6.))
+            .cursor_pointer()
+            .text_size(px(13.))
+            .font_weight(if !is_channels { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
+            .text_color(if !is_channels { rgb(0xffffff) } else { rgb(0x999999) })
+            .bg(if !is_channels { rgb(0x3d3d3d) } else { rgb(0x2d2d2d) })
+            .hover(|style: StyleRefinement| style.bg(rgb(0x454545)))
+            .on_click(move |_event, _window, cx| {
+                let _ = cx.update_entity(&app_root_entity_tab_agent, |this: &mut AppRoot, cx| {
+                    this.settings_tab = "agent_detect".to_string();
+                    cx.notify();
+                });
+            })
+            .child("Agent Detect");
+        let tab_bar = div()
+            .flex()
+            .flex_row()
+            .gap(px(2.))
+            .pb(px(8.))
+            .mb(px(4.))
+            .border_b_1()
+            .border_color(rgb(0x3d3d3d))
+            .child(tab_channels)
+            .child(tab_agent);
+
+        // ── Tab body ──
+        let tab_body = if is_channels {
+            self.render_settings_channels_tab(cx)
+        } else {
+            self.render_settings_agent_detect_tab(cx)
+        };
+
+        // ── Save button ──
+        let save_button = div()
+            .id("settings-save-btn")
+            .px(px(16.))
+            .py(px(8.))
+            .rounded(px(6.))
+            .bg(rgb(0x0066cc))
+            .text_color(rgb(0xffffff))
+            .text_size(px(14.))
+            .font_weight(FontWeight::MEDIUM)
+            .cursor_pointer()
+            .hover(|style: StyleRefinement| style.bg(rgb(0x0077dd)))
+            .on_click(move |_event, _window, cx| {
+                let _ = cx.update_entity(&app_root_entity_save, |this: &mut AppRoot, cx| {
+                    if let Some(ref draft) = this.settings_draft {
+                        let mut current = Config::load().unwrap_or_default();
+                        current.remote_channels = draft.remote_channels.clone();
+                        current.agent_detect = draft.agent_detect.clone();
+                        let _ = current.save();
+                    }
+                    if let Some(ref secrets) = this.settings_secrets_draft {
+                        let _ = secrets.save();
+                    }
+                    this.show_settings = false;
+                    this.settings_draft = None;
+                    this.settings_secrets_draft = None;
+                    this.settings_configuring_channel = None;
+                    this.settings_editing_agent = None;
+                    cx.notify();
+                });
+            })
+            .child("Save");
+
+        // ── Layout ──
+        // Header row: title + close (fixed)
+        let header_row = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_between()
+            .child(
+                div()
+                    .text_size(px(18.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(rgb(0xffffff))
+                    .child("Settings")
+            )
+            .child(
+                div()
+                    .id("settings-close-btn")
+                    .px(px(12.))
+                    .py(px(6.))
+                    .rounded(px(4.))
+                    .bg(rgb(0x3d3d3d))
+                    .text_color(rgb(0xcccccc))
+                    .text_size(px(14.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .cursor_pointer()
+                    .hover(|style: StyleRefinement| style.bg(rgb(0x4d4d4d)))
+                    .on_click(move |_event, _window, cx| {
+                        let _ = cx.update_entity(&app_root_entity_for_close, |this: &mut AppRoot, cx| {
+                            this.show_settings = false;
+                            this.settings_draft = None;
+                            this.settings_secrets_draft = None;
+                            this.settings_configuring_channel = None;
+                            this.settings_editing_agent = None;
+                            cx.notify();
+                        });
+                    })
+                    .child("×")
+            );
+
+        // Scrollable tab body
+        let scrollable_body = div()
+            .id("settings-content-scroll")
+            .flex_grow()
+            .overflow_y_scroll()
+            .child(tab_body);
+
+        // Save button row (fixed at bottom)
+        let save_row = div()
+            .flex()
+            .flex_row()
+            .justify_end()
+            .pt(px(8.))
+            .child(save_button);
+
+        let settings_content = div()
+            .flex()
+            .flex_col()
+            .gap(px(16.))
+            .max_h(px(600.))
+            // Fixed header
+            .child(header_row)
+            // Fixed tab bar
+            .child(tab_bar)
+            // Scrollable body (takes remaining space)
+            .child(scrollable_body)
+            // Fixed save button
+            .child(save_row);
+        let settings_card = div()
+            .id("settings-dialog-card")
+            .max_w(px(560.))
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(20.))
+            .px(px(24.))
+            .py(px(24.))
+            .rounded(px(8.))
+            .bg(rgb(0x2d2d2d))
+            .shadow_lg()
+            .on_click({
+                let app_root_entity_card = app_root_entity.clone();
+                move |_event, _window, cx| {
+                    // Clicking the card background unfocuses any text field
+                    let _ = cx.update_entity(&app_root_entity_card, |this: &mut AppRoot, cx| {
+                        if this.settings_focused_field.is_some() {
+                            this.settings_focused_field = None;
+                            cx.notify();
+                        }
+                    });
+                    cx.stop_propagation();
+                }
+            })
+            .child(settings_content);
+        let app_root_entity_for_esc = app_root_entity.clone();
+        div()
+            .id("settings-modal-overlay")
+            .absolute()
+            .inset(px(0.))
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(rgba(0x00000099u32))
+            .cursor_pointer()
+            .focusable()
+            .track_focus(&settings_focus)
+            .on_key_down(move |event: &KeyDownEvent, _window, cx| {
+                if event.keystroke.key.as_str() == "escape" {
+                    let _ = cx.update_entity(&app_root_entity_for_esc, |this: &mut AppRoot, cx| {
+                        // If a field is focused, just unfocus it; otherwise close settings
+                        if this.settings_focused_field.is_some() {
+                            this.settings_focused_field = None;
+                        } else {
+                            this.show_settings = false;
+                            this.settings_draft = None;
+                            this.settings_secrets_draft = None;
+                            this.settings_configuring_channel = None;
+                            this.settings_editing_agent = None;
+                            this.settings_focused_field = None;
+                        }
+                        cx.notify();
+                    });
+                } else {
+                    // Route text input to the focused settings field
+                    let _ = cx.update_entity(&app_root_entity_for_esc, |this: &mut AppRoot, cx| {
+                        if let Some(ref field_id) = this.settings_focused_field.clone() {
+                            let key = event.keystroke.key.as_str();
+                            let draft = this.settings_draft.get_or_insert_with(|| Config::load().unwrap_or_default());
+                            if field_id.starts_with("agent-name-") {
+                                if let Ok(idx) = field_id.strip_prefix("agent-name-").unwrap().parse::<usize>() {
+                                    if idx < draft.agent_detect.agents.len() {
+                                        let name = &mut draft.agent_detect.agents[idx].name;
+                                        match key {
+                                            "backspace" => { name.pop(); }
+                                            "tab" | "enter" => { this.settings_focused_field = None; }
+                                            _ => {
+                                                if let Some(ref ch) = event.keystroke.key_char {
+                                                    let filtered: String = ch.chars()
+                                                        .filter(|c| !c.is_control())
+                                                        .collect();
+                                                    name.push_str(&filtered);
+                                                }
+                                            }
+                                        }
+                                        cx.notify();
+                                    }
+                                }
+                            } else if field_id.starts_with("rule-patterns-") {
+                                let parts: Vec<&str> = field_id.strip_prefix("rule-patterns-").unwrap().split('-').collect();
+                                if parts.len() == 2 {
+                                    if let (Ok(ai), Ok(ri)) = (parts[0].parse::<usize>(), parts[1].parse::<usize>()) {
+                                        if ai < draft.agent_detect.agents.len() && ri < draft.agent_detect.agents[ai].rules.len() {
+                                            let patterns = &mut draft.agent_detect.agents[ai].rules[ri].patterns;
+                                            // Edit patterns as a comma-separated string
+                                            let mut text = patterns.join(", ");
+                                            match key {
+                                                "backspace" => { text.pop(); }
+                                                "tab" | "enter" => { this.settings_focused_field = None; }
+                                                _ => {
+                                                    if let Some(ref ch) = event.keystroke.key_char {
+                                                        let filtered: String = ch.chars()
+                                                            .filter(|c| !c.is_control())
+                                                            .collect();
+                                                        text.push_str(&filtered);
+                                                    }
+                                                }
+                                            }
+                                            *patterns = text.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                                            cx.notify();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+                // Block all keys from reaching terminal
+                cx.stop_propagation();
+            })
+            .on_scroll_wheel(|_event, _window, cx| {
+                cx.stop_propagation();
+            })
+            .on_click(move |_event, _window, cx| {
+                let _ = cx.update_entity(&app_root_entity, |this: &mut AppRoot, cx| {
+                    this.show_settings = false;
+                    this.settings_draft = None;
+                    this.settings_secrets_draft = None;
+                    this.settings_configuring_channel = None;
+                    this.settings_editing_agent = None;
+                    cx.notify();
+                });
+            })
+            .child(settings_card)
+    }
+
+    /// Render the Channels tab content in Settings.
+    fn render_settings_channels_tab(&mut self, cx: &mut Context<Self>) -> Div {
+        let app_root_entity = cx.entity();
+        let config = self.settings_draft.clone().unwrap_or_else(|| Config::load().unwrap_or_default());
+        let secrets = self.settings_secrets_draft.clone().unwrap_or_else(|| Secrets::load().unwrap_or_default());
+        let discord_configured = config.remote_channels.discord.channel_id.as_ref().map_or(false, |s: &String| !s.is_empty())
+            && secrets.remote_channels.discord.bot_token.as_ref().map_or(false, |s: &String| !s.is_empty());
+        let kook_configured = config.remote_channels.kook.channel_id.as_ref().map_or(false, |s: &String| !s.is_empty())
+            && secrets.remote_channels.kook.bot_token.as_ref().map_or(false, |s: &String| !s.is_empty());
+        let feishu_configured = config.remote_channels.feishu.chat_id.as_ref().map_or(false, |s: &String| !s.is_empty())
+            && secrets.remote_channels.feishu.app_id.as_ref().map_or(false, |s: &String| !s.is_empty())
+            && secrets.remote_channels.feishu.app_secret.as_ref().map_or(false, |s: &String| !s.is_empty());
+        let discord_enabled = config.remote_channels.discord.enabled;
+        let kook_enabled = config.remote_channels.kook.enabled;
+        let feishu_enabled = config.remote_channels.feishu.enabled;
+        let app_root_entity_discord = app_root_entity.clone();
+        let app_root_entity_kook = app_root_entity.clone();
+        let app_root_entity_feishu = app_root_entity.clone();
+        let discord_status = if discord_configured { "已配置" } else { "未配置" };
+        let kook_status = if kook_configured { "已配置" } else { "未配置" };
+        let feishu_status = if feishu_configured { "已配置" } else { "未配置" };
+        let channel_cards = div()
+            .flex()
+            .flex_col()
+            .gap(px(12.))
+            .child(Self::settings_channel_card_el(
+                "Discord", "discord", discord_status, discord_enabled, app_root_entity_discord,
+                |draft| { draft.remote_channels.discord.enabled = !draft.remote_channels.discord.enabled; },
+            ))
+            .child(Self::settings_channel_card_el(
+                "KOOK", "kook", kook_status, kook_enabled, app_root_entity_kook,
+                |draft| { draft.remote_channels.kook.enabled = !draft.remote_channels.kook.enabled; },
+            ))
+            .child(Self::settings_channel_card_el(
+                "飞书", "feishu", feishu_status, feishu_enabled, app_root_entity_feishu,
+                |draft| { draft.remote_channels.feishu.enabled = !draft.remote_channels.feishu.enabled; },
+            ));
+        let config_guide = self.render_settings_config_guide(&app_root_entity);
+        let mut body = div().flex().flex_col().gap(px(16.)).child(channel_cards);
+        if let Some(guide) = config_guide {
+            body = body.child(guide);
+        }
+        body
+    }
+
+    /// Render the Agent Detect tab content in Settings.
+    fn render_settings_agent_detect_tab(&self, cx: &mut Context<Self>) -> Div {
+        self.render_agent_detect_section(cx)
+    }
+
+    /// Render the Agent Detect section in Settings.
+    fn render_agent_detect_section(&self, cx: &mut Context<Self>) -> Div {
+        let app_root_entity = cx.entity();
+        let config = self.settings_draft.clone().unwrap_or_else(|| Config::load().unwrap_or_default());
+        let agents = config.agent_detect.agents.clone();
+        let editing_idx = self.settings_editing_agent;
+
+        let app_root_entity_add = app_root_entity.clone();
+        let add_button = div()
+            .id("agent-detect-add-btn")
+            .px(px(10.))
+            .py(px(4.))
+            .rounded(px(4.))
+            .bg(rgb(0x3d3d3d))
+            .text_color(rgb(0xcccccc))
+            .text_size(px(12.))
+            .cursor_pointer()
+            .hover(|style: StyleRefinement| style.bg(rgb(0x4d4d4d)))
+            .on_click(move |_event, _window, cx| {
+                let _ = cx.update_entity(&app_root_entity_add, |this: &mut AppRoot, cx| {
+                    let draft = this.settings_draft.get_or_insert_with(|| Config::load().unwrap_or_default());
+                    draft.agent_detect.agents.insert(0, crate::config::AgentDef {
+                        name: String::new(),
+                        rules: vec![],
+                        default_status: "Idle".to_string(),
+                    });
+                    // Shift editing index if one was open
+                    if let Some(ref mut idx) = this.settings_editing_agent {
+                        *idx += 1;
+                    }
+                    this.settings_editing_agent = Some(0);
+                    cx.notify();
+                });
+            })
+            .child("+ 添加");
+
+        let header = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_between()
+            .child(
+                div()
+                    .text_size(px(15.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(rgb(0xdddddd))
+                    .child("Agent Detect"),
+            )
+            .child(add_button);
+
+        let mut agent_cards = div().flex().flex_col().gap(px(8.));
+        for (i, agent) in agents.iter().enumerate() {
+            let is_editing = editing_idx == Some(i);
+            if is_editing {
+                agent_cards = agent_cards.child(self.render_agent_edit_card(i, agent, cx));
+            } else {
+                agent_cards = agent_cards.child(self.render_agent_summary_card(i, agent, cx));
+            }
+        }
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(12.))
+            .child(header)
+            .child(agent_cards)
+    }
+
+    /// Render a read-only summary card for an agent in Settings.
+    fn render_agent_summary_card(
+        &self,
+        index: usize,
+        agent: &crate::config::AgentDef,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let app_root_entity = cx.entity();
+        let app_root_entity_del = app_root_entity.clone();
+        let name = agent.name.clone();
+        let default_status = agent.default_status.clone();
+
+        // Build rules summary text
+        let mut rules_els: Vec<Div> = Vec::new();
+        for rule in &agent.rules {
+            let patterns_str = rule.patterns.iter().map(|p| format!("\"{}\"", p)).collect::<Vec<_>>().join(", ");
+            rules_els.push(
+                div()
+                    .text_size(px(12.))
+                    .text_color(rgb(0x999999))
+                    .child(format!("{}: {}", rule.status, patterns_str)),
+            );
+        }
+        rules_els.push(
+            div()
+                .text_size(px(12.))
+                .text_color(rgb(0x777777))
+                .child(format!("默认: {}", default_status)),
+        );
+
+        let edit_btn = div()
+            .id(SharedString::from(format!("agent-edit-{}", index)))
+            .px(px(8.))
+            .py(px(2.))
+            .rounded(px(4.))
+            .bg(rgb(0x3d3d3d))
+            .text_color(rgb(0xcccccc))
+            .text_size(px(11.))
+            .cursor_pointer()
+            .hover(|style: StyleRefinement| style.bg(rgb(0x4d4d4d)))
+            .on_click(move |_event, _window, cx| {
+                let _ = cx.update_entity(&app_root_entity, |this: &mut AppRoot, cx| {
+                    this.settings_editing_agent = Some(index);
+                    cx.notify();
+                });
+            })
+            .child("编辑");
+
+        let del_btn = div()
+            .id(SharedString::from(format!("agent-del-{}", index)))
+            .px(px(8.))
+            .py(px(2.))
+            .rounded(px(4.))
+            .bg(rgb(0x3d3d3d))
+            .text_color(rgb(0xcc6666))
+            .text_size(px(11.))
+            .cursor_pointer()
+            .hover(|style: StyleRefinement| style.bg(rgb(0x4d4d4d)))
+            .on_click(move |_event, _window, cx| {
+                let _ = cx.update_entity(&app_root_entity_del, |this: &mut AppRoot, cx| {
+                    let draft = this.settings_draft.get_or_insert_with(|| Config::load().unwrap_or_default());
+                    if index < draft.agent_detect.agents.len() {
+                        draft.agent_detect.agents.remove(index);
+                    }
+                    this.settings_editing_agent = None;
+                    cx.notify();
+                });
+            })
+            .child("删除");
+
+        let top_row = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_between()
+            .child(
+                div()
+                    .text_size(px(14.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(rgb(0xffffff))
+                    .child(if name.is_empty() { "(unnamed)".to_string() } else { name }),
+            )
+            .child(
+                div().flex().flex_row().gap(px(6.)).child(edit_btn).child(del_btn),
+            );
+
+        let mut card = div()
+            .p(px(12.))
+            .rounded(px(6.))
+            .bg(rgb(0x353535))
+            .flex()
+            .flex_col()
+            .gap(px(4.))
+            .child(top_row);
+        for el in rules_els {
+            card = card.child(el);
+        }
+        card
+    }
+
+    /// Render an editable card for an agent in Settings.
+    fn render_agent_edit_card(
+        &self,
+        index: usize,
+        agent: &crate::config::AgentDef,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let app_root_entity = cx.entity();
+        let agent_name = agent.name.clone();
+        let agent_default = agent.default_status.clone();
+
+        // Name input (real text field)
+        let name_field_id = format!("agent-name-{}", index);
+        let name_is_focused = self.settings_focused_field.as_deref() == Some(&name_field_id);
+        let app_root_entity_name = app_root_entity.clone();
+        let name_field_id_for_click = name_field_id.clone();
+        let name_display = if agent_name.is_empty() && !name_is_focused {
+            div().text_color(rgb(0x666666)).text_size(px(13.)).child("点击输入名称")
+        } else {
+            let mut row = div().flex().flex_row().items_center();
+            if !agent_name.is_empty() {
+                row = row.child(div().text_size(px(13.)).text_color(rgb(0xeeeeee)).child(SharedString::from(agent_name.clone())));
+            }
+            if name_is_focused {
+                row = row.child(div().w(px(1.5)).h(px(15.)).bg(rgb(0xffffff)).flex_shrink_0());
+            }
+            row
+        };
+        let name_input = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(8.))
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(rgb(0x999999))
+                    .w(px(60.))
+                    .child("名称:"),
+            )
+            .child(
+                div()
+                    .id(SharedString::from(format!("agent-name-input-{}", index)))
+                    .flex_1()
+                    .px(px(8.))
+                    .py(px(4.))
+                    .rounded(px(4.))
+                    .bg(rgb(0x2a2a2a))
+                    .when(name_is_focused, |el| el.border_1().border_color(rgb(0x0066cc)))
+                    .cursor(gpui::CursorStyle::IBeam)
+                    .on_click(move |_event, _window, cx| {
+                        let _ = cx.update_entity(&app_root_entity_name, |this: &mut AppRoot, cx| {
+                            this.settings_focused_field = Some(name_field_id_for_click.clone());
+                            cx.notify();
+                        });
+                        cx.stop_propagation();
+                    })
+                    .child(name_display),
+            );
+
+        // Default status selector
+        let app_root_entity_default = app_root_entity.clone();
+        let default_selector = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(8.))
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(rgb(0x999999))
+                    .w(px(60.))
+                    .child("默认:"),
+            )
+            .child(
+                div()
+                    .id(SharedString::from(format!("agent-default-{}", index)))
+                    .px(px(8.))
+                    .py(px(4.))
+                    .rounded(px(4.))
+                    .bg(rgb(0x2a2a2a))
+                    .text_size(px(13.))
+                    .text_color(rgb(0xeeeeee))
+                    .cursor_pointer()
+                    .child(agent_default.clone())
+                    .on_click(move |_event, _window, cx| {
+                        let _ = cx.update_entity(&app_root_entity_default, |this: &mut AppRoot, cx| {
+                            let draft = this.settings_draft.get_or_insert_with(|| Config::load().unwrap_or_default());
+                            if index < draft.agent_detect.agents.len() {
+                                let current = &draft.agent_detect.agents[index].default_status;
+                                let options = ["Idle", "Running", "Waiting", "Error"];
+                                let next = options.iter()
+                                    .position(|&o| o == current.as_str())
+                                    .map(|i| (i + 1) % options.len())
+                                    .unwrap_or(0);
+                                draft.agent_detect.agents[index].default_status = options[next].to_string();
+                            }
+                            cx.notify();
+                        });
+                    }),
+            );
+
+        // Rules list
+        let mut rules_container = div().flex().flex_col().gap(px(4.));
+        for (ri, rule) in agent.rules.iter().enumerate() {
+            let rule_status = rule.status.clone();
+            let patterns_str = rule.patterns.join(", ");
+            let app_root_entity_status = app_root_entity.clone();
+            let app_root_entity_del_rule = app_root_entity.clone();
+
+            let status_btn = div()
+                .id(SharedString::from(format!("rule-status-{}-{}", index, ri)))
+                .px(px(6.))
+                .py(px(2.))
+                .rounded(px(3.))
+                .bg(rgb(0x2a2a2a))
+                .text_size(px(12.))
+                .text_color(rgb(0xeeeeee))
+                .w(px(70.))
+                .cursor_pointer()
+                .child(rule_status.clone())
+                .on_click(move |_event, _window, cx| {
+                    let _ = cx.update_entity(&app_root_entity_status, |this: &mut AppRoot, cx| {
+                        let draft = this.settings_draft.get_or_insert_with(|| Config::load().unwrap_or_default());
+                        if index < draft.agent_detect.agents.len() && ri < draft.agent_detect.agents[index].rules.len() {
+                            let current = &draft.agent_detect.agents[index].rules[ri].status;
+                            let options = ["Running", "Waiting", "Error", "Idle"];
+                            let next = options.iter()
+                                .position(|&o| o == current.as_str())
+                                .map(|i| (i + 1) % options.len())
+                                .unwrap_or(0);
+                            draft.agent_detect.agents[index].rules[ri].status = options[next].to_string();
+                        }
+                        cx.notify();
+                    });
+                });
+
+            let pat_field_id = format!("rule-patterns-{}-{}", index, ri);
+            let pat_is_focused = self.settings_focused_field.as_deref() == Some(&pat_field_id);
+            let app_root_entity_pat = app_root_entity.clone();
+            let pat_field_id_for_click = pat_field_id.clone();
+            let pat_inner = if patterns_str.is_empty() && !pat_is_focused {
+                div().text_color(rgb(0x666666)).text_size(px(12.)).child("(no patterns)")
+            } else {
+                let mut row = div().flex().flex_row().items_center();
+                if !patterns_str.is_empty() {
+                    row = row.child(div().text_size(px(12.)).text_color(rgb(0xbbbbbb)).child(SharedString::from(patterns_str)));
+                }
+                if pat_is_focused {
+                    row = row.child(div().w(px(1.5)).h(px(13.)).bg(rgb(0xffffff)).flex_shrink_0());
+                }
+                row
+            };
+            let patterns_display = div()
+                .id(SharedString::from(format!("rule-pat-input-{}-{}", index, ri)))
+                .flex_1()
+                .px(px(6.))
+                .py(px(2.))
+                .rounded(px(3.))
+                .bg(rgb(0x2a2a2a))
+                .when(pat_is_focused, |el| el.border_1().border_color(rgb(0x0066cc)))
+                .cursor(gpui::CursorStyle::IBeam)
+                .on_click(move |_event, _window, cx| {
+                    let _ = cx.update_entity(&app_root_entity_pat, |this: &mut AppRoot, cx| {
+                        this.settings_focused_field = Some(pat_field_id_for_click.clone());
+                        cx.notify();
+                    });
+                    cx.stop_propagation();
+                })
+                .child(pat_inner);
+
+            let del_rule_btn = div()
+                .id(SharedString::from(format!("rule-del-{}-{}", index, ri)))
+                .px(px(6.))
+                .py(px(2.))
+                .rounded(px(3.))
+                .text_size(px(12.))
+                .text_color(rgb(0xcc6666))
+                .cursor_pointer()
+                .hover(|style: StyleRefinement| style.bg(rgb(0x4a3333)))
+                .child("×")
+                .on_click(move |_event, _window, cx| {
+                    let _ = cx.update_entity(&app_root_entity_del_rule, |this: &mut AppRoot, cx| {
+                        let draft = this.settings_draft.get_or_insert_with(|| Config::load().unwrap_or_default());
+                        if index < draft.agent_detect.agents.len() && ri < draft.agent_detect.agents[index].rules.len() {
+                            draft.agent_detect.agents[index].rules.remove(ri);
+                        }
+                        cx.notify();
+                    });
+                });
+
+            let rule_row = div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(6.))
+                .child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(rgb(0x666666))
+                        .w(px(16.))
+                        .child(format!("{}.", ri + 1)),
+                )
+                .child(status_btn)
+                .child(patterns_display)
+                .child(del_rule_btn);
+
+            rules_container = rules_container.child(rule_row);
+        }
+
+        // Add rule button
+        let app_root_entity_add_rule = app_root_entity.clone();
+        let add_rule_btn = div()
+            .id(SharedString::from(format!("agent-add-rule-{}", index)))
+            .px(px(8.))
+            .py(px(4.))
+            .rounded(px(4.))
+            .bg(rgb(0x2a2a2a))
+            .text_color(rgb(0xcccccc))
+            .text_size(px(11.))
+            .cursor_pointer()
+            .hover(|style: StyleRefinement| style.bg(rgb(0x3a3a3a)))
+            .on_click(move |_event, _window, cx| {
+                let _ = cx.update_entity(&app_root_entity_add_rule, |this: &mut AppRoot, cx| {
+                    let draft = this.settings_draft.get_or_insert_with(|| Config::load().unwrap_or_default());
+                    if index < draft.agent_detect.agents.len() {
+                        draft.agent_detect.agents[index].rules.push(crate::config::AgentRule {
+                            status: "Running".to_string(),
+                            patterns: vec!["pattern".to_string()],
+                        });
+                    }
+                    cx.notify();
+                });
+            })
+            .child("+ 添加规则");
+
+        // Done button
+        let app_root_entity_done = app_root_entity.clone();
+        let done_btn = div()
+            .id(SharedString::from(format!("agent-done-{}", index)))
+            .px(px(10.))
+            .py(px(4.))
+            .rounded(px(4.))
+            .bg(rgb(0x0066cc))
+            .text_color(rgb(0xffffff))
+            .text_size(px(12.))
+            .cursor_pointer()
+            .hover(|style: StyleRefinement| style.bg(rgb(0x0077dd)))
+            .on_click(move |_event, _window, cx| {
+                let _ = cx.update_entity(&app_root_entity_done, |this: &mut AppRoot, cx| {
+                    this.settings_editing_agent = None;
+                    cx.notify();
+                });
+            })
+            .child("完成");
+
+        let rules_header = div()
+            .text_size(px(11.))
+            .text_color(rgb(0x888888))
+            .child("检测规则（按顺序匹配，第一个命中的生效）：");
+
+        div()
+            .p(px(12.))
+            .rounded(px(6.))
+            .bg(rgb(0x353535))
+            .border_1()
+            .border_color(rgb(0x0066cc))
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(name_input)
+            .child(default_selector)
+            .child(rules_header)
+            .child(rules_container)
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .gap(px(8.))
+                    .child(add_rule_btn)
+                    .child(done_btn),
+            )
+    }
+
+    fn render_settings_config_guide(&self, app_root_entity: &Entity<AppRoot>) -> Option<impl IntoElement> {
+        let channel = self.settings_configuring_channel.as_ref()?.clone();
+        let (title, steps, url) = match channel.as_str() {
+            "discord" => (
+                "Discord 配置指南",
+                "1. 创建应用并添加 Bot\n2. 复制 Bot Token 到 secrets.json 的 discord.bot_token\n3. 邀请 Bot 到服务器\n4. 开启开发者模式，右键频道复制 Channel ID 到 config.json",
+                "https://discord.com/developers/applications",
+            ),
+            "kook" => (
+                "KOOK 配置指南",
+                "1. 创建应用并添加机器人\n2. 复制 Token 到 secrets.json 的 kook.bot_token\n3. 邀请机器人到服务器\n4. 获取频道 ID 填入 config.json 的 kook.channel_id",
+                "https://developer.kookapp.cn/",
+            ),
+            "feishu" => (
+                "飞书配置指南",
+                "1. 创建企业自建应用\n2. 记录 App ID、App Secret 填入 secrets.json\n3. 开通「获取与发送群消息」权限\n4. 将 chat_id 填入 config.json 的 feishu.chat_id",
+                "https://open.feishu.cn/",
+            ),
+            _ => ("配置", "", ""),
+        };
+        let app_root_entity_config = app_root_entity.clone();
+        let url_owned = url.to_string();
+        let open_btn = div()
+            .px(px(12.))
+            .py(px(8.))
+            .rounded(px(6.))
+            .bg(rgb(0x0066cc))
+            .text_color(rgb(0xffffff))
+            .text_size(px(12.))
+            .font_weight(FontWeight::MEDIUM)
+            .cursor_pointer()
+            .hover(|s: StyleRefinement| s.bg(rgb(0x0077dd)))
+            .on_mouse_down(gpui::MouseButton::Left, move |_event, _window, _cx| {
+                let _ = open::that(&url_owned);
+            })
+            .child("在浏览器中打开");
+        let done_btn = div()
+            .px(px(12.))
+            .py(px(8.))
+            .rounded(px(6.))
+            .bg(rgb(0x3d3d3d))
+            .text_color(rgb(0xcccccc))
+            .text_size(px(12.))
+            .font_weight(FontWeight::MEDIUM)
+            .cursor_pointer()
+            .hover(|s: StyleRefinement| s.bg(rgb(0x4d4d4d)))
+            .on_mouse_down(gpui::MouseButton::Left, move |_event, _window, cx| {
+                let _ = cx.update_entity(&app_root_entity_config, |this: &mut AppRoot, cx| {
+                    this.settings_configuring_channel = None;
+                    cx.notify();
+                });
+            })
+            .child("完成");
+        Some(div()
+            .flex()
+            .flex_col()
+            .gap(px(12.))
+            .p(px(16.))
+            .rounded(px(6.))
+            .bg(rgb(0x1e1e1e))
+            .child(
+                div()
+                    .text_size(px(14.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(rgb(0xffffff))
+                    .child(title)
+            )
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(rgb(0xaaaaaa))
+                    .whitespace_normal()
+                    .child(steps)
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .gap(px(8.))
+                    .child(open_btn)
+                    .child(done_btn)
+            ))
+    }
+
     fn render_dependency_check_page(
         &self,
         deps: &DependencyCheckResult,
@@ -3334,6 +4511,10 @@ impl AppRoot {
             .unwrap_or_else(|| self.notification_manager.lock().map(|m| m.unread_count()).unwrap_or(0));
         let app_root_entity_for_toggle = app_root_entity.clone();
         let notification_panel_model_for_toggle = self.notification_panel_model.clone();
+        let notification_panel_model_for_overlay = self.notification_panel_model.clone();
+        let notification_panel_is_open = self.notification_panel_model.as_ref()
+            .map(|m| m.read(cx).show_panel)
+            .unwrap_or(false);
         let app_root_entity_for_add_ws = app_root_entity.clone();
 
         // Collect pane summaries for sidebar display
@@ -3347,7 +4528,7 @@ impl AppRoot {
             .with_statuses(pane_statuses.clone())
             .with_pane_summaries(pane_summaries_data)
             .with_running_frame(running_frame)
-            .with_context_menu(self.sidebar_context_menu_index)
+            .with_context_menu(self.sidebar_context_menu)
             .on_toggle_sidebar(move |_window, cx| {
                 let _ = cx.update_entity(&app_root_entity_for_toggle, |this: &mut AppRoot, cx| {
                     this.sidebar_visible = !this.sidebar_visible;
@@ -3427,6 +4608,23 @@ impl AppRoot {
             }
         });
 
+        // Set up Settings callback - opens the settings modal
+        let app_root_entity_for_settings = app_root_entity.clone();
+        let settings_focus_for_cb = self.settings_focus.clone().expect("settings_focus created in ensure_entities");
+        sidebar.on_settings(move |window, cx| {
+            let _ = cx.update_entity(&app_root_entity_for_settings, |this: &mut AppRoot, cx| {
+                this.show_settings = true;
+                this.settings_draft = Config::load().ok();
+                this.settings_secrets_draft = Secrets::load().ok();
+                cx.notify();
+            });
+            // Focus settings overlay on next frame (after DOM is mounted)
+            let focus = settings_focus_for_cb.clone();
+            window.on_next_frame(move |window, cx| {
+                window.focus(&focus, cx);
+            });
+        });
+
         let app_root_entity_for_delete = app_root_entity.clone();
         let app_root_entity_for_view_diff = app_root_entity.clone();
         let app_root_entity_for_right_click = app_root_entity.clone();
@@ -3435,9 +4633,14 @@ impl AppRoot {
         let repo_path_for_delete = repo_path.clone();
         let repo_path_for_close_orphan = repo_path.clone();
         let repo_path_for_view_diff = repo_path.clone();
+        // Extra clones for the root-level context menu overlay
+        let app_root_entity_for_menu_delete = app_root_entity.clone();
+        let app_root_entity_for_menu_diff = app_root_entity.clone();
+        let repo_path_for_menu_delete = repo_path.clone();
+        let repo_path_for_menu_diff = repo_path.clone();
         sidebar.on_delete(move |idx, _window, cx| {
             let _ = cx.update_entity(&app_root_entity_for_delete, |this: &mut AppRoot, cx| {
-                this.sidebar_context_menu_index = None;
+                this.sidebar_context_menu = None;
                 cx.notify();
             });
             let repo_path = repo_path_for_delete.clone();
@@ -3473,7 +4676,7 @@ impl AppRoot {
         });
         sidebar.on_view_diff(move |idx, _window, cx| {
             let _ = cx.update_entity(&app_root_entity_for_view_diff, |this: &mut AppRoot, cx| {
-                this.sidebar_context_menu_index = None;
+                this.sidebar_context_menu = None;
                 cx.notify();
             });
             let entity = app_root_entity_for_view_diff.clone();
@@ -3491,9 +4694,9 @@ impl AppRoot {
                 });
             }).detach();
         });
-        sidebar.on_right_click(move |idx, _window, cx| {
+        sidebar.on_right_click(move |idx, x, y, _window, cx| {
             let _ = cx.update_entity(&app_root_entity_for_right_click, |this: &mut AppRoot, cx| {
-                this.sidebar_context_menu_index = Some(idx);
+                this.sidebar_context_menu = Some((idx, x, y));
                 cx.notify();
             });
         });
@@ -3523,6 +4726,9 @@ impl AppRoot {
             dialog
         };
 
+        let sidebar_context_menu = self.sidebar_context_menu;
+        let cached_worktrees = self.cached_worktrees.clone();
+
         div()
             .id("workspace-view")
             .size_full()
@@ -3530,23 +4736,6 @@ impl AppRoot {
             .flex_col()
             .bg(rgb(0x21252b))
             .relative()
-            .when(self.sidebar_context_menu_index.is_some(), |el| {
-                let app_root_entity_for_overlay = app_root_entity_for_clear_menu.clone();
-                el.child(
-                    div()
-                        .id("context-menu-overlay")
-                        .absolute()
-                        .inset(px(0.))
-                        .size_full()
-                        .cursor_pointer()
-                        .on_click(move |_event, _window, cx| {
-                            let _ = cx.update_entity(&app_root_entity_for_overlay, |this: &mut AppRoot, cx| {
-                                this.sidebar_context_menu_index = None;
-                                cx.notify();
-                            });
-                        })
-                )
-            })
             .child(
                 div()
                     .flex_1()
@@ -3557,13 +4746,16 @@ impl AppRoot {
                         el.child(
                             div()
                                 .w(px(self.sidebar_width as f32))
+                                .flex_shrink_0()
                                 .h_full()
+                                .overflow_hidden()
                                 .child(sidebar)
                         )
                     })
                     .child(
                         div()
                             .flex_1()
+                            .min_w(px(0.))
                             .min_h_0()
                             .flex()
                             .flex_col()
@@ -3708,6 +4900,91 @@ impl AppRoot {
                             })
                     )
             )
+            // Update banner (above status bar)
+            .children(if self.update_available.is_some() && !self.update_downloading {
+                let version = self.update_available.as_ref().map(|i| i.latest_version.display()).unwrap_or_default();
+                Some(
+                    div()
+                        .id("update-banner")
+                        .w_full()
+                        .h(px(28.))
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .justify_center()
+                        .gap(px(12.))
+                        .bg(rgb(0x1a3a2a))
+                        .border_t_1()
+                        .border_color(rgb(0x2d5f3f))
+                        .text_size(px(12.))
+                        .text_color(rgb(0x4ec9b0))
+                        .child(format!("pmux {} is available", version))
+                        .child(
+                            div()
+                                .id("update-now-btn")
+                                .px(px(12.))
+                                .py(px(2.))
+                                .rounded(px(3.))
+                                .bg(rgb(0x0e7a0d))
+                                .text_color(rgb(0xffffff))
+                                .text_size(px(11.))
+                                .cursor_pointer()
+                                .hover(|s| s.bg(rgb(0x12991e)))
+                                .on_click(cx.listener(|this, _event: &ClickEvent, _window, cx| {
+                                    this.trigger_update(cx);
+                                }))
+                                .child("Update Now"),
+                        )
+                        .child(
+                            div()
+                                .id("update-later-btn")
+                                .px(px(8.))
+                                .py(px(2.))
+                                .cursor_pointer()
+                                .text_color(rgb(0x888888))
+                                .text_size(px(11.))
+                                .hover(|s| s.text_color(rgb(0xcccccc)))
+                                .on_click(cx.listener(|this, _event: &ClickEvent, _window, cx| {
+                                    this.update_available = None;
+                                    cx.notify();
+                                }))
+                                .child("Later"),
+                        )
+                        .child(
+                            div()
+                                .id("update-skip-btn")
+                                .px(px(8.))
+                                .py(px(2.))
+                                .cursor_pointer()
+                                .text_color(rgb(0x666666))
+                                .text_size(px(11.))
+                                .hover(|s| s.text_color(rgb(0xaaaaaa)))
+                                .on_click(cx.listener(|this, _event: &ClickEvent, _window, cx| {
+                                    this.skip_update_version();
+                                    cx.notify();
+                                }))
+                                .child("Skip"),
+                        )
+                )
+            } else if self.update_downloading {
+                Some(
+                    div()
+                        .id("update-progress-banner")
+                        .w_full()
+                        .h(px(28.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(rgb(0x1a2a3a))
+                        .border_t_1()
+                        .border_color(rgb(0x2d4f6f))
+                        .text_size(px(12.))
+                        .text_color(rgb(0x6cb6ff))
+                        .child("Downloading update...")
+                )
+            } else {
+                None
+            })
             .child({
                 let repo_path = self.workspace_manager.active_tab().map(|t| t.path.clone());
                 let worktree_branch = repo_path.and_then(|p| {
@@ -3731,48 +5008,145 @@ impl AppRoot {
                     )
                 }
             })
+            .when(notification_panel_is_open, |el: Stateful<Div>| {
+                let model_left = notification_panel_model_for_overlay.clone();
+                let model_right = notification_panel_model_for_overlay.clone();
+                let close_panel = move |cx: &mut App, model: &Option<Entity<NotificationPanelModel>>| {
+                    if let Some(ref m) = model {
+                        let _ = cx.update_entity(m, |model, cx| {
+                            model.set_show_panel(false);
+                            cx.notify();
+                        });
+                    }
+                };
+                el.child(
+                    div()
+                        .id("notification-panel-overlay")
+                        .absolute()
+                        .inset(px(0.))
+                        .size_full()
+                        .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
+                            close_panel(cx, &model_left);
+                        })
+                        .on_mouse_down(MouseButton::Right, move |_event, _window, cx| {
+                            close_panel(cx, &model_right);
+                        })
+                )
+            })
             .when(self.notification_panel_entity.is_some(), |el: Stateful<Div>| {
                 el.child(self.notification_panel_entity.as_ref().unwrap().clone())
+            })
+            // Context menu rendered above main content, below dialogs
+            .when(sidebar_context_menu.is_some(), |el| {
+                let app_root_entity_for_overlay = app_root_entity_for_clear_menu.clone();
+                el.child(
+                    div()
+                        .id("context-menu-overlay")
+                        .absolute()
+                        .inset(px(0.))
+                        .size_full()
+                        .cursor_pointer()
+                        .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
+                            let _ = cx.update_entity(&app_root_entity_for_overlay, |this: &mut AppRoot, cx| {
+                                this.sidebar_context_menu = None;
+                                cx.notify();
+                            });
+                        })
+                )
+            })
+            .when(sidebar_context_menu.is_some(), |el| {
+                let (idx, click_x, click_y) = sidebar_context_menu.unwrap();
+                let is_main = cached_worktrees.get(idx).map(|w| w.is_main).unwrap_or(true);
+                let on_view_diff: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>> = if !is_main {
+                    let entity = app_root_entity_for_menu_diff.clone();
+                    let repo_path = repo_path_for_menu_diff.clone();
+                    Some(Arc::new(move |idx, _window, cx| {
+                        let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
+                            this.sidebar_context_menu = None;
+                            cx.notify();
+                        });
+                        let entity2 = entity.clone();
+                        let repo_path2 = repo_path.clone();
+                        cx.spawn(async move |cx| {
+                            let result = blocking::unblock(move || {
+                                crate::worktree::discover_worktrees(&repo_path2).ok().map(|wt| (wt, repo_path2))
+                            }).await;
+                            let _ = cx.update_entity(&entity2, |this: &mut AppRoot, cx: &mut _| {
+                                if let Some((wt, rp)) = result {
+                                    this.cached_worktrees = wt;
+                                    this.cached_worktrees_repo = Some(rp);
+                                }
+                                this.open_diff_view_for_worktree_with_cache(idx, cx);
+                            });
+                        }).detach();
+                    }))
+                } else {
+                    None
+                };
+                let on_delete: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>> = {
+                    let entity = app_root_entity_for_menu_delete.clone();
+                    let repo_path = repo_path_for_menu_delete.clone();
+                    Some(Arc::new(move |idx, _window, cx| {
+                        let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
+                            this.sidebar_context_menu = None;
+                            cx.notify();
+                        });
+                        let entity2 = entity.clone();
+                        let repo_path2 = repo_path.clone();
+                        cx.spawn(async move |cx| {
+                            let result = blocking::unblock(move || {
+                                let worktrees = crate::worktree::discover_worktrees(&repo_path2).ok()?;
+                                let worktree = worktrees.get(idx).cloned()?;
+                                let has_uncommitted = crate::worktree::has_uncommitted_changes(&worktree.path);
+                                Some((worktrees, worktree, has_uncommitted, repo_path2))
+                            }).await;
+                            if let Some((worktrees, worktree, has_uncommitted, rp)) = result {
+                                let _ = cx.update_entity(&entity2, |this: &mut AppRoot, cx: &mut _| {
+                                    this.cached_worktrees = worktrees;
+                                    this.cached_worktrees_repo = Some(rp);
+                                    this.delete_worktree_dialog.open(worktree, has_uncommitted);
+                                    cx.notify();
+                                });
+                            }
+                        }).detach();
+                    }))
+                };
+                let menu = Sidebar::render_context_menu(idx, on_view_diff, on_delete, &cached_worktrees);
+                el.child(
+                    div()
+                        .id("root-context-menu-float")
+                        .absolute()
+                        .top(px(click_y))
+                        .left(px(click_x))
+                        .child(menu)
+                )
             })
             // Dialogs rendered last so they appear on top (absolute overlay)
             .child(delete_dialog)
             .when(self.new_branch_dialog_entity.is_some(), |el: Stateful<Div>| {
                 el.child(self.new_branch_dialog_entity.as_ref().unwrap().clone())
             })
-            .when(self.diff_overlay_open.is_some(), |el| {
-                if let Some((branch, window_name, session, pane_target)) = &self.diff_overlay_open {
-                    let buffer = terminal_buffers
-                        .lock()
-                        .ok()
-                        .and_then(|g| g.get(pane_target).cloned())
-                        .unwrap_or(TerminalBuffer::Empty);
-                    let branch = branch.clone();
-                    let window_name = window_name.clone();
-                    let session = session.clone();
-                    let pane_target = pane_target.clone();
-                    let app_root_entity_for_diff_close = app_root_entity.clone();
-                    el.child(
-                        DiffOverlay::new(&branch, &pane_target, buffer)
-                            .on_close(move |_window, cx| {
-                                let _ = cx.update_entity(&app_root_entity_for_diff_close, |this: &mut AppRoot, cx| {
-                                    this.close_diff_overlay(&branch, &window_name, session.as_deref(), &pane_target, cx);
-                                });
-                            })
-                    )
-                } else {
-                    el
-                }
+            .when(self.diff_view_entity.is_some(), |el: Stateful<Div>| {
+                el.child(self.diff_view_entity.as_ref().unwrap().clone())
             })
     }
 }
 
 impl Render for AppRoot {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Track window focus state for notification suppression (方案 6a)
+        self.window_focused_shared.store(window.is_window_active(), std::sync::atomic::Ordering::Relaxed);
+
         // Open Settings when requested from menu (main.rs)
         if OPEN_SETTINGS_REQUESTED.swap(false, Ordering::SeqCst) {
             self.show_settings = true;
             self.settings_draft = Config::load().ok();
             self.settings_secrets_draft = Secrets::load().ok();
+            // Focus settings overlay on next frame (after DOM is mounted)
+            let focus = self.settings_focus.get_or_insert_with(|| cx.focus_handle()).clone();
+            window.on_next_frame(move |window, cx| {
+                window.focus(&focus, cx);
+            });
         }
 
         // Terminal resize is driven entirely by TerminalElement's with_resize_callback,
@@ -3785,7 +5159,8 @@ impl Render for AppRoot {
 
         // Auto-focus terminal when workspace loads so keyboard input works without clicking.
         // Use double on_next_frame so terminal DOM is fully mounted after worktree switch.
-        if self.has_workspaces() && self.terminal_needs_focus {
+        // Skip when settings modal is open to avoid stealing focus back from settings.
+        if self.has_workspaces() && self.terminal_needs_focus && !self.show_settings {
             self.terminal_needs_focus = false;
             let target = self.active_pane_target.clone();
             let buffers = self.terminal_buffers.clone();
@@ -3812,6 +5187,15 @@ impl Render for AppRoot {
             .new_branch_dialog_model
             .as_ref()
             .map_or(false, |e| e.read(cx).is_open);
+        // Pre-build settings modal outside the main div chain to reduce type nesting depth
+        // (deeply nested .when()/.child() chains cause proc-macro stack overflow in gpui_macros)
+        let settings_open = self.show_settings;
+        // Sync modal_overlay_open with any modal (settings or new branch dialog) so terminal
+        // input callbacks are suppressed while a modal is visible.
+        let any_modal_open = settings_open || new_branch_dialog_open;
+        self.modal_overlay_open.store(any_modal_open, Ordering::Relaxed);
+        let settings_modal_el = settings_open.then(|| self.render_settings_modal(cx));
+
         div()
             .id("app-root")
             .relative()
@@ -3821,7 +5205,7 @@ impl Render for AppRoot {
             .font_family(".SystemUIFont")
             .focusable()
             .track_focus(&terminal_focus)
-            .when(!new_branch_dialog_open, |el| {
+            .when(!new_branch_dialog_open && !settings_open, |el| {
                 el.on_key_down(cx.listener(|this, event, window, cx| {
                     this.handle_key_down(event, window, cx);
                 }))
@@ -3835,269 +5219,45 @@ impl Render for AppRoot {
                     self.render_startup_page(cx).into_any_element()
                 },
             )
-            .when(self.show_settings, |el| {
-                let app_root_entity = cx.entity();
-                let app_root_entity_for_close = app_root_entity.clone();
-                // Use draft or load on demand
-                let config = self.settings_draft.clone().unwrap_or_else(|| Config::load().unwrap_or_default());
-                let secrets = self.settings_secrets_draft.clone().unwrap_or_else(|| Secrets::load().unwrap_or_default());
-                let discord_configured = config.remote_channels.discord.channel_id.as_ref().map_or(false, |s: &String| !s.is_empty())
-                    && secrets.remote_channels.discord.bot_token.as_ref().map_or(false, |s: &String| !s.is_empty());
-                let kook_configured = config.remote_channels.kook.channel_id.as_ref().map_or(false, |s: &String| !s.is_empty())
-                    && secrets.remote_channels.kook.bot_token.as_ref().map_or(false, |s: &String| !s.is_empty());
-                let feishu_configured = config.remote_channels.feishu.chat_id.as_ref().map_or(false, |s: &String| !s.is_empty())
-                    && secrets.remote_channels.feishu.app_id.as_ref().map_or(false, |s: &String| !s.is_empty())
-                    && secrets.remote_channels.feishu.app_secret.as_ref().map_or(false, |s: &String| !s.is_empty());
-                let discord_enabled = config.remote_channels.discord.enabled;
-                let kook_enabled = config.remote_channels.kook.enabled;
-                let feishu_enabled = config.remote_channels.feishu.enabled;
-                let app_root_entity_discord = app_root_entity.clone();
-                let app_root_entity_kook = app_root_entity.clone();
-                let app_root_entity_feishu = app_root_entity.clone();
-                let app_root_entity_save = app_root_entity.clone();
-                let discord_status = if discord_configured { "已配置" } else { "未配置" };
-                let kook_status = if kook_configured { "已配置" } else { "未配置" };
-                let feishu_status = if feishu_configured { "已配置" } else { "未配置" };
-                let channel_cards = div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(12.))
-                    .child(Self::settings_channel_card_el(
-                        "Discord",
-                        "discord",
-                        discord_status,
-                        discord_enabled,
-                        app_root_entity_discord,
-                        |draft| {
-                            draft.remote_channels.discord.enabled = !draft.remote_channels.discord.enabled;
-                        },
-                    ))
-                    .child(Self::settings_channel_card_el(
-                        "KOOK",
-                        "kook",
-                        kook_status,
-                        kook_enabled,
-                        app_root_entity_kook,
-                        |draft| {
-                            draft.remote_channels.kook.enabled = !draft.remote_channels.kook.enabled;
-                        },
-                    ))
-                    .child(Self::settings_channel_card_el(
-                        "飞书",
-                        "feishu",
-                        feishu_status,
-                        feishu_enabled,
-                        app_root_entity_feishu,
-                        |draft| {
-                            draft.remote_channels.feishu.enabled = !draft.remote_channels.feishu.enabled;
-                        },
-                    ));
-                let save_button = div()
-                    .id("settings-save-btn")
-                    .px(px(16.))
-                    .py(px(8.))
-                    .rounded(px(6.))
-                    .bg(rgb(0x0066cc))
-                    .text_color(rgb(0xffffff))
-                    .text_size(px(14.))
-                    .font_weight(FontWeight::MEDIUM)
-                    .cursor_pointer()
-                    .hover(|style: StyleRefinement| style.bg(rgb(0x0077dd)))
-                    .on_click(move |_event, _window, cx| {
-                        let _ = cx.update_entity(&app_root_entity_save, |this: &mut AppRoot, cx| {
-                            if let Some(ref draft) = this.settings_draft {
-                                let mut current = Config::load().unwrap_or_default();
-                                current.remote_channels = draft.remote_channels.clone();
-                                let _ = current.save();
-                            }
-                            if let Some(ref secrets) = this.settings_secrets_draft {
-                                let _ = secrets.save();
-                            }
-                            this.show_settings = false;
-                            this.settings_draft = None;
-                            this.settings_secrets_draft = None;
-                            this.settings_configuring_channel = None;
-                            cx.notify();
-                        });
-                    })
-                    .child("Save");
-                let settings_content = div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(20.))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .text_size(px(18.))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(rgb(0xffffff))
-                                    .child("Settings")
-                            )
-                            .child(
-                                div()
-                                    .id("settings-close-btn")
-                                    .px(px(12.))
-                                    .py(px(6.))
-                                    .rounded(px(4.))
-                                    .bg(rgb(0x3d3d3d))
-                                    .text_color(rgb(0xcccccc))
-                                    .text_size(px(14.))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .cursor_pointer()
-                                    .hover(|style: StyleRefinement| style.bg(rgb(0x4d4d4d)))
-                                    .on_click(move |_event, _window, cx| {
-                                        let _ = cx.update_entity(&app_root_entity_for_close, |this: &mut AppRoot, cx| {
-                                            this.show_settings = false;
-                                            this.settings_draft = None;
-                                            this.settings_secrets_draft = None;
-                                            this.settings_configuring_channel = None;
-                                            cx.notify();
-                                        });
-                                    })
-                                    .child("×")
-                            )
-                    )
-                    .child(channel_cards)
-                    .when(self.settings_configuring_channel.is_some(), |el| {
-                        let channel = self.settings_configuring_channel.as_ref().unwrap().clone();
-                        let (title, steps, url) = match channel.as_str() {
-                            "discord" => (
-                                "Discord 配置指南",
-                                "1. 创建应用并添加 Bot\n2. 复制 Bot Token 到 secrets.json 的 discord.bot_token\n3. 邀请 Bot 到服务器\n4. 开启开发者模式，右键频道复制 Channel ID 到 config.json",
-                                "https://discord.com/developers/applications",
-                            ),
-                            "kook" => (
-                                "KOOK 配置指南",
-                                "1. 创建应用并添加机器人\n2. 复制 Token 到 secrets.json 的 kook.bot_token\n3. 邀请机器人到服务器\n4. 获取频道 ID 填入 config.json 的 kook.channel_id",
-                                "https://developer.kookapp.cn/",
-                            ),
-                            "feishu" => (
-                                "飞书配置指南",
-                                "1. 创建企业自建应用\n2. 记录 App ID、App Secret 填入 secrets.json\n3. 开通「获取与发送群消息」权限\n4. 将 chat_id 填入 config.json 的 feishu.chat_id",
-                                "https://open.feishu.cn/",
-                            ),
-                            _ => ("配置", "", ""),
-                        };
-                        let app_root_entity_config = app_root_entity.clone();
-                        let url_owned = url.to_string();
-                        let open_btn = div()
-                            .px(px(12.))
-                            .py(px(8.))
-                            .rounded(px(6.))
-                            .bg(rgb(0x0066cc))
-                            .text_color(rgb(0xffffff))
-                            .text_size(px(12.))
-                            .font_weight(FontWeight::MEDIUM)
-                            .cursor_pointer()
-                            .hover(|s: StyleRefinement| s.bg(rgb(0x0077dd)))
-                            .on_mouse_down(gpui::MouseButton::Left, move |_event, _window, _cx| {
-                                let _ = open::that(&url_owned);
-                            })
-                            .child("在浏览器中打开");
-                        let done_btn = div()
-                            .px(px(12.))
-                            .py(px(8.))
-                            .rounded(px(6.))
-                            .bg(rgb(0x3d3d3d))
-                            .text_color(rgb(0xcccccc))
-                            .text_size(px(12.))
-                            .font_weight(FontWeight::MEDIUM)
-                            .cursor_pointer()
-                            .hover(|s: StyleRefinement| s.bg(rgb(0x4d4d4d)))
-                            .on_mouse_down(gpui::MouseButton::Left, move |_event, _window, cx| {
-                                let _ = cx.update_entity(&app_root_entity_config, |this: &mut AppRoot, cx| {
-                                    this.settings_configuring_channel = None;
-                                    cx.notify();
-                                });
-                            })
-                            .child("完成");
-                        el.child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap(px(12.))
-                                .p(px(16.))
-                                .rounded(px(6.))
-                                .bg(rgb(0x1e1e1e))
-                                .child(
-                                    div()
-                                        .text_size(px(14.))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(rgb(0xffffff))
-                                        .child(title)
-                                )
-                                .child(
-                                    div()
-                                        .text_size(px(12.))
-                                        .text_color(rgb(0xaaaaaa))
-                                        .whitespace_normal()
-                                        .child(steps)
-                                )
-                                .child(
-                                    div()
-                                        .flex()
-                                        .flex_row()
-                                        .gap(px(8.))
-                                        .child(open_btn)
-                                        .child(done_btn)
-                                )
-                        )
-                    })
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .justify_end()
-                            .child(save_button)
-                    );
-                let settings_card_with_content = div()
-                    .id("settings-dialog-card")
-                    .max_w(px(560.))
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .gap(px(20.))
-                    .px(px(24.))
-                    .py(px(24.))
-                    .rounded(px(8.))
-                    .bg(rgb(0x2d2d2d))
-                    .shadow_lg()
-                    .on_click(|_event, _window, cx| {
-                        cx.stop_propagation();
-                    })
-                    .child(settings_content);
-                let settings_modal_with_content = div()
-                    .id("settings-modal-overlay")
-                    .absolute()
-                    .inset(px(0.))
-                    .size_full()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .bg(rgba(0x00000099u32))
-                    .cursor_pointer()
-                    .on_click(move |_event, _window, cx| {
-                        let _ = cx.update_entity(&app_root_entity, |this: &mut AppRoot, cx| {
-                            this.show_settings = false;
-                            this.settings_draft = None;
-                            this.settings_secrets_draft = None;
-                            this.settings_configuring_channel = None;
-                            cx.notify();
-                        });
-                    })
-                    .child(settings_card_with_content);
-                el.child(settings_modal_with_content)
-            })
+            .children(settings_modal_el)
     }
 }
 
 impl Default for AppRoot {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_worktree_path_local() {
+        let path = extract_worktree_path_from_pane_id("local:/home/user/project");
+        assert_eq!(path, Some(PathBuf::from("/home/user/project")));
+    }
+
+    #[test]
+    fn test_extract_worktree_path_with_index() {
+        let path = extract_worktree_path_from_pane_id("local:/home/user/project:1");
+        assert_eq!(path, Some(PathBuf::from("/home/user/project")));
+    }
+
+    #[test]
+    fn test_extract_worktree_path_with_large_index() {
+        let path = extract_worktree_path_from_pane_id("local:/tmp/repo:42");
+        assert_eq!(path, Some(PathBuf::from("/tmp/repo")));
+    }
+
+    #[test]
+    fn test_extract_worktree_path_tmux_pane() {
+        assert_eq!(extract_worktree_path_from_pane_id("%0"), None);
+    }
+
+    #[test]
+    fn test_extract_worktree_path_no_prefix() {
+        assert_eq!(extract_worktree_path_from_pane_id("some-other"), None);
     }
 }

@@ -271,7 +271,7 @@ impl KeyBinding {
                 ShortcutAction::ViewDiff,
                 "View Diff",
                 "⌘⇧R",
-                "Open diff view for current branch (nvim diffview)",
+                "Open diff view for current branch",
                 ShortcutCategory::View,
             ),
         ]

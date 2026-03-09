@@ -78,7 +78,7 @@ impl TopBar {
 
     fn notification_count(&self) -> usize {
         self.notification_count_override.unwrap_or_else(|| {
-            self.status_counts.error + self.status_counts.waiting + self.status_counts.waiting_confirm
+            self.status_counts.error + self.status_counts.waiting
         })
     }
 

@@ -103,6 +103,16 @@ jobs:
             "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
 
+      - name: Create tar.gz for auto-update
+        run: |
+          VERSION="${{ github.ref_name }}"
+          APP="${{ env.APP_PATH }}"
+          APP_DIR=$(dirname "$APP")
+          TARBALL="pmux-${VERSION}-macos-arm64.tar.gz"
+          cd "$APP_DIR"
+          tar czf "${GITHUB_WORKSPACE}/${TARBALL}" "pmux.app"
+          echo "TARBALL=${TARBALL}" >> "$GITHUB_ENV"
+
       - name: Create DMG
         run: |
           VERSION="${{ github.ref_name }}"
@@ -145,7 +155,9 @@ jobs:
           VERSION="${{ github.ref_name }}"
           DMG="${{ env.DMG_NAME }}"
 
-          gh release create "${VERSION}" "${DMG}" \
+          TARBALL="${{ env.TARBALL }}"
+
+          gh release create "${VERSION}" "${DMG}" "${TARBALL}" \
             --title "pmux ${VERSION}" \
             --notes "## pmux ${VERSION}
 

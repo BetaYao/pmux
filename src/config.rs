@@ -2,12 +2,168 @@
 use crate::runtime::backends::SessionBackend;
 use serde::{Deserialize, Serialize};
 
+fn default_true() -> bool {
+    true
+}
+
+fn default_check_interval() -> u64 {
+    6
+}
+
+fn default_auto_update() -> UpdateConfig {
+    UpdateConfig::default()
+}
+
 fn default_terminal_row_cache_size() -> usize {
     200
 }
 
 fn default_backend() -> String {
     "tmux".to_string()
+}
+
+fn default_tui_programs() -> Vec<String> {
+    ["claude", "agent", "aider", "cursor"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+fn default_idle_str() -> String {
+    "Idle".to_string()
+}
+
+fn default_agent_detect() -> AgentDetectConfig {
+    AgentDetectConfig {
+        agents: default_agent_detect_agents(),
+    }
+}
+
+fn default_agent_detect_agents() -> Vec<AgentDef> {
+    vec![
+        AgentDef {
+            name: "claude".to_string(),
+            rules: vec![
+                AgentRule {
+                    status: "Running".to_string(),
+                    patterns: vec!["to interrupt".to_string()],
+                },
+                AgentRule {
+                    status: "Error".to_string(),
+                    patterns: vec!["ERROR".to_string(), "error:".to_string()],
+                },
+                AgentRule {
+                    status: "Waiting".to_string(),
+                    patterns: vec![
+                        "?".to_string(),
+                        "(y/n)".to_string(),
+                        "(yes/no)".to_string(),
+                    ],
+                },
+            ],
+            default_status: "Idle".to_string(),
+        },
+        AgentDef {
+            name: "agent".to_string(),
+            rules: vec![
+                AgentRule {
+                    status: "Running".to_string(),
+                    patterns: vec!["to interrupt".to_string()],
+                },
+                AgentRule {
+                    status: "Error".to_string(),
+                    patterns: vec!["error".to_string()],
+                },
+                AgentRule {
+                    status: "Waiting".to_string(),
+                    patterns: vec!["?".to_string(), "> ".to_string()],
+                },
+            ],
+            default_status: "Idle".to_string(),
+        },
+        AgentDef {
+            name: "aider".to_string(),
+            rules: vec![
+                AgentRule {
+                    status: "Running".to_string(),
+                    patterns: vec!["thinking".to_string(), "sending".to_string()],
+                },
+                AgentRule {
+                    status: "Waiting".to_string(),
+                    patterns: vec!["> ".to_string()],
+                },
+            ],
+            default_status: "Idle".to_string(),
+        },
+        AgentDef {
+            name: "cursor".to_string(),
+            rules: vec![],
+            default_status: "Idle".to_string(),
+        },
+    ]
+}
+
+/// Per-CLI agent detection configuration.
+/// Each agent has ordered text pattern rules to detect sub-states (Running, Waiting, Error, Idle).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentDetectConfig {
+    #[serde(default = "default_agent_detect_agents")]
+    pub agents: Vec<AgentDef>,
+}
+
+impl Default for AgentDetectConfig {
+    fn default() -> Self {
+        default_agent_detect()
+    }
+}
+
+impl AgentDetectConfig {
+    /// Find the AgentDef for a given command name (case-insensitive).
+    pub fn find_agent(&self, cmd: &str) -> Option<&AgentDef> {
+        let cmd_lower = cmd.to_lowercase();
+        self.agents.iter().find(|a| a.name.to_lowercase() == cmd_lower)
+    }
+}
+
+/// Definition of a single CLI agent and its status detection rules.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentDef {
+    /// CLI command name (e.g. "claude", "agent", "aider").
+    /// Matched case-insensitively against tmux #{pane_current_command}.
+    pub name: String,
+    /// Ordered list of status rules. First matching rule wins.
+    #[serde(default)]
+    pub rules: Vec<AgentRule>,
+    /// Status when no rule matches. Defaults to "Idle".
+    #[serde(default = "default_idle_str")]
+    pub default_status: String,
+}
+
+impl AgentDef {
+    /// Detect status from terminal content by applying rules in order.
+    /// First rule where any pattern substring-matches (case-insensitive) wins.
+    /// Returns the default_status if no rule matches.
+    pub fn detect_status(&self, content: &str) -> crate::agent_status::AgentStatus {
+        let content_lower = content.to_lowercase();
+        for rule in &self.rules {
+            for pattern in &rule.patterns {
+                if content_lower.contains(&pattern.to_lowercase()) {
+                    return crate::agent_status::AgentStatus::from_status_str(&rule.status);
+                }
+            }
+        }
+        crate::agent_status::AgentStatus::from_status_str(&self.default_status)
+    }
+}
+
+/// A single detection rule: a status to assign when any of the patterns match.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentRule {
+    /// Target status name: "Running", "Waiting", "Error", "Idle"
+    pub status: String,
+    /// Text patterns. Case-insensitive substring match.
+    /// If ANY pattern is found in the terminal content, this rule matches.
+    pub patterns: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -73,6 +229,34 @@ impl Default for FeishuChannelConfig {
     }
 }
 
+/// Auto-update preferences
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateConfig {
+    /// Whether auto-update checking is enabled
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Hours between automatic checks (default: 6)
+    #[serde(default = "default_check_interval")]
+    pub check_interval_hours: u64,
+    /// Version tag the user chose to skip (e.g. "v0.2.0")
+    #[serde(default)]
+    pub skipped_version: Option<String>,
+    /// Unix timestamp of last successful check
+    #[serde(default)]
+    pub last_check_timestamp: Option<u64>,
+}
+
+impl Default for UpdateConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            check_interval_hours: 6,
+            skipped_version: None,
+            last_check_timestamp: None,
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -85,6 +269,9 @@ impl Default for Config {
             remote_channels: RemoteChannelsConfig::default(),
             last_terminal_cols: None,
             last_terminal_rows: None,
+            tui_programs: default_tui_programs(),
+            agent_detect: default_agent_detect(),
+            auto_update: UpdateConfig::default(),
         }
     }
 }
@@ -129,6 +316,16 @@ pub struct Config {
     pub last_terminal_cols: Option<u16>,
     #[serde(default)]
     pub last_terminal_rows: Option<u16>,
+    /// TUI programs that don't use alternate screen (e.g. claude, agent).
+    /// Deprecated: use agent_detect instead. Kept for backward compatibility.
+    #[serde(default = "default_tui_programs")]
+    pub tui_programs: Vec<String>,
+    /// Per-CLI agent detection: ordered text pattern rules for each CLI.
+    #[serde(default = "default_agent_detect")]
+    pub agent_detect: AgentDetectConfig,
+    /// Auto-update preferences
+    #[serde(default = "default_auto_update")]
+    pub auto_update: UpdateConfig,
 }
 
 impl Config {
@@ -434,6 +631,96 @@ mod tests {
         assert_eq!(config.remote_channels.kook.channel_id.as_deref(), Some("123"));
         assert!(config.remote_channels.feishu.enabled);
         assert_eq!(config.remote_channels.feishu.chat_id.as_deref(), Some("oc_abc"));
+    }
+
+    /// Test: agent_detect default has 4 agents
+    #[test]
+    fn test_agent_detect_default_config() {
+        let config = Config::default();
+        assert_eq!(config.agent_detect.agents.len(), 4);
+        assert_eq!(config.agent_detect.agents[0].name, "claude");
+        assert_eq!(config.agent_detect.agents[1].name, "agent");
+        assert_eq!(config.agent_detect.agents[2].name, "aider");
+        assert_eq!(config.agent_detect.agents[3].name, "cursor");
+    }
+
+    /// Test: agent_detect finds agent by name (case-insensitive)
+    #[test]
+    fn test_agent_detect_find_agent() {
+        let config = Config::default();
+        assert!(config.agent_detect.find_agent("claude").is_some());
+        assert!(config.agent_detect.find_agent("Claude").is_some());
+        assert!(config.agent_detect.find_agent("CLAUDE").is_some());
+        assert!(config.agent_detect.find_agent("unknown-cli").is_none());
+    }
+
+    /// Test: detect_status first match wins
+    #[test]
+    fn test_agent_def_detect_status_first_match_wins() {
+        use crate::agent_status::AgentStatus;
+        let config = Config::default();
+        let claude = config.agent_detect.find_agent("claude").unwrap();
+
+        // "to interrupt" matches Running rule (first rule)
+        assert_eq!(
+            claude.detect_status("Press Escape twice to interrupt"),
+            AgentStatus::Running
+        );
+    }
+
+    /// Test: detect_status case insensitive
+    #[test]
+    fn test_agent_def_detect_status_case_insensitive() {
+        use crate::agent_status::AgentStatus;
+        let config = Config::default();
+        let claude = config.agent_detect.find_agent("claude").unwrap();
+
+        assert_eq!(
+            claude.detect_status("press escape twice TO INTERRUPT this"),
+            AgentStatus::Running
+        );
+    }
+
+    /// Test: detect_status default when no match
+    #[test]
+    fn test_agent_def_detect_status_default() {
+        use crate::agent_status::AgentStatus;
+        let config = Config::default();
+        let claude = config.agent_detect.find_agent("claude").unwrap();
+
+        // No pattern matches → default_status = Idle
+        assert_eq!(
+            claude.detect_status("just some ordinary text"),
+            AgentStatus::Idle
+        );
+    }
+
+    /// Test: agent_detect serialization roundtrip
+    #[test]
+    fn test_agent_detect_serialization_roundtrip() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.json");
+
+        let config = Config::default();
+        config.save_to_path(&config_path).unwrap();
+
+        let loaded = Config::load_from_path(&config_path).unwrap();
+        assert_eq!(loaded.agent_detect.agents.len(), 4);
+        assert_eq!(loaded.agent_detect.agents[0].name, "claude");
+        assert_eq!(loaded.agent_detect.agents[0].rules.len(), 3);
+        assert_eq!(loaded.agent_detect.agents[0].rules[0].status, "Running");
+    }
+
+    /// Test: backward compat — old config without agent_detect loads defaults
+    #[test]
+    fn test_agent_detect_backward_compat() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("config.json");
+        // Old config without agent_detect field
+        std::fs::write(&path, r#"{"backend": "tmux"}"#).unwrap();
+        let config = Config::load_from_path(&path).unwrap();
+        // Should have default agent_detect
+        assert_eq!(config.agent_detect.agents.len(), 4);
     }
 
     /// Test: migrate_from_legacy populates workspace_paths from recent_workspace

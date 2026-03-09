@@ -1,6 +1,6 @@
 [package]
 name = "pmux"
-version = "0.1.0"
+version = "0.1.3"
 edition = "2021"
 default-run = "pmux"
 
@@ -32,6 +32,8 @@ tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
 futures-util = "0.3"
 alacritty_terminal = "0.25"
 parking_lot = "0.12"
+syntect = { version = "5", default-features = false, features = ["default-syntaxes", "default-themes", "parsing", "regex-fancy"] }
+similar = "2"
 
 [dev-dependencies]
 tempfile = "3.8"
@@ -49,7 +51,7 @@ path = "src/bin/remote_test.rs"
 name = "pmux"
 identifier = "cn.mx5.pmux"
 icon = ["resources/pmux.icns"]
-version = "0.1.0"
+version = "0.1.3"
 copyright = "Copyright (c) 2025"
 category = "Developer Tool"
 short_description = "AI Agent multi-branch development workbench"
