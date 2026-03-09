@@ -3,6 +3,26 @@ use std::path::PathBuf;
 
 use gpui::{actions, point, px, size, AssetSource, TitlebarOptions, WindowBounds, WindowOptions, *};
 use pmux::ui::app_root::AppRoot;
+
+/// Resolve the user's full login-shell PATH.
+/// macOS .app bundles launched from Finder inherit a minimal PATH
+/// (/usr/bin:/bin:/usr/sbin:/sbin), missing Homebrew and other user paths.
+/// This runs `$SHELL -l -c 'printf "%s" "$PATH"'` to get the real PATH.
+#[cfg(target_os = "macos")]
+fn fix_path_env() {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    if let Ok(output) = std::process::Command::new(&shell)
+        .args(["-l", "-c", r#"printf "%s" "$PATH""#])
+        .output()
+    {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout);
+            if !path.is_empty() {
+                std::env::set_var("PATH", path.as_ref());
+            }
+        }
+    }
+}
 use pmux::window_state::PersistentAppState;
 
 /// Set macOS notification bundle identifier before any notification.
@@ -36,6 +56,9 @@ impl AssetSource for Assets {
 }
 
 fn main() {
+    #[cfg(target_os = "macos")]
+    fix_path_env();
+
     #[cfg(target_os = "macos")]
     init_macos_notifications();
 
