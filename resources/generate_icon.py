@@ -78,15 +78,15 @@ def crop_to_content(image, threshold=240):
     return image.crop(crop_box)
 
 
-def create_square_image(image, bg_color=(255, 255, 255, 255)):
-    """Create a square image: white background with pudding centered."""
+def create_square_image(image, bg_color=(0, 0, 0, 0)):
+    """Create a square image: transparent background with pudding centered."""
     width, height = image.size
     size = max(width, height)
 
-    # White background fills entire icon area — no inner white-square artifact
+    # Transparent background — macOS adds its own rounded-rect background
     square = Image.new('RGBA', (size, size), bg_color)
 
-    # Remove white from pudding so it composites cleanly onto the white bg
+    # Remove white from pudding so it composites cleanly
     logo = remove_white_background(image)
 
     x = (size - width) // 2

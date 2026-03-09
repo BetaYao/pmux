@@ -1,6 +1,6 @@
 [package]
 name = "pmux"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 default-run = "pmux"
 
@@ -51,7 +51,7 @@ path = "src/bin/remote_test.rs"
 name = "pmux"
 identifier = "cn.mx5.pmux"
 icon = ["resources/pmux.icns"]
-version = "0.1.3"
+version = "0.1.4"
 copyright = "Copyright (c) 2025"
 category = "Developer Tool"
 short_description = "AI Agent multi-branch development workbench"
