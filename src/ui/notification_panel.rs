@@ -37,7 +37,6 @@ impl NotificationItem {
         match self.notif_type {
             NotificationType::Error => "✕",
             NotificationType::Waiting => "◐",
-            NotificationType::WaitingConfirm => "▲",
             NotificationType::Info => "ℹ",
         }
     }
@@ -46,7 +45,6 @@ impl NotificationItem {
         match self.notif_type {
             NotificationType::Error => rgb(0xff4444),
             NotificationType::Waiting => rgb(0xffaa00),
-            NotificationType::WaitingConfirm => rgb(0xff9800),
             NotificationType::Info => rgb(0x4488ff),
         }
     }

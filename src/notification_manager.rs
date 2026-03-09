@@ -171,7 +171,6 @@ impl NotificationManager {
             match notif.notif_type() {
                 NotificationType::Error => summary.error_count += 1,
                 NotificationType::Waiting => summary.waiting_count += 1,
-                NotificationType::WaitingConfirm => summary.waiting_confirm_count += 1,
                 NotificationType::Info => summary.info_count += 1,
             }
         }

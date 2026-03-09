@@ -561,6 +561,20 @@ impl TmuxControlModeRuntime {
         let _ = Command::new("tmux").args(["set", "-as", "terminal-features", ",xterm-256color:RGB"]).output();
         let _ = Command::new("tmux").args(["set", "-s", "escape-time", "10"]).output();
 
+        // Inject OSC 133 shell integration into the pane's shell.
+        // This enables agent status detection (Running/Idle/Error) via shell lifecycle markers.
+        if !skip_create_and_send_keys {
+            let shell = crate::shell_integration_inject::detect_shell();
+            if let Some(src_cmd) = crate::shell_integration_inject::source_command(&shell) {
+                let target = format!("{}:{}", session_name, window_name);
+                // Wait briefly for shell to initialize, then source integration + clear screen
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                let _ = Command::new("tmux")
+                    .args(["send-keys", "-t", &target, &format!("{} && clear", src_cmd), "Enter"])
+                    .output();
+            }
+        }
+
         // Open raw PTY at the target size — tmux reads the PTY winsize to set client dims
         let (master_fd, slave_fd) = open_raw_pty(initial_cols, initial_rows)?;
 
@@ -786,12 +800,25 @@ impl TmuxControlModeRuntime {
     /// Query the actual tmux window dimensions to use for refresh-client.
     /// In multi-pane mode, window_width > pane_width; using window_width prevents
     /// tmux from compressing all panes when we resize a single pane.
+    /// For single-pane windows, always use the target dims so the client can shrink.
     fn get_window_dims_for_client(&self, fallback_cols: u16, fallback_rows: u16) -> (u16, u16) {
         let wn = self.window_name.lock().map(|w| w.clone()).unwrap_or_default();
         if wn.is_empty() {
             return (fallback_cols, fallback_rows);
         }
         let target = format!("{}:{}", self.session_name, wn);
+
+        // Single-pane windows: use target dims directly so the client can both grow and shrink.
+        let pane_count = Command::new("tmux")
+            .args(["list-panes", "-t", &target, "-F", "#{pane_id}"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).lines().count())
+            .unwrap_or(1);
+        if pane_count <= 1 {
+            return (fallback_cols, fallback_rows);
+        }
+
+        // Multi-pane: use the current window width so we don't compress sibling panes.
         if let Ok(output) = Command::new("tmux")
             .args(["display-message", "-t", &target, "-p", "#{window_width} #{window_height}"])
             .output()
@@ -861,7 +888,10 @@ impl AgentRuntime for TmuxControlModeRuntime {
                 ws_xpixel: 0,
                 ws_ypixel: 0,
             };
-            libc::ioctl(self.pty_master_fd, libc::TIOCSWINSZ, &ws);
+            let ret = libc::ioctl(self.pty_master_fd, libc::TIOCSWINSZ, &ws);
+            if ret < 0 {
+                log::warn!("TIOCSWINSZ ioctl failed: {}", std::io::Error::last_os_error());
+            }
         }
         self.send_command(&format!("refresh-client -C {},{}", client_cols, client_rows))
     }
@@ -1534,4 +1564,5 @@ mod tests {
             .args(["kill-session", "-t", "pmux-test-hex"])
             .output();
     }
+
 }

@@ -1,7 +1,8 @@
 // syntax_highlight.rs - Syntect-based syntax highlighting for diff view
+use std::path::Path;
 use std::sync::OnceLock;
 use syntect::highlighting::{Theme, ThemeSet};
-use syntect::parsing::SyntaxSet;
+use syntect::parsing::{SyntaxReference, SyntaxSet};
 
 static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
 static THEME: OnceLock<Theme> = OnceLock::new();
@@ -15,6 +16,46 @@ fn theme() -> &'static Theme {
         let ts = ThemeSet::load_defaults();
         ts.themes["base16-ocean.dark"].clone()
     })
+}
+
+/// Find syntax for a file path by extension, with fallback mappings for
+/// languages not in Syntect's default set (TypeScript, TSX, JSX, Vue, etc.).
+/// Uses `find_syntax_by_extension` to avoid file I/O (git diff paths are relative).
+fn find_syntax_for_path(file_path: &str) -> &'static SyntaxReference {
+    let ss = syntax_set();
+    let ext = Path::new(file_path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+
+    // Try direct extension match first
+    if let Some(syn) = ss.find_syntax_by_extension(ext) {
+        return syn;
+    }
+
+    // Fallback mappings for common extensions not in default set
+    let fallback_ext = match ext {
+        "ts" | "mts" | "cts" => "js",
+        "tsx" => "jsx",
+        "jsx" => "js",
+        "mjs" | "cjs" => "js",
+        "vue" | "svelte" => "html",
+        "mdx" => "md",
+        "jsonc" | "json5" => "json",
+        "zsh" | "fish" => "sh",
+        "dockerfile" => "sh",
+        "toml" => "ini",        // rough fallback
+        "graphql" | "gql" => "js", // passable
+        _ => "",
+    };
+
+    if !fallback_ext.is_empty() {
+        if let Some(syn) = ss.find_syntax_by_extension(fallback_ext) {
+            return syn;
+        }
+    }
+
+    ss.find_syntax_plain_text()
 }
 
 /// A highlighted span: (foreground RGBA, text)
@@ -34,11 +75,7 @@ pub struct HighlightedLine {
 /// Returns one HighlightedLine per input line.
 pub fn highlight_lines(file_path: &str, lines: &[&str]) -> Vec<HighlightedLine> {
     let ss = syntax_set();
-    let syntax = ss
-        .find_syntax_for_file(file_path)
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| ss.find_syntax_plain_text());
+    let syntax = find_syntax_for_path(file_path);
 
     let mut highlighter = syntect::easy::HighlightLines::new(syntax, theme());
 
@@ -74,13 +111,7 @@ pub struct LineHighlighter {
 
 impl LineHighlighter {
     pub fn new(file_path: &str) -> Self {
-        let ss = syntax_set();
-        let syntax = ss
-            .find_syntax_for_file(file_path)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| ss.find_syntax_plain_text());
-
+        let syntax = find_syntax_for_path(file_path);
         Self {
             highlighter: syntect::easy::HighlightLines::new(syntax, theme()),
         }

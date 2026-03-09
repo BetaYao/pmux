@@ -107,9 +107,11 @@ fn make_font(weight: FontWeight, style: FontStyle) -> Font {
         family: FONT_FAMILY.into(),
         features: FontFeatures::default(),
         fallbacks: Some(FontFallbacks::from_fonts(vec![
-            "Apple Symbols".into(),
-            "Apple Color Emoji".into(),
-            "Helvetica Neue".into(),
+            "Symbols Nerd Font Mono".into(), // Nerd Font icons (powerline, devicons) — skipped if not installed
+            "Apple Symbols".into(),           // macOS symbol characters
+            "Apple Color Emoji".into(),       // Emoji support
+            ".AppleSystemUIFont".into(),      // System UI font, broad Unicode coverage
+            "Helvetica Neue".into(),          // General Latin fallback
         ])),
         weight,
         style,
@@ -240,6 +242,9 @@ impl Element for TerminalElement {
                 cell_height: line_height_f32,
             };
             self.terminal.resize(new_size);
+            // BUG-10: Clear selection on resize — old selection range may reference
+            // columns/lines that no longer exist in the new grid dimensions
+            self.terminal.clear_selection();
             if let Some(ref cb) = self.on_resize {
                 cb(cols as u16, rows as u16);
             }
@@ -327,20 +332,61 @@ impl Element for TerminalElement {
                         continue;
                     }
 
+                    // BUG-6: HIDDEN text — skip rendering entirely (invisible)
+                    if cell.flags.contains(Flags::HIDDEN) {
+                        if let Some(run) = current_run.take() {
+                            text_runs.push(run);
+                        }
+                        // Still handle background color for hidden cells
+                        let bg_hsla = self.palette.resolve(cell.bg, colors);
+                        if !is_default_bg(&cell.bg) {
+                            if let Some(ref mut rect) = current_bg {
+                                if rect.color == bg_hsla
+                                    && rect.start_col + rect.num_cells as i32 == col_idx as i32
+                                {
+                                    rect.extend();
+                                } else {
+                                    layout_rects.push(std::mem::replace(
+                                        rect,
+                                        LayoutRect::new(line_idx as i32, col_idx as i32, bg_hsla),
+                                    ));
+                                }
+                            } else {
+                                current_bg = Some(LayoutRect::new(
+                                    line_idx as i32,
+                                    col_idx as i32,
+                                    bg_hsla,
+                                ));
+                            }
+                        } else if let Some(rect) = current_bg.take() {
+                            layout_rects.push(rect);
+                        }
+                        continue;
+                    }
+
                     let mut fg = cell.fg;
                     let mut bg = cell.bg;
                     if cell.flags.contains(Flags::INVERSE) {
                         std::mem::swap(&mut fg, &mut bg);
                     }
 
-                    let fg_hsla = self.palette.resolve(fg, colors);
+                    let mut fg_hsla = self.palette.resolve(fg, colors);
                     let bg_hsla = self.palette.resolve(bg, colors);
+
+                    // BUG-5: DIM attribute — reduce foreground brightness
+                    if cell.flags.contains(Flags::DIM) {
+                        fg_hsla.l *= 0.66;
+                        fg_hsla.a = fg_hsla.a.min(0.7);
+                    }
 
                     let ch = if cell.c == ' ' || cell.c == '\0' {
                         ' '
                     } else {
                         cell.c
                     };
+
+                    // Collect zero-width / combining characters attached to this cell
+                    let zerowidth_chars = cell.zerowidth();
 
                     if !is_default_bg(&bg) {
                         if let Some(ref mut rect) = current_bg {
@@ -372,7 +418,15 @@ impl Element for TerminalElement {
                         }
                     }
 
-                    let has_decorations = cell.flags.contains(Flags::UNDERLINE)
+                    // BUG-7: check all underline variants
+                    let has_any_underline = cell.flags.intersects(
+                        Flags::UNDERLINE
+                            | Flags::DOUBLE_UNDERLINE
+                            | Flags::UNDERCURL
+                            | Flags::DOTTED_UNDERLINE
+                            | Flags::DASHED_UNDERLINE,
+                    );
+                    let has_decorations = has_any_underline
                         || cell.flags.contains(Flags::STRIKEOUT)
                         || !is_default_bg(&bg);
 
@@ -383,16 +437,25 @@ impl Element for TerminalElement {
                         (false, false) => state.font.clone(),
                     };
 
+                    // Calculate byte length including zero-width combining characters
+                    let zw_byte_len: usize = zerowidth_chars
+                        .map(|zw| zw.iter().map(|c| c.len_utf8()).sum())
+                        .unwrap_or(0);
+
                     let text_run = TextRun {
-                        len: ch.len_utf8(),
+                        len: ch.len_utf8() + zw_byte_len,
                         font: font.clone(),
                         color: fg_hsla,
                         background_color: None,
-                        underline: if cell.flags.contains(Flags::UNDERLINE) {
+                        underline: if has_any_underline {
                             Some(UnderlineStyle {
-                                thickness: px(1.0),
+                                thickness: if cell.flags.contains(Flags::DOUBLE_UNDERLINE) {
+                                    px(2.0) // thicker for double underline
+                                } else {
+                                    px(1.0)
+                                },
                                 color: Some(fg_hsla),
-                                wavy: false,
+                                wavy: cell.flags.contains(Flags::UNDERCURL),
                             })
                         } else {
                             None
@@ -410,18 +473,19 @@ impl Element for TerminalElement {
                     if ch != ' ' && ch != '\0' || has_decorations {
                         if let Some(ref mut run) = current_run {
                             if run.can_append(&text_run, line_idx as i32, col_idx as i32) {
-                                run.append_char(ch);
+                                run.append_char_with_zerowidth(ch, zerowidth_chars);
                             } else {
                                 text_runs.push(std::mem::replace(
                                     run,
-                                    BatchedTextRun::new(line_idx as i32, col_idx as i32, ch, text_run),
+                                    BatchedTextRun::new_with_zerowidth(line_idx as i32, col_idx as i32, ch, zerowidth_chars, text_run),
                                 ));
                             }
                         } else {
-                            current_run = Some(BatchedTextRun::new(
+                            current_run = Some(BatchedTextRun::new_with_zerowidth(
                                 line_idx as i32,
                                 col_idx as i32,
                                 ch,
+                                zerowidth_chars,
                                 text_run,
                             ));
                         }

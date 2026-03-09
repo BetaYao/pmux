@@ -22,6 +22,18 @@ impl BatchedTextRun {
         Self { start_line, start_col, text, cell_count: 1, style }
     }
 
+    /// Create a new run with zero-width combining characters appended after the main char
+    pub fn new_with_zerowidth(start_line: i32, start_col: i32, c: char, zerowidth: Option<&[char]>, style: TextRun) -> Self {
+        let mut text = String::with_capacity(16);
+        text.push(c);
+        if let Some(zw) = zerowidth {
+            for &zwc in zw {
+                text.push(zwc);
+            }
+        }
+        Self { start_line, start_col, text, cell_count: 1, style }
+    }
+
     /// Whether another cell with the given style can be appended to this run
     pub fn can_append(&self, other_style: &TextRun, line: i32, col: i32) -> bool {
         self.start_line == line
@@ -37,6 +49,20 @@ impl BatchedTextRun {
         self.text.push(c);
         self.cell_count += 1;
         self.style.len += c.len_utf8();
+    }
+
+    /// Append a character with its zero-width combining characters
+    pub fn append_char_with_zerowidth(&mut self, c: char, zerowidth: Option<&[char]>) {
+        self.text.push(c);
+        self.cell_count += 1;
+        let mut extra_len = c.len_utf8();
+        if let Some(zw) = zerowidth {
+            for &zwc in zw {
+                self.text.push(zwc);
+                extra_len += zwc.len_utf8();
+            }
+        }
+        self.style.len += extra_len;
     }
 
     /// Paint this run using GPUI's shape_line + paint

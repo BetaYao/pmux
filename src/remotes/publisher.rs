@@ -106,9 +106,7 @@ impl RemoteChannelPublisher {
         let (workspace, worktree) = Self::parse_agent_id(&n.agent_id);
         let severity = match n.notif_type {
             NotificationType::Error => RemoteSeverity::Error,
-            NotificationType::WaitingInput | NotificationType::WaitingConfirm => {
-                RemoteSeverity::Warning
-            }
+            NotificationType::WaitingInput => RemoteSeverity::Warning,
             NotificationType::Info => RemoteSeverity::Info,
         };
         RemoteMessage {
@@ -141,7 +139,7 @@ impl RemoteChannelPublisher {
     fn status_to_severity(s: &AgentStatus) -> RemoteSeverity {
         match s {
             AgentStatus::Error => RemoteSeverity::Error,
-            AgentStatus::Waiting | AgentStatus::WaitingConfirm => RemoteSeverity::Warning,
+            AgentStatus::Waiting => RemoteSeverity::Warning,
             _ => RemoteSeverity::Info,
         }
     }

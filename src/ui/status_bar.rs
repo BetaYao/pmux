@@ -80,10 +80,7 @@ impl StatusBar {
             if status_counts.waiting > 0 {
                 parts.push(format!("◐ {} Waiting", status_counts.waiting));
             }
-            if status_counts.waiting_confirm > 0 {
-                parts.push(format!("▲ {} Confirm", status_counts.waiting_confirm));
-            }
-            if status_counts.idle > 0 {
+if status_counts.idle > 0 {
                 parts.push(format!("○ {} Idle", status_counts.idle));
             }
             if status_counts.error > 0 {
@@ -148,25 +145,42 @@ impl RenderOnce for StatusBar {
                     .flex_row()
                     .items_center()
                     .gap(px(16.))
+                    .flex_shrink_0()
                     .overflow_hidden()
                     .children(
                         left_items
                             .into_iter()
-                            .map(|item| div().child(item.text).into_any_element())
+                            .map(|item| {
+                                div()
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .child(item.text)
+                                    .into_any_element()
+                            })
                             .collect::<Vec<_>>()
                     )
             )
             .child(
                 div()
+                    .flex_1()
+                    .min_w(px(0.))
                     .flex()
                     .flex_row()
                     .items_center()
+                    .justify_end()
                     .gap(px(16.))
                     .overflow_hidden()
                     .children(
                         right_items
                             .into_iter()
-                            .map(|item| div().text_color(rgb(0x888888)).child(item.text).into_any_element())
+                            .map(|item| {
+                                div()
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .text_color(rgb(0x888888))
+                                    .child(item.text)
+                                    .into_any_element()
+                            })
                             .collect::<Vec<_>>()
                     )
             )

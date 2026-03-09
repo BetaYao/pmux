@@ -5,10 +5,8 @@
 pub enum AgentStatus {
     /// Agent is actively executing (green ●)
     Running,
-    /// Agent is waiting for user input (yellow ◐)
+    /// Agent is waiting for user input or confirmation (yellow ◐)
     Waiting,
-    /// Agent needs human confirmation/approval (orange ▲) - e.g. permission request
-    WaitingConfirm,
     /// Agent is idle/not doing anything (gray ○)
     Idle,
     /// Agent encountered an error (red ✕)
@@ -20,12 +18,23 @@ pub enum AgentStatus {
 }
 
 impl AgentStatus {
+    /// Parse a status string (case-insensitive). Falls back to Unknown for unrecognized strings.
+    pub fn from_status_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "running" => AgentStatus::Running,
+            "waiting" => AgentStatus::Waiting,
+            "idle" => AgentStatus::Idle,
+            "error" => AgentStatus::Error,
+            "exited" => AgentStatus::Exited,
+            _ => AgentStatus::Unknown,
+        }
+    }
+
     /// Get the color associated with this status
     pub fn color(&self) -> &'static str {
         match self {
             AgentStatus::Running => "green",
             AgentStatus::Waiting => "yellow",
-            AgentStatus::WaitingConfirm => "orange",
             AgentStatus::Idle => "gray",
             AgentStatus::Error => "red",
             AgentStatus::Exited => "blue",
@@ -38,7 +47,6 @@ impl AgentStatus {
         match self {
             AgentStatus::Running => (76, 175, 80),   // #4caf50 green
             AgentStatus::Waiting => (255, 193, 7),   // #ffc107 yellow
-            AgentStatus::WaitingConfirm => (255, 152, 0), // #ff9800 orange/amber
             AgentStatus::Idle => (158, 158, 158),    // #9e9e9e gray
             AgentStatus::Error => (244, 67, 54),     // #f44336 red
             AgentStatus::Exited => (33, 150, 243),   // #2196f3 blue
@@ -51,7 +59,6 @@ impl AgentStatus {
         match self {
             AgentStatus::Running => "●",
             AgentStatus::Waiting => "◐",
-            AgentStatus::WaitingConfirm => "▲",
             AgentStatus::Idle => "○",
             AgentStatus::Error => "✕",
             AgentStatus::Exited => "✓",
@@ -63,8 +70,7 @@ impl AgentStatus {
     pub fn display_text(&self) -> &'static str {
         match self {
             AgentStatus::Running => "Running",
-            AgentStatus::Waiting => "Waiting for input",
-            AgentStatus::WaitingConfirm => "Waiting for confirmation",
+            AgentStatus::Waiting => "Waiting",
             AgentStatus::Idle => "Idle",
             AgentStatus::Error => "Error detected",
             AgentStatus::Exited => "Process exited",
@@ -77,7 +83,6 @@ impl AgentStatus {
         match self {
             AgentStatus::Running => "Running",
             AgentStatus::Waiting => "Waiting",
-            AgentStatus::WaitingConfirm => "Confirm",
             AgentStatus::Idle => "Idle",
             AgentStatus::Error => "Error",
             AgentStatus::Exited => "Exited",
@@ -91,7 +96,6 @@ impl AgentStatus {
         match self {
             AgentStatus::Error => 6,
             AgentStatus::Exited => 5,
-            AgentStatus::WaitingConfirm => 5, // same as Exited, above Waiting
             AgentStatus::Waiting => 4,
             AgentStatus::Running => 3,
             AgentStatus::Idle => 2,
@@ -101,18 +105,12 @@ impl AgentStatus {
 
     /// Check if this status should trigger immediate notification
     pub fn is_urgent(&self) -> bool {
-        matches!(
-            self,
-            AgentStatus::Error | AgentStatus::Waiting | AgentStatus::WaitingConfirm
-        )
+        matches!(self, AgentStatus::Error | AgentStatus::Waiting)
     }
 
     /// Check if this status indicates activity
     pub fn is_active(&self) -> bool {
-        matches!(
-            self,
-            AgentStatus::Running | AgentStatus::Waiting | AgentStatus::WaitingConfirm
-        )
+        matches!(self, AgentStatus::Running | AgentStatus::Waiting)
     }
 
     /// Compare two statuses by priority
@@ -153,7 +151,6 @@ impl Default for AgentStatus {
 pub struct StatusCounts {
     pub running: usize,
     pub waiting: usize,
-    pub waiting_confirm: usize,
     pub idle: usize,
     pub error: usize,
     pub exited: usize,
@@ -171,7 +168,6 @@ impl StatusCounts {
         match status {
             AgentStatus::Running => self.running += 1,
             AgentStatus::Waiting => self.waiting += 1,
-            AgentStatus::WaitingConfirm => self.waiting_confirm += 1,
             AgentStatus::Idle => self.idle += 1,
             AgentStatus::Error => self.error += 1,
             AgentStatus::Exited => self.exited += 1,
@@ -184,7 +180,6 @@ impl StatusCounts {
         match status {
             AgentStatus::Running => self.running = self.running.saturating_sub(1),
             AgentStatus::Waiting => self.waiting = self.waiting.saturating_sub(1),
-            AgentStatus::WaitingConfirm => self.waiting_confirm = self.waiting_confirm.saturating_sub(1),
             AgentStatus::Idle => self.idle = self.idle.saturating_sub(1),
             AgentStatus::Error => self.error = self.error.saturating_sub(1),
             AgentStatus::Exited => self.exited = self.exited.saturating_sub(1),
@@ -194,13 +189,12 @@ impl StatusCounts {
 
     /// Get total count
     pub fn total(&self) -> usize {
-        self.running + self.waiting + self.waiting_confirm + self.idle + self.error
-            + self.exited + self.unknown
+        self.running + self.waiting + self.idle + self.error + self.exited + self.unknown
     }
 
-    /// Get count of urgent statuses (Error + Waiting + WaitingConfirm)
+    /// Get count of urgent statuses (Error + Waiting)
     pub fn urgent_count(&self) -> usize {
-        self.error + self.waiting + self.waiting_confirm
+        self.error + self.waiting
     }
 
     /// Check if there are any errors
@@ -210,7 +204,7 @@ impl StatusCounts {
 
     /// Check if there are any waiting (input or confirmation)
     pub fn has_waiting(&self) -> bool {
-        self.waiting > 0 || self.waiting_confirm > 0
+        self.waiting > 0
     }
 
     /// Compute StatusCounts from a HashMap of pane_id -> AgentStatus
@@ -260,7 +254,6 @@ impl StatusCounts {
         let counts = [
             (AgentStatus::Error, self.error),
             (AgentStatus::Exited, self.exited),
-            (AgentStatus::WaitingConfirm, self.waiting_confirm),
             (AgentStatus::Waiting, self.waiting),
             (AgentStatus::Running, self.running),
             (AgentStatus::Idle, self.idle),
@@ -285,7 +278,6 @@ mod tests {
         let statuses = vec![
             AgentStatus::Running,
             AgentStatus::Waiting,
-            AgentStatus::WaitingConfirm,
             AgentStatus::Idle,
             AgentStatus::Error,
             AgentStatus::Exited,
@@ -293,7 +285,7 @@ mod tests {
         ];
 
         // All should be different
-        assert_eq!(statuses.len(), 7);
+        assert_eq!(statuses.len(), 6);
     }
 
     /// Test: Status color mapping
@@ -301,7 +293,6 @@ mod tests {
     fn test_status_colors() {
         assert_eq!(AgentStatus::Running.color(), "green");
         assert_eq!(AgentStatus::Waiting.color(), "yellow");
-        assert_eq!(AgentStatus::WaitingConfirm.color(), "orange");
         assert_eq!(AgentStatus::Idle.color(), "gray");
         assert_eq!(AgentStatus::Error.color(), "red");
         assert_eq!(AgentStatus::Exited.color(), "blue");
@@ -320,7 +311,6 @@ mod tests {
     fn test_status_icons() {
         assert_eq!(AgentStatus::Running.icon(), "●");
         assert_eq!(AgentStatus::Waiting.icon(), "◐");
-        assert_eq!(AgentStatus::WaitingConfirm.icon(), "▲");
         assert_eq!(AgentStatus::Idle.icon(), "○");
         assert_eq!(AgentStatus::Error.icon(), "✕");
         assert_eq!(AgentStatus::Exited.icon(), "✓");
@@ -331,7 +321,7 @@ mod tests {
     #[test]
     fn test_status_display_text() {
         assert_eq!(AgentStatus::Running.display_text(), "Running");
-        assert_eq!(AgentStatus::Waiting.display_text(), "Waiting for input");
+        assert_eq!(AgentStatus::Waiting.display_text(), "Waiting");
         assert_eq!(AgentStatus::Idle.display_text(), "Idle");
         assert_eq!(AgentStatus::Error.display_text(), "Error detected");
         assert_eq!(AgentStatus::Exited.display_text(), "Process exited");
@@ -354,6 +344,7 @@ mod tests {
         assert_eq!(AgentStatus::Running.priority(), 3);
         assert_eq!(AgentStatus::Idle.priority(), 2);
         assert_eq!(AgentStatus::Unknown.priority(), 1);
+        // WaitingConfirm no longer exists; Waiting covers both cases
     }
 
     /// Test: Priority comparison
@@ -362,6 +353,7 @@ mod tests {
         assert!(AgentStatus::Error.higher_priority_than(&AgentStatus::Exited));
         assert!(AgentStatus::Exited.higher_priority_than(&AgentStatus::Waiting));
         assert!(AgentStatus::Waiting.higher_priority_than(&AgentStatus::Running));
+        // WaitingConfirm merged into Waiting
         assert!(AgentStatus::Running.higher_priority_than(&AgentStatus::Idle));
         assert!(AgentStatus::Idle.higher_priority_than(&AgentStatus::Unknown));
 
@@ -373,7 +365,6 @@ mod tests {
     fn test_is_urgent() {
         assert!(AgentStatus::Error.is_urgent());
         assert!(AgentStatus::Waiting.is_urgent());
-        assert!(AgentStatus::WaitingConfirm.is_urgent());
         assert!(!AgentStatus::Running.is_urgent());
         assert!(!AgentStatus::Idle.is_urgent());
         assert!(!AgentStatus::Exited.is_urgent());
@@ -385,7 +376,6 @@ mod tests {
     fn test_is_active() {
         assert!(AgentStatus::Running.is_active());
         assert!(AgentStatus::Waiting.is_active());
-        assert!(AgentStatus::WaitingConfirm.is_active());
         assert!(!AgentStatus::Idle.is_active());
         assert!(!AgentStatus::Error.is_active());
         assert!(!AgentStatus::Exited.is_active());
@@ -502,6 +492,29 @@ mod tests {
         let statuses: HashMap<String, AgentStatus> = HashMap::new();
         let result = AgentStatus::highest_priority_for_prefix(&statuses, "local:/path/feat");
         assert_eq!(result, AgentStatus::Unknown);
+    }
+
+    #[test]
+    fn test_from_status_str_valid() {
+        assert_eq!(AgentStatus::from_status_str("Running"), AgentStatus::Running);
+        assert_eq!(AgentStatus::from_status_str("Waiting"), AgentStatus::Waiting);
+        assert_eq!(AgentStatus::from_status_str("Idle"), AgentStatus::Idle);
+        assert_eq!(AgentStatus::from_status_str("Error"), AgentStatus::Error);
+        assert_eq!(AgentStatus::from_status_str("Exited"), AgentStatus::Exited);
+    }
+
+    #[test]
+    fn test_from_status_str_case_insensitive() {
+        assert_eq!(AgentStatus::from_status_str("running"), AgentStatus::Running);
+        assert_eq!(AgentStatus::from_status_str("RUNNING"), AgentStatus::Running);
+        assert_eq!(AgentStatus::from_status_str("wAiTiNg"), AgentStatus::Waiting);
+    }
+
+    #[test]
+    fn test_from_status_str_unknown_fallback() {
+        assert_eq!(AgentStatus::from_status_str(""), AgentStatus::Unknown);
+        assert_eq!(AgentStatus::from_status_str("invalid"), AgentStatus::Unknown);
+        assert_eq!(AgentStatus::from_status_str("Active"), AgentStatus::Unknown);
     }
 
     #[test]

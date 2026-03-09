@@ -7,7 +7,7 @@ pub mod file_tree_panel;
 
 use crate::git_diff::{self, ChangedFile, CommitInfo, FileDiff};
 use crate::syntax_highlight::{HighlightedLine, LineHighlighter};
-use diff_panel::{build_flat_rows, render_binary_notice, render_diff_row, render_empty_state, render_no_changes, DiffFlatRow, RejectHunkCallback};
+use diff_panel::{build_flat_rows, build_flat_rows_sbs, render_binary_notice, render_diff_row, render_empty_state, render_no_changes, DiffFlatRow, RejectHunkCallback};
 use file_tree_panel::{build_file_tree, FileTreeNode};
 use gpui::prelude::*;
 use gpui::*;
@@ -34,8 +34,10 @@ pub struct DiffViewOverlay {
     file_tree: Vec<FileTreeNode>,
     current_file_diff: Option<Arc<FileDiff>>,
     cached_highlighted: Option<Arc<Vec<HighlightedLine>>>,
-    /// Pre-computed flat row index for the diff panel (uniform_list).
+    /// Pre-computed flat rows for unified mode (one row per diff line).
     diff_flat_rows: Vec<DiffFlatRow>,
+    /// Pre-computed flat rows for side-by-side mode (removed/added lines paired).
+    diff_flat_rows_sbs: Vec<DiffFlatRow>,
 
     // Data — Changes tab
     commits: Vec<CommitInfo>,
@@ -54,6 +56,10 @@ pub struct DiffViewOverlay {
     side_by_side: bool,
 
     on_close: Option<CloseDiffViewCallback>,
+    /// Scroll handle for the right-panel diff uniform_list (keyboard scrolling).
+    diff_scroll_handle: UniformListScrollHandle,
+    /// Current visible top row index (for keyboard scroll calculations).
+    scroll_top_row: usize,
 }
 
 impl DiffViewOverlay {
@@ -67,6 +73,7 @@ impl DiffViewOverlay {
             current_file_diff: None,
             cached_highlighted: None,
             diff_flat_rows: Vec::new(),
+            diff_flat_rows_sbs: Vec::new(),
             commits: Vec::new(),
             commits_loaded: false,
             commit_files_cache: HashMap::new(),
@@ -80,6 +87,8 @@ impl DiffViewOverlay {
             error: None,
             side_by_side: true,
             on_close: None,
+            diff_scroll_handle: UniformListScrollHandle::new(),
+            scroll_top_row: 0,
         }
     }
 
@@ -169,6 +178,8 @@ impl DiffViewOverlay {
         self.current_file_diff = None;
         self.cached_highlighted = None;
         self.diff_flat_rows.clear();
+        self.diff_flat_rows_sbs.clear();
+        self.scroll_top_row = 0;
         cx.notify();
 
         let worktree = self.worktree_path.clone();
@@ -179,14 +190,16 @@ impl DiffViewOverlay {
                 let diff = git_diff::file_diff(&wt, &fp)?;
                 let highlighted = highlight_diff_lines(&diff);
                 let flat_rows = build_flat_rows(&diff);
-                Ok::<_, git_diff::GitDiffError>((diff, highlighted, flat_rows))
+                let flat_rows_sbs = build_flat_rows_sbs(&diff);
+                Ok::<_, git_diff::GitDiffError>((diff, highlighted, flat_rows, flat_rows_sbs))
             })
             .await;
             let _ = entity.update(cx, |this: &mut DiffViewOverlay, cx| {
                 this.loading_file = false;
                 match result {
-                    Ok((d, hl, rows)) => {
+                    Ok((d, hl, rows, rows_sbs)) => {
                         this.diff_flat_rows = rows;
+                        this.diff_flat_rows_sbs = rows_sbs;
                         this.current_file_diff = Some(Arc::new(d));
                         this.cached_highlighted = Some(Arc::new(hl));
                     }
@@ -211,6 +224,8 @@ impl DiffViewOverlay {
         self.current_file_diff = None;
         self.cached_highlighted = None;
         self.diff_flat_rows.clear();
+        self.diff_flat_rows_sbs.clear();
+        self.scroll_top_row = 0;
         cx.notify();
 
         let worktree = self.worktree_path.clone();
@@ -222,14 +237,16 @@ impl DiffViewOverlay {
                 let diff = git_diff::commit_file_diff(&wt, &hash, &fp)?;
                 let highlighted = highlight_diff_lines(&diff);
                 let flat_rows = build_flat_rows(&diff);
-                Ok::<_, git_diff::GitDiffError>((diff, highlighted, flat_rows))
+                let flat_rows_sbs = build_flat_rows_sbs(&diff);
+                Ok::<_, git_diff::GitDiffError>((diff, highlighted, flat_rows, flat_rows_sbs))
             })
             .await;
             let _ = entity.update(cx, |this: &mut DiffViewOverlay, cx| {
                 this.loading_file = false;
                 match result {
-                    Ok((d, hl, rows)) => {
+                    Ok((d, hl, rows, rows_sbs)) => {
                         this.diff_flat_rows = rows;
+                        this.diff_flat_rows_sbs = rows_sbs;
                         this.current_file_diff = Some(Arc::new(d));
                         this.cached_highlighted = Some(Arc::new(hl));
                     }
@@ -274,10 +291,13 @@ impl DiffViewOverlay {
 
     fn render_header(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let on_close = self.on_close.clone();
+        // Button label shows what you *switch to* (standard toggle UX):
+        // When currently in side-by-side mode → clicking switches to Unified
+        // When currently in unified mode       → clicking switches to Side-by-Side
         let toggle_label = if self.side_by_side {
-            "Side-by-Side"
-        } else {
             "Unified"
+        } else {
+            "Side-by-Side"
         };
         let entity = cx.entity();
 
@@ -496,7 +516,13 @@ impl DiffViewOverlay {
             return render_no_changes().into_any_element();
         }
 
-        let total_rows = self.diff_flat_rows.len();
+        // Use paired flat rows for side-by-side mode (proper removed/added alignment)
+        let active_flat_rows = if self.side_by_side {
+            &self.diff_flat_rows_sbs
+        } else {
+            &self.diff_flat_rows
+        };
+        let total_rows = active_flat_rows.len();
         if total_rows == 0 {
             return render_empty_state().into_any_element();
         }
@@ -514,16 +540,25 @@ impl DiffViewOverlay {
             None
         };
 
-        // uniform_list: only renders visible rows
+        // uniform_list: only renders visible rows.
+        // Use a mode-specific element ID so GPUI creates a fresh list (with reset
+        // scroll position) whenever the user switches between unified and side-by-side.
+        // Without this, GPUI preserves the scroll offset from the previous mode,
+        // which can push some rows out of the visible viewport.
+        let list_id = if self.side_by_side {
+            "diff-content-sbs"
+        } else {
+            "diff-content-uni"
+        };
         div()
             .size_full()
             .flex()
             .flex_col()
             .font_family("monospace")
-            .text_size(px(13.))
+            .text_size(px(12.))
             .child(
                 uniform_list(
-                    "diff-content",
+                    list_id,
                     total_rows,
                     cx.processor(move |this, range: std::ops::Range<usize>, _window, _cx| {
                         let diff = match &this.current_file_diff {
@@ -532,10 +567,15 @@ impl DiffViewOverlay {
                         };
                         let hl = this.cached_highlighted.as_deref().map(|v| v.as_slice());
                         let side_by_side = this.side_by_side;
+                        let flat_rows = if side_by_side {
+                            &this.diff_flat_rows_sbs
+                        } else {
+                            &this.diff_flat_rows
+                        };
 
                         range
                             .map(|idx| {
-                                if let Some(row) = this.diff_flat_rows.get(idx) {
+                                if let Some(row) = flat_rows.get(idx) {
                                     render_diff_row(
                                         row,
                                         diff,
@@ -550,9 +590,51 @@ impl DiffViewOverlay {
                             .collect()
                     }),
                 )
-                .flex_grow(),
+                .flex_grow()
+                .track_scroll(&self.diff_scroll_handle),
             )
             .into_any_element()
+    }
+
+    /// Scroll the diff panel by a number of rows (positive = down, negative = up).
+    pub fn scroll_diff_by(&mut self, delta: i32, cx: &mut Context<Self>) {
+        let total = if self.side_by_side {
+            self.diff_flat_rows_sbs.len()
+        } else {
+            self.diff_flat_rows.len()
+        };
+        if total == 0 {
+            return;
+        }
+        let new_top = if delta < 0 {
+            self.scroll_top_row.saturating_sub((-delta) as usize)
+        } else {
+            (self.scroll_top_row + delta as usize).min(total.saturating_sub(1))
+        };
+        self.scroll_top_row = new_top;
+        self.diff_scroll_handle
+            .scroll_to_item(new_top, ScrollStrategy::Top);
+        cx.notify();
+    }
+
+    /// Scroll the diff panel to top.
+    pub fn scroll_diff_to_top(&mut self, cx: &mut Context<Self>) {
+        self.scroll_top_row = 0;
+        self.diff_scroll_handle
+            .scroll_to_item(0, ScrollStrategy::Top);
+        cx.notify();
+    }
+
+    /// Scroll the diff panel to bottom.
+    pub fn scroll_diff_to_bottom(&mut self, cx: &mut Context<Self>) {
+        self.diff_scroll_handle.scroll_to_bottom();
+        let total = if self.side_by_side {
+            self.diff_flat_rows_sbs.len()
+        } else {
+            self.diff_flat_rows.len()
+        };
+        self.scroll_top_row = total.saturating_sub(1);
+        cx.notify();
     }
 
     fn render_body(&mut self, cx: &mut Context<Self>) -> Stateful<Div> {

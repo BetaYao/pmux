@@ -62,6 +62,9 @@ fn main() {
     #[cfg(target_os = "macos")]
     init_macos_notifications();
 
+    // Write OSC 133 shell integration scripts to ~/.config/pmux/
+    pmux::shell_integration_inject::ensure_shell_integration_scripts();
+
     let resources = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources");
     gpui_platform::application()
         .with_assets(Assets { base: resources })
@@ -170,6 +173,7 @@ actions!(pmux_menus, [
 fn open_settings(_: &OpenSettings, cx: &mut App) {
     pmux::ui::app_root::OPEN_SETTINGS_REQUESTED.store(true, std::sync::atomic::Ordering::SeqCst);
     cx.activate(true);
+    cx.refresh_windows();
 }
 
 fn select_workspace_from_menu(_: &SelectWorkspaceFromMenu, _cx: &mut App) {

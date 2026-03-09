@@ -204,12 +204,16 @@ impl AgentRuntime for LocalPtyAgent {
             .master
             .lock()
             .map_err(|e| RuntimeError::Backend(e.to_string()))?;
+        // BUG-11: Provide approximate pixel dimensions instead of 0.
+        // At 12pt Menlo: cell ≈ 7.2px wide, line ≈ 17px tall.
+        // Exact values aren't critical (few programs use ws_xpixel/ws_ypixel),
+        // but nonzero is better for sixel/image protocols.
         guard
             .resize(PtySize {
                 rows,
                 cols,
-                pixel_width: 0,
-                pixel_height: 0,
+                pixel_width: (cols as u16).saturating_mul(8),
+                pixel_height: (rows as u16).saturating_mul(17),
             })
             .map_err(|e| RuntimeError::Backend(e.to_string()))
     }
@@ -431,8 +435,8 @@ impl AgentRuntime for LocalPtyRuntime {
             .resize(PtySize {
                 rows,
                 cols,
-                pixel_width: 0,
-                pixel_height: 0,
+                pixel_width: (cols as u16).saturating_mul(8),
+                pixel_height: (rows as u16).saturating_mul(17),
             })
             .map_err(|e| RuntimeError::Backend(e.to_string()));
         Ok(())

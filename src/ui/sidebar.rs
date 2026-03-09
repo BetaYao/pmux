@@ -29,7 +29,6 @@ impl WorktreeItem {
         match self.status {
             AgentStatus::Running => "●",
             AgentStatus::Waiting => "◐",
-            AgentStatus::WaitingConfirm => "▲",
             AgentStatus::Idle => "○",
             AgentStatus::Error => "✕",
             AgentStatus::Exited => "✓",
@@ -41,7 +40,6 @@ impl WorktreeItem {
         match self.status {
             AgentStatus::Running => rgb(0x4caf50),
             AgentStatus::Waiting => rgb(0xffc107),
-            AgentStatus::WaitingConfirm => rgb(0xff9800),
             AgentStatus::Idle => rgb(0x9e9e9e),
             AgentStatus::Error => rgb(0xf44336),
             AgentStatus::Exited => rgb(0x2196f3),
@@ -61,8 +59,7 @@ impl WorktreeItem {
     pub fn status_text(&self) -> &'static str {
         match self.status {
             AgentStatus::Running => "Running",
-            AgentStatus::Waiting => "Waiting for input",
-            AgentStatus::WaitingConfirm => "Waiting for confirmation",
+            AgentStatus::Waiting => "Waiting",
             AgentStatus::Idle => "Idle",
             AgentStatus::Error => "Error detected",
             AgentStatus::Exited => "Process exited",
@@ -104,6 +101,8 @@ pub struct Sidebar {
     orphan_windows: Arc<Mutex<Vec<String>>>,
     /// Callback when user closes an orphan window (window_name).
     on_close_orphan: Option<Arc<dyn Fn(&str, &mut Window, &mut App) + Send + Sync>>,
+    /// Callback when user clicks the settings gear icon.
+    on_settings: Option<Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
 }
 
 impl Sidebar {
@@ -130,6 +129,7 @@ impl Sidebar {
             running_animation_frame: 0,
             orphan_windows: Arc::new(Mutex::new(Vec::new())),
             on_close_orphan: None,
+            on_settings: None,
         }
     }
 
@@ -224,6 +224,10 @@ impl Sidebar {
 
     pub fn on_new_branch<F: Fn(&mut Window, &mut App) + Send + Sync + 'static>(&mut self, callback: F) {
         self.on_new_branch = Some(Arc::new(callback));
+    }
+
+    pub fn on_settings<F: Fn(&mut Window, &mut App) + Send + Sync + 'static>(&mut self, callback: F) {
+        self.on_settings = Some(Arc::new(callback));
     }
 
     pub fn add_worktree(&mut self, info: WorktreeInfo) {
@@ -529,7 +533,11 @@ impl Sidebar {
         menu
     }
 
-    fn render_footer(creating: bool, on_new_branch: Option<&Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>) -> Stateful<Div> {
+    fn render_footer(
+        creating: bool,
+        on_new_branch: Option<&Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
+        on_settings: Option<&Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
+    ) -> Stateful<Div> {
         let mut btn = div()
             .id("new-branch-btn")
             .px(px(12.)).py(px(6.)).rounded(px(4.))
@@ -554,12 +562,28 @@ impl Sidebar {
             }
         }
 
+        // Settings gear icon button (sized to match New Branch button height)
+        let mut gear = div()
+            .id("sidebar-settings-btn")
+            .px(px(8.)).py(px(4.)).rounded(px(4.))
+            .text_color(rgb(0x999999)).text_size(px(16.))
+            .cursor_pointer()
+            .hover(|s: StyleRefinement| s.text_color(rgb(0xffffff)).bg(rgb(0x3d3d3d)))
+            .child("⚙");
+        if let Some(callback) = on_settings {
+            let cb = Arc::clone(callback);
+            gear = gear.on_click(move |_, window, cx| {
+                cb(window, cx);
+            });
+        }
+
         div()
             .id("sidebar-footer")
-            .flex().flex_row().items_center().justify_center()
+            .flex().flex_row().items_center().justify_between()
             .px(px(8.)).py(px(8.))
             .border_t(px(1.)).border_color(rgb(0x3d3d3d))
             .child(btn)
+            .child(gear)
     }
 }
 
@@ -597,7 +621,7 @@ impl RenderOnce for Sidebar {
         let repo_name = self.repo_name.clone();
         let creating = self.creating_branch;
         let on_new_branch_ref = self.on_new_branch.as_ref();
-        let on_delete = self.on_delete.clone();
+        let _on_delete = self.on_delete.clone(); // delete via context menu only
         let on_select = self.on_select.clone();
         let on_right_click = self.on_right_click.clone();
         let on_toggle_sidebar = self.on_toggle_sidebar.clone();
@@ -615,7 +639,8 @@ impl RenderOnce for Sidebar {
         } else {
             Self::render_header(&repo_name).into_any_element()
         };
-        let footer = Self::render_footer(creating, on_new_branch_ref);
+        let on_settings_ref = self.on_settings.as_ref();
+        let footer = Self::render_footer(creating, on_new_branch_ref, on_settings_ref);
 
         let mut rows: Vec<AnyElement> = Vec::new();
         for (idx, item) in worktrees.iter().enumerate() {
@@ -658,9 +683,12 @@ impl RenderOnce for Sidebar {
                         .child(div().flex_shrink_0().text_size(px(11.)).text_color(status_color).child(status_icon_text))
                         .child(div().flex_1().min_w(px(0.)).overflow_hidden().text_ellipsis().text_size(px(12.)).font_weight(FontWeight::SEMIBOLD).text_color(text_color)
                             .child(SharedString::from(item_with_status.info.short_branch_name().to_string())))
-                        .child(div().text_size(px(10.)).text_color(meta_color).flex_shrink_0().child(last_time))
                 )
-                .child(div().pl(px(17.)).text_size(px(10.)).text_color(meta_color).line_height(px(14.)).overflow_hidden().text_ellipsis().child(SharedString::from(last_message)));
+                .child(
+                    div().flex().flex_row().items_center().gap(px(4.)).pl(px(17.))
+                        .child(div().flex_1().min_w(px(0.)).text_size(px(10.)).text_color(meta_color).line_height(px(14.)).overflow_hidden().text_ellipsis().child(SharedString::from(last_message)))
+                        .child(div().flex_shrink_0().text_size(px(9.)).text_color(meta_color).child(SharedString::from(last_time)))
+                );
 
             let row_content = div()
                 .flex_1()
@@ -688,21 +716,6 @@ impl RenderOnce for Sidebar {
             }
 
             row = row.child(row_content);
-
-            if let Some(ref on_delete) = on_delete {
-                let on_delete = Arc::clone(on_delete);
-                let delete_btn = div()
-                    .id(format!("sidebar-delete-{}", idx))
-                    .px(px(4.)).py(px(2.))
-                    .text_size(px(10.)).text_color(rgb(0x666666))
-                    .hover(|s: StyleRefinement| s.text_color(rgb(0xffffff)))
-                    .cursor_pointer()
-                    .on_click(move |_event, window, cx| {
-                        on_delete(idx, window, cx);
-                    })
-                    .child("×");
-                row = row.child(delete_btn);
-            }
 
             if is_selected {
                 row = row.bg(rgb(0x2c313a));
@@ -902,7 +915,7 @@ mod tests {
         assert_eq!(item.status_text(), "Running");
         
         item.set_status(AgentStatus::Waiting);
-        assert_eq!(item.status_text(), "Waiting for input");
+        assert_eq!(item.status_text(), "Waiting");
     }
 
     #[test]

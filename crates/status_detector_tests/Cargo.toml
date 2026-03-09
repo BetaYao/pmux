@@ -1,0 +1,11 @@
+[package]
+name = "status-detector-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# no external dependencies needed - pure OSC 133 detection
+
+[dev-dependencies]
+# no gpui dependency - tests compile independently
