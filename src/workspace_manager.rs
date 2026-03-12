@@ -9,6 +9,9 @@ pub struct WorkspaceTab {
     pub name: String,
     pub display_name: String,
     pub is_modified: bool,
+    /// Last selected worktree index for this tab (preserved across tab switches)
+    #[serde(default)]
+    pub last_worktree_index: Option<usize>,
 }
 
 impl WorkspaceTab {
@@ -23,6 +26,7 @@ impl WorkspaceTab {
             name: name.clone(),
             display_name: name,
             is_modified: false,
+            last_worktree_index: None,
         }
     }
 
@@ -59,6 +63,16 @@ impl WorkspaceTab {
     /// Update display name with disambiguation
     pub fn set_display_name(&mut self, name: String) {
         self.display_name = name;
+    }
+
+    /// Save the last selected worktree index for this tab
+    pub fn save_worktree_index(&mut self, index: Option<usize>) {
+        self.last_worktree_index = index;
+    }
+
+    /// Get the last selected worktree index for this tab
+    pub fn last_worktree_index(&self) -> Option<usize> {
+        self.last_worktree_index
     }
 }
 

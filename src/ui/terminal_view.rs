@@ -210,7 +210,7 @@ impl RenderOnce for TerminalView {
             .when(self.is_focused, |el| el.bg(rgb(0x1e1e1e)))
             .when(!self.is_focused, |el| el.bg(rgb(0x19191c)))
             .text_color(rgb(0xabb2bf))
-            .font_family("Menlo")
+            .font_family("MesloLGS NF")
             .text_size(px(12.))
             .child(
                 div()

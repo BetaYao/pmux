@@ -22,6 +22,9 @@ pub struct WorktreeInfo {
     pub branch: String,
     pub head: String,
     pub is_main: bool,
+    /// True when this worktree's path matches the repo root directory.
+    /// Used to pin the base repo to the top of the sidebar regardless of branch name.
+    pub is_base: bool,
     pub ahead: usize,
     pub behind: usize,
 }
@@ -38,6 +41,7 @@ impl WorktreeInfo {
             branch: branch.to_string(),
             head: head.to_string(),
             is_main,
+            is_base: false, // Set later by discover_worktrees() based on path comparison
             ahead: 0,
             behind: 0,
         }
@@ -80,7 +84,28 @@ pub fn discover_worktrees(repo_path: &Path) -> Result<Vec<WorktreeInfo>, Worktre
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    parse_worktree_list(&stdout)
+    let mut worktrees = parse_worktree_list(&stdout)?;
+
+    // Mark the base repo: the worktree whose path matches the repo root directory.
+    // Canonicalize paths for reliable comparison (resolves symlinks, trailing slashes).
+    let canonical_repo = repo_path.canonicalize().unwrap_or_else(|_| repo_path.to_path_buf());
+    for wt in &mut worktrees {
+        let canonical_wt = wt.path.canonicalize().unwrap_or_else(|_| wt.path.clone());
+        if canonical_wt == canonical_repo {
+            wt.is_base = true;
+        }
+    }
+
+    // Re-sort: base repo always first (is_base takes priority over is_main)
+    worktrees.sort_by(|a, b| {
+        match (a.is_base, b.is_base) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.branch.cmp(&b.branch),
+        }
+    });
+
+    Ok(worktrees)
 }
 
 /// Parse porcelain output from `git worktree list --porcelain`
@@ -117,9 +142,12 @@ fn parse_worktree_list(output: &str) -> Result<Vec<WorktreeInfo>, WorktreeError>
         return Err(WorktreeError::ParseError("No worktrees found".to_string()));
     }
 
-    // Sort: main/master first, then alphabetically
+    // Sort: base repo first, then alphabetically by branch name.
+    // is_base is set later by discover_worktrees(); here we use is_main as fallback.
     worktrees.sort_by(|a, b| {
-        match (a.is_main, b.is_main) {
+        let a_first = a.is_base || a.is_main;
+        let b_first = b.is_base || b.is_main;
+        match (a_first, b_first) {
             (true, false) => std::cmp::Ordering::Less,
             (false, true) => std::cmp::Ordering::Greater,
             _ => a.branch.cmp(&b.branch),

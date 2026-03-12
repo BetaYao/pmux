@@ -513,6 +513,10 @@ impl AgentRuntime for TmuxRuntime {
         Ok(new_id)
     }
 
+    fn kill_pane(&self, pane_id: &PaneId) -> Result<(), RuntimeError> {
+        self.tmux_cmd(&["kill-pane", "-t", &self.pane_target(pane_id)])
+    }
+
     fn get_pane_dimensions(&self, pane_id: &PaneId) -> (u16, u16) {
         let target = self.pane_target(pane_id);
         let out = match self.tmux_cmd_output(&["display-message", "-t", &target, "-p", "-F", "#{pane_width} #{pane_height}"]) {

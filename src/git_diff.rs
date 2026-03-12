@@ -106,11 +106,30 @@ pub fn detect_main_branch(worktree: &Path) -> String {
     "main".to_string()
 }
 
-/// List files changed between main branch and HEAD
+/// Detect the diff base ref for comparing current branch against main.
+/// Prefers origin/main > origin/master > local main > local master.
+pub fn detect_diff_base(worktree: &Path) -> String {
+    for candidate in &["origin/main", "origin/master"] {
+        let output = Command::new("git")
+            .args(["rev-parse", "--verify", candidate])
+            .current_dir(worktree)
+            .stderr(std::process::Stdio::null())
+            .output();
+        if let Ok(o) = output {
+            if o.status.success() {
+                return candidate.to_string();
+            }
+        }
+    }
+    detect_main_branch(worktree)
+}
+
+/// List files changed between origin/main and the current working tree
+/// (includes both committed and uncommitted changes)
 pub fn changed_files(worktree: &Path) -> Result<Vec<ChangedFile>, GitDiffError> {
-    let main_branch = detect_main_branch(worktree);
+    let base = detect_diff_base(worktree);
     let output = Command::new("git")
-        .args(["diff", "--name-status", &format!("{}...HEAD", main_branch)])
+        .args(["diff", "--name-status", &base])
         .current_dir(worktree)
         .output()?;
 
@@ -123,16 +142,11 @@ pub fn changed_files(worktree: &Path) -> Result<Vec<ChangedFile>, GitDiffError> 
     parse_name_status(&stdout)
 }
 
-/// Get diff for a specific file (main...HEAD)
+/// Get diff for a specific file (origin/main vs working tree)
 pub fn file_diff(worktree: &Path, file_path: &str) -> Result<FileDiff, GitDiffError> {
-    let main_branch = detect_main_branch(worktree);
+    let base = detect_diff_base(worktree);
     let output = Command::new("git")
-        .args([
-            "diff",
-            &format!("{}...HEAD", main_branch),
-            "--",
-            file_path,
-        ])
+        .args(["diff", &base, "--", file_path])
         .current_dir(worktree)
         .output()?;
 
@@ -145,13 +159,15 @@ pub fn file_diff(worktree: &Path, file_path: &str) -> Result<FileDiff, GitDiffEr
     parse_unified_diff(&stdout, file_path)
 }
 
-/// List commits between main and HEAD
+/// List commits on the current branch not yet merged to origin/main.
+/// Uses --first-parent to exclude commits from other branches that were merged in.
 pub fn commits(worktree: &Path) -> Result<Vec<CommitInfo>, GitDiffError> {
-    let main_branch = detect_main_branch(worktree);
+    let base = detect_diff_base(worktree);
     let output = Command::new("git")
         .args([
             "log",
-            &format!("{}...HEAD", main_branch),
+            "--first-parent",
+            &format!("{}..HEAD", base),
             "--format=%H%n%h%n%s%n%an%n%ad",
             "--date=relative",
         ])

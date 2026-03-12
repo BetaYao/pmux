@@ -12,12 +12,14 @@ use crate::system_notifier;
 use crate::shell_integration::ShellPhaseInfo;
 use crate::terminal::ContentExtractor;
 use crate::runtime::{AgentRuntime, EventBus, RuntimeEvent, StatusPublisher};
-use crate::runtime::backends::{create_runtime_from_env, kill_tmux_window, list_tmux_windows, recover_runtime, resolve_backend, session_name_for_workspace, window_name_for_worktree, window_target};
+use crate::runtime::backends::{create_runtime_from_env, kill_tmux_window, legacy_window_name_for_worktree, list_tmux_windows, migrate_tmux_window_name, recover_runtime, resolve_backend, session_name_for_workspace, window_name_for_worktree, window_target};
 use crate::runtime::{RuntimeState, WorktreeState};
-use crate::ui::{AppState, sidebar::Sidebar, workspace_tabbar::WorkspaceTabBar, terminal_controller::ResizeController, terminal_view::TerminalBuffer, terminal_area_entity::TerminalAreaEntity, notification_panel_entity::NotificationPanelEntity, new_branch_dialog_entity::NewBranchDialogEntity, delete_worktree_dialog_ui::DeleteWorktreeDialogUi, split_pane_container::SplitPaneContainer, diff_view::DiffViewOverlay, status_bar::StatusBar, models::{StatusCountsModel, NotificationPanelModel, NewBranchDialogModel, PaneSummaryModel}, topbar_entity::TopBarEntity};
+use crate::ui::{AppState, sidebar::Sidebar, workspace_tabbar::WorkspaceTabBar, terminal_controller::ResizeController, terminal_view::TerminalBuffer, terminal_area_entity::TerminalAreaEntity, notification_panel_entity::NotificationPanelEntity, new_branch_dialog_entity::NewBranchDialogEntity, close_tab_dialog_ui::CloseTabDialogUi, delete_worktree_dialog_ui::DeleteWorktreeDialogUi, split_pane_container::SplitPaneContainer, diff_view::DiffViewOverlay, status_bar::StatusBar, models::{StatusCountsModel, NotificationPanelModel, NewBranchDialogModel, PaneSummaryModel}, topbar_entity::TopBarEntity};
 use crate::split_tree::SplitNode;
 use crate::workspace_manager::WorkspaceManager;
 use crate::input::{key_to_xterm_escape, KeyModifiers};
+use futures_util::future::{select, Either};
+use futures_util::pin_mut;
 use crate::window_state::PersistentAppState;
 use crate::new_branch_orchestrator::{NewBranchOrchestrator, CreationResult, NotificationSender};
 use crate::notification::Notification;
@@ -28,6 +30,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+// Terminal clipboard actions — dispatched via GPUI key bindings (cmd-v, cmd-c)
+// so they work correctly even when TerminalInputHandler is active.
+actions!(pmux_terminal, [TerminalPaste, TerminalCopy]);
+
 /// When true, AppRoot will set show_settings=true and clear this flag at start of render.
 /// Used by menu action (open_settings) to open Settings from main.rs without window access.
 pub static OPEN_SETTINGS_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -36,9 +42,178 @@ pub static OPEN_SETTINGS_REQUESTED: AtomicBool = AtomicBool::new(false);
 /// work on huge buffers in large/active panes (e.g. big monorepos), keeping input responsive.
 const MAX_STATUS_CONTENT_LEN: usize = 32_768;
 
-/// Min output chunks per batch (interactive typing). Max scales up under backpressure.
-const TERMINAL_OUTPUT_MIN_BATCH: usize = 24;
-const TERMINAL_OUTPUT_MAX_BATCH: usize = 256;
+// ---------------------------------------------------------------------------
+// Clipboard paste helpers (image / file / text)
+// ---------------------------------------------------------------------------
+
+/// Map GPUI ImageFormat to file extension.
+fn image_format_extension(format: ImageFormat) -> &'static str {
+    match format {
+        ImageFormat::Png => "png",
+        ImageFormat::Jpeg => "jpeg",
+        ImageFormat::Webp => "webp",
+        ImageFormat::Gif => "gif",
+        ImageFormat::Svg => "svg",
+        ImageFormat::Bmp => "bmp",
+        ImageFormat::Tiff => "tiff",
+        ImageFormat::Ico => "ico",
+    }
+}
+
+/// Save clipboard image bytes to a temp file under `$TMPDIR/pmux-images/`.
+/// Returns the absolute path on success, `None` on failure.
+fn save_clipboard_image_to_temp(image: &Image) -> Option<String> {
+    let dir = std::env::temp_dir().join("pmux-images");
+    let _ = std::fs::create_dir_all(&dir);
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let ext = image_format_extension(image.format);
+    let filename = format!("pmux-paste-{}-{:x}.{}", ts, image.id, ext);
+    let path = dir.join(&filename);
+    match std::fs::write(&path, &image.bytes) {
+        Ok(()) => Some(path.to_string_lossy().into_owned()),
+        Err(e) => {
+            eprintln!("pmux: failed to save pasted image: {}", e);
+            None
+        }
+    }
+}
+
+/// Remove pmux paste image files older than 24 hours.
+/// Errors are silently ignored (directory may not exist yet).
+fn cleanup_old_paste_images() {
+    let dir = std::env::temp_dir().join("pmux-images");
+    let Ok(entries) = std::fs::read_dir(&dir) else { return };
+    let cutoff = std::time::SystemTime::now()
+        - std::time::Duration::from_secs(24 * 60 * 60);
+    for entry in entries.flatten() {
+        if let Ok(meta) = entry.metadata() {
+            if let Ok(modified) = meta.modified() {
+                if modified < cutoff {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+    }
+}
+
+/// Shell-quote a path if it contains special characters (spaces, quotes, etc.).
+fn shell_quote_path(path: &str) -> String {
+    let needs_quoting = path.chars().any(|c| matches!(c,
+        ' ' | '\'' | '"' | '(' | ')' | '&' | '|' | ';' | '$'
+        | '`' | '!' | '#' | '*' | '?' | '[' | ']' | '{' | '}'
+    ));
+    if needs_quoting {
+        format!("'{}'", path.replace('\'', "'\\''"))
+    } else {
+        path.to_string()
+    }
+}
+
+/// Build paste text from all clipboard entries.
+/// - `String` entries: concatenated as-is (preserves existing text-paste behaviour).
+/// - `Image` entries: saved to a temp file, path pasted (enables Cmd+V image paste).
+/// - `ExternalPaths` entries: file paths pasted with shell quoting.
+fn build_paste_text_from_clipboard(clipboard: &ClipboardItem) -> String {
+    let mut result = String::new();
+    let mut did_cleanup = false;
+    for entry in clipboard.entries() {
+        match entry {
+            ClipboardEntry::String(cs) => {
+                result.push_str(&cs.text);
+            }
+            ClipboardEntry::Image(image) => {
+                if !did_cleanup {
+                    cleanup_old_paste_images();
+                    did_cleanup = true;
+                }
+                if let Some(path) = save_clipboard_image_to_temp(image) {
+                    if !result.is_empty() { result.push(' '); }
+                    result.push_str(&shell_quote_path(&path));
+                }
+            }
+            ClipboardEntry::ExternalPaths(paths) => {
+                for p in paths.paths() {
+                    if !result.is_empty() { result.push(' '); }
+                    result.push_str(&shell_quote_path(&p.display().to_string()));
+                }
+            }
+        }
+    }
+    result
+}
+
+/// Detect which agent is running in a tmux pane.
+///
+/// First checks `pane_current_command` (fast). If that doesn't match a known agent,
+/// falls back to checking child processes of the pane shell. This handles cases where
+/// tmux reports the binary filename instead of the symlink name (e.g. Claude CLI's
+/// binary is `2.1.72` but the symlink is `claude`).
+fn detect_agent_in_pane(
+    pane_target: &str,
+    agent_detect: &crate::config::AgentDetectConfig,
+) -> Option<crate::config::AgentDef> {
+    // Fast path: check pane_current_command directly
+    if let Ok(out) = std::process::Command::new("tmux")
+        .args(["display-message", "-t", pane_target, "-p", "#{pane_current_command}"])
+        .output()
+    {
+        let cmd = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if let Some(agent) = agent_detect.find_agent(&cmd) {
+            return Some(agent.clone());
+        }
+    }
+
+    // Slow path: check child processes of the pane's shell.
+    // tmux may report a version-named binary (e.g. "2.1.72" for Claude CLI)
+    // instead of the symlink name ("claude"). Walk the process tree to find
+    // the real command.
+    if let Ok(out) = std::process::Command::new("tmux")
+        .args(["display-message", "-t", pane_target, "-p", "#{pane_pid}"])
+        .output()
+    {
+        let pane_pid = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if let Ok(pid) = pane_pid.parse::<u32>() {
+            // pgrep -P <pid> lists direct children
+            if let Ok(children) = std::process::Command::new("pgrep")
+                .args(["-P", &pid.to_string()])
+                .output()
+            {
+                let child_pids = String::from_utf8_lossy(&children.stdout);
+                for child_pid in child_pids.lines().map(str::trim).filter(|s| !s.is_empty()) {
+                    // Get the command name of each child process
+                    if let Ok(ps_out) = std::process::Command::new("ps")
+                        .args(["-o", "comm=", "-p", child_pid])
+                        .output()
+                    {
+                        let child_cmd = String::from_utf8_lossy(&ps_out.stdout).trim().to_string();
+                        if let Some(agent) = agent_detect.find_agent(&child_cmd) {
+                            return Some(agent.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Check if the tmux pane's foreground process is a shell (zsh, bash, fish, etc.)
+fn is_pane_shell(pane_target: &str) -> bool {
+    if let Ok(out) = std::process::Command::new("tmux")
+        .args(["display-message", "-t", pane_target, "-p", "#{pane_current_command}"])
+        .output()
+    {
+        let cmd = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        matches!(cmd.as_str(), "zsh" | "bash" | "fish" | "sh" | "dash" | "ksh" | "tcsh" | "csh" | "nu" | "elvish" | "pwsh")
+    } else {
+        false
+    }
+}
+
 
 /// Notification sender that forwards to AppRoot's NotificationManager
 struct AppNotificationSender {
@@ -82,6 +257,8 @@ pub struct AppRoot {
     event_bus: Arc<EventBus>,
     /// Status publisher (publishes to EventBus, replaces StatusPoller)
     status_publisher: Option<StatusPublisher>,
+    /// JSONL session scanner for supplementary agent status detection
+    session_scanner: Option<crate::session_scanner::SessionScanner>,
     /// Status key base for current worktree (e.g. "local:/path/to/worktree")
     status_key_base: Option<String>,
     /// Whether EventBus subscription has been started (spawn once)
@@ -93,6 +270,8 @@ pub struct AppRoot {
     dialog_input_focus: Option<FocusHandle>,
     /// Delete worktree confirmation dialog
     delete_worktree_dialog: DeleteWorktreeDialogUi,
+    /// Close tab confirmation dialog (with tmux session cleanup option)
+    close_tab_dialog: CloseTabDialogUi,
     /// Pending worktree selection to be processed on next render
     pending_worktree_selection: Option<usize>,
     /// When Some(idx): switching to worktree idx, show loading in terminal area
@@ -106,8 +285,13 @@ pub struct AppRoot {
     cached_worktrees_repo: Option<PathBuf>,
     /// Cached tmux window names for the current repo; filled once when opening repo to avoid repeated list-windows calls.
     cached_tmux_windows: Option<(PathBuf, Vec<String>)>,
+    /// Maps worktree path → repo path (workspace tab path). Built incrementally
+    /// when worktrees are discovered for each repo. Used for per-tab agent counts.
+    worktree_to_repo_map: HashMap<PathBuf, PathBuf>,
     /// Sidebar context menu: which worktree index has menu open, and mouse (x, y) position
     sidebar_context_menu: Option<(usize, f32, f32)>,
+    /// Terminal context menu: mouse (x, y) position when right-clicked
+    terminal_context_menu: Option<(f32, f32)>,
     /// Built-in diff view entity (replaces nvim+diffview overlay)
     diff_view_entity: Option<Entity<DiffViewOverlay>>,
     /// Sidebar width in pixels (persisted to state.json)
@@ -154,6 +338,9 @@ pub struct AppRoot {
     /// When true, new branch (or other modal) dialog is open; terminal output loop skips
     /// notifying terminal area so the main thread stays responsive for dialog input (e.g. in large repos).
     modal_overlay_open: Arc<AtomicBool>,
+    /// When true, a split divider is being dragged; resize callbacks skip runtime.resize()
+    /// to prevent tmux feedback loop (resize-pane redistributes space, fighting the UI ratio).
+    split_dragging: Arc<AtomicBool>,
     /// IME: set on Enter (no Cmd/Alt); cleared when replace_text_in_range runs or after 50ms timeout. Ensures "commit + Enter" sends text then \\r (no extra newline).
     ime_pending_enter: Arc<AtomicBool>,
     /// When true, search bar is visible and keyboard input appends to search_query
@@ -172,6 +359,11 @@ pub struct AppRoot {
     window_focused_shared: Arc<AtomicBool>,
     /// Timestamp of last user keyboard input (shared with event loop for notification suppression)
     last_input_time: Arc<Mutex<std::time::Instant>>,
+    /// Pending notification jump target: (pane_id, timestamp). Set when a system notification is
+    /// sent so that clicking the notification (which activates the window) auto-focuses the pane.
+    pending_notification_jump: Arc<Mutex<Option<(String, std::time::Instant)>>>,
+    /// Previous window focus state, used to detect unfocused→focused transitions for notification click-to-focus.
+    was_window_focused: bool,
     /// Available update info (set by background check)
     update_available: Option<crate::updater::UpdateInfo>,
     /// Whether an update download is in progress
@@ -317,19 +509,23 @@ impl AppRoot {
             pane_statuses: Arc::new(Mutex::new(HashMap::new())),
             event_bus: Arc::new(EventBus::default()),
             status_publisher: None,
+            session_scanner: None,
             status_key_base: None,
         event_bus_subscription_started: false,
         new_branch_dialog_model: None,
         new_branch_dialog_entity: None,
         dialog_input_focus: None,
         delete_worktree_dialog: DeleteWorktreeDialogUi::new(),
+        close_tab_dialog: CloseTabDialogUi::new(),
             pending_worktree_selection: None,
             worktree_switch_loading: None,
             active_worktree_index: None,
             cached_worktrees: Vec::new(),
             cached_worktrees_repo: None,
             cached_tmux_windows: None,
+            worktree_to_repo_map: HashMap::new(),
             sidebar_context_menu: None,
+            terminal_context_menu: None,
             diff_view_entity: None,
             sidebar_width,
             dependency_check,
@@ -352,6 +548,7 @@ impl AppRoot {
             notification_panel_entity: None,
             terminal_area_entity: None,
             modal_overlay_open: Arc::new(AtomicBool::new(false)),
+            split_dragging: Arc::new(AtomicBool::new(false)),
             ime_pending_enter: Arc::new(AtomicBool::new(false)),
             search_active: false,
             search_query: String::new(),
@@ -361,6 +558,8 @@ impl AppRoot {
             running_animation_task: None,
             window_focused_shared: Arc::new(AtomicBool::new(true)),
             last_input_time: Arc::new(Mutex::new(std::time::Instant::now())),
+            pending_notification_jump: Arc::new(Mutex::new(None)),
+            was_window_focused: true,
             update_available: None,
             update_downloading: false,
         }
@@ -395,9 +594,11 @@ impl AppRoot {
                 let on_select = Arc::new(move |idx: usize, _w: &mut Window, cx: &mut App| {
                     let _ = cx.update_entity(&app_root_entity_select, |this: &mut AppRoot, cx| {
                         this.handle_workspace_tab_switch(idx, cx);
+                        let counts = this.compute_per_tab_active_counts();
                         if let Some(ref e) = this.topbar_entity {
                             let _ = cx.update_entity(e, |t: &mut TopBarEntity, cx| {
                                 t.set_workspace_manager(this.workspace_manager.clone());
+                                t.set_per_tab_active_counts(counts);
                                 cx.notify();
                             });
                         }
@@ -406,21 +607,10 @@ impl AppRoot {
                 let app_root_entity_close = app_root_entity.clone();
                 let on_close = Arc::new(move |idx: usize, _w: &mut Window, cx: &mut App| {
                     let _ = cx.update_entity(&app_root_entity_close, |this: &mut AppRoot, cx| {
-                        let closed_path = this.workspace_manager.get_tab(idx).map(|t| t.path.clone());
-                        this.workspace_manager.close_tab(idx);
-                        let _ = closed_path;
-                        if this.workspace_manager.is_empty() {
-                            this.stop_current_session();
-                        } else {
-                            this.stop_current_session();
-                            this.start_session_for_active_tab(cx);
-                        }
-                        this.save_config();
-                        if let Some(ref e) = this.topbar_entity {
-                            let _ = cx.update_entity(e, |t: &mut TopBarEntity, cx| {
-                                t.set_workspace_manager(this.workspace_manager.clone());
-                                cx.notify();
-                            });
+                        if let Some(tab) = this.workspace_manager.get_tab(idx) {
+                            let path = tab.path.clone();
+                            let name = tab.display_name.clone();
+                            this.close_tab_dialog.open(idx, path, name);
                         }
                         cx.notify();
                     });
@@ -856,9 +1046,13 @@ impl AppRoot {
         };
         let post_resize_dims = if resize_succeeded { (cols, rows) } else { post_subprocess_dims };
 
-        if !resize_succeeded {
-            runtime.set_skip_initial_capture();
-        }
+        // NOTE: Previously we called runtime.set_skip_initial_capture() when resize failed,
+        // to avoid a brief "shake" from dimension-mismatched content. However, this caused
+        // a much worse bug: when the tmux window has orphan panes (e.g. a 1-row leftover),
+        // the main pane cannot be resized to the target dims, skip_capture fires, and the
+        // terminal starts completely blank. A slight layout mismatch is far preferable to
+        // showing nothing. The capture will be at the pane's actual dims and any mismatch
+        // self-corrects on the next output event.
 
         // #region agent log
         crate::debug_log::dbg_session_log(
@@ -866,7 +1060,7 @@ impl AppRoot {
             "pre-subscribe state",
             &serde_json::json!({
                 "dims_match": dims_match,
-                "skip_capture": !resize_succeeded,
+                "skip_capture": false,  // no longer skipped
                 "pane_target": &pane_target_str,
                 "post_resize_dims": format!("{}x{}", post_resize_dims.0, post_resize_dims.1),
                 "resize_succeeded": resize_succeeded,
@@ -939,13 +1133,19 @@ impl AppRoot {
             let runtime_for_resize = runtime.clone();
             let pane_for_resize = pane_target_str.clone();
             let shared_dims_for_resize = Arc::clone(&self.shared_terminal_dims);
+            let split_dragging_for_resize = self.split_dragging.clone();
             // Throttle PTY resize: execute first resize immediately (critical for shrinking),
             // coalesce rapid subsequent resizes to avoid SIGWINCH flood, and always apply
             // the final size via a trailing-edge timer.
             let pending_resize_dims = Arc::new(std::sync::atomic::AtomicU32::new(0));
             let last_pty_resize_ms = Arc::new(std::sync::atomic::AtomicU64::new(0));
-            const RESIZE_THROTTLE_MS: u64 = 100;
+            const RESIZE_THROTTLE_MS: u64 = 32;
             let resize_callback: Arc<dyn Fn(u16, u16) + Send + Sync> = Arc::new(move |cols, rows| {
+                // Skip runtime resize during split divider drag to prevent tmux feedback loop
+                // (resize-pane redistributes space between panes, fighting the UI ratio).
+                if split_dragging_for_resize.load(Ordering::SeqCst) {
+                    return;
+                }
                 // #region agent log
                 crate::debug_log::dbg_session_log(
                     "app_root.rs:resize_callback(setup_local)",
@@ -1064,7 +1264,7 @@ impl AppRoot {
             cx.spawn(async move |_entity, cx| {
                 use std::time::{Duration, Instant};
                 let mut last_status_check = Instant::now();
-                let mut last_notify = Instant::now();
+
                 let mut last_phase = ext.shell_phase();
                 let mut last_alt_screen = false;
                 let mut agent_override: Option<crate::config::AgentDef> = None;
@@ -1072,28 +1272,99 @@ impl AppRoot {
                     .map(|c| c.agent_detect)
                     .unwrap_or_else(|_| crate::config::Config::default().agent_detect);
                 let status_interval = Duration::from_millis(200);
-                loop {
-                    // Process the first event immediately (low latency for first char)
-                    let chunk = match rx.recv_async().await {
-                        Ok(c) => c,
-                        Err(_) => break,
-                    };
-                    terminal_for_output.process_output(&chunk);
-                    ext.feed(&chunk);
 
-                    // Adaptive batching: drain more under backpressure, yield often when idle
-                    let pending = rx.len();
-                    let batch_limit = if pending > 100 { TERMINAL_OUTPUT_MAX_BATCH } else { TERMINAL_OUTPUT_MIN_BATCH };
-                    let mut batch_count = 1usize;
-                    while batch_count < batch_limit {
-                        match rx.try_recv() {
-                            Ok(next) => {
+                // Initial status check for recovered sessions.
+                // capture-pane doesn't include OSC 133 markers, so ext.shell_phase()
+                // is Unknown after the initial snapshot. Use detect_agent_in_pane()
+                // which checks both pane_current_command and child processes.
+                {
+                    if let Some(agent_def) = detect_agent_in_pane(&pane_target_clone, &agent_detect) {
+                        agent_override = Some(agent_def.clone());
+                        let screen_text = terminal_for_output.screen_tail_text(
+                            terminal_for_output.size().rows as usize,
+                        );
+                        if let Some(ref pub_) = status_publisher {
+                            let detected = agent_def.detect_status(&screen_text);
+                            let _ = pub_.force_status(&status_key_clone, detected, &screen_text, &agent_def.message_skip_patterns);
+                        }
+                    } else if is_pane_shell(&pane_target_clone) {
+                        if let Some(ref pub_) = status_publisher {
+                            let _ = pub_.force_status(&status_key_clone, AgentStatus::Idle, "", &[]);
+                        }
+                    }
+                }
+
+                loop {
+                    // Wait for new output OR a periodic idle-check timeout.
+                    // When an agent (e.g. Claude) is running, its status can change
+                    // without producing output (e.g. user presses Esc to cancel).
+                    // The 2s timer ensures we re-check the screen periodically.
+                    let idle_timeout = Duration::from_secs(2);
+                    let got_output;
+                    {
+                        let timer = cx.background_executor().timer(idle_timeout);
+                        let recv = rx.recv_async();
+                        pin_mut!(timer);
+                        pin_mut!(recv);
+                        match select(recv, timer).await {
+                            Either::Left((Ok(chunk), _)) => {
+                                terminal_for_output.process_output(&chunk);
+                                ext.feed(&chunk);
+                                got_output = true;
+                            }
+                            Either::Left((Err(_), _)) => break, // channel closed
+                            Either::Right((_, _)) => {
+                                got_output = false;
+                            }
+                        }
+                    }
+
+                    // When no output arrived (idle timeout), do a screen-based status
+                    // check for known agents and skip the rest of the output processing.
+                    if !got_output {
+                        // Periodic resync: capture tmux's authoritative screen content
+                        // and re-inject it to fix any accumulated garbling from %output.
+                        if let Some(resync) = crate::runtime::backends::tmux_control_mode::capture_pane_resync(&pane_target_clone) {
+                            terminal_for_output.process_output(&resync);
+                        }
+                        if let Some(ref agent_def) = agent_override {
+                            let screen_text = terminal_for_output.screen_tail_text(
+                                terminal_for_output.size().rows as usize,
+                            );
+                            let detected = agent_def.detect_status(&screen_text);
+                            if let Some(ref pub_) = status_publisher {
+                                let _ = pub_.force_status(
+                                    &status_key_clone,
+                                    detected,
+                                    &screen_text,
+                                    &agent_def.message_skip_patterns,
+                                );
+                            }
+                        }
+                        continue;
+                    }
+
+                    // Coalesce output: wait up to 4ms for more chunks to reduce tearing.
+                    // During fast output (Claude Code, cat, etc.) this batches dozens of
+                    // chunks per render frame. Adds <4ms latency to keystroke echo (imperceptible).
+                    {
+                        let timer = cx.background_executor().timer(Duration::from_millis(4));
+                        let recv = rx.recv_async();
+                        pin_mut!(timer);
+                        pin_mut!(recv);
+                        match select(recv, timer).await {
+                            Either::Left((Ok(next), _)) => {
                                 terminal_for_output.process_output(&next);
                                 ext.feed(&next);
-                                batch_count += 1;
                             }
-                            Err(_) => break,
+                            _ => {} // Timeout or channel closed
                         }
+                    }
+
+                    // Drain all immediately available chunks (may have queued during the 4ms wait)
+                    while let Ok(next) = rx.try_recv() {
+                        terminal_for_output.process_output(&next);
+                        ext.feed(&next);
                     }
 
                     // Throttle status detection: only run on phase change or every 200ms
@@ -1106,37 +1377,28 @@ impl AppRoot {
                         || now.duration_since(last_status_check) >= status_interval
                     {
                         last_status_check = now;
-                        // While phase is Running and we haven't identified an agent yet,
-                        // keep querying tmux for the foreground process name. This is
-                        // necessary because OSC 133 C (PreExec) fires BEFORE the shell
-                        // actually exec's the command, so the first query may still see
-                        // the shell (zsh/bash) instead of the target CLI (claude/aider).
-                        if phase == crate::shell_integration::ShellPhase::Running
-                            && !alt_screen
-                            && agent_override.is_none()
+                        // Agent detection: query tmux when we need to identify the agent.
+                        // - Running/Unknown + no agent: check process tree (handles version-named binaries)
+                        // - Input/Prompt/Output: shell is back at prompt, clear agent override
+                        if !alt_screen && agent_override.is_none()
+                            && matches!(phase,
+                                crate::shell_integration::ShellPhase::Running
+                                | crate::shell_integration::ShellPhase::Unknown)
                         {
-                            if let Ok(out) = std::process::Command::new("tmux")
-                                .args(["display-message", "-t", &pane_target_clone, "-p", "#{pane_current_command}"])
-                                .output()
-                            {
-                                let cmd = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                                agent_override = agent_detect.find_agent(&cmd).cloned();
-                            }
-                        } else if phase != crate::shell_integration::ShellPhase::Running {
+                            agent_override = detect_agent_in_pane(&pane_target_clone, &agent_detect);
+                        } else if matches!(phase,
+                            crate::shell_integration::ShellPhase::Input
+                            | crate::shell_integration::ShellPhase::Prompt
+                            | crate::shell_integration::ShellPhase::Output)
+                        {
                             agent_override = None;
                         }
                         last_phase = phase;
                         last_alt_screen = alt_screen;
 
-                        let content_str = ext.take_content().0;
-                        let content_for_status: &str = if content_str.len() > MAX_STATUS_CONTENT_LEN {
-                            &content_str[content_str.len() - MAX_STATUS_CONTENT_LEN..]
-                        } else {
-                            content_str.as_str()
-                        };
-
                         if alt_screen {
                             // Alt screen TUI (vim, htop) → force Idle
+                            let content_str = ext.content_for_status(MAX_STATUS_CONTENT_LEN);
                             let shell_info = ShellPhaseInfo {
                                 phase: crate::shell_integration::ShellPhase::Input,
                                 last_post_exec_exit_code: ext.last_exit_code(),
@@ -1146,21 +1408,27 @@ impl AppRoot {
                                     &status_key_clone,
                                     crate::status_detector::ProcessStatus::Running,
                                     Some(shell_info),
-                                    content_for_status,
+                                    &content_str,
+                                    &[],
                                 );
                             }
                         } else if let Some(ref agent_def) = agent_override {
-                            // Known agent CLI → detect sub-status via text patterns
-                            let detected = agent_def.detect_status(content_for_status);
+                            // Known agent CLI → detect sub-status from visible screen content.
+                            let screen_text = terminal_for_output.screen_tail_text(
+                                terminal_for_output.size().rows as usize,
+                            );
+                            let detected = agent_def.detect_status(&screen_text);
                             if let Some(ref pub_) = status_publisher {
                                 let _ = pub_.force_status(
                                     &status_key_clone,
                                     detected,
-                                    content_for_status,
+                                    &screen_text,
+                                    &agent_def.message_skip_patterns,
                                 );
                             }
                         } else {
                             // Normal shell command → use OSC 133 phase
+                            let content_str = ext.content_for_status(MAX_STATUS_CONTENT_LEN);
                             let shell_info = ShellPhaseInfo {
                                 phase,
                                 last_post_exec_exit_code: ext.last_exit_code(),
@@ -1170,7 +1438,8 @@ impl AppRoot {
                                     &status_key_clone,
                                     crate::status_detector::ProcessStatus::Running,
                                     Some(shell_info),
-                                    content_for_status,
+                                    &content_str,
+                                    &[],
                                 );
                             }
                         }
@@ -1180,14 +1449,9 @@ impl AppRoot {
                     if modal_open.load(Ordering::Relaxed) {
                         // continue without notifying; terminal will refresh on next output after modal closes
                     } else if let Some(ref tae) = term_area_entity {
-                        let now = Instant::now();
-                        // Always notify on single-chunk (user typing) for low latency; throttle bursts (e.g. cat bigfile)
-                        let should_notify = batch_count == 1
-                            || now.duration_since(last_notify) >= Duration::from_millis(8);
-                        if should_notify {
-                            last_notify = now;
-                            let _ = cx.update_entity(tae, |_, cx| cx.notify());
-                        }
+                        // The 4ms coalescing window above provides natural render throttling.
+                        // GPUI coalesces multiple notify() calls into one actual render frame.
+                        let _ = cx.update_entity(tae, |_, cx| cx.notify());
                     }
                 }
             })
@@ -1258,11 +1522,16 @@ impl AppRoot {
 
             let runtime_for_resize = runtime.clone();
             let pane_for_resize = pane_target_str.clone();
+            let split_dragging_for_resize2 = self.split_dragging.clone();
             let pending_resize_dims2 = Arc::new(std::sync::atomic::AtomicU32::new(0));
             let last_pty_resize_ms2 = Arc::new(std::sync::atomic::AtomicU64::new(0));
-            const RESIZE_THROTTLE_MS: u64 = 100;
+            const RESIZE_THROTTLE_MS: u64 = 32;
             let resize_callback: Arc<dyn Fn(u16, u16) + Send + Sync> =
                 Arc::new(move |cols, rows| {
+                    // Skip runtime resize during split divider drag to prevent tmux feedback loop
+                    if split_dragging_for_resize2.load(Ordering::SeqCst) {
+                        return;
+                    }
                     let packed = ((cols as u32) << 16) | (rows as u32);
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
@@ -1339,7 +1608,7 @@ impl AppRoot {
             cx.spawn(async move |_entity, cx| {
                 use std::time::{Duration, Instant};
                 let mut last_status_check = Instant::now();
-                let mut last_notify = Instant::now();
+
                 let mut last_phase = ext.shell_phase();
                 let mut last_alt_screen = false;
                 let mut agent_override: Option<crate::config::AgentDef> = None;
@@ -1347,27 +1616,88 @@ impl AppRoot {
                     .map(|c| c.agent_detect)
                     .unwrap_or_else(|_| crate::config::Config::default().agent_detect);
                 let status_interval = Duration::from_millis(200);
-                loop {
-                    // Process the first event immediately (low latency for first char)
-                    let chunk = match rx.recv_async().await {
-                        Ok(c) => c,
-                        Err(_) => break,
-                    };
-                    terminal_for_output.process_output(&chunk);
-                    ext.feed(&chunk);
 
-                    let pending = rx.len();
-                    let batch_limit = if pending > 100 { TERMINAL_OUTPUT_MAX_BATCH } else { TERMINAL_OUTPUT_MIN_BATCH };
-                    let mut batch_count = 1usize;
-                    while batch_count < batch_limit {
-                        match rx.try_recv() {
-                            Ok(next) => {
+                // Initial status check for recovered sessions (same as setup_local_terminal).
+                {
+                    if let Some(agent_def) = detect_agent_in_pane(&pane_target_clone, &agent_detect) {
+                        agent_override = Some(agent_def.clone());
+                        let screen_text = terminal_for_output.screen_tail_text(
+                            terminal_for_output.size().rows as usize,
+                        );
+                        if let Some(ref pub_) = status_publisher {
+                            let detected = agent_def.detect_status(&screen_text);
+                            let _ = pub_.force_status(&status_key_clone, detected, &screen_text, &agent_def.message_skip_patterns);
+                        }
+                    } else if is_pane_shell(&pane_target_clone) {
+                        if let Some(ref pub_) = status_publisher {
+                            let _ = pub_.force_status(&status_key_clone, AgentStatus::Idle, "", &[]);
+                        }
+                    }
+                }
+
+                loop {
+                    // Wait for output or periodic idle-check (same as setup_local_terminal).
+                    let idle_timeout = Duration::from_secs(2);
+                    let got_output;
+                    {
+                        let timer = cx.background_executor().timer(idle_timeout);
+                        let recv = rx.recv_async();
+                        pin_mut!(timer);
+                        pin_mut!(recv);
+                        match select(recv, timer).await {
+                            Either::Left((Ok(chunk), _)) => {
+                                terminal_for_output.process_output(&chunk);
+                                ext.feed(&chunk);
+                                got_output = true;
+                            }
+                            Either::Left((Err(_), _)) => break,
+                            Either::Right((_, _)) => {
+                                got_output = false;
+                            }
+                        }
+                    }
+
+                    if !got_output {
+                        // Periodic resync from tmux during idle
+                        if let Some(resync) = crate::runtime::backends::tmux_control_mode::capture_pane_resync(&pane_target_clone) {
+                            terminal_for_output.process_output(&resync);
+                        }
+                        if let Some(ref agent_def) = agent_override {
+                            let screen_text = terminal_for_output.screen_tail_text(
+                                terminal_for_output.size().rows as usize,
+                            );
+                            let detected = agent_def.detect_status(&screen_text);
+                            if let Some(ref pub_) = status_publisher {
+                                let _ = pub_.force_status(
+                                    &status_key_clone,
+                                    detected,
+                                    &screen_text,
+                                    &agent_def.message_skip_patterns,
+                                );
+                            }
+                        }
+                        continue;
+                    }
+
+                    // Coalesce output: wait up to 4ms for more chunks to reduce tearing.
+                    {
+                        let timer = cx.background_executor().timer(Duration::from_millis(4));
+                        let recv = rx.recv_async();
+                        pin_mut!(timer);
+                        pin_mut!(recv);
+                        match select(recv, timer).await {
+                            Either::Left((Ok(next), _)) => {
                                 terminal_for_output.process_output(&next);
                                 ext.feed(&next);
-                                batch_count += 1;
                             }
-                            Err(_) => break,
+                            _ => {}
                         }
+                    }
+
+                    // Drain all immediately available chunks (may have queued during the 4ms wait)
+                    while let Ok(next) = rx.try_recv() {
+                        terminal_for_output.process_output(&next);
+                        ext.feed(&next);
                     }
 
                     // Throttle status detection: only run on phase change or every 200ms
@@ -1380,37 +1710,24 @@ impl AppRoot {
                         || now.duration_since(last_status_check) >= status_interval
                     {
                         last_status_check = now;
-                        // While phase is Running and we haven't identified an agent yet,
-                        // keep querying tmux for the foreground process name. This is
-                        // necessary because OSC 133 C (PreExec) fires BEFORE the shell
-                        // actually exec's the command, so the first query may still see
-                        // the shell (zsh/bash) instead of the target CLI (claude/aider).
-                        if phase == crate::shell_integration::ShellPhase::Running
-                            && !alt_screen
-                            && agent_override.is_none()
+                        if !alt_screen && agent_override.is_none()
+                            && matches!(phase,
+                                crate::shell_integration::ShellPhase::Running
+                                | crate::shell_integration::ShellPhase::Unknown)
                         {
-                            if let Ok(out) = std::process::Command::new("tmux")
-                                .args(["display-message", "-t", &pane_target_clone, "-p", "#{pane_current_command}"])
-                                .output()
-                            {
-                                let cmd = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                                agent_override = agent_detect.find_agent(&cmd).cloned();
-                            }
-                        } else if phase != crate::shell_integration::ShellPhase::Running {
+                            agent_override = detect_agent_in_pane(&pane_target_clone, &agent_detect);
+                        } else if matches!(phase,
+                            crate::shell_integration::ShellPhase::Input
+                            | crate::shell_integration::ShellPhase::Prompt
+                            | crate::shell_integration::ShellPhase::Output)
+                        {
                             agent_override = None;
                         }
                         last_phase = phase;
                         last_alt_screen = alt_screen;
 
-                        let content_str = ext.take_content().0;
-                        let content_for_status: &str = if content_str.len() > MAX_STATUS_CONTENT_LEN {
-                            &content_str[content_str.len() - MAX_STATUS_CONTENT_LEN..]
-                        } else {
-                            content_str.as_str()
-                        };
-
                         if alt_screen {
-                            // Alt screen TUI (vim, htop) → force Idle
+                            let content_str = ext.content_for_status(MAX_STATUS_CONTENT_LEN);
                             let shell_info = ShellPhaseInfo {
                                 phase: crate::shell_integration::ShellPhase::Input,
                                 last_post_exec_exit_code: ext.last_exit_code(),
@@ -1420,21 +1737,25 @@ impl AppRoot {
                                     &status_key_clone,
                                     crate::status_detector::ProcessStatus::Running,
                                     Some(shell_info),
-                                    content_for_status,
+                                    &content_str,
+                                    &[],
                                 );
                             }
                         } else if let Some(ref agent_def) = agent_override {
-                            // Known agent CLI → detect sub-status via text patterns
-                            let detected = agent_def.detect_status(content_for_status);
+                            let screen_text = terminal_for_output.screen_tail_text(
+                                terminal_for_output.size().rows as usize,
+                            );
+                            let detected = agent_def.detect_status(&screen_text);
                             if let Some(ref pub_) = status_publisher {
                                 let _ = pub_.force_status(
                                     &status_key_clone,
                                     detected,
-                                    content_for_status,
+                                    &screen_text,
+                                    &agent_def.message_skip_patterns,
                                 );
                             }
                         } else {
-                            // Normal shell command → use OSC 133 phase
+                            let content_str = ext.content_for_status(MAX_STATUS_CONTENT_LEN);
                             let shell_info = ShellPhaseInfo {
                                 phase,
                                 last_post_exec_exit_code: ext.last_exit_code(),
@@ -1444,7 +1765,8 @@ impl AppRoot {
                                     &status_key_clone,
                                     crate::status_detector::ProcessStatus::Running,
                                     Some(shell_info),
-                                    content_for_status,
+                                    &content_str,
+                                    &[],
                                 );
                             }
                         }
@@ -1452,14 +1774,7 @@ impl AppRoot {
                     if modal_open.load(Ordering::Relaxed) {
                         // skip terminal notify while modal open (e.g. new branch dialog)
                     } else if let Some(ref tae) = term_area_entity {
-                        let now = Instant::now();
-                        // Always notify on single-chunk (user typing) for low latency; throttle bursts
-                        let should_notify = batch_count == 1
-                            || now.duration_since(last_notify) >= Duration::from_millis(8);
-                        if should_notify {
-                            last_notify = now;
-                            let _ = cx.update_entity(tae, |_, cx| cx.notify());
-                        }
+                        let _ = cx.update_entity(tae, |_, cx| cx.notify());
                     }
                 }
             })
@@ -1506,13 +1821,24 @@ impl AppRoot {
         // If tmux was killed and restarted (kill-server), there is only 1 pane even if
         // the persisted state recorded multiple. Using a stale split tree would try to
         // subscribe to pane IDs that don't exist, leaving phantom terminal areas.
-        let actual_pane_count = runtime.list_panes(&pane_target).len().max(1);
+        let all_panes = runtime.list_panes(&pane_target);
+        let actual_pane_count = all_panes.len().max(1);
         let (split_tree, pane_targets): (SplitNode, Vec<String>) = match saved_split_tree {
             Some(tree) if tree.pane_count() > 1 && tree.pane_count() <= actual_pane_count => {
                 let targets: Vec<String> = tree.flatten().into_iter().map(|(t, _)| t).collect();
                 (tree, targets)
             }
             _ => {
+                // Kill orphan panes: when we expect a single pane but the tmux window
+                // has extras (e.g. leftover 1-row panes from diff view), they steal rows
+                // and prevent the main pane from resizing to target dimensions.
+                if actual_pane_count > 1 {
+                    for orphan in &all_panes {
+                        if orphan != &pane_target {
+                            let _ = runtime.kill_pane(orphan);
+                        }
+                    }
+                }
                 let _ = runtime.focus_pane(&pane_target);
                 (SplitNode::pane(&pane_target), vec![pane_target.clone()])
             }
@@ -1542,6 +1868,11 @@ impl AppRoot {
         }
         self.status_publisher = Some(status_publisher);
 
+        // Start JSONL session scanner for supplementary status detection
+        let mut scanner = crate::session_scanner::SessionScanner::new(Arc::clone(&self.event_bus));
+        scanner.start_watching(&status_key_base, worktree_path);
+        self.session_scanner = Some(scanner);
+
         // Phase 4: Create TerminalAreaEntity for scoped notify (only terminal re-renders on content change)
         let repo_name = self.workspace_manager.active_tab().map(|t| t.name.clone()).unwrap_or_else(|| "workspace".to_string());
         let app_root_entity = cx.entity();
@@ -1567,7 +1898,10 @@ impl AppRoot {
                 cx.notify();
             });
         }) as Arc<dyn Fn(Vec<bool>, f32, &mut Window, &mut App)>;
+        let split_dragging_for_start = self.split_dragging.clone();
+        let split_dragging_for_end = self.split_dragging.clone();
         let on_drag_start = Arc::new(move |path: Vec<bool>, pos: f32, ratio: f32, vert: bool, _w: &mut Window, cx: &mut App| {
+            split_dragging_for_start.store(true, Ordering::SeqCst);
             let _ = cx.update_entity(&app_root_for_drag, |this: &mut AppRoot, cx| {
                 this.split_divider_drag = Some((path.clone(), pos, ratio, vert));
                 if let Ok(guard) = term_entity_holder_for_drag.lock() {
@@ -1582,8 +1916,24 @@ impl AppRoot {
             });
         }) as Arc<dyn Fn(Vec<bool>, f32, f32, bool, &mut Window, &mut App)>;
         let on_drag_end = Arc::new(move |_w: &mut Window, cx: &mut App| {
+            split_dragging_for_end.store(false, Ordering::SeqCst);
             let _ = cx.update_entity(&app_root_for_drag_end, |this: &mut AppRoot, cx| {
                 this.split_divider_drag = None;
+                // Force resize all terminals: during drag, runtime.resize() was suppressed
+                // so the terminal process doesn't know about the new dimensions.
+                // The VTE grid was already resized locally — now sync to runtime.
+                if let Some(ref rt) = this.runtime {
+                    if let Ok(buffers) = this.terminal_buffers.lock() {
+                        for (pane_id, buf) in buffers.iter() {
+                            if let TerminalBuffer::Terminal { terminal, .. } = buf {
+                                let sz = terminal.size();
+                                if sz.cols > 0 && sz.rows > 0 {
+                                    let _ = rt.resize(pane_id, sz.cols, sz.rows);
+                                }
+                            }
+                        }
+                    }
+                }
                 if let Ok(guard) = term_entity_holder_for_drag_end.lock() {
                     if let Some(ref e) = *guard {
                         let _ = cx.update_entity(e, |ent: &mut TerminalAreaEntity, cx| {
@@ -1638,6 +1988,14 @@ impl AppRoot {
             });
         }) as Arc<dyn Fn(usize, &mut Window, &mut App)>;
 
+        let app_root_for_ctx_menu = cx.entity();
+        let on_ctx_menu = Arc::new(move |x: f32, y: f32, _w: &mut Window, cx: &mut App| {
+            let _ = cx.update_entity(&app_root_for_ctx_menu, |this: &mut AppRoot, cx| {
+                this.terminal_context_menu = Some((x, y));
+                cx.notify();
+            });
+        }) as Arc<dyn Fn(f32, f32, &mut Window, &mut App)>;
+
         let term_entity = cx.new(|_cx| {
             TerminalAreaEntity::new(
                 self.split_tree.clone(),
@@ -1650,6 +2008,7 @@ impl AppRoot {
                 Some(on_drag_start),
                 Some(on_drag_end),
                 Some(on_pane),
+                Some(on_ctx_menu),
                 if self.search_active {
                     Some(self.search_query.clone())
                 } else {
@@ -1761,9 +2120,11 @@ impl AppRoot {
                         } else {
                             this.start_local_session(&path, "main", cx);
                         }
+                        let counts = this.compute_per_tab_active_counts();
                         if let Some(ref e) = this.topbar_entity {
                             let _ = cx.update_entity(e, |t: &mut TopBarEntity, cx| {
                                 t.set_workspace_manager(this.workspace_manager.clone());
+                                t.set_per_tab_active_counts(counts);
                                 cx.notify();
                             });
                         }
@@ -1780,15 +2141,37 @@ impl AppRoot {
             return;
         }
 
+        // Save current worktree index to the tab we're leaving
+        if let Some(current_tab) = self.workspace_manager.active_tab_mut() {
+            current_tab.save_worktree_index(self.active_worktree_index);
+        }
+
         self.workspace_manager.switch_to_tab(idx);
         self.save_config();
         self.stop_current_session();
 
         if let Some(tab) = self.workspace_manager.active_tab() {
             let repo_path = tab.path.clone();
+            let saved_wt_index = tab.last_worktree_index();
             self.refresh_worktrees_for_repo(&repo_path);
 
             if self.try_recover_then_switch(&repo_path, cx) {
+                // Recovery attached to the tmux session's current window, but
+                // the user may have last selected a different worktree. Override
+                // with the saved per-tab index and switch tmux if needed.
+                if let Some(saved_idx) = saved_wt_index {
+                    if saved_idx < self.cached_worktrees.len()
+                        && self.active_worktree_index != Some(saved_idx)
+                    {
+                        let wt = &self.cached_worktrees[saved_idx];
+                        let wt_path = wt.path.clone();
+                        let branch = wt.short_branch_name().to_string();
+                        self.active_worktree_index = Some(saved_idx);
+                        self.schedule_switch_to_worktree_async(
+                            &repo_path, &wt_path, &branch, saved_idx, cx,
+                        );
+                    }
+                }
                 cx.notify();
                 return;
             }
@@ -1798,9 +2181,13 @@ impl AppRoot {
                 cx.notify();
                 return;
             } else {
-                let wt = &worktrees[0];
-                self.active_worktree_index = Some(0);
-                (wt.path.clone(), wt.short_branch_name().to_string(), 0)
+                // Restore saved worktree index (with bounds check), fallback to 0
+                let restored_idx = saved_wt_index
+                    .filter(|&i| i < worktrees.len())
+                    .unwrap_or(0);
+                let wt = &worktrees[restored_idx];
+                self.active_worktree_index = Some(restored_idx);
+                (wt.path.clone(), wt.short_branch_name().to_string(), restored_idx)
             };
             self.schedule_switch_to_worktree_async(&repo_path, &wt_path, &branch, worktree_idx, cx);
         }
@@ -1906,7 +2293,11 @@ impl AppRoot {
         let worktree = match workspace
             .worktrees
             .iter()
-            .find(|w| window_name_for_worktree(&w.path, &w.branch) == current_window_name)
+            .find(|w| {
+                let new_name = window_name_for_worktree(&w.path, &w.branch);
+                let old_name = legacy_window_name_for_worktree(&w.branch);
+                new_name == current_window_name || old_name == current_window_name
+            })
         {
             Some(w) => w,
             None => workspace.worktrees.first().unwrap(),
@@ -2052,8 +2443,8 @@ impl AppRoot {
         let notification_panel_model = self.notification_panel_model.clone();
         let pane_summary_model = self.pane_summary_model.clone();
         let active_pane_shared = Arc::clone(&self.active_pane_target_shared);
-        let window_focused = Arc::clone(&self.window_focused_shared);
         let last_input_time = Arc::clone(&self.last_input_time);
+        let pending_notification_jump = Arc::clone(&self.pending_notification_jump);
         cx.spawn(async move |entity, cx| {
             let rx = std::sync::Arc::new(std::sync::Mutex::new(event_bus.subscribe()));
             let mut last_branch_check: HashMap<PathBuf, std::time::Instant> = HashMap::new();
@@ -2091,9 +2482,10 @@ impl AppRoot {
                                     });
                                 }
                             }
-                            // Manage animation timer
+                            // Manage animation timer + per-tab counts
                             let _ = entity.update(cx, |this, cx| {
                                 this.manage_running_animation(cx);
+                                this.update_topbar_per_tab_counts(cx);
                             });
 
                             // Branch refresh: when command completes, check if git branch changed
@@ -2144,20 +2536,21 @@ impl AppRoot {
                             };
                             let message = n.message.clone();
                             let source_label = if pane_id.is_empty() { None } else { Some(pane_id_to_source_label(pane_id)) };
-                            // 方案 6a: suppress system notification when window is focused
-                            let is_window_focused = window_focused.load(std::sync::atomic::Ordering::Relaxed);
-                            // 方案 6b: suppress Running→Idle notification if user was recently active
+                            // Suppress Running→Idle notification if user was recently active
                             let recent_user_input = last_input_time.lock().ok()
                                 .map(|t| t.elapsed() < std::time::Duration::from_secs(2))
                                 .unwrap_or(false);
                             let is_info_notification = matches!(notif_type, NotificationType::Info);
-                            let suppress_system_notif = is_window_focused
-                                || (is_info_notification && recent_user_input);
+                            let suppress_system_notif = is_info_notification && recent_user_input;
                             let mut unread_after = 0usize;
                             if let Ok(mut mgr) = notification_manager.lock() {
                                 if mgr.add_labeled(pane_id, notif_type, &message, source_label) {
                                     if !suppress_system_notif {
                                         system_notifier::notify("pmux", &message, notif_type);
+                                        // Store pending jump target for notification click-to-focus
+                                        if let Ok(mut pending) = pending_notification_jump.lock() {
+                                            *pending = Some((pane_id.to_string(), std::time::Instant::now()));
+                                        }
                                     }
                                 }
                                 unread_after = mgr.unread_count();
@@ -2226,6 +2619,9 @@ impl AppRoot {
         if self.current_runtime_matches_session(&workspace_path) {
             let runtime = self.runtime.as_ref().unwrap().clone();
             let window_name = window_name_for_worktree(worktree_path, branch_name);
+            let legacy_name = legacy_window_name_for_worktree(branch_name);
+            let session_name = session_name_for_workspace(&workspace_path);
+            migrate_tmux_window_name(&session_name, &legacy_name, &window_name);
             self.detach_ui_from_runtime();
             if let Err(e) = runtime.switch_window(&window_name, Some(worktree_path)) {
                 self.runtime = None;
@@ -2326,6 +2722,9 @@ impl AppRoot {
 
             let runtime = self.runtime.as_ref().unwrap().clone();
             let window_name = window_name_for_worktree(&path, &branch);
+            let legacy_name = legacy_window_name_for_worktree(&branch);
+            let session_name = session_name_for_workspace(&workspace_path);
+            migrate_tmux_window_name(&session_name, &legacy_name, &window_name);
             let path_clone = path.clone();
             let branch_clone = branch.clone();
             cx.spawn(async move |entity, cx| {
@@ -2437,6 +2836,9 @@ impl AppRoot {
         if self.current_runtime_matches_session(workspace_path) {
             let runtime = self.runtime.as_ref().unwrap().clone();
             let window_name = window_name_for_worktree(worktree_path, branch_name);
+            let legacy_name = legacy_window_name_for_worktree(branch_name);
+            let session_name = session_name_for_workspace(workspace_path);
+            migrate_tmux_window_name(&session_name, &legacy_name, &window_name);
             let worktree_path = worktree_path.to_path_buf();
             let branch_name = branch_name.to_string();
             cx.spawn(async move |entity, cx| {
@@ -2580,6 +2982,10 @@ impl AppRoot {
     fn refresh_worktrees_for_repo(&mut self, repo_path: &Path) {
         match crate::worktree::discover_worktrees(repo_path) {
             Ok(wt) => {
+                // Populate worktree→repo mapping for per-tab agent counts
+                for w in &wt {
+                    self.worktree_to_repo_map.insert(w.path.clone(), repo_path.to_path_buf());
+                }
                 self.cached_worktrees = wt;
                 self.cached_worktrees_repo = Some(repo_path.to_path_buf());
                 // One-shot: cache tmux window list for this repo to speed up worktree switch and orphan detection
@@ -2605,7 +3011,11 @@ impl AppRoot {
     ) -> Option<usize> {
         worktrees
             .iter()
-            .position(|wt| window_name_for_worktree(&wt.path, wt.short_branch_name()) == window_name)
+            .position(|wt| {
+                let new_name = window_name_for_worktree(&wt.path, wt.short_branch_name());
+                let old_name = legacy_window_name_for_worktree(wt.short_branch_name());
+                new_name == window_name || old_name == window_name
+            })
     }
 
     /// Get worktrees for current repo (from cache). Call from render.
@@ -2638,7 +3048,11 @@ impl AppRoot {
         let valid: std::collections::HashSet<String> = if self.cached_worktrees_repo.as_deref() == Some(repo_path) {
             self.cached_worktrees
                 .iter()
-                .map(|wt| window_name_for_worktree(&wt.path, wt.short_branch_name()))
+                .flat_map(|wt| {
+                    let new_name = window_name_for_worktree(&wt.path, wt.short_branch_name());
+                    let old_name = legacy_window_name_for_worktree(wt.short_branch_name());
+                    vec![new_name, old_name]
+                })
                 .collect()
         } else {
             std::collections::HashSet::new()
@@ -2660,12 +3074,58 @@ impl AppRoot {
         self.status_counts = counts;
     }
 
+    /// Compute per-tab active agent counts from pane_statuses.
+    /// Groups panes by worktree, then maps to repo/tab via worktree_to_repo_map.
+    /// Active = Running, Error, or Waiting.
+    fn compute_per_tab_active_counts(&self) -> Vec<usize> {
+        let num_tabs = self.workspace_manager.tab_count();
+        let mut counts = vec![0usize; num_tabs];
+        if let Ok(statuses) = self.pane_statuses.lock() {
+            // Group by worktree path, keep highest-priority status per worktree
+            let mut worktree_statuses: HashMap<PathBuf, AgentStatus> = HashMap::new();
+            for (pane_id, status) in statuses.iter() {
+                if let Some(wt_path) = extract_worktree_path_from_pane_id(pane_id) {
+                    let entry = worktree_statuses.entry(wt_path).or_insert(AgentStatus::Unknown);
+                    if status.priority() > entry.priority() {
+                        *entry = *status;
+                    }
+                }
+            }
+            // Count active worktrees per tab
+            for (wt_path, status) in &worktree_statuses {
+                if matches!(status, AgentStatus::Running | AgentStatus::Error | AgentStatus::Waiting) {
+                    if let Some(repo_path) = self.worktree_to_repo_map.get(wt_path) {
+                        if let Some(tab_idx) = self.workspace_manager.find_workspace_index(repo_path) {
+                            if tab_idx < num_tabs {
+                                counts[tab_idx] += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        counts
+    }
+
+    /// Push per-tab active agent counts to TopBarEntity.
+    fn update_topbar_per_tab_counts(&self, cx: &mut Context<Self>) {
+        let counts = self.compute_per_tab_active_counts();
+        if let Some(ref topbar) = self.topbar_entity {
+            let topbar = topbar.clone();
+            let _ = cx.update_entity(&topbar, |t: &mut TopBarEntity, cx| {
+                t.set_per_tab_active_counts(counts);
+                cx.notify();
+            });
+        }
+    }
+
     /// Detach UI components from the runtime without dropping it.
     /// Used when switching worktrees within the same session — the -CC
     /// connection stays alive, only the terminal UI is torn down.
     fn detach_ui_from_runtime(&mut self) {
         self.resize_controller.reset_for_new_session();
         self.status_publisher.take();
+        self.session_scanner.take(); // Stop JSONL session watcher threads
         self.terminal_area_entity.take();
         if let Ok(mut buffers) = self.terminal_buffers.lock() {
             buffers.clear();
@@ -2687,6 +3147,69 @@ impl AppRoot {
     fn stop_current_session(&mut self) {
         self.detach_ui_from_runtime();
         self.runtime = None;
+    }
+
+    /// Handle Cmd+V paste action (dispatched via GPUI key binding).
+    /// GPUI's macOS backend intercepts Cmd+V at the Cocoa input system level,
+    /// so on_key_down never fires for it when an InputHandler is active.
+    /// Using a GPUI action ensures paste works regardless of focus/InputHandler state.
+    fn handle_paste(&mut self, _: &TerminalPaste, _window: &mut Window, cx: &mut Context<Self>) {
+        // Don't paste when a modal is open
+        if self.show_settings || self.new_branch_dialog_model.as_ref().map_or(false, |e| e.read(cx).is_open) {
+            return;
+        }
+        let Some(clipboard) = cx.read_from_clipboard() else { return };
+        let text = build_paste_text_from_clipboard(&clipboard);
+        if text.is_empty() { return; }
+
+        if let (Some(runtime), Some(target)) = (&self.runtime, self.active_pane_target.as_ref()) {
+            let bracketed = if let Ok(buffers) = self.terminal_buffers.lock() {
+                if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
+                    if terminal.display_offset() > 0 {
+                        terminal.scroll_to_bottom();
+                    }
+                    terminal.mode().contains(alacritty_terminal::term::TermMode::BRACKETED_PASTE)
+                } else { false }
+            } else { false };
+
+            let mut bytes = Vec::with_capacity(text.len() + 12);
+            if bracketed {
+                bytes.extend_from_slice(b"\x1b[200~");
+            }
+            bytes.extend_from_slice(text.replace('\n', "\r").as_bytes());
+            if bracketed {
+                bytes.extend_from_slice(b"\x1b[201~");
+            }
+            let _ = runtime.send_input(target, &bytes);
+        }
+    }
+
+    /// Handle Cmd+C copy action (dispatched via GPUI key binding).
+    /// Copies selected text from the terminal to the system clipboard.
+    /// If no text is selected, sends Ctrl+C (SIGINT) to the terminal.
+    fn handle_copy(&mut self, _: &TerminalCopy, _window: &mut Window, cx: &mut Context<Self>) {
+        // Don't copy when a modal is open
+        if self.show_settings || self.new_branch_dialog_model.as_ref().map_or(false, |e| e.read(cx).is_open) {
+            return;
+        }
+        if let Some(target) = self.active_pane_target.as_ref() {
+            let selected_text = if let Ok(buffers) = self.terminal_buffers.lock() {
+                if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
+                    terminal.selection_text()
+                } else { None }
+            } else { None };
+
+            if let Some(text) = selected_text {
+                if !text.is_empty() {
+                    cx.write_to_clipboard(ClipboardItem::new_string(text));
+                    return;
+                }
+            }
+            // No selection → send Ctrl+C (SIGINT) to the terminal
+            if let Some(runtime) = &self.runtime {
+                let _ = runtime.send_input(target, &[0x03]); // ETX = Ctrl+C
+            }
+        }
     }
 
     /// Handle keyboard events
@@ -2882,38 +3405,15 @@ impl AppRoot {
                     self.open_diff_view(cx);
                     return;
                 }
-                "v" => {
-                    if let Some(clipboard) = cx.read_from_clipboard() {
-                        let text = clipboard.text().unwrap_or_default();
-                        if !text.is_empty() {
-                            if let (Some(runtime), Some(target)) = (&self.runtime, self.active_pane_target.as_ref()) {
-                                let bracketed = if let Ok(buffers) = self.terminal_buffers.lock() {
-                                    if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
-                                        if terminal.display_offset() > 0 {
-                                            terminal.scroll_to_bottom();
-                                        }
-                                        terminal.mode().contains(alacritty_terminal::term::TermMode::BRACKETED_PASTE)
-                                    } else { false }
-                                } else { false };
-
-                                let mut bytes = Vec::with_capacity(text.len() + 12);
-                                if bracketed {
-                                    bytes.extend_from_slice(b"\x1b[200~");
-                                }
-                                bytes.extend_from_slice(text.replace('\n', "\r").as_bytes());
-                                if bracketed {
-                                    bytes.extend_from_slice(b"\x1b[201~");
-                                }
-                                let _ = runtime.send_input(target, &bytes);
-                            }
-                        }
-                    }
-                    return;
-                }
+                // Note: "v" (paste) is handled via GPUI action (TerminalPaste) registered
+                // with cx.bind_keys(), not here. GPUI's macOS backend intercepts Cmd+V
+                // at the Cocoa level before on_key_down fires when an InputHandler is active.
                 "w" => {
                     if self.diff_view_entity.is_some() {
                         self.diff_view_entity = None;
                         cx.notify();
+                    } else {
+                        self.handle_close_pane(cx);
                     }
                 }
                 "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" => {
@@ -2921,6 +3421,16 @@ impl AppRoot {
                         let idx = idx - 1; // 0-based
                         if idx < self.workspace_manager.tab_count() {
                             self.handle_workspace_tab_switch(idx, cx);
+                            let counts = self.compute_per_tab_active_counts();
+                            if let Some(ref e) = self.topbar_entity {
+                                let topbar = e.clone();
+                                let wm = self.workspace_manager.clone();
+                                let _ = cx.update_entity(&topbar, |t: &mut TopBarEntity, cx| {
+                                    t.set_workspace_manager(wm);
+                                    t.set_per_tab_active_counts(counts);
+                                    cx.notify();
+                                });
+                            }
                         }
                     }
                 }
@@ -3120,6 +3630,48 @@ impl AppRoot {
         }
     }
 
+    /// Handle close focused pane (⌘W). No-op if only one pane remains.
+    fn handle_close_pane(&mut self, cx: &mut Context<Self>) {
+        if self.split_tree.pane_count() <= 1 {
+            return;
+        }
+        let Some(target) = self.split_tree.focus_index_to_pane_target(self.focused_pane_index) else {
+            return;
+        };
+        if let Some(rt) = &self.runtime {
+            let _ = rt.kill_pane(&target);
+        }
+        let Some(new_tree) = self.split_tree.remove_pane_at_index(self.focused_pane_index) else {
+            return;
+        };
+        if let Ok(mut buffers) = self.terminal_buffers.lock() {
+            buffers.remove(&target);
+        }
+        if let Ok(mut statuses) = self.pane_statuses.lock() {
+            statuses.retain(|k, _| !k.contains(&target));
+        }
+        self.split_tree = new_tree.clone();
+        if let Some(ref e) = self.terminal_area_entity {
+            let _ = cx.update_entity(e, |ent: &mut TerminalAreaEntity, cx| {
+                ent.set_split_tree(new_tree);
+                cx.notify();
+            });
+        }
+        let pane_count = self.split_tree.pane_count();
+        if self.focused_pane_index >= pane_count {
+            self.focused_pane_index = pane_count.saturating_sub(1);
+        }
+        self.active_pane_target = self.split_tree.focus_index_to_pane_target(self.focused_pane_index);
+        if let Ok(mut guard) = self.pane_targets_shared.lock() {
+            *guard = self.split_tree.flatten().into_iter().map(|(t, _)| t).collect();
+        }
+        if let (Some(rt), Some(ref target)) = (&self.runtime, &self.active_pane_target) {
+            let _ = rt.focus_pane(target);
+        }
+        self.save_current_worktree_runtime_state();
+        cx.notify();
+    }
+
     /// Save runtime state for the current active worktree. No-op if no tab or worktree.
     /// Called on window close and when pane focus changes so the selected worktree restores correctly.
     pub fn save_current_worktree_runtime_state(&mut self) {
@@ -3161,13 +3713,6 @@ impl AppRoot {
             Some(w) => w,
             None => return,
         };
-
-        // Diff view only makes sense for non-main branches (main...HEAD is empty for main)
-        if worktree.is_main {
-            self.state.error_message = Some("Diff view is not available for the main branch.".to_string());
-            cx.notify();
-            return;
-        }
 
         let branch = worktree.short_branch_name().to_string();
         let worktree_path = worktree.path.clone();
@@ -3290,6 +3835,51 @@ impl AppRoot {
         cx.notify();
     }
 
+    /// Closes the close-tab confirmation dialog
+    fn close_close_tab_dialog(&mut self, cx: &mut Context<Self>) {
+        self.close_tab_dialog.close();
+        self.terminal_needs_focus = true;
+        cx.notify();
+    }
+
+    /// Toggles the kill_tmux checkbox in the close-tab dialog
+    fn toggle_close_tab_kill_tmux(&mut self, cx: &mut Context<Self>) {
+        self.close_tab_dialog.toggle_kill_tmux();
+        cx.notify();
+    }
+
+    /// Confirms tab close: removes tab, stops session, optionally kills tmux session
+    fn confirm_close_tab(&mut self, tab_index: usize, kill_tmux: bool, cx: &mut Context<Self>) {
+        let closed_path = self.workspace_manager.get_tab(tab_index).map(|t| t.path.clone());
+        self.workspace_manager.close_tab(tab_index);
+
+        if self.workspace_manager.is_empty() {
+            self.stop_current_session();
+        } else {
+            self.stop_current_session();
+            self.start_session_for_active_tab(cx);
+        }
+
+        // Kill tmux session if requested
+        if kill_tmux {
+            if let Some(ref path) = closed_path {
+                let _ = crate::runtime::backends::kill_tmux_session(path);
+            }
+        }
+
+        self.save_config();
+        let counts = self.compute_per_tab_active_counts();
+        if let Some(ref e) = self.topbar_entity {
+            let _ = cx.update_entity(e, |t: &mut TopBarEntity, cx| {
+                t.set_workspace_manager(self.workspace_manager.clone());
+                t.set_per_tab_active_counts(counts);
+                cx.notify();
+            });
+        }
+        self.close_tab_dialog.close();
+        cx.notify();
+    }
+
     /// Closes the delete worktree dialog
     fn close_delete_dialog(&mut self, cx: &mut Context<Self>) {
         self.delete_worktree_dialog.close();
@@ -3306,10 +3896,16 @@ impl AppRoot {
         let branch = worktree.short_branch_name().to_string();
 
         let win_name = window_name_for_worktree(&worktree.path, &branch);
+        let legacy_name = legacy_window_name_for_worktree(&branch);
         let target = window_target(&repo_path, &win_name);
+        let legacy_target = window_target(&repo_path, &legacy_name);
         if let Some(rt) = &self.runtime {
+            // Kill both new and legacy window names (one may exist depending on migration state)
             if let Err(e) = rt.kill_window(&target) {
                 eprintln!("tmux kill-window failed (best-effort): {}", e);
+            }
+            if win_name != legacy_name {
+                let _ = rt.kill_window(&legacy_target);
             }
         }
 
@@ -3446,7 +4042,7 @@ impl AppRoot {
     fn render_settings_modal(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let app_root_entity = cx.entity();
         let app_root_entity_for_close = app_root_entity.clone();
-        let app_root_entity_save = app_root_entity.clone();
+        // (app_root_entity_save removed — save is now per-agent form)
         let settings_focus = self.settings_focus.get_or_insert_with(|| cx.focus_handle()).clone();
         let active_tab = self.settings_tab.clone();
 
@@ -3508,38 +4104,7 @@ impl AppRoot {
             self.render_settings_agent_detect_tab(cx)
         };
 
-        // ── Save button ──
-        let save_button = div()
-            .id("settings-save-btn")
-            .px(px(16.))
-            .py(px(8.))
-            .rounded(px(6.))
-            .bg(rgb(0x0066cc))
-            .text_color(rgb(0xffffff))
-            .text_size(px(14.))
-            .font_weight(FontWeight::MEDIUM)
-            .cursor_pointer()
-            .hover(|style: StyleRefinement| style.bg(rgb(0x0077dd)))
-            .on_click(move |_event, _window, cx| {
-                let _ = cx.update_entity(&app_root_entity_save, |this: &mut AppRoot, cx| {
-                    if let Some(ref draft) = this.settings_draft {
-                        let mut current = Config::load().unwrap_or_default();
-                        current.remote_channels = draft.remote_channels.clone();
-                        current.agent_detect = draft.agent_detect.clone();
-                        let _ = current.save();
-                    }
-                    if let Some(ref secrets) = this.settings_secrets_draft {
-                        let _ = secrets.save();
-                    }
-                    this.show_settings = false;
-                    this.settings_draft = None;
-                    this.settings_secrets_draft = None;
-                    this.settings_configuring_channel = None;
-                    this.settings_editing_agent = None;
-                    cx.notify();
-                });
-            })
-            .child("Save");
+        // (Save button removed — each agent form has its own Save button)
 
         // ── Layout ──
         // Header row: title + close (fixed)
@@ -3587,14 +4152,6 @@ impl AppRoot {
             .overflow_y_scroll()
             .child(tab_body);
 
-        // Save button row (fixed at bottom)
-        let save_row = div()
-            .flex()
-            .flex_row()
-            .justify_end()
-            .pt(px(8.))
-            .child(save_button);
-
         let settings_content = div()
             .flex()
             .flex_col()
@@ -3605,9 +4162,7 @@ impl AppRoot {
             // Fixed tab bar
             .child(tab_bar)
             // Scrollable body (takes remaining space)
-            .child(scrollable_body)
-            // Fixed save button
-            .child(save_row);
+            .child(scrollable_body);
         let settings_card = div()
             .id("settings-dialog-card")
             .max_w(px(560.))
@@ -3620,7 +4175,7 @@ impl AppRoot {
             .rounded(px(8.))
             .bg(rgb(0x2d2d2d))
             .shadow_lg()
-            .on_click({
+            .on_mouse_down(gpui::MouseButton::Left, {
                 let app_root_entity_card = app_root_entity.clone();
                 move |_event, _window, cx| {
                     // Clicking the card background unfocuses any text field
@@ -3665,23 +4220,50 @@ impl AppRoot {
                     });
                 } else {
                     // Route text input to the focused settings field
+                    let clipboard_text = if event.keystroke.modifiers.platform && event.keystroke.key.as_str() == "v" {
+                        cx.read_from_clipboard().and_then(|c| {
+                            let t = c.text().unwrap_or_default();
+                            if t.is_empty() { None } else { Some(t) }
+                        })
+                    } else {
+                        None
+                    };
+                    let is_select_all = event.keystroke.modifiers.platform && event.keystroke.key.as_str() == "a";
                     let _ = cx.update_entity(&app_root_entity_for_esc, |this: &mut AppRoot, cx| {
                         if let Some(ref field_id) = this.settings_focused_field.clone() {
+                            // Skip modifier key combos (except paste handled above)
+                            if event.keystroke.modifiers.platform && clipboard_text.is_none() && !is_select_all {
+                                return;
+                            }
                             let key = event.keystroke.key.as_str();
                             let draft = this.settings_draft.get_or_insert_with(|| Config::load().unwrap_or_default());
                             if field_id.starts_with("agent-name-") {
                                 if let Ok(idx) = field_id.strip_prefix("agent-name-").unwrap().parse::<usize>() {
                                     if idx < draft.agent_detect.agents.len() {
                                         let name = &mut draft.agent_detect.agents[idx].name;
-                                        match key {
-                                            "backspace" => { name.pop(); }
-                                            "tab" | "enter" => { this.settings_focused_field = None; }
-                                            _ => {
-                                                if let Some(ref ch) = event.keystroke.key_char {
-                                                    let filtered: String = ch.chars()
-                                                        .filter(|c| !c.is_control())
-                                                        .collect();
-                                                    name.push_str(&filtered);
+                                        if let Some(ref paste) = clipboard_text {
+                                            let filtered: String = paste.chars().filter(|c| !c.is_control()).collect();
+                                            name.push_str(&filtered);
+                                        } else if is_select_all {
+                                            // no-op for now (select-all not supported in custom inputs)
+                                        } else {
+                                            match key {
+                                                "backspace" => { name.pop(); }
+                                                "space" => { name.push(' '); }
+                                                "tab" | "enter" => { this.settings_focused_field = None; }
+                                                _ => {
+                                                    // Use key_char if available, fall back to key name for single chars
+                                                    let ch_text = event.keystroke.key_char.as_deref()
+                                                        .or_else(|| {
+                                                            let k = event.keystroke.key.as_str();
+                                                            if k.chars().count() == 1 { Some(k) } else { None }
+                                                        });
+                                                    if let Some(ch) = ch_text {
+                                                        let filtered: String = ch.chars()
+                                                            .filter(|c| !c.is_control())
+                                                            .collect();
+                                                        name.push_str(&filtered);
+                                                    }
                                                 }
                                             }
                                         }
@@ -3696,11 +4278,61 @@ impl AppRoot {
                                             let patterns = &mut draft.agent_detect.agents[ai].rules[ri].patterns;
                                             // Edit patterns as a comma-separated string
                                             let mut text = patterns.join(", ");
+                                            if let Some(ref paste) = clipboard_text {
+                                                let filtered: String = paste.chars().filter(|c| !c.is_control()).collect();
+                                                text.push_str(&filtered);
+                                            } else if is_select_all {
+                                                // no-op
+                                            } else {
+                                                match key {
+                                                    "backspace" => { text.pop(); }
+                                                    "space" => { text.push(' '); }
+                                                    "tab" | "enter" => { this.settings_focused_field = None; }
+                                                    _ => {
+                                                        // Use key_char if available, fall back to key name for single chars
+                                                        let ch_text = event.keystroke.key_char.as_deref()
+                                                            .or_else(|| {
+                                                                let k = event.keystroke.key.as_str();
+                                                                if k.chars().count() == 1 { Some(k) } else { None }
+                                                            });
+                                                        if let Some(ch) = ch_text {
+                                                            let filtered: String = ch.chars()
+                                                                .filter(|c| !c.is_control())
+                                                                .collect();
+                                                            text.push_str(&filtered);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            // Use trim_start (not trim) so trailing spaces survive during typing;
+                                            // full trim happens on save/defocus.
+                                            *patterns = text.split(',').map(|s| s.trim_start().to_string()).filter(|s| !s.is_empty()).collect();
+                                            cx.notify();
+                                        }
+                                    }
+                                }
+                            } else if field_id.starts_with("agent-skip-patterns-") {
+                                if let Ok(idx) = field_id.strip_prefix("agent-skip-patterns-").unwrap().parse::<usize>() {
+                                    if idx < draft.agent_detect.agents.len() {
+                                        let patterns = &mut draft.agent_detect.agents[idx].message_skip_patterns;
+                                        let mut text = patterns.join(", ");
+                                        if let Some(ref paste) = clipboard_text {
+                                            let filtered: String = paste.chars().filter(|c| !c.is_control()).collect();
+                                            text.push_str(&filtered);
+                                        } else if is_select_all {
+                                            // no-op
+                                        } else {
                                             match key {
                                                 "backspace" => { text.pop(); }
+                                                "space" => { text.push(' '); }
                                                 "tab" | "enter" => { this.settings_focused_field = None; }
                                                 _ => {
-                                                    if let Some(ref ch) = event.keystroke.key_char {
+                                                    let ch_text = event.keystroke.key_char.as_deref()
+                                                        .or_else(|| {
+                                                            let k = event.keystroke.key.as_str();
+                                                            if k.chars().count() == 1 { Some(k) } else { None }
+                                                        });
+                                                    if let Some(ch) = ch_text {
                                                         let filtered: String = ch.chars()
                                                             .filter(|c| !c.is_control())
                                                             .collect();
@@ -3708,9 +4340,11 @@ impl AppRoot {
                                                     }
                                                 }
                                             }
-                                            *patterns = text.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
-                                            cx.notify();
                                         }
+                                        // Use trim_start (not trim) so trailing spaces survive during typing;
+                                        // full trim happens on save/defocus.
+                                        *patterns = text.split(',').map(|s| s.trim_start().to_string()).filter(|s| !s.is_empty()).collect();
+                                        cx.notify();
                                     }
                                 }
                             }
@@ -3723,7 +4357,7 @@ impl AppRoot {
             .on_scroll_wheel(|_event, _window, cx| {
                 cx.stop_propagation();
             })
-            .on_click(move |_event, _window, cx| {
+            .on_mouse_down(gpui::MouseButton::Left, move |_event, _window, cx| {
                 let _ = cx.update_entity(&app_root_entity, |this: &mut AppRoot, cx| {
                     this.show_settings = false;
                     this.settings_draft = None;
@@ -3811,6 +4445,7 @@ impl AppRoot {
                         name: String::new(),
                         rules: vec![],
                         default_status: "Idle".to_string(),
+                        message_skip_patterns: vec![],
                     });
                     // Shift editing index if one was open
                     if let Some(ref mut idx) = this.settings_editing_agent {
@@ -3970,6 +4605,7 @@ impl AppRoot {
         let name_is_focused = self.settings_focused_field.as_deref() == Some(&name_field_id);
         let app_root_entity_name = app_root_entity.clone();
         let name_field_id_for_click = name_field_id.clone();
+        let settings_focus_for_name = self.settings_focus.clone();
         let name_display = if agent_name.is_empty() && !name_is_focused {
             div().text_color(rgb(0x666666)).text_size(px(13.)).child("点击输入名称")
         } else {
@@ -4004,11 +4640,15 @@ impl AppRoot {
                     .bg(rgb(0x2a2a2a))
                     .when(name_is_focused, |el| el.border_1().border_color(rgb(0x0066cc)))
                     .cursor(gpui::CursorStyle::IBeam)
-                    .on_click(move |_event, _window, cx| {
+                    .on_click(move |_event, window, cx| {
                         let _ = cx.update_entity(&app_root_entity_name, |this: &mut AppRoot, cx| {
                             this.settings_focused_field = Some(name_field_id_for_click.clone());
                             cx.notify();
                         });
+                        // Re-focus overlay so on_key_down continues to fire
+                        if let Some(ref focus) = settings_focus_for_name {
+                            window.focus(focus, cx);
+                        }
                         cx.stop_propagation();
                     })
                     .child(name_display),
@@ -4095,6 +4735,7 @@ impl AppRoot {
             let pat_is_focused = self.settings_focused_field.as_deref() == Some(&pat_field_id);
             let app_root_entity_pat = app_root_entity.clone();
             let pat_field_id_for_click = pat_field_id.clone();
+            let settings_focus_for_pat = self.settings_focus.clone();
             let pat_inner = if patterns_str.is_empty() && !pat_is_focused {
                 div().text_color(rgb(0x666666)).text_size(px(12.)).child("(no patterns)")
             } else {
@@ -4116,11 +4757,15 @@ impl AppRoot {
                 .bg(rgb(0x2a2a2a))
                 .when(pat_is_focused, |el| el.border_1().border_color(rgb(0x0066cc)))
                 .cursor(gpui::CursorStyle::IBeam)
-                .on_click(move |_event, _window, cx| {
+                .on_click(move |_event, window, cx| {
                     let _ = cx.update_entity(&app_root_entity_pat, |this: &mut AppRoot, cx| {
                         this.settings_focused_field = Some(pat_field_id_for_click.clone());
                         cx.notify();
                     });
+                    // Re-focus overlay so on_key_down continues to fire
+                    if let Some(ref focus) = settings_focus_for_pat {
+                        window.focus(focus, cx);
+                    }
                     cx.stop_propagation();
                 })
                 .child(pat_inner);
@@ -4190,30 +4835,117 @@ impl AppRoot {
             })
             .child("+ 添加规则");
 
-        // Done button
+        // Message skip patterns input
+        let skip_patterns_str = agent.message_skip_patterns.join(", ");
+        let skip_field_id = format!("agent-skip-patterns-{}", index);
+        let skip_is_focused = self.settings_focused_field.as_deref() == Some(&skip_field_id);
+        let app_root_entity_skip = app_root_entity.clone();
+        let skip_field_id_for_click = skip_field_id.clone();
+        let settings_focus_for_skip = self.settings_focus.clone();
+        let skip_inner = if skip_patterns_str.is_empty() && !skip_is_focused {
+            div().text_color(rgb(0x666666)).text_size(px(12.)).child("(无，逗号分隔)")
+        } else {
+            let mut row = div().flex().flex_row().items_center();
+            if !skip_patterns_str.is_empty() {
+                row = row.child(div().text_size(px(12.)).text_color(rgb(0xbbbbbb)).child(SharedString::from(skip_patterns_str)));
+            }
+            if skip_is_focused {
+                row = row.child(div().w(px(1.5)).h(px(13.)).bg(rgb(0xffffff)).flex_shrink_0());
+            }
+            row
+        };
+        let skip_patterns_input = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(8.))
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(rgb(0x999999))
+                    .w(px(60.))
+                    .child("跳过:"),
+            )
+            .child(
+                div()
+                    .id(SharedString::from(format!("agent-skip-input-{}", index)))
+                    .flex_1()
+                    .px(px(8.))
+                    .py(px(4.))
+                    .rounded(px(4.))
+                    .bg(rgb(0x2a2a2a))
+                    .when(skip_is_focused, |el| el.border_1().border_color(rgb(0x0066cc)))
+                    .cursor(gpui::CursorStyle::IBeam)
+                    .on_click(move |_event, window, cx| {
+                        let _ = cx.update_entity(&app_root_entity_skip, |this: &mut AppRoot, cx| {
+                            this.settings_focused_field = Some(skip_field_id_for_click.clone());
+                            cx.notify();
+                        });
+                        if let Some(ref focus) = settings_focus_for_skip {
+                            window.focus(focus, cx);
+                        }
+                        cx.stop_propagation();
+                    })
+                    .child(skip_inner),
+            );
+
+        // Save button — saves agent config directly and closes editing form
         let app_root_entity_done = app_root_entity.clone();
-        let done_btn = div()
-            .id(SharedString::from(format!("agent-done-{}", index)))
-            .px(px(10.))
-            .py(px(4.))
+        let save_btn = div()
+            .id(SharedString::from(format!("agent-save-{}", index)))
+            .py(px(6.))
             .rounded(px(4.))
             .bg(rgb(0x0066cc))
             .text_color(rgb(0xffffff))
-            .text_size(px(12.))
+            .text_size(px(13.))
+            .font_weight(FontWeight::MEDIUM)
             .cursor_pointer()
             .hover(|style: StyleRefinement| style.bg(rgb(0x0077dd)))
+            .flex()
+            .items_center()
+            .justify_center()
             .on_click(move |_event, _window, cx| {
                 let _ = cx.update_entity(&app_root_entity_done, |this: &mut AppRoot, cx| {
+                    // Trim trailing spaces from all patterns before saving
+                    if let Some(ref mut draft) = this.settings_draft {
+                        for agent in &mut draft.agent_detect.agents {
+                            for rule in &mut agent.rules {
+                                for p in &mut rule.patterns {
+                                    *p = p.trim().to_string();
+                                }
+                                rule.patterns.retain(|p| !p.is_empty());
+                            }
+                            for p in &mut agent.message_skip_patterns {
+                                *p = p.trim().to_string();
+                            }
+                            agent.message_skip_patterns.retain(|p| !p.is_empty());
+                        }
+                    }
+                    // Save to config file
+                    if let Some(ref draft) = this.settings_draft {
+                        let mut current = Config::load().unwrap_or_default();
+                        current.agent_detect = draft.agent_detect.clone();
+                        current.remote_channels = draft.remote_channels.clone();
+                        match current.save() {
+                            Ok(()) => eprintln!("[pmux] Agent config saved ({} agents)", current.agent_detect.agents.len()),
+                            Err(e) => eprintln!("[pmux] Agent config save FAILED: {}", e),
+                        }
+                    }
                     this.settings_editing_agent = None;
                     cx.notify();
                 });
             })
-            .child("完成");
+            .child("Save");
 
         let rules_header = div()
             .text_size(px(11.))
             .text_color(rgb(0x888888))
             .child("检测规则（按顺序匹配，第一个命中的生效）：");
+
+        let skip_header = div()
+            .text_size(px(11.))
+            .text_color(rgb(0x888888))
+            .child("消息跳过模式（提取最后一条消息时跳过包含这些文本的行）：");
 
         div()
             .p(px(12.))
@@ -4233,9 +4965,11 @@ impl AppRoot {
                     .flex()
                     .flex_row()
                     .gap(px(8.))
-                    .child(add_rule_btn)
-                    .child(done_btn),
+                    .child(add_rule_btn),
             )
+            .child(skip_header)
+            .child(skip_patterns_input)
+            .child(save_btn)
     }
 
     fn render_settings_config_guide(&self, app_root_entity: &Entity<AppRoot>) -> Option<impl IntoElement> {
@@ -4608,6 +5342,17 @@ impl AppRoot {
             }
         });
 
+        // Set up Refresh callback - refreshes worktree list
+        let app_root_entity_for_refresh = app_root_entity.clone();
+        sidebar.on_refresh(move |_window, cx| {
+            let _ = cx.update_entity(&app_root_entity_for_refresh, |this: &mut AppRoot, cx| {
+                if let Some(repo_path) = this.workspace_manager.active_tab().map(|t| t.path.clone()) {
+                    this.refresh_worktrees_for_repo(&repo_path);
+                }
+                cx.notify();
+            });
+        });
+
         // Set up Settings callback - opens the settings modal
         let app_root_entity_for_settings = app_root_entity.clone();
         let settings_focus_for_cb = self.settings_focus.clone().expect("settings_focus created in ensure_entities");
@@ -4726,8 +5471,62 @@ impl AppRoot {
             dialog
         };
 
+        let close_tab_dialog = {
+            let app_root_entity_for_confirm = app_root_entity.clone();
+            let app_root_entity_for_cancel = app_root_entity.clone();
+            let app_root_entity_for_toggle = app_root_entity.clone();
+            let mut dialog = CloseTabDialogUi::new()
+                .on_confirm(move |tab_index, kill_tmux, _window, cx| {
+                    let _ = cx.update_entity(&app_root_entity_for_confirm, |this: &mut AppRoot, cx| {
+                        this.confirm_close_tab(tab_index, kill_tmux, cx);
+                    });
+                })
+                .on_cancel(move |_window, cx| {
+                    let _ = cx.update_entity(&app_root_entity_for_cancel, |this: &mut AppRoot, cx| {
+                        this.close_close_tab_dialog(cx);
+                    });
+                })
+                .on_toggle_kill_tmux(move |_window, cx| {
+                    let _ = cx.update_entity(&app_root_entity_for_toggle, |this: &mut AppRoot, cx| {
+                        this.toggle_close_tab_kill_tmux(cx);
+                    });
+                });
+            if self.close_tab_dialog.is_open() {
+                if let (Some(idx), Some(path), Some(name)) = (
+                    self.close_tab_dialog.tab_index(),
+                    self.close_tab_dialog.workspace_path().cloned(),
+                    self.close_tab_dialog.workspace_name().map(|s| s.to_string()),
+                ) {
+                    dialog.open(idx, path, name);
+                    if !self.close_tab_dialog.kill_tmux() {
+                        dialog.toggle_kill_tmux();
+                    }
+                }
+            }
+            dialog
+        };
+
         let sidebar_context_menu = self.sidebar_context_menu;
+        let terminal_context_menu = self.terminal_context_menu;
         let cached_worktrees = self.cached_worktrees.clone();
+
+        // Terminal context menu clones
+        let app_root_for_term_menu_overlay = app_root_entity.clone();
+        let app_root_for_term_copy = app_root_entity.clone();
+        let app_root_for_term_paste = app_root_entity.clone();
+        let app_root_for_term_select_all = app_root_entity.clone();
+        let app_root_for_term_clear = app_root_entity.clone();
+
+        // Get selected text for Copy menu item
+        let has_selection = terminal_context_menu.is_some() && {
+            if let Some(ref target) = self.active_pane_target {
+                if let Ok(buffers) = self.terminal_buffers.lock() {
+                    if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
+                        terminal.selection_text().map(|t| !t.is_empty()).unwrap_or(false)
+                    } else { false }
+                } else { false }
+            } else { false }
+        };
 
         div()
             .id("workspace-view")
@@ -5056,8 +5855,7 @@ impl AppRoot {
             })
             .when(sidebar_context_menu.is_some(), |el| {
                 let (idx, click_x, click_y) = sidebar_context_menu.unwrap();
-                let is_main = cached_worktrees.get(idx).map(|w| w.is_main).unwrap_or(true);
-                let on_view_diff: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>> = if !is_main {
+                let on_view_diff: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>> = {
                     let entity = app_root_entity_for_menu_diff.clone();
                     let repo_path = repo_path_for_menu_diff.clone();
                     Some(Arc::new(move |idx, _window, cx| {
@@ -5080,8 +5878,6 @@ impl AppRoot {
                             });
                         }).detach();
                     }))
-                } else {
-                    None
                 };
                 let on_delete: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>> = {
                     let entity = app_root_entity_for_menu_delete.clone();
@@ -5121,8 +5917,231 @@ impl AppRoot {
                         .child(menu)
                 )
             })
+            // Terminal context menu overlay (dismiss on left-click)
+            .when(terminal_context_menu.is_some(), |el| {
+                el.child(
+                    div()
+                        .id("terminal-context-menu-overlay")
+                        .absolute()
+                        .inset(px(0.))
+                        .size_full()
+                        .cursor_pointer()
+                        .on_mouse_down(MouseButton::Left, {
+                            let entity = app_root_for_term_menu_overlay.clone();
+                            move |_event, _window, cx| {
+                                let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
+                                    this.terminal_context_menu = None;
+                                    cx.notify();
+                                });
+                            }
+                        })
+                        .on_mouse_down(MouseButton::Right, {
+                            let entity = app_root_for_term_menu_overlay.clone();
+                            move |_event, _window, cx| {
+                                let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
+                                    this.terminal_context_menu = None;
+                                    cx.notify();
+                                });
+                            }
+                        })
+                )
+            })
+            // Terminal context menu float
+            .when(terminal_context_menu.is_some(), |el| {
+                let (click_x, click_y) = terminal_context_menu.unwrap();
+                let mut menu = div()
+                    .id("terminal-context-menu")
+                    .min_w(px(180.))
+                    .py(px(4.))
+                    .rounded(px(6.))
+                    .bg(rgb(0x282828))
+                    .border_1().border_color(rgb(0x404040))
+                    .shadow_lg()
+                    .occlude()
+                    .on_click(|_event, _window, cx| { cx.stop_propagation(); })
+                    .flex().flex_col();
+
+                // Copy
+                {
+                    let entity = app_root_for_term_copy.clone();
+                    if has_selection {
+                        menu = menu.child(
+                            div()
+                                .id("term-ctx-copy")
+                                .mx(px(4.)).px(px(8.)).py(px(6.))
+                                .rounded(px(4.))
+                                .flex().flex_row().items_center().gap(px(8.))
+                                .text_size(px(13.))
+                                .text_color(rgb(0xdddddd))
+                                .hover(|s: StyleRefinement| s.bg(rgb(0x3a3a3a)).text_color(rgb(0xffffff)))
+                                .cursor_pointer()
+                                .on_click(move |_event, _window, cx| {
+                                    let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
+                                        // Copy selected text to clipboard
+                                        if let Some(ref target) = this.active_pane_target {
+                                            if let Ok(buffers) = this.terminal_buffers.lock() {
+                                                if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
+                                                    if let Some(text) = terminal.selection_text() {
+                                                        if !text.is_empty() {
+                                                            cx.write_to_clipboard(ClipboardItem::new_string(text));
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        this.terminal_context_menu = None;
+                                        cx.notify();
+                                    });
+                                })
+                                .child(svg().path("icons/copy.svg").size(px(15.)).flex_shrink_0().text_color(rgb(0xaaaaaa)))
+                                .child(div().flex_1().child("Copy"))
+                                .child(div().text_size(px(11.)).text_color(rgb(0x888888)).child("⌘C"))
+                        );
+                    } else {
+                        menu = menu.child(
+                            div()
+                                .id("term-ctx-copy")
+                                .mx(px(4.)).px(px(8.)).py(px(6.))
+                                .rounded(px(4.))
+                                .flex().flex_row().items_center().gap(px(8.))
+                                .text_size(px(13.))
+                                .text_color(rgb(0x666666))
+                                .child(svg().path("icons/copy.svg").size(px(15.)).flex_shrink_0().text_color(rgb(0x555555)))
+                                .child(div().flex_1().child("Copy"))
+                                .child(div().text_size(px(11.)).text_color(rgb(0x555555)).child("⌘C"))
+                        );
+                    }
+                }
+
+                // Paste
+                {
+                    let entity = app_root_for_term_paste.clone();
+                    menu = menu.child(
+                        div()
+                            .id("term-ctx-paste")
+                            .mx(px(4.)).px(px(8.)).py(px(6.))
+                            .rounded(px(4.))
+                            .flex().flex_row().items_center().gap(px(8.))
+                            .text_size(px(13.))
+                            .text_color(rgb(0xdddddd))
+                            .hover(|s: StyleRefinement| s.bg(rgb(0x3a3a3a)).text_color(rgb(0xffffff)))
+                            .cursor_pointer()
+                            .on_click(move |_event, _window, cx| {
+                                let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
+                                    // Paste clipboard content to terminal (text, image, or file paths)
+                                    if let Some(clipboard) = cx.read_from_clipboard() {
+                                        let text = build_paste_text_from_clipboard(&clipboard);
+                                        if !text.is_empty() {
+                                            if let (Some(runtime), Some(target)) = (&this.runtime, this.active_pane_target.as_ref()) {
+                                                let bracketed = if let Ok(buffers) = this.terminal_buffers.lock() {
+                                                    if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
+                                                        if terminal.display_offset() > 0 {
+                                                            terminal.scroll_to_bottom();
+                                                        }
+                                                        terminal.mode().contains(alacritty_terminal::term::TermMode::BRACKETED_PASTE)
+                                                    } else { false }
+                                                } else { false };
+                                                let mut bytes = Vec::with_capacity(text.len() + 12);
+                                                if bracketed {
+                                                    bytes.extend_from_slice(b"\x1b[200~");
+                                                }
+                                                bytes.extend_from_slice(text.replace('\n', "\r").as_bytes());
+                                                if bracketed {
+                                                    bytes.extend_from_slice(b"\x1b[201~");
+                                                }
+                                                let _ = runtime.send_input(target, &bytes);
+                                            }
+                                        }
+                                    }
+                                    this.terminal_context_menu = None;
+                                    cx.notify();
+                                });
+                            })
+                            .child(svg().path("icons/paste.svg").size(px(15.)).flex_shrink_0().text_color(rgb(0xaaaaaa)))
+                            .child(div().flex_1().child("Paste"))
+                            .child(div().text_size(px(11.)).text_color(rgb(0x888888)).child("⌘V"))
+                    );
+                }
+
+                // Separator
+                menu = menu.child(
+                    div().mx(px(4.)).my(px(2.)).h(px(1.)).bg(rgb(0x3a3a3a))
+                );
+
+                // Select All
+                {
+                    let entity = app_root_for_term_select_all.clone();
+                    menu = menu.child(
+                        div()
+                            .id("term-ctx-select-all")
+                            .mx(px(4.)).px(px(8.)).py(px(6.))
+                            .rounded(px(4.))
+                            .flex().flex_row().items_center().gap(px(8.))
+                            .text_size(px(13.))
+                            .text_color(rgb(0xdddddd))
+                            .hover(|s: StyleRefinement| s.bg(rgb(0x3a3a3a)).text_color(rgb(0xffffff)))
+                            .cursor_pointer()
+                            .on_click(move |_event, _window, cx| {
+                                let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
+                                    // Select all terminal content
+                                    if let Some(ref target) = this.active_pane_target {
+                                        if let Ok(buffers) = this.terminal_buffers.lock() {
+                                            if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
+                                                terminal.select_all();
+                                            }
+                                        }
+                                    }
+                                    this.terminal_context_menu = None;
+                                    cx.notify();
+                                });
+                            })
+                            .child(svg().path("icons/select-all.svg").size(px(15.)).flex_shrink_0().text_color(rgb(0xaaaaaa)))
+                            .child(div().flex_1().child("Select All"))
+                            .child(div().text_size(px(11.)).text_color(rgb(0x888888)).child("⌘A"))
+                    );
+                }
+
+                // Clear
+                {
+                    let entity = app_root_for_term_clear.clone();
+                    menu = menu.child(
+                        div()
+                            .id("term-ctx-clear")
+                            .mx(px(4.)).px(px(8.)).py(px(6.))
+                            .rounded(px(4.))
+                            .flex().flex_row().items_center().gap(px(8.))
+                            .text_size(px(13.))
+                            .text_color(rgb(0xdddddd))
+                            .hover(|s: StyleRefinement| s.bg(rgb(0x3a3a3a)).text_color(rgb(0xffffff)))
+                            .cursor_pointer()
+                            .on_click(move |_event, _window, cx| {
+                                let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
+                                    // Send Ctrl+L to clear terminal
+                                    if let (Some(runtime), Some(target)) = (&this.runtime, this.active_pane_target.as_ref()) {
+                                        let _ = runtime.send_input(target, b"\x0c");
+                                    }
+                                    this.terminal_context_menu = None;
+                                    cx.notify();
+                                });
+                            })
+                            .child(svg().path("icons/clear.svg").size(px(15.)).flex_shrink_0().text_color(rgb(0xaaaaaa)))
+                            .child(div().flex_1().child("Clear"))
+                            .child(div().text_size(px(11.)).text_color(rgb(0x888888)).child("⌘K"))
+                    );
+                }
+
+                el.child(
+                    div()
+                        .id("terminal-context-menu-float")
+                        .absolute()
+                        .top(px(click_y))
+                        .left(px(click_x))
+                        .child(menu)
+                )
+            })
             // Dialogs rendered last so they appear on top (absolute overlay)
             .child(delete_dialog)
+            .child(close_tab_dialog)
             .when(self.new_branch_dialog_entity.is_some(), |el: Stateful<Div>| {
                 el.child(self.new_branch_dialog_entity.as_ref().unwrap().clone())
             })
@@ -5134,8 +6153,53 @@ impl AppRoot {
 
 impl Render for AppRoot {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Track window focus state for notification suppression (方案 6a)
-        self.window_focused_shared.store(window.is_window_active(), std::sync::atomic::Ordering::Relaxed);
+        // Track window focus state
+        let is_focused_now = window.is_window_active();
+        self.window_focused_shared.store(is_focused_now, std::sync::atomic::Ordering::Relaxed);
+
+        // Notification click-to-focus: when window transitions unfocused → focused,
+        // check for a pending notification jump target and auto-focus that pane.
+        if is_focused_now && !self.was_window_focused {
+            // Extract pending target before mutably borrowing self
+            let jump_target = self.pending_notification_jump.lock().ok().and_then(|mut pending| {
+                if let Some((ref pane_id, ref ts)) = *pending {
+                    if ts.elapsed() < std::time::Duration::from_secs(30) {
+                        let target = pane_id.clone();
+                        *pending = None;
+                        return Some(target);
+                    }
+                    *pending = None;
+                }
+                None
+            });
+            if let Some(target_pane) = jump_target {
+                // Try jump within current split tree
+                if let Some(idx) = self.split_tree.flatten().into_iter().position(|(t, _)| t == target_pane) {
+                    self.focused_pane_index = idx;
+                    self.active_pane_target = Some(target_pane.clone());
+                    if let Ok(mut guard) = self.active_pane_target_shared.lock() {
+                        *guard = target_pane.clone();
+                    }
+                    if let Some(ref rt) = self.runtime {
+                        let _ = rt.focus_pane(&target_pane);
+                    }
+                    self.terminal_needs_focus = true;
+                } else {
+                    // Pane not in current split tree — try switching to its worktree
+                    if let Some(wt_path) = extract_worktree_path_from_pane_id(&target_pane) {
+                        if let Some(wt_idx) = self.cached_worktrees.iter().position(|wt| wt.path == wt_path) {
+                            let branch = self.cached_worktrees[wt_idx].short_branch_name().to_string();
+                            self.active_worktree_index = Some(wt_idx);
+                            if let Some(tab) = self.workspace_manager.active_tab() {
+                                let repo_path = tab.path.clone();
+                                self.schedule_switch_to_worktree_async(&repo_path, &wt_path, &branch, wt_idx, cx);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        self.was_window_focused = is_focused_now;
 
         // Open Settings when requested from menu (main.rs)
         if OPEN_SETTINGS_REQUESTED.swap(false, Ordering::SeqCst) {
@@ -5206,9 +6270,11 @@ impl Render for AppRoot {
             .focusable()
             .track_focus(&terminal_focus)
             .when(!new_branch_dialog_open && !settings_open, |el| {
-                el.on_key_down(cx.listener(|this, event, window, cx| {
-                    this.handle_key_down(event, window, cx);
-                }))
+                el.on_action(cx.listener(Self::handle_paste))
+                    .on_action(cx.listener(Self::handle_copy))
+                    .on_key_down(cx.listener(|this, event, window, cx| {
+                        this.handle_key_down(event, window, cx);
+                    }))
             })
             .child(
                 if let Some(ref deps) = self.dependency_check {

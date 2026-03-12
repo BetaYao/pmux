@@ -86,6 +86,118 @@ fn strip_tmux_title_sequences(data: &[u8]) -> Vec<u8> {
     result
 }
 
+/// Check if a tmux pane is currently in alternate screen mode.
+/// Returns true if the pane's application has entered alt screen (e.g. a TUI app).
+pub fn check_tmux_alternate_on(pane_id: &str) -> bool {
+    Command::new("tmux")
+        .args(["display-message", "-t", pane_id, "-p", "#{alternate_on}"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "1")
+        .unwrap_or(false)
+}
+
+/// Capture the current tmux pane content and build a byte sequence that can be
+/// injected into alacritty_terminal to resync its grid with tmux's authoritative state.
+///
+/// tmux control mode `%output` events should carry all raw PTY bytes, but in
+/// practice some sequences (cursor positioning, erase, DEC private modes) can be
+/// lost or arrive out-of-order, causing accumulated garbling. This function provides
+/// a periodic "I-frame" resync: capture the correct state from tmux and overwrite
+/// our terminal's visible screen.
+///
+/// Uses per-line cursor positioning (`CSI row;1H` + content + `CSI K`) instead of
+/// clear-screen (`CSI 2J`), so that the scrollback buffer is NOT polluted with
+/// duplicate content.
+///
+/// Returns `None` if the pane doesn't exist or capture fails.
+pub fn capture_pane_resync(pane_id: &str) -> Option<Vec<u8>> {
+    let output = Command::new("tmux")
+        .args(["capture-pane", "-t", pane_id, "-p", "-e"])
+        .output()
+        .ok()?;
+    if !output.status.success() || output.stdout.is_empty() {
+        return None;
+    }
+
+    // Get cursor position, visibility, screen height, and alt screen state
+    let pane_info = Command::new("tmux")
+        .args([
+            "display-message",
+            "-t",
+            pane_id,
+            "-p",
+            "#{cursor_x},#{cursor_y},#{cursor_flag},#{alternate_on},#{pane_height}",
+        ])
+        .output()
+        .ok()
+        .and_then(|o| {
+            let s = String::from_utf8_lossy(&o.stdout);
+            let s = s.trim().to_string();
+            let mut parts = s.splitn(5, ',');
+            let x: u16 = parts.next()?.trim().parse().ok()?;
+            let y: u16 = parts.next()?.trim().parse().ok()?;
+            let cursor_flag: u8 = parts.next()?.trim().parse().unwrap_or(1);
+            let alt_on: u8 = parts.next()?.trim().parse().unwrap_or(0);
+            let pane_height: u16 = parts.next()?.trim().parse().unwrap_or(24);
+            Some((x, y, cursor_flag, alt_on, pane_height))
+        });
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let lines: Vec<&str> = text.split('\n').collect();
+    // capture-pane always returns pane_height lines (some may be empty trailing)
+    if lines.is_empty() {
+        return None;
+    }
+
+    let pane_height = pane_info.map(|(_, _, _, _, h)| h as usize).unwrap_or(lines.len());
+
+    let mut result = Vec::new();
+
+    // If tmux pane is in alternate screen, ensure our terminal is too
+    if let Some((_, _, _, alt_on, _)) = pane_info {
+        if alt_on == 1 {
+            result.extend_from_slice(b"\x1b[?1049h");
+        }
+    }
+
+    // Overwrite each visible row in-place using cursor positioning.
+    // This does NOT affect the scrollback buffer (no CSI 2J, no scrolling).
+    for (i, line) in lines.iter().enumerate() {
+        if i >= pane_height {
+            break;
+        }
+        let row = i + 1; // 1-based
+        // Move cursor to the start of this row
+        result.extend_from_slice(format!("\x1b[{row};1H").as_bytes());
+        // Write the line content (strip non-SGR escapes from capture-pane output)
+        let filtered = strip_non_sgr_escapes(line.as_bytes());
+        result.extend_from_slice(&filtered);
+        // Clear to end of line (remove stale content from previous longer lines)
+        result.extend_from_slice(b"\x1b[K");
+    }
+
+    // Clear any remaining rows below the captured content
+    for i in lines.len()..pane_height {
+        let row = i + 1;
+        result.extend_from_slice(format!("\x1b[{row};1H\x1b[K").as_bytes());
+    }
+
+    // Restore cursor position (1-based)
+    if let Some((cx, cy, cursor_flag, _, _)) = pane_info {
+        let row = cy + 1;
+        let col = cx + 1;
+        result.extend_from_slice(format!("\x1b[{row};{col}H").as_bytes());
+        if cursor_flag == 0 {
+            result.extend_from_slice(b"\x1b[?25l"); // hide cursor
+        } else {
+            result.extend_from_slice(b"\x1b[?25h"); // show cursor
+        }
+    }
+
+    Some(result)
+}
+
 /// Strip non-SGR CSI escape sequences from tmux capture-pane -e output.
 /// Keeps only \x1b[...m (SGR: color/attribute) sequences which are safe to
 /// replay into a VTE at any position. All other CSI sequences (cursor
@@ -588,7 +700,7 @@ impl TmuxControlModeRuntime {
         let slave_dup = unsafe { libc::dup(slave_fd) };
         let child = unsafe {
             Command::new("tmux")
-                .args(["-CC", "attach", "-t", session_name])
+                .args(["-CC", "attach", "-d", "-t", session_name])
                 .env("TERM", "xterm-256color")
                 .stdin(Stdio::from_raw_fd(slave_fd))
                 .stdout(Stdio::from_raw_fd(slave_dup))
@@ -954,35 +1066,39 @@ impl AgentRuntime for TmuxControlModeRuntime {
     }
 
     fn capture_initial_content(&self, pane_id: &PaneId) -> Option<Vec<u8>> {
-        // Capture the visible screen with -e (SGR color sequences) so that the
-        // initial snapshot preserves colors. We then strip non-SGR escape
-        // sequences (cursor positioning, erase, etc.) to avoid layout
-        // corruption caused by tmux's absolute \x1b[row;colH sequences being
-        // re-emitted into pmux's VTE at different coordinates.
+        // Capture the visible screen AND scrollback history with -e (SGR color
+        // sequences) so that the initial snapshot preserves both colors and
+        // scrollback. -S -10000 captures up to 10,000 lines of history above
+        // the visible area (matching pmux's own scrollback buffer size).
+        // Without this, tab-switching or reconnecting would lose all scrollback.
         let output = Command::new("tmux")
-            .args(["capture-pane", "-t", pane_id, "-p", "-e"])
+            .args(["capture-pane", "-t", pane_id, "-p", "-e", "-S", "-10000"])
             .output()
             .ok()?;
 
-        // Also fetch the cursor position so we can restore it after feeding
-        // the snapshot. Without this the cursor appears at the wrong column.
-        let cursor_pos = Command::new("tmux")
+        // Also fetch the cursor position and visibility so we can restore them
+        // after feeding the snapshot. Without cursor_x/cursor_y the cursor
+        // appears at the wrong column. Without cursor_flag, a TUI app's hidden
+        // cursor (e.g. Claude Code's \x1b[?25l) would appear as a second cursor
+        // because the terminal defaults to SHOW_CURSOR=true.
+        let cursor_info = Command::new("tmux")
             .args([
                 "display-message",
                 "-t",
                 pane_id,
                 "-p",
-                "#{cursor_x},#{cursor_y}",
+                "#{cursor_x},#{cursor_y},#{cursor_flag}",
             ])
             .output()
             .ok()
             .and_then(|o| {
                 let s = String::from_utf8_lossy(&o.stdout);
-                let s = s.trim();
-                let mut parts = s.splitn(2, ',');
+                let s = s.trim().to_string();
+                let mut parts = s.splitn(3, ',');
                 let x: u16 = parts.next()?.trim().parse().ok()?;
                 let y: u16 = parts.next()?.trim().parse().ok()?;
-                Some((x, y))
+                let cursor_flag: u8 = parts.next()?.trim().parse().unwrap_or(1);
+                Some((x, y, cursor_flag))
             });
 
         // #region agent log
@@ -994,7 +1110,7 @@ impl AgentRuntime for TmuxControlModeRuntime {
                 "success": output.status.success(),
                 "stdout_len": output.stdout.len(),
                 "stderr": String::from_utf8_lossy(&output.stderr).to_string(),
-                "cursor_pos": cursor_pos.map(|(x,y)| format!("{x},{y}")),
+                "cursor_info": cursor_info.map(|(x,y,f)| format!("{x},{y},flag={f}")),
             }),
             "H_capture",
         );
@@ -1010,7 +1126,24 @@ impl AgentRuntime for TmuxControlModeRuntime {
         if trimmed.is_empty() {
             return None;
         }
-        let mut result = b"\x1b[H\x1b[2J".to_vec(); // CSI H = home, CSI 2J = clear
+        // Check if the pane is in alternate screen mode.
+        // tmux control mode does NOT pass through ESC[?1049h/l sequences —
+        // it processes them internally. We must detect the state and inject
+        // the sequence into our terminal so that alacritty_terminal mirrors
+        // the pane's alt screen state. Without this, TUI apps (like Claude
+        // Code) draw on the main buffer, mixing with old content.
+        let alternate_on = Command::new("tmux")
+            .args(["display-message", "-t", pane_id, "-p", "#{alternate_on}"])
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string() == "1")
+            .unwrap_or(false);
+
+        let mut result = Vec::new();
+        if alternate_on {
+            result.extend_from_slice(b"\x1b[?1049h"); // Enter alt screen
+        }
+        result.extend_from_slice(b"\x1b[H\x1b[2J"); // CSI H = home, CSI 2J = clear
         // capture-pane uses \n (LF) between lines, but VTE interprets LF as
         // "move cursor down" without returning to column 0. Use \r\n so each
         // line starts at the left margin.
@@ -1024,11 +1157,18 @@ impl AgentRuntime for TmuxControlModeRuntime {
 
         // Restore cursor to its actual position (1-based CSI row;col H).
         // tmux cursor_x/cursor_y are 0-based.
-        if let Some((cx, cy)) = cursor_pos {
+        if let Some((cx, cy, cursor_flag)) = cursor_info {
             let row = cy + 1;
             let col = cx + 1;
             let csi = format!("\x1b[{row};{col}H");
             result.extend_from_slice(csi.as_bytes());
+
+            // Sync cursor visibility: cursor_flag=1 means visible, 0 means hidden.
+            // Without this, TUI apps that hide the cursor (e.g. Claude Code) will
+            // show a duplicate cursor because the terminal defaults to SHOW_CURSOR=true.
+            if cursor_flag == 0 {
+                result.extend_from_slice(b"\x1b[?25l"); // DECTCEM hide
+            }
         }
 
         Some(result)
@@ -1085,6 +1225,10 @@ impl AgentRuntime for TmuxControlModeRuntime {
             .into_iter()
             .last()
             .ok_or_else(|| RuntimeError::Backend("no pane after split".into()))
+    }
+
+    fn kill_pane(&self, pane_id: &PaneId) -> Result<(), RuntimeError> {
+        self.send_command(&format!("kill-pane -t {}", pane_id))
     }
 
     fn get_pane_dimensions(&self, pane_id: &PaneId) -> (u16, u16) {

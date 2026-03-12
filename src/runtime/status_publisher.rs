@@ -12,7 +12,7 @@ use crate::runtime::event_bus::{
 };
 use crate::shell_integration::ShellPhaseInfo;
 use crate::status_detector::{DebouncedStatusTracker, ProcessStatus, StatusDetector};
-use crate::terminal::extract_last_line;
+use crate::terminal::extract_last_line_filtered;
 
 /// Publishes agent status changes to EventBus (event-driven, no polling loop).
 ///
@@ -67,6 +67,7 @@ impl StatusPublisher {
         process_status: ProcessStatus,
         shell_info: Option<ShellPhaseInfo>,
         content: &str,
+        skip_patterns: &[String],
     ) -> bool {
         let mut tracker_guard = match self.tracker.lock() {
             Ok(g) => g,
@@ -90,7 +91,7 @@ impl StatusPublisher {
         if changed {
             let current_status = tracker.current_status();
             let agent_id = pane_id.split(':').next().unwrap_or(pane_id).to_string();
-            let last_line = extract_last_line(content, 80);
+            let last_line = extract_last_line_filtered(content, 80, skip_patterns);
             let last_line_opt = if last_line.is_empty() {
                 None
             } else {
@@ -146,7 +147,13 @@ impl StatusPublisher {
     ///
     /// # Returns
     /// `true` if status changed and was published
-    pub fn force_status(&self, pane_id: &str, status: AgentStatus, content: &str) -> bool {
+    pub fn force_status(
+        &self,
+        pane_id: &str,
+        status: AgentStatus,
+        content: &str,
+        skip_patterns: &[String],
+    ) -> bool {
         let mut tracker_guard = match self.tracker.lock() {
             Ok(g) => g,
             Err(_) => return false,
@@ -163,7 +170,7 @@ impl StatusPublisher {
         if changed {
             let current_status = tracker.current_status();
             let agent_id = pane_id.split(':').next().unwrap_or(pane_id).to_string();
-            let last_line = extract_last_line(content, 80);
+            let last_line = extract_last_line_filtered(content, 80, skip_patterns);
             let last_line_opt = if last_line.is_empty() {
                 None
             } else {
@@ -249,7 +256,7 @@ mod tests {
         };
 
         // OSC 133 Running commits immediately (no debounce)
-        let changed = pub_.check_status("pane-1", ProcessStatus::Running, Some(running_info), "");
+        let changed = pub_.check_status("pane-1", ProcessStatus::Running, Some(running_info), "", &[]);
         assert!(changed);
         assert_eq!(pub_.current_status("pane-1"), AgentStatus::Running);
     }
@@ -266,7 +273,7 @@ mod tests {
         };
 
         // Running phase commits immediately
-        let changed = pub_.check_status("pane-1", ProcessStatus::Running, Some(info), "any content");
+        let changed = pub_.check_status("pane-1", ProcessStatus::Running, Some(info), "any content", &[]);
         assert!(changed);
         assert_eq!(pub_.current_status("pane-1"), AgentStatus::Running);
     }
@@ -282,11 +289,11 @@ mod tests {
             phase: ShellPhase::Running,
             last_post_exec_exit_code: None,
         };
-        pub_.check_status("pane-1", ProcessStatus::Running, Some(running_info), "");
+        pub_.check_status("pane-1", ProcessStatus::Running, Some(running_info), "", &[]);
         assert_eq!(pub_.current_status("pane-1"), AgentStatus::Running);
 
         // Process error commits immediately
-        let changed = pub_.check_status("pane-1", ProcessStatus::Error, None, "");
+        let changed = pub_.check_status("pane-1", ProcessStatus::Error, None, "", &[]);
         assert!(changed);
         assert_eq!(pub_.current_status("pane-1"), AgentStatus::Error);
     }
@@ -302,11 +309,11 @@ mod tests {
             phase: ShellPhase::Running,
             last_post_exec_exit_code: None,
         };
-        pub_.check_status("pane-1", ProcessStatus::Running, Some(running_info), "");
+        pub_.check_status("pane-1", ProcessStatus::Running, Some(running_info), "", &[]);
         assert_eq!(pub_.current_status("pane-1"), AgentStatus::Running);
 
         // Exited commits immediately
-        let changed = pub_.check_status("pane-1", ProcessStatus::Exited, None, "");
+        let changed = pub_.check_status("pane-1", ProcessStatus::Exited, None, "", &[]);
         assert!(changed);
         assert_eq!(pub_.current_status("pane-1"), AgentStatus::Exited);
     }
@@ -317,7 +324,7 @@ mod tests {
         let bus = Arc::new(EventBus::new(8));
         let pub_ = StatusPublisher::new(bus);
         pub_.register_pane("test");
-        pub_.check_status("test", ProcessStatus::Running, None, "content");
+        pub_.check_status("test", ProcessStatus::Running, None, "content", &[]);
     }
 
     #[test]
@@ -332,7 +339,7 @@ mod tests {
             phase: ShellPhase::Running,
             last_post_exec_exit_code: None,
         };
-        pub_.check_status("pane-1", ProcessStatus::Running, Some(running_info), "");
+        pub_.check_status("pane-1", ProcessStatus::Running, Some(running_info), "", &[]);
         // drain events
         while rx.try_recv().is_ok() {}
 
@@ -341,7 +348,7 @@ mod tests {
             phase: ShellPhase::Output,
             last_post_exec_exit_code: Some(0),
         };
-        pub_.check_status("pane-1", ProcessStatus::Running, Some(idle_info), "Done: 3 files changed");
+        pub_.check_status("pane-1", ProcessStatus::Running, Some(idle_info), "Done: 3 files changed", &[]);
 
         // Collect events
         let mut found_notification = false;

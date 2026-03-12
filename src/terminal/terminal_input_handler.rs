@@ -6,16 +6,26 @@ use gpui::*;
 use std::ops::Range;
 use std::sync::Arc;
 
+use crate::terminal::Terminal;
+
 pub struct TerminalInputHandler {
+    terminal: Arc<Terminal>,
     send_input: Arc<dyn Fn(&[u8]) + Send + Sync>,
-    /// Screen-space bounds of the terminal cursor, used to position the IME
-    /// candidate window. Passed from terminal_element.rs at paint time.
+    /// Screen-space bounds of the terminal cursor, computed at paint time.
+    /// Used to position the IME candidate window.
     cursor_bounds: Option<Bounds<Pixels>>,
 }
 
 impl TerminalInputHandler {
-    pub fn new(send_input: Arc<dyn Fn(&[u8]) + Send + Sync>) -> Self {
-        Self { send_input, cursor_bounds: None }
+    pub fn new(
+        terminal: Arc<Terminal>,
+        send_input: Arc<dyn Fn(&[u8]) + Send + Sync>,
+    ) -> Self {
+        Self {
+            terminal,
+            send_input,
+            cursor_bounds: None,
+        }
     }
 
     pub fn with_cursor_bounds(mut self, bounds: Option<Bounds<Pixels>>) -> Self {
@@ -38,7 +48,11 @@ impl InputHandler for TerminalInputHandler {
     }
 
     fn marked_text_range(&mut self, _window: &mut Window, _cx: &mut App) -> Option<Range<usize>> {
-        None
+        // Read from persistent Terminal state (survives handler recreation each frame).
+        self.terminal.ime_marked_text().map(|text| {
+            let len_utf16: usize = text.encode_utf16().count();
+            0..len_utf16
+        })
     }
 
     fn text_for_range(
@@ -55,9 +69,14 @@ impl InputHandler for TerminalInputHandler {
         &mut self,
         _replacement_range: Option<Range<usize>>,
         text: &str,
-        _window: &mut Window,
+        window: &mut Window,
         _cx: &mut App,
     ) {
+        // Committed text — clear IME composition in persistent state.
+        self.terminal.set_ime_marked_text(None);
+        // Trigger repaint so the preedit overlay is cleared from the terminal surface.
+        window.refresh();
+
         if text.is_empty() {
             return;
         }
@@ -87,16 +106,26 @@ impl InputHandler for TerminalInputHandler {
     fn replace_and_mark_text_in_range(
         &mut self,
         _range_utf16: Option<Range<usize>>,
-        _new_text: &str,
+        new_text: &str,
         _new_selected_range: Option<Range<usize>>,
-        _window: &mut Window,
+        window: &mut Window,
         _cx: &mut App,
     ) {
-        // IME composing state — do NOT send to PTY.
-        // The final committed text arrives via replace_text_in_range.
+        // IME composing state — store in persistent Terminal state.
+        // Do NOT send to PTY; the final committed text arrives via replace_text_in_range.
+        if new_text.is_empty() {
+            self.terminal.set_ime_marked_text(None);
+        } else {
+            self.terminal.set_ime_marked_text(Some(new_text.to_string()));
+        }
+        // Trigger repaint so the preedit text overlay is rendered on the terminal surface.
+        window.refresh();
     }
 
-    fn unmark_text(&mut self, _window: &mut Window, _cx: &mut App) {}
+    fn unmark_text(&mut self, window: &mut Window, _cx: &mut App) {
+        self.terminal.set_ime_marked_text(None);
+        window.refresh();
+    }
 
     fn bounds_for_range(
         &mut self,
@@ -104,9 +133,6 @@ impl InputHandler for TerminalInputHandler {
         _window: &mut Window,
         _cx: &mut App,
     ) -> Option<Bounds<Pixels>> {
-        // Return the cursor's screen bounds so macOS positions the IME
-        // candidate window next to the terminal cursor rather than the
-        // default bottom-left corner of the screen.
         self.cursor_bounds
     }
 

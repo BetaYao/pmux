@@ -80,6 +80,7 @@ pub struct Sidebar {
     selected_index: Option<usize>,
     on_select: Option<SelectCallback>,
     on_new_branch: Option<Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
+    on_refresh: Option<Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
     on_delete: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>>,
     on_view_diff: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>>,
     on_right_click: Option<Arc<dyn Fn(usize, f32, f32, &mut Window, &mut App) + Send + Sync>>,
@@ -115,6 +116,7 @@ impl Sidebar {
             selected_index: None,
             on_select: None,
             on_new_branch: None,
+            on_refresh: None,
             on_delete: None,
             on_view_diff: None,
             on_right_click: None,
@@ -224,6 +226,10 @@ impl Sidebar {
 
     pub fn on_new_branch<F: Fn(&mut Window, &mut App) + Send + Sync + 'static>(&mut self, callback: F) {
         self.on_new_branch = Some(Arc::new(callback));
+    }
+
+    pub fn on_refresh<F: Fn(&mut Window, &mut App) + Send + Sync + 'static>(&mut self, callback: F) {
+        self.on_refresh = Some(Arc::new(callback));
     }
 
     pub fn on_settings<F: Fn(&mut Window, &mut App) + Send + Sync + 'static>(&mut self, callback: F) {
@@ -482,10 +488,12 @@ impl Sidebar {
         on_delete: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>>,
         worktrees_info: &[crate::worktree::WorktreeInfo],
     ) -> impl IntoElement {
-        let show_view_diff = on_view_diff.is_some()
-            && !worktrees_info.get(idx).map(|w| w.is_main).unwrap_or(true);
+        let wt = worktrees_info.get(idx);
+        let is_base = wt.map(|w| w.is_base).unwrap_or(true);
+        let show_view_diff = on_view_diff.is_some();
+        let show_delete = on_delete.is_some() && !is_base;
         let has_view_diff = show_view_diff;
-        let has_delete = on_delete.is_some();
+        let has_delete = show_delete;
 
         let mut menu = div()
             .id(format!("sidebar-context-menu-{}", idx))
@@ -518,7 +526,7 @@ impl Sidebar {
             );
         }
 
-        if let Some(on_delete) = on_delete {
+        if let Some(on_delete) = on_delete.filter(|_| show_delete) {
             menu = menu.child(Self::context_menu_item(
                 format!("context-menu-remove-{}", idx),
                 "⊗",
@@ -536,6 +544,7 @@ impl Sidebar {
     fn render_footer(
         creating: bool,
         on_new_branch: Option<&Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
+        on_refresh: Option<&Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
         on_settings: Option<&Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
     ) -> Stateful<Div> {
         let mut btn = div()
@@ -562,6 +571,21 @@ impl Sidebar {
             }
         }
 
+        // Refresh worktree list button
+        let mut refresh_btn = div()
+            .id("refresh-worktrees-btn")
+            .px(px(8.)).py(px(4.)).rounded(px(4.))
+            .text_color(rgb(0x999999)).text_size(px(14.))
+            .cursor_pointer()
+            .hover(|s: StyleRefinement| s.text_color(rgb(0xffffff)).bg(rgb(0x3d3d3d)))
+            .child("↻");
+        if let Some(callback) = on_refresh {
+            let cb = Arc::clone(callback);
+            refresh_btn = refresh_btn.on_click(move |_, window, cx| {
+                cb(window, cx);
+            });
+        }
+
         // Settings gear icon button (sized to match New Branch button height)
         let mut gear = div()
             .id("sidebar-settings-btn")
@@ -583,7 +607,11 @@ impl Sidebar {
             .px(px(8.)).py(px(8.))
             .border_t(px(1.)).border_color(rgb(0x3d3d3d))
             .child(btn)
-            .child(gear)
+            .child(
+                div().flex().flex_row().gap(px(4.))
+                    .child(refresh_btn)
+                    .child(gear)
+            )
     }
 }
 
@@ -639,8 +667,9 @@ impl RenderOnce for Sidebar {
         } else {
             Self::render_header(&repo_name).into_any_element()
         };
+        let on_refresh_ref = self.on_refresh.as_ref();
         let on_settings_ref = self.on_settings.as_ref();
-        let footer = Self::render_footer(creating, on_new_branch_ref, on_settings_ref);
+        let footer = Self::render_footer(creating, on_new_branch_ref, on_refresh_ref, on_settings_ref);
 
         let mut rows: Vec<AnyElement> = Vec::new();
         for (idx, item) in worktrees.iter().enumerate() {
@@ -676,6 +705,7 @@ impl RenderOnce for Sidebar {
                 item_with_status.status_icon()
             };
 
+            let is_base = item_with_status.info.is_base;
             let inner = div()
                 .flex().flex_col().gap(px(2.)).overflow_hidden()
                 .child(
@@ -683,6 +713,20 @@ impl RenderOnce for Sidebar {
                         .child(div().flex_shrink_0().text_size(px(11.)).text_color(status_color).child(status_icon_text))
                         .child(div().flex_1().min_w(px(0.)).overflow_hidden().text_ellipsis().text_size(px(12.)).font_weight(FontWeight::SEMIBOLD).text_color(text_color)
                             .child(SharedString::from(item_with_status.info.short_branch_name().to_string())))
+                        .when(is_base, |el| {
+                            el.child(
+                                div()
+                                    .flex_shrink_0()
+                                    .ml(px(4.))
+                                    .px(px(4.))
+                                    .py(px(1.))
+                                    .rounded(px(3.))
+                                    .bg(rgb(0x3d4556))
+                                    .text_size(px(8.))
+                                    .text_color(rgb(0x8899aa))
+                                    .child("BASE")
+                            )
+                        })
                 )
                 .child(
                     div().flex().flex_row().items_center().gap(px(4.)).pl(px(17.))
@@ -692,6 +736,8 @@ impl RenderOnce for Sidebar {
 
             let row_content = div()
                 .flex_1()
+                .min_w(px(0.))
+                .overflow_hidden()
                 .flex()
                 .flex_row()
                 .items_center()
@@ -754,7 +800,8 @@ impl RenderOnce for Sidebar {
                     .bg(rgb(0x2a2520))
                     .border_1().border_color(rgb(0x4d4030))
                     .child(
-                        div().flex_1().text_size(px(12.)).text_color(rgb(0xcccccc))
+                        div().flex_1().min_w(px(0.)).overflow_hidden().text_ellipsis()
+                            .text_size(px(12.)).text_color(rgb(0xcccccc))
                             .child(SharedString::from(win_name.clone())),
                     );
                 if let Some(ref on_close) = on_close_orphan {

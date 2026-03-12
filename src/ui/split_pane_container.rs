@@ -8,7 +8,6 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 const DIVIDER_WIDTH: f32 = 1.0;
-const RATIO_SENSITIVITY: f32 = 0.002; // pixels to ratio: 500px drag = 1.0 ratio change
 
 /// Split pane container - recursively renders SplitNode tree with draggable dividers
 pub struct SplitPaneContainer {
@@ -28,6 +27,8 @@ pub struct SplitPaneContainer {
     on_divider_drag_end: Option<Arc<dyn Fn(&mut Window, &mut App)>>,
     /// Callback when user clicks a pane: (pane_index)
     on_pane_click: Option<Arc<dyn Fn(usize, &mut Window, &mut App)>>,
+    /// Callback when user right-clicks a pane: (x, y)
+    on_context_menu: Option<Arc<dyn Fn(f32, f32, &mut Window, &mut App)>>,
     search_query: Option<String>,
     search_current_match: usize,
 }
@@ -50,6 +51,7 @@ impl SplitPaneContainer {
             on_divider_drag_start: None,
             on_divider_drag_end: None,
             on_pane_click: None,
+            on_context_menu: None,
             search_query: None,
             search_current_match: 0,
         }
@@ -88,6 +90,11 @@ impl SplitPaneContainer {
 
     pub fn on_pane_click<F: Fn(usize, &mut Window, &mut App) + 'static>(mut self, f: F) -> Self {
         self.on_pane_click = Some(Arc::new(f));
+        self
+    }
+
+    pub fn on_context_menu<F: Fn(f32, f32, &mut Window, &mut App) + 'static>(mut self, f: F) -> Self {
+        self.on_context_menu = Some(Arc::new(f));
         self
     }
 
@@ -130,6 +137,7 @@ impl RenderOnce for SplitPaneContainer {
         let on_divider_drag_start = self.on_divider_drag_start.clone();
         let on_divider_drag_end = self.on_divider_drag_end.clone();
         let on_pane_click = self.on_pane_click.clone();
+        let on_context_menu = self.on_context_menu.clone();
         let drag_state = self.drag_state.clone();
         let drag_state_for_up = self.drag_state.clone();
 
@@ -145,6 +153,7 @@ impl RenderOnce for SplitPaneContainer {
             &on_ratio_change,
             &on_divider_drag_start,
             &on_pane_click,
+            &on_context_menu,
             search_query,
             search_current_match,
         );
@@ -168,7 +177,19 @@ impl RenderOnce for SplitPaneContainer {
                         event.position.y.into()
                     };
                     let delta = pos - start_pos;
-                    let ratio_delta = delta * RATIO_SENSITIVITY;
+                    // Dynamic sensitivity: 1/window_dimension so divider tracks mouse ~1:1
+                    let bounds = window.window_bounds().get_bounds();
+                    let container_size: f32 = if *is_vertical {
+                        f32::from(bounds.size.width)
+                    } else {
+                        f32::from(bounds.size.height)
+                    };
+                    let sensitivity = if container_size > 100.0 {
+                        1.0 / container_size
+                    } else {
+                        0.002 // fallback for tiny windows
+                    };
+                    let ratio_delta = delta * sensitivity;
                     let new_ratio = (start_ratio + ratio_delta).clamp(
                         SplitNode::MIN_RATIO,
                         SplitNode::MAX_RATIO,
@@ -202,6 +223,7 @@ impl SplitPaneContainer {
         on_ratio_change: &Option<Arc<dyn Fn(Vec<bool>, f32, &mut Window, &mut App)>>,
         on_divider_drag_start: &Option<Arc<dyn Fn(Vec<bool>, f32, f32, bool, &mut Window, &mut App)>>,
         on_pane_click: &Option<Arc<dyn Fn(usize, &mut Window, &mut App)>>,
+        on_context_menu: &Option<Arc<dyn Fn(f32, f32, &mut Window, &mut App)>>,
         search_query: Option<String>,
         search_current_match: usize,
     ) -> impl IntoElement {
@@ -215,7 +237,8 @@ impl SplitPaneContainer {
                 let is_focused = pane_index_offset == focused_pane_index;
                 let pane_idx = pane_index_offset;
                 let on_click = on_pane_click.clone();
-                let pane_div = div()
+                let on_ctx = on_context_menu.clone();
+                let mut pane_div = div()
                     .flex_1()
                     .min_w(px(0.))
                     .min_h(px(0.))
@@ -225,6 +248,11 @@ impl SplitPaneContainer {
                             cb(pane_idx, window, cx);
                         }
                     });
+                if let Some(on_ctx) = on_ctx {
+                    pane_div = pane_div.on_mouse_down(MouseButton::Right, move |event, window, cx| {
+                        on_ctx(f32::from(event.position.x), f32::from(event.position.y), window, cx);
+                    });
+                }
                 let search_current = if search_query.is_some() {
                     Some(search_current_match)
                 } else {
@@ -264,6 +292,7 @@ impl SplitPaneContainer {
                     on_ratio_change,
                     on_divider_drag_start,
                     on_pane_click,
+                    on_context_menu,
                     search_query.clone(),
                     search_current_match,
                 );
@@ -278,6 +307,7 @@ impl SplitPaneContainer {
                     on_ratio_change,
                     on_divider_drag_start,
                     on_pane_click,
+                    on_context_menu,
                     search_query.clone(),
                     search_current_match,
                 );
@@ -343,6 +373,7 @@ impl SplitPaneContainer {
                     on_ratio_change,
                     on_divider_drag_start,
                     on_pane_click,
+                    on_context_menu,
                     search_query.clone(),
                     search_current_match,
                 );
@@ -357,6 +388,7 @@ impl SplitPaneContainer {
                     on_ratio_change,
                     on_divider_drag_start,
                     on_pane_click,
+                    on_context_menu,
                     search_query.clone(),
                     search_current_match,
                 );

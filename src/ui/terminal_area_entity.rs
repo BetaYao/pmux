@@ -20,6 +20,7 @@ pub struct TerminalAreaEntity {
     on_divider_drag_start: Option<Arc<dyn Fn(Vec<bool>, f32, f32, bool, &mut Window, &mut App)>>,
     on_divider_drag_end: Option<Arc<dyn Fn(&mut Window, &mut App)>>,
     on_pane_click: Option<Arc<dyn Fn(usize, &mut Window, &mut App)>>,
+    on_context_menu: Option<Arc<dyn Fn(f32, f32, &mut Window, &mut App)>>,
     search_query: Option<String>,
     search_current_match: usize,
 }
@@ -37,6 +38,7 @@ impl TerminalAreaEntity {
         on_divider_drag_start: Option<Arc<dyn Fn(Vec<bool>, f32, f32, bool, &mut Window, &mut App)>>,
         on_divider_drag_end: Option<Arc<dyn Fn(&mut Window, &mut App)>>,
         on_pane_click: Option<Arc<dyn Fn(usize, &mut Window, &mut App)>>,
+        on_context_menu: Option<Arc<dyn Fn(f32, f32, &mut Window, &mut App)>>,
         search_query: Option<String>,
         search_current_match: usize,
     ) -> Self {
@@ -51,6 +53,7 @@ impl TerminalAreaEntity {
             on_divider_drag_start,
             on_divider_drag_end,
             on_pane_click,
+            on_context_menu,
             search_query,
             search_current_match,
         }
@@ -103,6 +106,10 @@ impl Render for TerminalAreaEntity {
         if let Some(ref cb) = self.on_pane_click {
             let cb = Arc::clone(cb);
             container = container.on_pane_click(move |idx, w, cx| cb(idx, w, cx));
+        }
+        if let Some(ref cb) = self.on_context_menu {
+            let cb = Arc::clone(cb);
+            container = container.on_context_menu(move |x, y, w, cx| cb(x, y, w, cx));
         }
 
         container.into_element()

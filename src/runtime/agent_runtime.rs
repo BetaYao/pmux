@@ -54,6 +54,7 @@ pub trait AgentRuntime: Send + Sync + DowncastSync {
     fn list_panes(&self, agent_id: &AgentId) -> Vec<PaneId>;
     fn focus_pane(&self, pane_id: &PaneId) -> Result<(), RuntimeError>;
     fn split_pane(&self, pane_id: &PaneId, vertical: bool) -> Result<PaneId, RuntimeError>;
+    fn kill_pane(&self, pane_id: &PaneId) -> Result<(), RuntimeError>;
     fn get_pane_dimensions(&self, pane_id: &PaneId) -> (u16, u16);
     fn open_diff(&self, worktree: &Path, pane_id: Option<&PaneId>) -> Result<String, RuntimeError>;
     fn open_review(&self, worktree: &Path) -> Result<String, RuntimeError>;

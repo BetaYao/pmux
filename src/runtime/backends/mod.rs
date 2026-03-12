@@ -84,17 +84,71 @@ pub fn session_name_for_workspace(workspace_path: &Path) -> String {
 }
 
 /// Window naming for tmux backend. One worktree/agent = one window.
-/// Main worktree -> "main"; linked worktrees -> sanitized branch name.
-pub fn window_name_for_worktree(_worktree_path: &Path, branch_name: &str) -> String {
+/// Uses the worktree directory name (last path component) as the window name.
+/// This is stable even when branches are switched inside the terminal.
+pub fn window_name_for_worktree(worktree_path: &Path, _branch_name: &str) -> String {
+    let name = worktree_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "default".to_string());
+    sanitize_tmux_name(&name)
+}
+
+/// Legacy window name (branch-based) for migration from old naming scheme.
+pub fn legacy_window_name_for_worktree(branch_name: &str) -> String {
     let name = if branch_name.is_empty() || branch_name == "main" {
         "main".to_string()
     } else {
         branch_name.to_string()
     };
+    sanitize_tmux_name(&name)
+}
+
+/// Sanitize a string for use as a tmux window/session name.
+fn sanitize_tmux_name(name: &str) -> String {
     name.chars()
         .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
         .collect::<String>()
 }
+
+/// Migrate a tmux window from legacy branch-based name to path-based name.
+/// If old-name window exists but new-name doesn't, rename it via `tmux rename-window`.
+#[cfg(unix)]
+pub fn migrate_tmux_window_name(session: &str, old_name: &str, new_name: &str) {
+    if old_name == new_name {
+        return;
+    }
+    // List current window names in the session
+    let output = match std::process::Command::new("tmux")
+        .args(["list-windows", "-t", session, "-F", "#{window_name}"])
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return,
+    };
+    let windows: Vec<String> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|l| l.trim().to_string())
+        .collect();
+    // If new name already exists, nothing to do
+    if windows.iter().any(|w| w == new_name) {
+        return;
+    }
+    // If old name exists, rename it
+    if windows.iter().any(|w| w == old_name) {
+        let _ = std::process::Command::new("tmux")
+            .args([
+                "rename-window",
+                "-t",
+                &format!("{}:{}", session, old_name),
+                new_name,
+            ])
+            .output();
+    }
+}
+
+#[cfg(not(unix))]
+pub fn migrate_tmux_window_name(_session: &str, _old_name: &str, _new_name: &str) {}
 
 /// Target for killing a worktree's window: session:window
 pub fn window_target(workspace_path: &Path, window_name: &str) -> String {
@@ -165,6 +219,24 @@ pub fn kill_tmux_window(workspace_path: &Path, window_name: &str) -> Result<(), 
 #[cfg(not(unix))]
 pub fn kill_tmux_window(_workspace_path: &Path, _window_name: &str) -> Result<(), RuntimeError> {
     Err(RuntimeError::Backend("tmux not supported on this platform".into()))
+}
+
+/// Kill an entire tmux session by workspace path.
+#[cfg(unix)]
+pub fn kill_tmux_session(workspace_path: &Path) -> Result<(), RuntimeError> {
+    let session_name = session_name_for_workspace(workspace_path);
+    let status = std::process::Command::new("tmux")
+        .args(["kill-session", "-t", &session_name])
+        .status()
+        .map_err(|e| RuntimeError::Backend(format!("tmux kill-session: {}", e)))?;
+    // Session may not exist (already dead), treat as ok either way
+    let _ = status;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+pub fn kill_tmux_session(_workspace_path: &Path) -> Result<(), RuntimeError> {
+    Ok(())
 }
 
 /// Result of runtime creation; may include fallback message when tmux was requested but unavailable.
@@ -248,6 +320,8 @@ pub fn create_runtime_from_env(
                 }
                 let session_name = session_name_for_workspace(workspace_path);
                 let window_name = window_name_for_worktree(worktree_path, branch_name);
+                let legacy_name = legacy_window_name_for_worktree(branch_name);
+                migrate_tmux_window_name(&session_name, &legacy_name, &window_name);
                 let tmux_result = tmux_control_mode::TmuxControlModeRuntime::new(
                     &session_name,
                     Some(&window_name),

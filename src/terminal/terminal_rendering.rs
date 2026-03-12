@@ -65,7 +65,10 @@ impl BatchedTextRun {
         self.style.len += extra_len;
     }
 
-    /// Paint this run using GPUI's shape_line + paint
+    /// Paint this run using GPUI's shape_line + paint.
+    ///
+    /// Batches all characters into a single shape_line call with `force_width`
+    /// to enforce monospace grid alignment (same approach as Zed's terminal).
     pub fn paint(
         &self,
         origin: Point<Pixels>,
@@ -87,9 +90,12 @@ impl BatchedTextRun {
             underline: self.style.underline.clone(),
             strikethrough: self.style.strikethrough.clone(),
         };
-        let shaped = window
-            .text_system()
-            .shape_line(self.text.clone().into(), font_size, &[run_style], Some(cell_width));
+        let shaped = window.text_system().shape_line(
+            self.text.clone().into(),
+            font_size,
+            &[run_style],
+            Some(cell_width),
+        );
         let _ = shaped.paint(pos, line_height, TextAlign::Left, None, window, cx);
     }
 }
@@ -136,6 +142,45 @@ impl LayoutRect {
 /// True if a cell's background is the terminal default (should not generate a LayoutRect)
 pub fn is_default_bg(color: &Color) -> bool {
     matches!(color, Color::Named(NamedColor::Background))
+}
+
+/// Split a batched text run's text into per-cell strings, grouping base characters
+/// with any following zero-width combining characters.
+/// Returns (col_offset, cell_text) pairs for each cell.
+pub fn split_text_into_cells(text: &str) -> Vec<String> {
+    let mut cells = Vec::new();
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        let mut cell_text = String::new();
+        cell_text.push(c);
+        while let Some(&next) = chars.peek() {
+            if is_zero_width_or_combining(next) {
+                cell_text.push(chars.next().unwrap());
+            } else {
+                break;
+            }
+        }
+        cells.push(cell_text);
+    }
+    cells
+}
+
+/// True if the character is zero-width or a Unicode combining mark.
+/// Used to group combining characters with their base character for per-cell rendering.
+fn is_zero_width_or_combining(c: char) -> bool {
+    matches!(c,
+        '\u{200B}'  // zero-width space
+        | '\u{200C}' // zero-width non-joiner
+        | '\u{200D}' // zero-width joiner
+        | '\u{FEFF}' // zero-width no-break space / BOM
+        | '\u{FE00}'..='\u{FE0F}' // variation selectors
+        | '\u{0300}'..='\u{036F}' // combining diacritical marks
+        | '\u{20D0}'..='\u{20FF}' // combining diacritical marks for symbols
+        | '\u{1AB0}'..='\u{1AFF}' // combining diacritical marks extended
+        | '\u{1DC0}'..='\u{1DFF}' // combining diacritical marks supplement
+        | '\u{FE20}'..='\u{FE2F}' // combining half marks
+        | '\u{E0100}'..='\u{E01EF}' // variation selectors supplement
+    )
 }
 
 #[cfg(test)]
@@ -188,5 +233,146 @@ mod tests {
         use alacritty_terminal::vte::ansi::{Color, NamedColor};
         assert!(is_default_bg(&Color::Named(NamedColor::Background)));
         assert!(!is_default_bg(&Color::Named(NamedColor::Foreground)));
+    }
+
+    #[test]
+    fn test_is_zero_width_or_combining() {
+        assert!(is_zero_width_or_combining('\u{200D}')); // ZWJ
+        assert!(is_zero_width_or_combining('\u{0301}')); // combining acute accent
+        assert!(is_zero_width_or_combining('\u{FE0F}')); // variation selector
+        assert!(!is_zero_width_or_combining('a'));
+        assert!(!is_zero_width_or_combining('─'));
+        assert!(!is_zero_width_or_combining('⏺'));
+    }
+
+    // --- Per-cell splitting tests ---
+
+    #[test]
+    fn test_split_ascii_text() {
+        let cells = split_text_into_cells("Read");
+        assert_eq!(cells, vec!["R", "e", "a", "d"]);
+    }
+
+    #[test]
+    fn test_split_box_drawing() {
+        let cells = split_text_into_cells("──────");
+        assert_eq!(cells.len(), 6);
+        for cell in &cells {
+            assert_eq!(cell, "─");
+        }
+    }
+
+    #[test]
+    fn test_split_unicode_symbols() {
+        let cells = split_text_into_cells("⏺ Read");
+        assert_eq!(cells, vec!["⏺", " ", "R", "e", "a", "d"]);
+    }
+
+    #[test]
+    fn test_split_mixed_content() {
+        // Simulates Claude Code output: icon + bold text + path
+        let cells = split_text_into_cells("⏺Read(packages/app/src)");
+        assert_eq!(cells.len(), 23);
+        assert_eq!(cells[0], "⏺");
+        assert_eq!(cells[1], "R");
+        assert_eq!(cells[2], "e");
+        assert_eq!(cells[3], "a");
+        assert_eq!(cells[4], "d");
+        assert_eq!(cells[5], "(");
+    }
+
+    #[test]
+    fn test_split_with_combining_char() {
+        // 'e' followed by combining acute accent (é)
+        let text = "e\u{0301}x";
+        let cells = split_text_into_cells(text);
+        assert_eq!(cells.len(), 2);
+        assert_eq!(cells[0], "e\u{0301}"); // base + combining grouped together
+        assert_eq!(cells[1], "x");
+    }
+
+    #[test]
+    fn test_split_with_variation_selector() {
+        // ⏺ followed by VS16 (emoji presentation selector)
+        let text = "⏺\u{FE0F}x";
+        let cells = split_text_into_cells(text);
+        assert_eq!(cells.len(), 2);
+        assert_eq!(cells[0], "⏺\u{FE0F}"); // base + VS grouped
+        assert_eq!(cells[1], "x");
+    }
+
+    #[test]
+    fn test_split_with_zwj_sequence() {
+        // Simulated ZWJ sequence: base + ZWJ + next char
+        let text = "a\u{200D}bx";
+        let cells = split_text_into_cells(text);
+        assert_eq!(cells.len(), 3);
+        assert_eq!(cells[0], "a\u{200D}"); // a + ZWJ grouped (ZWJ is zero-width)
+        assert_eq!(cells[1], "b"); // b is NOT zero-width, starts new cell
+        assert_eq!(cells[2], "x");
+    }
+
+    #[test]
+    fn test_split_empty_text() {
+        let cells = split_text_into_cells("");
+        assert!(cells.is_empty());
+    }
+
+    #[test]
+    fn test_split_single_char() {
+        let cells = split_text_into_cells("R");
+        assert_eq!(cells, vec!["R"]);
+    }
+
+    #[test]
+    fn test_split_preserves_cell_count() {
+        // For a batched run, the number of cells returned by split_text_into_cells
+        // should equal cell_count (assuming no zero-width chars in the text).
+        let style = TextRun {
+            len: 1,
+            font: Font::default(),
+            color: Hsla::default(),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        let mut run = BatchedTextRun::new(0, 0, 'H', style.clone());
+        run.append_char('e');
+        run.append_char('l');
+        run.append_char('l');
+        run.append_char('o');
+        assert_eq!(run.cell_count, 5);
+        let cells = split_text_into_cells(&run.text);
+        assert_eq!(cells.len(), run.cell_count);
+    }
+
+    #[test]
+    fn test_split_claude_code_like_output() {
+        // Test content similar to what Claude Code produces
+        let test_cases = vec![
+            ("Read(packages/app/src/stores/knowledge.ts)", 42),
+            ("────────────────────", 20),
+            ("BaseSearch", 10),
+            ("✓ Write(CLAUDE.md)", 18),
+        ];
+        for (text, expected_len) in test_cases {
+            let cells = split_text_into_cells(text);
+            assert_eq!(
+                cells.len(), expected_len,
+                "Failed for {:?}: got {} cells, expected {}",
+                text, cells.len(), expected_len
+            );
+            // Verify each cell has at least one visible character
+            for (i, cell) in cells.iter().enumerate() {
+                assert!(!cell.is_empty(), "Cell {} is empty for text {:?}", i, text);
+                // First char should not be a zero-width char
+                let first = cell.chars().next().unwrap();
+                assert!(
+                    !is_zero_width_or_combining(first),
+                    "Cell {} starts with zero-width char for text {:?}",
+                    i, text
+                );
+            }
+        }
     }
 }

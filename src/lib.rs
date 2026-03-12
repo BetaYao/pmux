@@ -24,6 +24,7 @@ pub mod notification_manager;
 pub mod remotes;
 pub mod resizable_sidebar;
 pub mod runtime;
+pub mod session_scanner;
 pub mod shell_integration;
 pub mod shell_integration_inject;
 pub mod status_detector;
