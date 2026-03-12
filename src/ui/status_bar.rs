@@ -94,7 +94,7 @@ if status_counts.idle > 0 {
             }
         }
         right.push(StatusBarItem {
-            text: "⌘B Sidebar  ⌘D Split  ⌘⇧D H-Split  ⌘R Diff  ⌘1-8 Workspace".to_string(),
+            text: "⌘B Sidebar  ⌘D Split  ⌘⇧D H-Split  ⌘W Close  ⌘R Diff  ⌘1-8 Workspace".to_string(),
             title: Some("Shortcuts".to_string()),
         });
 

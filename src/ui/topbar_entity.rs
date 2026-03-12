@@ -17,6 +17,8 @@ pub struct TopBarEntity {
     on_select_tab: Arc<dyn Fn(usize, &mut Window, &mut App)>,
     on_close_tab: Arc<dyn Fn(usize, &mut Window, &mut App)>,
     sidebar_visible: bool,
+    /// Per-tab active agent counts (running + error + waiting). Index = tab index.
+    per_tab_active_counts: Vec<usize>,
 }
 
 impl TopBarEntity {
@@ -40,6 +42,7 @@ impl TopBarEntity {
             on_select_tab,
             on_close_tab,
             sidebar_visible: true,
+            per_tab_active_counts: Vec::new(),
         }
     }
 
@@ -51,11 +54,16 @@ impl TopBarEntity {
         self.sidebar_visible = visible;
     }
 
+    pub fn set_per_tab_active_counts(&mut self, counts: Vec<usize>) {
+        self.per_tab_active_counts = counts;
+    }
+
     fn render_workspace_tab(
         &self,
         tab: &WorkspaceTab,
         index: usize,
         is_active: bool,
+        active_count: usize,
     ) -> impl IntoElement {
         let name = tab.name().to_string();
         let is_modified = tab.is_modified();
@@ -82,6 +90,30 @@ impl TopBarEntity {
             })
             .cursor_pointer()
             .on_click(move |_, window, cx| { on_select(index, window, cx); })
+            // Active agent count badge (before tab name)
+            .when(active_count > 0, |el: Stateful<Div>| {
+                el.child(
+                    div()
+                        .flex_shrink_0()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(2.))
+                        .child(
+                            // Running icon (●)
+                            div()
+                                .text_size(px(8.))
+                                .text_color(rgb(0x61afef))
+                                .child("●")
+                        )
+                        .child(
+                            div()
+                                .text_size(px(10.))
+                                .text_color(rgb(0x61afef))
+                                .child(SharedString::from(active_count.to_string()))
+                        )
+                )
+            })
             .child(
                 div()
                     .flex_1()
@@ -110,6 +142,7 @@ impl Render for TopBarEntity {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         // When sidebar is hidden, add left padding to clear macOS traffic light buttons (~80px)
         let left_pad = if self.sidebar_visible { px(8.) } else { px(80.) };
+        let per_tab_counts = self.per_tab_active_counts.clone();
         div()
             .id("topbar-entity")
             .w_full()
@@ -137,7 +170,8 @@ impl Render for TopBarEntity {
                             .filter_map(|i| {
                                 self.workspace_manager.get_tab(i).map(|tab| {
                                     let is_active = self.workspace_manager.active_tab_index() == Some(i);
-                                    self.render_workspace_tab(tab, i, is_active).into_any_element()
+                                    let active_count = per_tab_counts.get(i).copied().unwrap_or(0);
+                                    self.render_workspace_tab(tab, i, is_active, active_count).into_any_element()
                                 })
                             })
                             .collect::<Vec<_>>()

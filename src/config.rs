@@ -62,6 +62,11 @@ fn default_agent_detect_agents() -> Vec<AgentDef> {
                 },
             ],
             default_status: "Idle".to_string(),
+            message_skip_patterns: vec![
+                "shift+tab".to_string(),
+                "accept edits".to_string(),
+                "to interrupt".to_string(),
+            ],
         },
         AgentDef {
             name: "agent".to_string(),
@@ -80,6 +85,33 @@ fn default_agent_detect_agents() -> Vec<AgentDef> {
                 },
             ],
             default_status: "Idle".to_string(),
+            message_skip_patterns: vec![
+                "shift+tab".to_string(),
+                "accept edits".to_string(),
+                "to interrupt".to_string(),
+            ],
+        },
+        AgentDef {
+            name: "opencode".to_string(),
+            rules: vec![
+                AgentRule {
+                    status: "Running".to_string(),
+                    patterns: vec!["to interrupt".to_string()],
+                },
+                AgentRule {
+                    status: "Error".to_string(),
+                    patterns: vec!["error".to_string()],
+                },
+                AgentRule {
+                    status: "Waiting".to_string(),
+                    patterns: vec!["?".to_string(), "> ".to_string()],
+                },
+            ],
+            default_status: "Idle".to_string(),
+            message_skip_patterns: vec![
+                "tab agents".to_string(),
+                "ctrl+p commands".to_string(),
+            ],
         },
         AgentDef {
             name: "aider".to_string(),
@@ -94,11 +126,13 @@ fn default_agent_detect_agents() -> Vec<AgentDef> {
                 },
             ],
             default_status: "Idle".to_string(),
+            message_skip_patterns: vec![],
         },
         AgentDef {
             name: "cursor".to_string(),
             rules: vec![],
             default_status: "Idle".to_string(),
+            message_skip_patterns: vec![],
         },
     ]
 }
@@ -137,6 +171,11 @@ pub struct AgentDef {
     /// Status when no rule matches. Defaults to "Idle".
     #[serde(default = "default_idle_str")]
     pub default_status: String,
+    /// Patterns for lines to skip when extracting the last meaningful message.
+    /// Used to filter TUI chrome (status bars, keyboard hints, etc.) that box-drawing
+    /// detection alone can't handle. Case-insensitive substring match.
+    #[serde(default)]
+    pub message_skip_patterns: Vec<String>,
 }
 
 impl AgentDef {
@@ -153,6 +192,13 @@ impl AgentDef {
             }
         }
         crate::agent_status::AgentStatus::from_status_str(&self.default_status)
+    }
+
+    /// Extract the last meaningful message from screen text,
+    /// skipping TUI chrome lines using both default box-drawing detection
+    /// and agent-specific message_skip_patterns.
+    pub fn extract_last_message(&self, content: &str, max_len: usize) -> String {
+        crate::terminal::extract_last_line_filtered(content, max_len, &self.message_skip_patterns)
     }
 }
 

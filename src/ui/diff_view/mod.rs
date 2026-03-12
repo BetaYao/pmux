@@ -103,7 +103,7 @@ impl DiffViewOverlay {
         cx.spawn(async move |entity, cx| {
             let wt = worktree.clone();
             let (main_branch, files) = blocking::unblock(move || {
-                let main = git_diff::detect_main_branch(&wt);
+                let main = git_diff::detect_diff_base(&wt);
                 let files = git_diff::changed_files(&wt);
                 (main, files)
             })
@@ -554,6 +554,7 @@ impl DiffViewOverlay {
             .size_full()
             .flex()
             .flex_col()
+            .overflow_hidden()
             .font_family("monospace")
             .text_size(px(12.))
             .child(

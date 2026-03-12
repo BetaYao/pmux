@@ -11,7 +11,7 @@ pub mod terminal_input_handler;
 pub use colors::ColorPalette;
 pub use input::key_to_bytes;
 pub use terminal_element::TerminalElement;
-pub use content_extractor::{ContentExtractor, extract_last_line};
+pub use content_extractor::{ContentExtractor, extract_last_line, extract_last_line_filtered};
 pub use terminal_core::{DetectedLink, SearchMatch, Terminal, TerminalSize};
 
 pub use alacritty_terminal::selection::SelectionType;

@@ -96,7 +96,7 @@ pub struct TerminalElementState {
     pub rows: usize,
 }
 
-const FONT_FAMILY: &str = "Menlo";
+const FONT_FAMILY: &str = "MesloLGS NF";
 fn font_size() -> Pixels {
     px(12.0)
 }
@@ -186,14 +186,30 @@ impl Element for TerminalElement {
         use std::cell::Cell;
         thread_local! {
             static CELL_SIZE_CACHE: Cell<Option<(Pixels, Pixels)>> = const { Cell::new(None) };
+            /// Re-measure cell size after this many prepaint calls to catch font load changes.
+            static MEASURE_COUNTDOWN: Cell<u32> = const { Cell::new(0) };
         }
 
         let (cell_width, line_height) = CELL_SIZE_CACHE.with(|cache| {
-            if let Some(cached) = cache.get() {
-                return cached;
+            // Invalidate cache periodically: re-measure after ~120 frames (~2s at 60fps)
+            // to correct any initial measurement with fallback font metrics.
+            let needs_remeasure = MEASURE_COUNTDOWN.with(|cd| {
+                let count = cd.get();
+                if count == 0 {
+                    cd.set(120);
+                    cache.get().is_some() // only remeasure if we already have a cached value
+                } else {
+                    cd.set(count - 1);
+                    false
+                }
+            });
+            if !needs_remeasure {
+                if let Some(cached) = cache.get() {
+                    return cached;
+                }
             }
-            // Use Menlo without fallbacks for measurement so cell_width is always
-            // based on Menlo's monospace advance — fallback fonts may have different metrics.
+            // Use primary font without fallbacks for measurement so cell_width is always
+            // based on primary font's monospace advance — fallback fonts may have different metrics.
             let font_no_fallback = Font {
                 family: FONT_FAMILY.into(),
                 features: FontFeatures::default(),
@@ -248,6 +264,9 @@ impl Element for TerminalElement {
             if let Some(ref cb) = self.on_resize {
                 cb(cols as u16, rows as u16);
             }
+            // Schedule another render frame so the UI picks up the application's
+            // redraw response (SIGWINCH → new output) promptly.
+            window.refresh();
         }
 
         TerminalElementState {
@@ -295,8 +314,6 @@ impl Element for TerminalElement {
             let num_cols = grid.columns();
             let display_offset = grid.display_offset() as i32;
             let colors = term.colors();
-
-
 
             let mut layout_rects: Vec<LayoutRect> = Vec::new();
             let mut text_runs: Vec<BatchedTextRun> = Vec::new();
@@ -622,14 +639,28 @@ impl Element for TerminalElement {
                 Point::new(cursor_x, cursor_y),
                 Size::new(cell_width, line_height),
             );
-            window.paint_quad(quad(
-                cursor_bounds,
-                px(0.0),
-                cursor_color,
-                Edges::default(),
-                transparent_black(),
-                Default::default(),
-            ));
+            if self.focused {
+                // Focused: solid block cursor
+                window.paint_quad(quad(
+                    cursor_bounds,
+                    px(0.0),
+                    cursor_color,
+                    Edges::default(),
+                    transparent_black(),
+                    Default::default(),
+                ));
+            } else {
+                // Unfocused: hollow outline cursor
+                let border_width = px(1.0);
+                window.paint_quad(quad(
+                    cursor_bounds,
+                    px(0.0),
+                    transparent_black(),
+                    Edges::all(border_width),
+                    cursor_color,
+                    Default::default(),
+                ));
+            }
         }
 
         // Focus fog: dim unfocused panes
@@ -746,7 +777,9 @@ impl Element for TerminalElement {
             let b = bounds;
 
             window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, _cx| {
-                if !phase.bubble() || event.pressed_button != Some(MouseButton::Left) {
+                if !phase.bubble() || event.pressed_button != Some(MouseButton::Left)
+                    || !b.contains(&event.position)
+                {
                     return;
                 }
                 let mode = terminal.mode();
@@ -776,7 +809,7 @@ impl Element for TerminalElement {
             let rows = state.rows;
             let b = bounds;
 
-            window.on_mouse_event(move |event: &MouseUpEvent, phase, _window, cx| {
+            window.on_mouse_event(move |event: &MouseUpEvent, phase, _window, _cx| {
                 if !phase.bubble() || event.button != MouseButton::Left {
                     return;
                 }
@@ -790,17 +823,13 @@ impl Element for TerminalElement {
                         let row = (pt.line.0 + display_offset as i32).max(0) as usize;
                         send(&crate::terminal::sgr_mouse_release(0, col, row));
                     }
-                } else if let Some(text) = terminal.selection_text() {
-                    if !text.is_empty() {
-                        cx.write_to_clipboard(ClipboardItem::new_string(text));
-                    }
                 }
             });
         }
 
         // Register InputHandler for text input (IME path).
-        // Compute cursor screen bounds here (regardless of SHOW_CURSOR mode)
-        // so the IME candidate window can be positioned next to the cursor.
+        // Compute cursor screen bounds at paint time so the IME candidate
+        // window is positioned next to the terminal cursor.
         if self.focused {
             if let Some(ref send_fn) = self.on_input {
                 let ime_cursor_bounds = self.terminal.with_content(|term| {
@@ -815,9 +844,78 @@ impl Element for TerminalElement {
                     let cy = origin.y + line_height * (visual_line as f32);
                     Some(Bounds::new(Point::new(cx, cy), Size::new(cell_width, line_height)))
                 });
-                let handler = crate::terminal::terminal_input_handler::TerminalInputHandler::new(send_fn.clone())
-                    .with_cursor_bounds(ime_cursor_bounds);
+                let handler = crate::terminal::terminal_input_handler::TerminalInputHandler::new(
+                    self.terminal.clone(),
+                    send_fn.clone(),
+                ).with_cursor_bounds(ime_cursor_bounds);
                 window.handle_input(&self.focus_handle, handler, cx);
+            }
+
+            // Render IME preedit (marked) text overlay at cursor position.
+            // This shows the composing text (e.g. pinyin) on top of the terminal
+            // so the user can see what they're typing before committing.
+            if let Some(marked_text) = self.terminal.ime_marked_text() {
+                if !marked_text.is_empty() {
+                    let ime_pos = self.terminal.with_content(|term| {
+                        let grid = term.grid();
+                        let cursor_point = grid.cursor.point;
+                        let display_offset = grid.display_offset() as i32;
+                        let visual_line = cursor_point.line.0 + display_offset;
+                        let px_x = origin.x + cell_width * (cursor_point.column.0 as f32);
+                        let px_y = origin.y + line_height * (visual_line as f32);
+                        Point::new(px_x, px_y)
+                    });
+
+                    let ime_font = Font {
+                        family: FONT_FAMILY.into(),
+                        features: FontFeatures::default(),
+                        fallbacks: None,
+                        weight: FontWeight::NORMAL,
+                        style: FontStyle::Normal,
+                    };
+                    let ime_color = Hsla { h: 0.0, s: 0.0, l: 0.95, a: 1.0 };
+                    let ime_run = TextRun {
+                        len: marked_text.len(),
+                        font: ime_font,
+                        color: ime_color,
+                        background_color: None,
+                        underline: Some(UnderlineStyle {
+                            color: Some(ime_color),
+                            thickness: px(1.0),
+                            wavy: false,
+                        }),
+                        strikethrough: None,
+                    };
+                    let shaped = window.text_system().shape_line(
+                        marked_text.clone().into(),
+                        font_size,
+                        &[ime_run],
+                        None,
+                    );
+                    // Paint background to cover terminal text behind marked text
+                    let bg_bounds = Bounds::new(
+                        ime_pos,
+                        Size::new(shaped.width, line_height),
+                    );
+                    let bg_color = Hsla { h: 0.0, s: 0.0, l: 0.12, a: 1.0 };
+                    window.paint_quad(quad(
+                        bg_bounds,
+                        px(0.0),
+                        bg_color,
+                        Edges::default(),
+                        transparent_black(),
+                        Default::default(),
+                    ));
+                    // Paint the marked text
+                    let _ = shaped.paint(
+                        ime_pos,
+                        line_height,
+                        gpui::TextAlign::Left,
+                        None,
+                        window,
+                        cx,
+                    );
+                }
             }
         }
     }

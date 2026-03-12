@@ -502,6 +502,7 @@ fn render_sbs_context(
         .w_full()
         .flex()
         .flex_row()
+        .overflow_hidden()
         .child(
             sbs_left()
                 .child(sbs_gutter(old_no))
@@ -561,7 +562,7 @@ fn render_sbs_paired(
         sbs_right().bg(rgba(ADDED_EMPTY_BG))
     };
 
-    div().w_full().flex().flex_row().child(left).child(right)
+    div().w_full().flex().flex_row().overflow_hidden().child(left).child(right)
 }
 
 // --- Unified mode ---
@@ -635,6 +636,7 @@ fn render_unified_line(
     let row = div()
         .flex()
         .flex_row()
+        .overflow_hidden()
         .child(
             div()
                 .w(gutter_width)

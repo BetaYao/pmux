@@ -183,6 +183,24 @@ impl ContentExtractor {
         self.text_buf.clear();
         (s, ())
     }
+
+    /// Returns a view of accumulated visible text for status detection WITHOUT clearing.
+    /// The buffer is capped at `max_len` bytes (keeping the tail) to prevent unbounded growth.
+    pub fn content_for_status(&mut self, max_len: usize) -> String {
+        // Cap buffer to max_len to prevent unbounded growth
+        if self.text_buf.len() > max_len {
+            // Find a safe UTF-8 boundary to truncate from
+            let start = self.text_buf.len() - max_len;
+            // Walk forward to find the start of a valid UTF-8 codepoint
+            let start = self.text_buf[start..]
+                .iter()
+                .position(|&b| (b & 0xC0) != 0x80) // not a continuation byte
+                .map(|off| start + off)
+                .unwrap_or(self.text_buf.len());
+            self.text_buf.drain(..start);
+        }
+        String::from_utf8_lossy(&self.text_buf).into_owned()
+    }
 }
 
 impl Default for ContentExtractor {
@@ -191,29 +209,99 @@ impl Default for ContentExtractor {
     }
 }
 
+/// Check if a character is a box-drawing, block element, or simple separator character.
+fn is_box_or_separator(c: char) -> bool {
+    matches!(c,
+        '-' | '=' | '*' | '_' | '~' | '.' | ' '
+        // Box Drawing (U+2500-U+257F)
+        | '\u{2500}'..='\u{257F}'
+        // Block Elements (U+2580-U+259F)
+        | '\u{2580}'..='\u{259F}'
+    )
+}
+
+/// Check if a character is a TUI frame start character (vertical bars, corners, etc.).
+fn is_frame_start_char(c: char) -> bool {
+    matches!(c,
+        '┃' | '│' | '╹' | '╻' | '┌' | '┐' | '└' | '┘'
+        | '├' | '┤' | '╭' | '╮' | '╯' | '╰'
+        | '║' | '╔' | '╗' | '╚' | '╝'
+    )
+}
+
+/// Detect if a line is TUI chrome (borders, separators, single-char prompts, etc.).
+fn is_chrome_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    // Use char count (not byte len) so multi-byte single chars like ❯ are correctly detected
+    let visible_chars = trimmed.chars().count();
+    if visible_chars <= 1 {
+        return true;
+    }
+    // All box-drawing / border / block characters + spaces
+    if trimmed.chars().all(|c| is_box_or_separator(c)) {
+        return true;
+    }
+    // Starts with a frame character (e.g. ┃ text, ╹▀▀▀)
+    if let Some(first) = trimmed.chars().next() {
+        if is_frame_start_char(first) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Truncate a string to `max_len` characters, appending "..." if truncated.
+fn truncate_with_ellipsis(s: &str, max_len: usize) -> String {
+    let char_count = s.chars().count();
+    if char_count > max_len {
+        let truncated: String = s.chars().take(max_len).collect();
+        format!("{}...", truncated)
+    } else {
+        s.to_string()
+    }
+}
+
 /// Extract the last meaningful line from terminal content.
 /// Skips empty lines and separator-only lines (e.g. "---", "===").
 /// Truncates to `max_len` characters with "..." suffix if needed.
 pub fn extract_last_line(content: &str, max_len: usize) -> String {
+    extract_last_line_filtered(content, max_len, &[])
+}
+
+/// Extract the last meaningful line from terminal content, with two-layer filtering:
+/// 1. Default filtering: skip chrome lines (box-drawing, single-char, separators)
+/// 2. Per-agent filtering: skip lines matching any of `skip_patterns` (case-insensitive)
+///
+/// Used by `AgentDef::extract_last_message()` to skip TUI chrome specific to each agent.
+pub fn extract_last_line_filtered(
+    content: &str,
+    max_len: usize,
+    skip_patterns: &[String],
+) -> String {
     content
         .lines()
         .rev()
         .map(|l| l.trim())
         .find(|l| {
-            !l.is_empty()
-                && l.len() > 1
-                && !l.chars().all(|c| matches!(c, '-' | '=' | '*' | '_' | '~' | '.' | ' '))
-        })
-        .map(|l| {
-            // Use char count for truncation to avoid panicking on multi-byte UTF-8 boundaries
-            let char_count = l.chars().count();
-            if char_count > max_len {
-                let truncated: String = l.chars().take(max_len).collect();
-                format!("{}...", truncated)
-            } else {
-                l.to_string()
+            if is_chrome_line(l) {
+                return false;
             }
+            // Per-agent skip patterns (case-insensitive substring match)
+            if !skip_patterns.is_empty() {
+                let lower = l.to_lowercase();
+                if skip_patterns
+                    .iter()
+                    .any(|p| lower.contains(&p.to_lowercase()))
+                {
+                    return false;
+                }
+            }
+            true
         })
+        .map(|l| truncate_with_ellipsis(l, max_len))
         .unwrap_or_default()
 }
 
@@ -324,5 +412,122 @@ mod tests {
         let (text, _) = ext.take_content();
         // 0xC3 is discarded (invalid sequence), 'A' is re-processed as printable
         assert_eq!(text, "A");
+    }
+
+    // --- Tests for two-layer filtering ---
+
+    #[test]
+    fn test_is_chrome_line_box_drawing() {
+        // Lines composed entirely of box-drawing characters are chrome
+        assert!(is_chrome_line("─────────────────"));
+        assert!(is_chrome_line("═══════════════"));
+        assert!(is_chrome_line("▀▀▀▀▀▀▀▀▀▀▀▀▀"));
+        assert!(is_chrome_line("────── ──────")); // box drawing + spaces
+        assert!(is_chrome_line("  "));
+        assert!(is_chrome_line(""));
+    }
+
+    #[test]
+    fn test_is_chrome_line_frame_start() {
+        // Lines starting with frame characters are chrome
+        assert!(is_chrome_line("┃ some content"));
+        assert!(is_chrome_line("│ sidebar text"));
+        assert!(is_chrome_line("╹▀▀▀▀▀▀▀▀▀"));
+        assert!(is_chrome_line("╭─────────────╮"));
+        assert!(is_chrome_line("╰─────────────╯"));
+        assert!(is_chrome_line("║ double frame"));
+    }
+
+    #[test]
+    fn test_is_chrome_line_single_char_utf8() {
+        // Single UTF-8 char (like ❯) should be detected as single-char and skipped
+        assert!(is_chrome_line("❯"));
+        assert!(is_chrome_line("$"));
+        assert!(is_chrome_line("▶"));
+        // But multi-char content is NOT chrome
+        assert!(!is_chrome_line("❯ hello"));
+        assert!(!is_chrome_line("hello world"));
+    }
+
+    #[test]
+    fn test_is_chrome_line_normal_content() {
+        // Normal content should NOT be detected as chrome
+        assert!(!is_chrome_line("I've updated the file successfully"));
+        assert!(!is_chrome_line("Error: compilation failed"));
+        assert!(!is_chrome_line("Done: 3 files changed"));
+        assert!(!is_chrome_line("已提交并推送到 main"));
+    }
+
+    #[test]
+    fn test_extract_filtered_claude_code() {
+        // Simulated Claude Code bottom of screen
+        let content = "I've updated the configuration file.\n\
+                       \n\
+                       ─────────────────────────────────\n\
+                       > accept edits on (shift+tab to cycle)\n\
+                       \n\
+                       ╹ press esc to interrupt";
+        let skip = vec![
+            "shift+tab".to_string(),
+            "accept edits".to_string(),
+            "to interrupt".to_string(),
+        ];
+        let result = extract_last_line_filtered(content, 80, &skip);
+        assert_eq!(result, "I've updated the configuration file.");
+    }
+
+    #[test]
+    fn test_extract_filtered_opencode() {
+        // Simulated opencode bottom of screen
+        let content = "Successfully compiled the project\n\
+                       ───────────────────────────────\n\
+                       │ tab agents  ctrl+p commands\n\
+                       ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀";
+        let skip = vec![
+            "tab agents".to_string(),
+            "ctrl+p commands".to_string(),
+        ];
+        let result = extract_last_line_filtered(content, 80, &skip);
+        assert_eq!(result, "Successfully compiled the project");
+    }
+
+    #[test]
+    fn test_extract_filtered_skip_patterns_case_insensitive() {
+        let content = "Real message here\nShift+Tab to cycle\n";
+        let skip = vec!["shift+tab".to_string()];
+        let result = extract_last_line_filtered(content, 80, &skip);
+        assert_eq!(result, "Real message here");
+    }
+
+    #[test]
+    fn test_extract_last_line_backward_compat() {
+        // Original extract_last_line behavior should be preserved
+        assert_eq!(extract_last_line("", 80), "");
+        assert_eq!(extract_last_line("---\n===\n", 80), "");
+        assert_eq!(
+            extract_last_line("first line\nsecond line\n---\n\n", 80),
+            "second line"
+        );
+        // New: box-drawing lines are also skipped (enhancement)
+        assert_eq!(
+            extract_last_line("real content\n──────────\n", 80),
+            "real content"
+        );
+    }
+
+    #[test]
+    fn test_extract_filtered_empty_skip_patterns() {
+        // With empty skip patterns, behaves like enhanced extract_last_line
+        let content = "message\n┃ chrome line\n───────\n";
+        let result = extract_last_line_filtered(content, 80, &[]);
+        assert_eq!(result, "message");
+    }
+
+    #[test]
+    fn test_extract_filtered_all_chrome() {
+        // When all lines are chrome, return empty
+        let content = "───────\n┃ frame\n╹▀▀▀▀\n";
+        let result = extract_last_line_filtered(content, 80, &[]);
+        assert_eq!(result, "");
     }
 }

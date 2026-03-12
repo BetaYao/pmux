@@ -1,0 +1,83 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "bash": "ask",
+    "edit": "ask",
+    "write": "ask",
+    "external_directory": "ask",
+    "doom_loop": "ask"
+  },
+  "mcp": {
+    "playwright": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "pnpm",
+        "dlx",
+        "@playwright/mcp@latest"
+      ],
+      "environment": {
+        "PLAYWRIGHT_MCP_EXTENSION_TOKEN": "PeDxRV6o5vN3Bqaw_sRCc-T-AdQXsoiPnEmJqJxk2eI"
+      }
+    },
+    "autoui": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "pnpm",
+        "dlx",
+        "autoui-mcp@latest"
+      ],
+      "environment": {
+        "QWEN_API_KEY": "${QWEN_API_KEY}",
+        "QWEN_BASE_URL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "QWEN_MODEL": "qwen3-vl-flash"
+      }
+    }
+  },
+  "skills": {
+    "paths": [
+      "ganix-team/.claude/skills",
+      "ganix-team/.agent/skills"
+    ]
+  },
+  "provider": {
+    "compass": {
+      "models": {
+        "gemini-2.5-pro": {
+          "limit": {
+            "context": 1000000,
+            "output": 65000
+          },
+          "name": "Gemini 2.5 Pro"
+        },
+        "gpt-4o": {
+          "limit": {
+            "context": 128000,
+            "output": 16000
+          },
+          "name": "GPT 4o"
+        },
+        "gpt-5.1": {
+          "limit": {
+            "context": 256000,
+            "output": 16000
+          },
+          "name": "GPT 5.1"
+        },
+        "gpt-5.2": {
+          "limit": {
+            "context": 256000,
+            "output": 16000
+          },
+          "name": "GPT 5.2"
+        }
+      },
+      "name": "Compass",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "http://127.0.0.1:13142/v1"
+      }
+    }
+  }
+}

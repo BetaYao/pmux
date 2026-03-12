@@ -1,8 +1,8 @@
 // main.rs - pmux GUI application using gpui
 use std::path::PathBuf;
 
-use gpui::{actions, point, px, size, AssetSource, TitlebarOptions, WindowBounds, WindowOptions, *};
-use pmux::ui::app_root::AppRoot;
+use gpui::{actions, point, px, size, AssetSource, KeyBinding, TitlebarOptions, WindowBounds, WindowOptions, *};
+use pmux::ui::app_root::{AppRoot, TerminalPaste, TerminalCopy};
 
 /// Resolve the user's full login-shell PATH.
 /// macOS .app bundles launched from Finder inherit a minimal PATH
@@ -75,6 +75,15 @@ fn main() {
         cx.on_action(toggle_sidebar_from_menu);
         cx.on_action(open_help);
 
+        // Bind Cmd+V/Cmd+C to terminal paste/copy actions.
+        // GPUI's macOS backend intercepts Cmd+V at the Cocoa input system level,
+        // so on_key_down never fires for it when a TerminalInputHandler is active.
+        // Using GPUI key bindings ensures paste/copy work correctly.
+        cx.bind_keys([
+            KeyBinding::new("cmd-v", TerminalPaste, None),
+            KeyBinding::new("cmd-c", TerminalCopy, None),
+        ]);
+
         // Set up macOS-style application menus
         cx.set_menus(vec![
             Menu {
@@ -87,7 +96,10 @@ fn main() {
             },
             Menu {
                 name: "Edit".into(),
-                items: vec![],
+                items: vec![
+                    MenuItem::action("Copy", TerminalCopy),
+                    MenuItem::action("Paste", TerminalPaste),
+                ],
             },
             Menu {
                 name: "View".into(),

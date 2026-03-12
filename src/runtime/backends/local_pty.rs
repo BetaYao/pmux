@@ -242,6 +242,15 @@ impl AgentRuntime for LocalPtyAgent {
         self.create_pane(&format!("pane{}", idx))
     }
 
+    fn kill_pane(&self, pane_id: &PaneId) -> Result<(), RuntimeError> {
+        let mut panes = self.panes.lock().map_err(|e| RuntimeError::Backend(e.to_string()))?;
+        if panes.remove(pane_id).is_some() {
+            Ok(())
+        } else {
+            Err(RuntimeError::Backend(format!("pane {} not found", pane_id)))
+        }
+    }
+
     fn get_pane_dimensions(&self, pane_id: &PaneId) -> (u16, u16) {
         if let Some(pane) = self.get_pane(pane_id) {
             (
@@ -478,6 +487,10 @@ impl AgentRuntime for LocalPtyRuntime {
         Err(RuntimeError::Backend(
             "split pane not implemented in single LocalPtyRuntime - use LocalPtyAgent".to_string(),
         ))
+    }
+
+    fn kill_pane(&self, _pane_id: &PaneId) -> Result<(), RuntimeError> {
+        Err(RuntimeError::Backend("kill_pane not supported".into()))
     }
 
     fn get_pane_dimensions(&self, pane_id: &PaneId) -> (u16, u16) {

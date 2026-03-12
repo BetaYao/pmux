@@ -212,6 +212,10 @@ impl AgentRuntime for DtachRuntime {
         ))
     }
 
+    fn kill_pane(&self, _pane_id: &PaneId) -> Result<(), RuntimeError> {
+        Err(RuntimeError::Backend("kill_pane not supported".into()))
+    }
+
     fn get_pane_dimensions(&self, pane_id: &PaneId) -> (u16, u16) {
         if pane_id == &self.pane_id {
             (

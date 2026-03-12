@@ -64,6 +64,55 @@ impl EventListener for TermEventProxy {
     }
 }
 
+/// Find the largest prefix length of `data` that doesn't split a UTF-8 multi-byte sequence.
+///
+/// Scans backward from the end to check if the trailing bytes form an incomplete
+/// UTF-8 character. Returns `data.len()` if the data ends on a complete boundary.
+fn find_utf8_boundary(data: &[u8]) -> usize {
+    if data.is_empty() {
+        return 0;
+    }
+    // Check trailing bytes: walk backward to find the last lead byte or ASCII byte.
+    // UTF-8 encoding:
+    //   0xxxxxxx (00-7F) = 1-byte (ASCII) — always a complete boundary
+    //   110xxxxx (C0-DF) = 2-byte lead, needs 1 continuation
+    //   1110xxxx (E0-EF) = 3-byte lead, needs 2 continuations
+    //   11110xxx (F0-F7) = 4-byte lead, needs 3 continuations
+    //   10xxxxxx (80-BF) = continuation byte
+    let len = data.len();
+    // Walk back up to 3 bytes (max UTF-8 sequence is 4 bytes)
+    let check_from = len.saturating_sub(3);
+    for i in (check_from..len).rev() {
+        let b = data[i];
+        if b < 0x80 {
+            // ASCII byte — everything up to and including this is safe
+            return len;
+        }
+        if b >= 0xC2 {
+            // Lead byte found — check if the sequence is complete
+            let expected = if b < 0xE0 {
+                2
+            } else if b < 0xF0 {
+                3
+            } else {
+                4
+            };
+            let available = len - i;
+            if available >= expected {
+                // Complete sequence — all of `data` is safe
+                return len;
+            } else {
+                // Incomplete sequence — split before this lead byte
+                return i;
+            }
+        }
+        // else: continuation byte (0x80-0xBF), keep walking back
+    }
+    // All trailing bytes are continuations with no lead byte in range — likely
+    // corrupted data. Feed it all through and let the VTE parser handle it.
+    len
+}
+
 /// Core terminal wrapping alacritty_terminal::Term
 pub struct Terminal {
     term: Arc<Mutex<Term<TermEventProxy>>>,
@@ -84,6 +133,14 @@ pub struct Terminal {
     cached_links: Mutex<Option<Vec<DetectedLink>>>,
     cached_search: Mutex<Option<(String, Vec<SearchMatch>)>>,
     scroll_pixel_remainder: Mutex<f32>,
+    /// Buffer for incomplete UTF-8 sequences split across chunks.
+    /// Holds trailing bytes that form an incomplete multi-byte character,
+    /// to be prepended to the next chunk before feeding to the VTE parser.
+    utf8_remainder: Mutex<Vec<u8>>,
+    /// IME composition state — persists across input handler recreations.
+    /// The InputHandler is recreated every paint frame, so marked text must
+    /// live here to survive between frames.
+    ime_marked_text: Mutex<Option<String>>,
 }
 
 impl Terminal {
@@ -118,14 +175,55 @@ impl Terminal {
             cached_links: Mutex::new(None),
             cached_search: Mutex::new(None),
             scroll_pixel_remainder: Mutex::new(0.0),
+            utf8_remainder: Mutex::new(Vec::new()),
+            ime_marked_text: Mutex::new(None),
         }
     }
 
-    /// Feed PTY output bytes into the VTE parser
+    /// Feed PTY output bytes into the VTE parser.
+    ///
+    /// Buffers incomplete UTF-8 multi-byte sequences at chunk boundaries to prevent
+    /// garbled character rendering. The VTE parser receives only complete UTF-8
+    /// codepoints; any trailing incomplete sequence is held until the next call.
     pub fn process_output(&self, data: &[u8]) {
+        let mut remainder = self.utf8_remainder.lock();
+        // Build the full buffer: previous remainder + new data
+        let buf = if remainder.is_empty() {
+            data.to_vec()
+        } else {
+            let mut combined = std::mem::take(&mut *remainder);
+            combined.extend_from_slice(data);
+            combined
+        };
+        if buf.is_empty() {
+            return;
+        }
+        // Find the safe UTF-8 boundary (don't split multi-byte sequences)
+        let safe_len = find_utf8_boundary(&buf);
+        // Save any trailing incomplete sequence for next call
+        if safe_len < buf.len() {
+            *remainder = buf[safe_len..].to_vec();
+        }
+        if safe_len == 0 {
+            // Only incomplete bytes — nothing to feed yet
+            if remainder.is_empty() {
+                *remainder = buf;
+            }
+            return;
+        }
+        let to_process = &buf[..safe_len];
         let mut term = self.term.lock();
+        let was_alt = term.mode().contains(TermMode::ALT_SCREEN);
         let mut processor = self.processor.lock();
-        processor.advance(&mut *term, data);
+        processor.advance(&mut *term, to_process);
+
+        // Give alt screen scrollback when a TUI app enters alternate screen mode.
+        // alacritty_terminal creates the alt screen grid with 0 history by default,
+        // so content that scrolls off the top is lost. Enable scrollback so users
+        // can scroll up through TUI output (e.g. Claude Code analysis results).
+        if !was_alt && term.mode().contains(TermMode::ALT_SCREEN) {
+            term.grid_mut().update_history(10_000);
+        }
         self.dirty.store(true, Ordering::Relaxed);
     }
 
@@ -154,6 +252,8 @@ impl Terminal {
         let mut term = self.term.lock();
         let term_size = TermSize::new(new_size.cols as usize, new_size.rows as usize);
         term.resize(term_size);
+        // Mark dirty so link/search caches are invalidated (they reference old grid coords)
+        self.dirty.store(true, Ordering::Relaxed);
     }
 
     /// Current terminal size
@@ -177,6 +277,58 @@ impl Terminal {
     /// Current terminal mode flags (cursor visibility, app cursor, etc.)
     pub fn mode(&self) -> TermMode {
         *self.term.lock().mode()
+    }
+
+    /// Dump visible grid content as plain text (for debugging).
+    /// Each line is terminated by '\n'. Trailing spaces per line are trimmed.
+    pub fn dump_grid_text(&self) -> String {
+        use alacritty_terminal::grid::Dimensions;
+        use alacritty_terminal::index::{Column, Line, Point};
+        let term = self.term.lock();
+        let grid = term.grid();
+        let rows = grid.screen_lines();
+        let cols = grid.columns();
+        let display_offset = grid.display_offset() as i32;
+        let mut out = String::new();
+        for row in 0..rows {
+            let line = Line(row as i32 - display_offset);
+            let mut line_text = String::new();
+            for col in 0..cols {
+                let point = Point::new(line, Column(col));
+                let cell = &grid[point];
+                let c = cell.c;
+                if c == '\0' { line_text.push(' '); } else { line_text.push(c); }
+            }
+            let trimmed = line_text.trim_end();
+            out.push_str(trimmed);
+            out.push('\n');
+        }
+        out
+    }
+
+    /// Sync cursor visibility from an external source (e.g. tmux `cursor_flag`).
+    /// Feeds a synthetic DECTCEM sequence through the VTE parser so that
+    /// alacritty_terminal properly updates its internal mode flags.
+    /// This is needed when reconnecting to an existing tmux session where the
+    /// TUI app already hid the cursor before we started listening.
+    pub fn sync_cursor_visibility(&self, visible: bool) {
+        if visible {
+            self.process_output(b"\x1b[?25h"); // DECTCEM show
+        } else {
+            self.process_output(b"\x1b[?25l"); // DECTCEM hide
+        }
+    }
+
+    // ── IME state ─────────────────────────────────────────────────────
+
+    /// Set IME marked (composing) text. Called from InputHandler.
+    pub fn set_ime_marked_text(&self, text: Option<String>) {
+        *self.ime_marked_text.lock() = text;
+    }
+
+    /// Get current IME marked text (for rendering and marked_text_range).
+    pub fn ime_marked_text(&self) -> Option<String> {
+        self.ime_marked_text.lock().clone()
     }
 
     /// Search the visible terminal grid for `query`. Returns all matches.
@@ -376,9 +528,55 @@ impl Terminal {
         self.term.lock().selection_to_string()
     }
 
+    /// Extract the last `n` lines of visible text from the terminal screen.
+    /// Used for agent status detection (pattern matching against on-screen content).
+    pub fn screen_tail_text(&self, n: usize) -> String {
+        self.with_content(|term| {
+            use alacritty_terminal::grid::Dimensions;
+            use alacritty_terminal::index::{Column, Line, Point};
+            let grid = term.grid();
+            let screen_lines = grid.screen_lines();
+            let cols = grid.columns();
+            let display_offset = grid.display_offset() as i32;
+            let start_row = screen_lines.saturating_sub(n);
+            let mut text = String::new();
+            for row in start_row..screen_lines {
+                let line = Line(row as i32 - display_offset);
+                for col in 0..cols {
+                    let cell = &grid[Point { line, column: Column(col) }];
+                    text.push(cell.c);
+                }
+                text.push('\n');
+            }
+            text
+        })
+    }
+
     pub fn selection_range(&self) -> Option<SelectionRange> {
         let term = self.term.lock();
         term.selection.as_ref().and_then(|s| s.to_range(&term))
+    }
+
+    /// Select all content in the terminal (screen + scrollback).
+    pub fn select_all(&self) {
+        use alacritty_terminal::grid::Dimensions;
+        use alacritty_terminal::index::{Column, Line, Point};
+        let mut term = self.term.lock();
+        let grid = term.grid();
+        let total_lines = grid.total_lines();
+        let cols = grid.columns();
+        // Start at the top of scrollback, end at bottom-right of screen
+        let start = Point {
+            line: Line(-(total_lines as i32 - grid.screen_lines() as i32)),
+            column: Column(0),
+        };
+        let end = Point {
+            line: Line(grid.screen_lines() as i32 - 1),
+            column: Column(cols.saturating_sub(1)),
+        };
+        let mut sel = Selection::new(SelectionType::Simple, start, Side::Left);
+        sel.update(end, Side::Right);
+        term.selection = Some(sel);
     }
 }
 
@@ -476,6 +674,28 @@ mod tests {
     }
 
     #[test]
+    fn test_dectcem_hide_show_cursor() {
+        let term = Terminal::new("cursor-vis".into(), TerminalSize::default());
+        // Initially cursor should be visible
+        assert!(
+            term.mode().contains(TermMode::SHOW_CURSOR),
+            "cursor should be visible by default"
+        );
+        // Send DECTCEM hide cursor: ESC [ ? 25 l
+        term.process_output(b"\x1b[?25l");
+        assert!(
+            !term.mode().contains(TermMode::SHOW_CURSOR),
+            "cursor should be hidden after \\x1b[?25l"
+        );
+        // Send DECTCEM show cursor: ESC [ ? 25 h
+        term.process_output(b"\x1b[?25h");
+        assert!(
+            term.mode().contains(TermMode::SHOW_CURSOR),
+            "cursor should be visible after \\x1b[?25h"
+        );
+    }
+
+    #[test]
     fn test_selection_basic() {
         let term = Terminal::new("sel-1".into(), TerminalSize::default());
         term.process_output(b"Hello World\r\n");
@@ -494,5 +714,144 @@ mod tests {
 
         term.clear_selection();
         assert!(!term.has_selection());
+    }
+
+    // --- UTF-8 boundary and split-chunk tests ---
+
+    #[test]
+    fn test_find_utf8_boundary_ascii_only() {
+        assert_eq!(find_utf8_boundary(b"hello"), 5);
+        assert_eq!(find_utf8_boundary(b""), 0);
+    }
+
+    #[test]
+    fn test_find_utf8_boundary_complete_utf8() {
+        // "编" = E7 BC 96
+        assert_eq!(find_utf8_boundary(&[0xE7, 0xBC, 0x96]), 3);
+        // "编a" = E7 BC 96 61
+        assert_eq!(find_utf8_boundary(&[0xE7, 0xBC, 0x96, 0x61]), 4);
+    }
+
+    #[test]
+    fn test_find_utf8_boundary_incomplete_2byte() {
+        // 2-byte lead (C3) without continuation
+        assert_eq!(find_utf8_boundary(&[0x61, 0xC3]), 1);
+    }
+
+    #[test]
+    fn test_find_utf8_boundary_incomplete_3byte() {
+        // 3-byte lead (E7) + 1 continuation — needs 2
+        assert_eq!(find_utf8_boundary(&[0x61, 0xE7, 0xBC]), 1);
+        // 3-byte lead (E7) alone
+        assert_eq!(find_utf8_boundary(&[0x61, 0xE7]), 1);
+    }
+
+    #[test]
+    fn test_find_utf8_boundary_incomplete_4byte() {
+        // 4-byte lead (F0) + 2 continuations — needs 3
+        assert_eq!(find_utf8_boundary(&[0xF0, 0x9F, 0x98]), 0);
+        // After ASCII: split before F0
+        assert_eq!(find_utf8_boundary(&[0x61, 0xF0, 0x9F, 0x98]), 1);
+    }
+
+    #[test]
+    fn test_process_output_split_utf8_renders_correctly() {
+        let term = Terminal::new("utf8-split".into(), TerminalSize::default());
+        // "编" = E7 BC 96 — split across two chunks
+        term.process_output(&[0xE7, 0xBC]); // incomplete
+        term.process_output(&[0x96]);        // completes "编"
+
+        let text = term.screen_tail_text(1);
+        assert!(
+            text.contains('编'),
+            "expected '编' in screen output, got: {:?}",
+            text.trim()
+        );
+    }
+
+    #[test]
+    fn test_process_output_split_utf8_3way() {
+        let term = Terminal::new("utf8-3way".into(), TerminalSize::default());
+        // "编" = E7 BC 96 — each byte in a separate chunk
+        term.process_output(&[0xE7]);
+        term.process_output(&[0xBC]);
+        term.process_output(&[0x96]);
+
+        let text = term.screen_tail_text(1);
+        assert!(
+            text.contains('编'),
+            "expected '编' in screen output after 3-way split, got: {:?}",
+            text.trim()
+        );
+    }
+
+    #[test]
+    fn test_dump_grid_text_with_sgr_sequences() {
+        // Simulate Claude Code-like output with bold, colors, and special chars
+        let term = Terminal::new("grid-dump".into(), TerminalSize {
+            cols: 80, rows: 24, cell_width: 7.0, cell_height: 14.0,
+        });
+        // ESC[1m = bold, ESC[0m = reset, ESC[38;2;R;G;Bm = 24-bit fg color
+        let data = b"\x1b[38;2;255;255;255m\xe2\x8f\xba\x1b[39m \x1b[1mRead\x1b[0m(packages/app/src/stores/knowledge.ts)\r\n";
+        term.process_output(data);
+        let grid = term.dump_grid_text();
+        let first_line = grid.lines().next().unwrap_or("");
+        eprintln!("GRID LINE: {:?}", first_line);
+        assert!(
+            first_line.contains("Read(packages/app/src/stores/knowledge.ts)"),
+            "Grid should contain 'Read(packages/app/src/stores/knowledge.ts)' but got: {:?}",
+            first_line,
+        );
+    }
+
+    #[test]
+    fn test_dump_grid_text_with_horizontal_lines() {
+        let term = Terminal::new("hlines".into(), TerminalSize {
+            cols: 80, rows: 24, cell_width: 7.0, cell_height: 14.0,
+        });
+        // 20 horizontal box drawing characters
+        let data = "────────────────────\r\n".as_bytes();
+        term.process_output(data);
+        let grid = term.dump_grid_text();
+        let first_line = grid.lines().next().unwrap_or("");
+        eprintln!("GRID HLINE: {:?}", first_line);
+        // Each ─ is 1 column wide; should have 20 of them
+        let dash_count = first_line.chars().filter(|&c| c == '─').count();
+        assert_eq!(dash_count, 20, "Expected 20 horizontal lines, got {}: {:?}", dash_count, first_line);
+    }
+
+    #[test]
+    fn test_dump_grid_text_alt_screen_with_history() {
+        let term = Terminal::new("alt-hist".into(), TerminalSize {
+            cols: 80, rows: 5, cell_width: 7.0, cell_height: 14.0,
+        });
+        // Enter alt screen
+        term.process_output(b"\x1b[?1049h");
+        // Write some content
+        term.process_output(b"Line1\r\nLine2\r\nLine3\r\nLine4\r\nLine5");
+        let grid = term.dump_grid_text();
+        eprintln!("ALT GRID:\n{}", grid);
+        assert!(grid.contains("Line1"), "Grid should contain Line1: {:?}", grid);
+        assert!(grid.contains("Line5"), "Grid should contain Line5: {:?}", grid);
+    }
+
+    #[test]
+    fn test_process_output_mixed_ascii_and_split_utf8() {
+        let term = Terminal::new("utf8-mixed".into(), TerminalSize::default());
+        // "hi编码" split: "hi" + E7 BC in chunk 1, then 96 + E7 A0 81 in chunk 2
+        let mut chunk1 = b"hi".to_vec();
+        chunk1.extend_from_slice(&[0xE7, 0xBC]); // incomplete "编"
+        term.process_output(&chunk1);
+
+        let mut chunk2 = vec![0x96]; // completes "编"
+        chunk2.extend_from_slice(&[0xE7, 0xA0, 0x81]); // complete "码" (E7 A0 81)
+        term.process_output(&chunk2);
+
+        let text = term.screen_tail_text(1);
+        assert!(
+            text.contains("hi编码"),
+            "expected 'hi编码' in output, got: {:?}",
+            text.trim()
+        );
     }
 }
