@@ -297,18 +297,9 @@ impl Element for TerminalElement {
         let line_height = state.line_height;
         let font_size = state.font_size;
 
-        // Anti-ghosting: resync the VTE grid from tmux's authoritative screen
-        // state before reading it for painting.
-        //
-        // A background thread continuously calls `tmux capture-pane -p -e` every
-        // ~33ms and caches the result. Paint reads from this cache (zero blocking).
-        // The resync write and grid read are performed atomically under a single
-        // term lock, preventing the output loop from injecting mid-frame data.
-        //
-        // This works for ALL rendering modes (alt-screen AND inline TUI like
-        // Claude Code/ink). tmux processes CSI ?2026h synchronized-output
-        // internally, so `capture-pane` always returns a frame-consistent snapshot.
-        let resync_data = self.terminal.get_resync_cache();
+        // Anti-ghosting: a background thread applies `tmux capture-pane` data
+        // directly to the VTE grid (only when new output arrives). Paint just
+        // reads the grid — zero VTE processing overhead on the main thread.
 
         let default_bg = self.palette.background();
         window.paint_quad(quad(
@@ -320,9 +311,7 @@ impl Element for TerminalElement {
             Default::default(),
         ));
 
-        let (layout_rects, text_runs) = self.terminal.maybe_resync_and_with_content(
-            resync_data.as_deref(),
-            |term| {
+        let (layout_rects, text_runs) = self.terminal.with_content(|term| {
             let grid = term.grid();
             let num_lines = grid.screen_lines();
             let num_cols = grid.columns();

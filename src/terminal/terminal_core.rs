@@ -116,12 +116,12 @@ fn find_utf8_boundary(data: &[u8]) -> usize {
 /// Core terminal wrapping alacritty_terminal::Term
 pub struct Terminal {
     term: Arc<Mutex<Term<TermEventProxy>>>,
-    processor: Mutex<Processor>,
+    processor: Arc<Mutex<Processor>>,
     pub terminal_id: String,
     size: Mutex<TerminalSize>,
     title: Arc<Mutex<Option<String>>>,
     has_bell: Arc<Mutex<bool>>,
-    dirty: AtomicBool,
+    dirty: Arc<AtomicBool>,
     pub pty_write_rx: flume::Receiver<Vec<u8>>,
     /// Keep sender to maintain channel liveness; TermEventProxy uses a clone.
     #[allow(dead_code)]
@@ -161,12 +161,12 @@ pub struct Terminal {
     /// from tmux's frame-consistent screen state before rendering, eliminating
     /// ghosting caused by mid-frame %output processing.
     tmux_backed: bool,
-    /// Cached resync data from the background resync thread.
-    /// Updated asynchronously every ~33ms by a dedicated thread, so paint()
-    /// never blocks on subprocess calls. Arc-shared with the background thread.
-    resync_cache: Arc<Mutex<Option<Vec<u8>>>>,
     /// Stop signal for the background resync thread.
     resync_stop: Arc<AtomicBool>,
+    /// Set by process_output() when new data arrives. The background resync
+    /// thread only calls capture_pane_resync when this is true, so zero
+    /// subprocess overhead when the terminal is idle.
+    output_dirty: Arc<AtomicBool>,
 }
 
 impl Terminal {
@@ -188,12 +188,12 @@ impl Terminal {
 
         Self {
             term: Arc::new(Mutex::new(term)),
-            processor: Mutex::new(Processor::new()),
+            processor: Arc::new(Mutex::new(Processor::new())),
             terminal_id,
             size: Mutex::new(size),
             title,
             has_bell,
-            dirty: AtomicBool::new(false),
+            dirty: Arc::new(AtomicBool::new(false)),
             pty_write_rx,
             pty_write_tx,
             clipboard_store_rx,
@@ -207,32 +207,58 @@ impl Terminal {
             ime_last_paint_cursor: Mutex::new((0, 0)),
             synchronized_output: AtomicBool::new(false),
             tmux_backed: false,
-            resync_cache: Arc::new(Mutex::new(None)),
             resync_stop: Arc::new(AtomicBool::new(false)),
+            output_dirty: Arc::new(AtomicBool::new(false)),
         }
     }
 
     /// Create a new Terminal backed by tmux (control mode).
-    /// Starts a background thread that refreshes the resync cache every ~33ms
-    /// via `tmux capture-pane`. Paint reads from this cache (zero blocking).
+    /// Starts a background thread that applies resync data directly to the VTE
+    /// grid when new output arrives (gated by `output_dirty` flag). This keeps
+    /// ALL VTE processing off the main/paint thread, eliminating input lag.
     pub fn new_tmux(terminal_id: String, size: TerminalSize) -> Self {
         let mut t = Self::new(terminal_id, size);
         t.tmux_backed = true;
 
-        // Start background resync thread
-        let cache = t.resync_cache.clone();
+        // Start background resync thread — applies capture-pane data directly
+        // to the VTE grid so paint() never touches the VTE processor.
+        let term = t.term.clone();
+        let processor = t.processor.clone();
+        let render_dirty = t.dirty.clone();
         let stop = t.resync_stop.clone();
+        let dirty = t.output_dirty.clone();
         let pane_id = t.terminal_id.clone();
         std::thread::Builder::new()
             .name(format!("resync-{}", pane_id))
             .spawn(move || {
+                let mut cooldown: u8 = 0;
                 while !stop.load(Ordering::Relaxed) {
-                    if let Some(data) =
-                        crate::runtime::backends::tmux_control_mode::capture_pane_resync(&pane_id)
-                    {
-                        *cache.lock() = Some(data);
+                    let was_dirty = dirty.swap(false, Ordering::Relaxed);
+                    if was_dirty || cooldown > 0 {
+                        if let Some(data) =
+                            crate::runtime::backends::tmux_control_mode::capture_pane_resync(
+                                &pane_id,
+                            )
+                        {
+                            // Apply resync to VTE grid — use try_lock to NEVER
+                            // block the main thread. If paint() or process_output()
+                            // holds the lock, skip this cycle and retry in 33ms.
+                            if let Some(mut t) = term.try_lock() {
+                                if let Some(mut p) = processor.try_lock() {
+                                    p.advance(&mut *t, &data);
+                                    render_dirty.store(true, Ordering::Relaxed);
+                                }
+                            }
+                        }
+                        if was_dirty {
+                            cooldown = 3;
+                        } else {
+                            cooldown -= 1;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(33));
+                    } else {
+                        std::thread::sleep(std::time::Duration::from_millis(200));
                     }
-                    std::thread::sleep(std::time::Duration::from_millis(33));
                 }
             })
             .ok();
@@ -245,13 +271,8 @@ impl Terminal {
         self.tmux_backed
     }
 
-    /// Get the most recent cached resync data (from background thread).
-    /// Returns a clone of the cached data so every paint gets a resync,
-    /// even if multiple paints happen within the same 33ms refresh window.
-    /// Returns None if no resync is available (non-tmux or thread not started).
-    pub fn get_resync_cache(&self) -> Option<Vec<u8>> {
-        self.resync_cache.lock().clone()
-    }
+    // Resync is now applied directly to the VTE grid by the background thread.
+    // Paint just calls with_content() — zero VTE processing overhead.
 
     /// Feed PTY output bytes into the VTE parser.
     ///
@@ -327,6 +348,11 @@ impl Terminal {
             term.grid_mut().update_history(10_000);
         }
         self.dirty.store(true, Ordering::Relaxed);
+        // Signal the background resync thread that new data arrived.
+        // It will call capture_pane_resync on its next ~33ms cycle.
+        if self.tmux_backed {
+            self.output_dirty.store(true, Ordering::Relaxed);
+        }
     }
 
     /// Check and clear dirty flag. Invalidates search/link caches when dirty.
@@ -348,33 +374,8 @@ impl Terminal {
         f(&term)
     }
 
-    /// Optionally process resync data, then read the grid — all under a single lock.
-    ///
-    /// When `resync_data` is `Some`, the resync escape sequences are fed through
-    /// the VTE processor to overwrite the grid, then the closure reads it. Both
-    /// operations happen while the term mutex is held, so the output-loop thread
-    /// cannot inject mid-frame data between the resync write and the grid read.
-    ///
-    /// When `resync_data` is `None`, this behaves identically to `with_content`.
-    pub fn maybe_resync_and_with_content<F, R>(&self, resync_data: Option<&[u8]>, f: F) -> R
-    where
-        F: FnOnce(&Term<TermEventProxy>) -> R,
-    {
-        if let Some(data) = resync_data {
-            let mut term = self.term.lock();
-            {
-                let mut processor = self.processor.lock();
-                // Resync data is always valid UTF-8 (generated by capture_pane_resync),
-                // so we bypass the utf8_remainder handling used by process_output().
-                processor.advance(&mut *term, data);
-            }
-            self.dirty.store(true, Ordering::Relaxed);
-            f(&term)
-        } else {
-            let term = self.term.lock();
-            f(&term)
-        }
-    }
+    // NOTE: maybe_resync_and_with_content() removed — resync is now applied
+    // directly by the background thread. Paint uses with_content() only.
 
     /// Resize the terminal grid (does NOT resize PTY — caller must do that)
     pub fn resize(&self, new_size: TerminalSize) {

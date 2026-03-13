@@ -1335,7 +1335,7 @@ impl AppRoot {
             cx.spawn(async move |_entity, cx| {
                 use std::time::{Duration, Instant};
                 let mut last_status_check = Instant::now();
-                let mut last_resync = Instant::now();
+                let _last_resync = Instant::now();
                 let mut last_output_time = Instant::now();
 
                 let mut last_phase = ext.shell_phase();
@@ -1420,17 +1420,8 @@ impl AppRoot {
                             // Don't fall through to resync — we just rendered fresh output.
                             continue;
                         }
-                        // True idle: rate-limited resync from tmux's authoritative screen.
-                        let now = Instant::now();
-                        if now.duration_since(last_resync) >= Duration::from_secs(1) {
-                            if let Some(resync) = crate::runtime::backends::tmux_control_mode::capture_pane_resync(&pane_target_clone) {
-                                terminal_for_output.process_output(&resync);
-                                last_resync = now;
-                                if let Some(ref tae) = term_area_entity {
-                                    let _ = cx.update_entity(tae, |_, cx| cx.notify());
-                                }
-                            }
-                        }
+                        // Idle resync is now handled by the background resync
+                        // thread in Terminal::new_tmux() — no subprocess calls here.
                         if let Some(ref agent_def) = agent_override {
                             let screen_text = terminal_for_output.screen_tail_text(
                                 terminal_for_output.size().rows as usize,
@@ -1545,13 +1536,8 @@ impl AppRoot {
                         // Safety: force render if deferred too long (continuous streaming).
                         if let Some(start) = first_pending_time {
                             if start.elapsed() >= MAX_RENDER_DELAY {
-                                // Do a capture-pane resync to get the authoritative screen
-                                // state before rendering. The VTE grid may be mid-frame
-                                // (tmux strips CSI 2026 sync markers), so we overwrite it
-                                // with tmux's correct state.
-                                if let Some(resync) = crate::runtime::backends::tmux_control_mode::capture_pane_resync(&pane_target_clone) {
-                                    terminal_for_output.process_output(&resync);
-                                }
+                                // Resync is handled by background thread in
+                                // Terminal::new_tmux() — no subprocess calls here.
                                 if !terminal_for_output.is_synchronized_output() {
                                     if let Some(ref tae) = term_area_entity {
                                         let _ = cx.update_entity(tae, |_, cx| cx.notify());
@@ -1736,7 +1722,7 @@ impl AppRoot {
             cx.spawn(async move |_entity, cx| {
                 use std::time::{Duration, Instant};
                 let mut last_status_check = Instant::now();
-                let mut last_resync = Instant::now();
+                let _last_resync = Instant::now();
                 let mut last_output_time = Instant::now();
 
                 let mut last_phase = ext.shell_phase();
@@ -1804,17 +1790,8 @@ impl AppRoot {
                             }
                             continue;
                         }
-                        // True idle: rate-limited resync from tmux's authoritative screen.
-                        let now = Instant::now();
-                        if now.duration_since(last_resync) >= Duration::from_secs(1) {
-                            if let Some(resync) = crate::runtime::backends::tmux_control_mode::capture_pane_resync(&pane_target_clone) {
-                                terminal_for_output.process_output(&resync);
-                                last_resync = now;
-                                if let Some(ref tae) = term_area_entity {
-                                    let _ = cx.update_entity(tae, |_, cx| cx.notify());
-                                }
-                            }
-                        }
+                        // Idle resync is now handled by the background resync
+                        // thread in Terminal::new_tmux() — no subprocess calls here.
                         if let Some(ref agent_def) = agent_override {
                             let screen_text = terminal_for_output.screen_tail_text(
                                 terminal_for_output.size().rows as usize,
@@ -1916,9 +1893,7 @@ impl AppRoot {
 
                         if let Some(start) = first_pending_time {
                             if start.elapsed() >= MAX_RENDER_DELAY {
-                                if let Some(resync) = crate::runtime::backends::tmux_control_mode::capture_pane_resync(&pane_target_clone) {
-                                    terminal_for_output.process_output(&resync);
-                                }
+                                // Resync handled by background thread.
                                 if !terminal_for_output.is_synchronized_output() {
                                     if let Some(ref tae) = term_area_entity {
                                         let _ = cx.update_entity(tae, |_, cx| cx.notify());
