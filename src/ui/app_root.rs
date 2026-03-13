@@ -228,6 +228,64 @@ impl NotificationSender for AppNotificationSender {
     }
 }
 
+/// Coalesce terminal output chunks into a single buffer and process once.
+/// Returns `Ok(true)` if output data was received, `Ok(false)` for idle timeout.
+/// Returns `Err` if the channel is closed.
+async fn coalesce_and_process_output(
+    rx: &flume::Receiver<Vec<u8>>,
+    terminal: &crate::terminal::Terminal,
+    ext: &mut ContentExtractor,
+    idle_timeout: std::time::Duration,
+    cx: &AsyncApp,
+) -> Result<bool, flume::RecvError> {
+    use std::time::Duration;
+
+    // Step 1: Wait for first chunk OR idle timeout.
+    let first_chunk: Vec<u8>;
+    {
+        let timer = cx.background_executor().timer(idle_timeout);
+        let recv = rx.recv_async();
+        pin_mut!(timer);
+        pin_mut!(recv);
+        match select(recv, timer).await {
+            Either::Left((Ok(chunk), _)) => {
+                first_chunk = chunk;
+            }
+            Either::Left((Err(e), _)) => return Err(e),
+            Either::Right((_, _)) => return Ok(false),
+        }
+    }
+
+    // Step 2: Adaptive coalescing window.
+    // Alt-screen (TUI programs): use 50ms to capture more of the TUI frame in
+    // one batch. tmux strips CSI 2026, so we can't detect frame boundaries;
+    // a wider window reduces mid-frame renders that cause ghosting.
+    // Normal shell: 4ms for responsive keystroke echo.
+    let coalesce_ms: u64 = if terminal.is_alt_screen() { 50 } else { 4 };
+
+    let mut coalesce_buf = first_chunk;
+
+    // Wait the FULL coalescing window, then drain everything that arrived.
+    // This ensures all %output events for a single TUI frame are collected
+    // before processing. In tmux mode, CSI 2026 is consumed by tmux so
+    // this coalescing window is the primary defense against ghosting.
+    cx.background_executor()
+        .timer(Duration::from_millis(coalesce_ms))
+        .await;
+
+    // Drain all chunks that arrived during the coalescing window.
+    while let Ok(next) = rx.try_recv() {
+        coalesce_buf.extend_from_slice(&next);
+    }
+
+    // Step 3: Single-shot processing of the entire coalesced buffer.
+    terminal.process_output(&coalesce_buf);
+    ext.feed(&coalesce_buf);
+
+    // Step 4: Signal that output was received.
+    Ok(true)
+}
+
 /// Main application root component
 pub struct AppRoot {
     state: AppState,
@@ -1081,15 +1139,28 @@ impl AppRoot {
             );
             // #endregion
 
-            let terminal = Arc::new(Terminal::new(
-                pane_target_str.clone(),
-                TerminalSize {
-                    cols: cols as u16,
-                    rows: rows as u16,
-                    cell_width: 8.0,
-                    cell_height: 16.0,
-                },
-            ));
+            let is_tmux = runtime.backend_type().starts_with("tmux");
+            let terminal = Arc::new(if is_tmux {
+                Terminal::new_tmux(
+                    pane_target_str.clone(),
+                    TerminalSize {
+                        cols: cols as u16,
+                        rows: rows as u16,
+                        cell_width: 8.0,
+                        cell_height: 16.0,
+                    },
+                )
+            } else {
+                Terminal::new(
+                    pane_target_str.clone(),
+                    TerminalSize {
+                        cols: cols as u16,
+                        rows: rows as u16,
+                        cell_width: 8.0,
+                        cell_height: 16.0,
+                    },
+                )
+            });
 
             // Pre-populate the terminal with the initial capture-pane snapshot synchronously
             // so the very first GPUI render frame already shows real content instead of a
@@ -1264,6 +1335,8 @@ impl AppRoot {
             cx.spawn(async move |_entity, cx| {
                 use std::time::{Duration, Instant};
                 let mut last_status_check = Instant::now();
+                let mut last_resync = Instant::now();
+                let mut last_output_time = Instant::now();
 
                 let mut last_phase = ext.shell_phase();
                 let mut last_alt_screen = false;
@@ -1272,6 +1345,20 @@ impl AppRoot {
                     .map(|c| c.agent_detect)
                     .unwrap_or_else(|_| crate::config::Config::default().agent_detect);
                 let status_interval = Duration::from_millis(200);
+
+                // Deferred rendering: don't render mid-frame. Wait for an output
+                // gap to detect TUI frame completion. This compensates for tmux
+                // stripping CSI ?2026h synchronized-output markers.
+                let mut pending_notify = false;
+                let mut first_pending_time: Option<Instant> = None;
+                // Gap threshold: if no output for this long, consider the frame complete.
+                // 16ms = one 60fps frame; gives TUI programs time to complete their
+                // frame output before we render.
+                const RENDER_GAP: Duration = Duration::from_millis(16);
+                // Safety cap: force a render if deferred too long (continuous streaming).
+                // In alt-screen mode, the forced render does a capture-pane resync first
+                // to avoid showing mid-frame ghosting.
+                const MAX_RENDER_DELAY: Duration = Duration::from_millis(200);
 
                 // Initial status check for recovered sessions.
                 // capture-pane doesn't include OSC 133 markers, so ext.shell_phase()
@@ -1295,37 +1382,54 @@ impl AppRoot {
                 }
 
                 loop {
-                    // Wait for new output OR a periodic idle-check timeout.
-                    // When an agent (e.g. Claude) is running, its status can change
-                    // without producing output (e.g. user presses Esc to cancel).
-                    // The 2s timer ensures we re-check the screen periodically.
-                    let idle_timeout = Duration::from_secs(2);
-                    let got_output;
-                    {
-                        let timer = cx.background_executor().timer(idle_timeout);
-                        let recv = rx.recv_async();
-                        pin_mut!(timer);
-                        pin_mut!(recv);
-                        match select(recv, timer).await {
-                            Either::Left((Ok(chunk), _)) => {
-                                terminal_for_output.process_output(&chunk);
-                                ext.feed(&chunk);
-                                got_output = true;
-                            }
-                            Either::Left((Err(_), _)) => break, // channel closed
-                            Either::Right((_, _)) => {
-                                got_output = false;
-                            }
-                        }
-                    }
+                    // When a render is pending, use a short gap timeout to detect
+                    // when the TUI frame is complete. Otherwise use longer timeouts
+                    // for resync / idle status checks.
+                    let idle_timeout = if pending_notify {
+                        RENDER_GAP
+                    } else if Instant::now().duration_since(last_output_time) < Duration::from_secs(2) {
+                        Duration::from_millis(300)
+                    } else {
+                        Duration::from_secs(2)
+                    };
 
-                    // When no output arrived (idle timeout), do a screen-based status
-                    // check for known agents and skip the rest of the output processing.
+                    let got_output = match coalesce_and_process_output(
+                        &rx,
+                        &terminal_for_output,
+                        &mut ext,
+                        idle_timeout,
+                        &cx,
+                    ).await {
+                        Ok(got) => got,
+                        Err(_) => break, // channel closed
+                    };
+
                     if !got_output {
-                        // Periodic resync: capture tmux's authoritative screen content
-                        // and re-inject it to fix any accumulated garbling from %output.
-                        if let Some(resync) = crate::runtime::backends::tmux_control_mode::capture_pane_resync(&pane_target_clone) {
-                            terminal_for_output.process_output(&resync);
+                        // Output gap or true idle.
+                        if pending_notify {
+                            // Gap detected after output — TUI frame is likely complete.
+                            pending_notify = false;
+                            first_pending_time = None;
+                            if !modal_open.load(Ordering::Relaxed)
+                                && !terminal_for_output.is_synchronized_output()
+                            {
+                                if let Some(ref tae) = term_area_entity {
+                                    let _ = cx.update_entity(tae, |_, cx| cx.notify());
+                                }
+                            }
+                            // Don't fall through to resync — we just rendered fresh output.
+                            continue;
+                        }
+                        // True idle: rate-limited resync from tmux's authoritative screen.
+                        let now = Instant::now();
+                        if now.duration_since(last_resync) >= Duration::from_secs(1) {
+                            if let Some(resync) = crate::runtime::backends::tmux_control_mode::capture_pane_resync(&pane_target_clone) {
+                                terminal_for_output.process_output(&resync);
+                                last_resync = now;
+                                if let Some(ref tae) = term_area_entity {
+                                    let _ = cx.update_entity(tae, |_, cx| cx.notify());
+                                }
+                            }
                         }
                         if let Some(ref agent_def) = agent_override {
                             let screen_text = terminal_for_output.screen_tail_text(
@@ -1343,36 +1447,14 @@ impl AppRoot {
                         }
                         continue;
                     }
+                    last_output_time = Instant::now();
 
-                    // Coalesce output: wait up to 4ms for more chunks to reduce tearing.
-                    // During fast output (Claude Code, cat, etc.) this batches dozens of
-                    // chunks per render frame. Adds <4ms latency to keystroke echo (imperceptible).
-                    {
-                        let timer = cx.background_executor().timer(Duration::from_millis(4));
-                        let recv = rx.recv_async();
-                        pin_mut!(timer);
-                        pin_mut!(recv);
-                        match select(recv, timer).await {
-                            Either::Left((Ok(next), _)) => {
-                                terminal_for_output.process_output(&next);
-                                ext.feed(&next);
-                            }
-                            _ => {} // Timeout or channel closed
-                        }
-                    }
-
-                    // Drain all immediately available chunks (may have queued during the 4ms wait)
-                    while let Ok(next) = rx.try_recv() {
-                        terminal_for_output.process_output(&next);
-                        ext.feed(&next);
-                    }
+                    let alt_screen = terminal_for_output.mode()
+                        .contains(alacritty_terminal::term::TermMode::ALT_SCREEN);
 
                     // Throttle status detection: only run on phase change or every 200ms
                     let now = Instant::now();
                     let phase = ext.shell_phase();
-                    // Detect alternate screen buffer (TUI programs: vim, htop, etc.)
-                    let alt_screen = terminal_for_output.mode()
-                        .contains(alacritty_terminal::term::TermMode::ALT_SCREEN);
                     if phase != last_phase || alt_screen != last_alt_screen
                         || now.duration_since(last_status_check) >= status_interval
                     {
@@ -1444,15 +1526,48 @@ impl AppRoot {
                             }
                         }
                     }
-                    // Skip terminal area notify when a modal (e.g. new branch dialog) is open so
-                    // the main thread stays responsive for dialog input (notably in large repos).
+
+                    // Rendering strategy depends on terminal mode:
+                    // - Alt-screen (TUI): defer rendering and wait for output gap to
+                    //   detect TUI frame completion. This prevents ghosting caused by
+                    //   tmux stripping CSI ?2026h synchronized-output markers.
+                    // - Normal shell: render immediately after coalescing for responsive
+                    //   keystroke echo and command output.
                     if modal_open.load(Ordering::Relaxed) {
-                        // continue without notifying; terminal will refresh on next output after modal closes
-                    } else if let Some(ref tae) = term_area_entity {
-                        // The 4ms coalescing window above provides natural render throttling.
-                        // GPUI coalesces multiple notify() calls into one actual render frame.
-                        let _ = cx.update_entity(tae, |_, cx| cx.notify());
+                        // skip while modal open
+                    } else if alt_screen {
+                        // Alt-screen: deferred rendering.
+                        if !pending_notify {
+                            first_pending_time = Some(Instant::now());
+                        }
+                        pending_notify = true;
+
+                        // Safety: force render if deferred too long (continuous streaming).
+                        if let Some(start) = first_pending_time {
+                            if start.elapsed() >= MAX_RENDER_DELAY {
+                                // Do a capture-pane resync to get the authoritative screen
+                                // state before rendering. The VTE grid may be mid-frame
+                                // (tmux strips CSI 2026 sync markers), so we overwrite it
+                                // with tmux's correct state.
+                                if let Some(resync) = crate::runtime::backends::tmux_control_mode::capture_pane_resync(&pane_target_clone) {
+                                    terminal_for_output.process_output(&resync);
+                                }
+                                if !terminal_for_output.is_synchronized_output() {
+                                    if let Some(ref tae) = term_area_entity {
+                                        let _ = cx.update_entity(tae, |_, cx| cx.notify());
+                                    }
+                                }
+                                pending_notify = false;
+                                first_pending_time = None;
+                            }
+                        }
+                    } else {
+                        // Normal shell: render immediately after coalescing.
+                        if let Some(ref tae) = term_area_entity {
+                            let _ = cx.update_entity(tae, |_, cx| cx.notify());
+                        }
                     }
+
                 }
             })
             .detach();
@@ -1484,15 +1599,28 @@ impl AppRoot {
         if let Some(rx) = runtime.subscribe_output(&pane_target_str) {
             use crate::terminal::{Terminal, TerminalSize};
 
-            let terminal = Arc::new(Terminal::new(
-                pane_target_str.clone(),
-                TerminalSize {
-                    cols: cols as u16,
-                    rows: rows as u16,
-                    cell_width: 8.0,
-                    cell_height: 16.0,
-                },
-            ));
+            let is_tmux = runtime.backend_type().starts_with("tmux");
+            let terminal = Arc::new(if is_tmux {
+                Terminal::new_tmux(
+                    pane_target_str.clone(),
+                    TerminalSize {
+                        cols: cols as u16,
+                        rows: rows as u16,
+                        cell_width: 8.0,
+                        cell_height: 16.0,
+                    },
+                )
+            } else {
+                Terminal::new(
+                    pane_target_str.clone(),
+                    TerminalSize {
+                        cols: cols as u16,
+                        rows: rows as u16,
+                        cell_width: 8.0,
+                        cell_height: 16.0,
+                    },
+                )
+            });
 
             let pty_write_rx = terminal.pty_write_rx.clone();
             let runtime_for_pty = runtime.clone();
@@ -1608,6 +1736,8 @@ impl AppRoot {
             cx.spawn(async move |_entity, cx| {
                 use std::time::{Duration, Instant};
                 let mut last_status_check = Instant::now();
+                let mut last_resync = Instant::now();
+                let mut last_output_time = Instant::now();
 
                 let mut last_phase = ext.shell_phase();
                 let mut last_alt_screen = false;
@@ -1616,6 +1746,12 @@ impl AppRoot {
                     .map(|c| c.agent_detect)
                     .unwrap_or_else(|_| crate::config::Config::default().agent_detect);
                 let status_interval = Duration::from_millis(200);
+
+                // Deferred rendering (same as local terminal loop).
+                let mut pending_notify = false;
+                let mut first_pending_time: Option<Instant> = None;
+                const RENDER_GAP: Duration = Duration::from_millis(16);
+                const MAX_RENDER_DELAY: Duration = Duration::from_millis(200);
 
                 // Initial status check for recovered sessions (same as setup_local_terminal).
                 {
@@ -1636,31 +1772,48 @@ impl AppRoot {
                 }
 
                 loop {
-                    // Wait for output or periodic idle-check (same as setup_local_terminal).
-                    let idle_timeout = Duration::from_secs(2);
-                    let got_output;
-                    {
-                        let timer = cx.background_executor().timer(idle_timeout);
-                        let recv = rx.recv_async();
-                        pin_mut!(timer);
-                        pin_mut!(recv);
-                        match select(recv, timer).await {
-                            Either::Left((Ok(chunk), _)) => {
-                                terminal_for_output.process_output(&chunk);
-                                ext.feed(&chunk);
-                                got_output = true;
-                            }
-                            Either::Left((Err(_), _)) => break,
-                            Either::Right((_, _)) => {
-                                got_output = false;
-                            }
-                        }
-                    }
+                    let idle_timeout = if pending_notify {
+                        RENDER_GAP
+                    } else if Instant::now().duration_since(last_output_time) < Duration::from_secs(2) {
+                        Duration::from_millis(300)
+                    } else {
+                        Duration::from_secs(2)
+                    };
+
+                    let got_output = match coalesce_and_process_output(
+                        &rx,
+                        &terminal_for_output,
+                        &mut ext,
+                        idle_timeout,
+                        &cx,
+                    ).await {
+                        Ok(got) => got,
+                        Err(_) => break,
+                    };
 
                     if !got_output {
-                        // Periodic resync from tmux during idle
-                        if let Some(resync) = crate::runtime::backends::tmux_control_mode::capture_pane_resync(&pane_target_clone) {
-                            terminal_for_output.process_output(&resync);
+                        if pending_notify {
+                            pending_notify = false;
+                            first_pending_time = None;
+                            if !modal_open.load(Ordering::Relaxed)
+                                && !terminal_for_output.is_synchronized_output()
+                            {
+                                if let Some(ref tae) = term_area_entity {
+                                    let _ = cx.update_entity(tae, |_, cx| cx.notify());
+                                }
+                            }
+                            continue;
+                        }
+                        // True idle: rate-limited resync from tmux's authoritative screen.
+                        let now = Instant::now();
+                        if now.duration_since(last_resync) >= Duration::from_secs(1) {
+                            if let Some(resync) = crate::runtime::backends::tmux_control_mode::capture_pane_resync(&pane_target_clone) {
+                                terminal_for_output.process_output(&resync);
+                                last_resync = now;
+                                if let Some(ref tae) = term_area_entity {
+                                    let _ = cx.update_entity(tae, |_, cx| cx.notify());
+                                }
+                            }
                         }
                         if let Some(ref agent_def) = agent_override {
                             let screen_text = terminal_for_output.screen_tail_text(
@@ -1678,32 +1831,11 @@ impl AppRoot {
                         }
                         continue;
                     }
-
-                    // Coalesce output: wait up to 4ms for more chunks to reduce tearing.
-                    {
-                        let timer = cx.background_executor().timer(Duration::from_millis(4));
-                        let recv = rx.recv_async();
-                        pin_mut!(timer);
-                        pin_mut!(recv);
-                        match select(recv, timer).await {
-                            Either::Left((Ok(next), _)) => {
-                                terminal_for_output.process_output(&next);
-                                ext.feed(&next);
-                            }
-                            _ => {}
-                        }
-                    }
-
-                    // Drain all immediately available chunks (may have queued during the 4ms wait)
-                    while let Ok(next) = rx.try_recv() {
-                        terminal_for_output.process_output(&next);
-                        ext.feed(&next);
-                    }
+                    last_output_time = Instant::now();
 
                     // Throttle status detection: only run on phase change or every 200ms
                     let now = Instant::now();
                     let phase = ext.shell_phase();
-                    // Detect alternate screen buffer (TUI programs: vim, htop, etc.)
                     let alt_screen = terminal_for_output.mode()
                         .contains(alacritty_terminal::term::TermMode::ALT_SCREEN);
                     if phase != last_phase || alt_screen != last_alt_screen
@@ -1771,10 +1903,36 @@ impl AppRoot {
                             }
                         }
                     }
+
+                    // Rendering strategy (same as local terminal loop).
                     if modal_open.load(Ordering::Relaxed) {
-                        // skip terminal notify while modal open (e.g. new branch dialog)
-                    } else if let Some(ref tae) = term_area_entity {
-                        let _ = cx.update_entity(tae, |_, cx| cx.notify());
+                        // skip while modal open
+                    } else if alt_screen {
+                        // Alt-screen: deferred rendering.
+                        if !pending_notify {
+                            first_pending_time = Some(Instant::now());
+                        }
+                        pending_notify = true;
+
+                        if let Some(start) = first_pending_time {
+                            if start.elapsed() >= MAX_RENDER_DELAY {
+                                if let Some(resync) = crate::runtime::backends::tmux_control_mode::capture_pane_resync(&pane_target_clone) {
+                                    terminal_for_output.process_output(&resync);
+                                }
+                                if !terminal_for_output.is_synchronized_output() {
+                                    if let Some(ref tae) = term_area_entity {
+                                        let _ = cx.update_entity(tae, |_, cx| cx.notify());
+                                    }
+                                }
+                                pending_notify = false;
+                                first_pending_time = None;
+                            }
+                        }
+                    } else {
+                        // Normal shell: render immediately after coalescing.
+                        if let Some(ref tae) = term_area_entity {
+                            let _ = cx.update_entity(tae, |_, cx| cx.notify());
+                        }
                     }
                 }
             })

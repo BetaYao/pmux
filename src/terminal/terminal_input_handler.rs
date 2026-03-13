@@ -72,8 +72,9 @@ impl InputHandler for TerminalInputHandler {
         window: &mut Window,
         _cx: &mut App,
     ) {
-        // Committed text — clear IME composition in persistent state.
+        // Committed text — clear IME composition and frozen cursor in persistent state.
         self.terminal.set_ime_marked_text(None);
+        self.terminal.set_ime_cursor_frozen(None);
         // Trigger repaint so the preedit overlay is cleared from the terminal surface.
         window.refresh();
 
@@ -115,7 +116,18 @@ impl InputHandler for TerminalInputHandler {
         // Do NOT send to PTY; the final committed text arrives via replace_text_in_range.
         if new_text.is_empty() {
             self.terminal.set_ime_marked_text(None);
+            self.terminal.set_ime_cursor_frozen(None);
         } else {
+            // Freeze cursor position from the most recent paint frame.
+            // We use the paint-time cursor instead of reading the grid directly
+            // because TUI apps (like Claude Code) move the grid cursor during
+            // background redraws. Between the last paint and this key event,
+            // the cursor may have been moved to a status bar or output area.
+            // The paint-time position reflects what the user actually saw on screen.
+            if self.terminal.ime_cursor_frozen().is_none() {
+                let cursor_pos = self.terminal.ime_last_paint_cursor();
+                self.terminal.set_ime_cursor_frozen(Some(cursor_pos));
+            }
             self.terminal.set_ime_marked_text(Some(new_text.to_string()));
         }
         // Trigger repaint so the preedit text overlay is rendered on the terminal surface.
@@ -124,6 +136,7 @@ impl InputHandler for TerminalInputHandler {
 
     fn unmark_text(&mut self, window: &mut Window, _cx: &mut App) {
         self.terminal.set_ime_marked_text(None);
+        self.terminal.set_ime_cursor_frozen(None);
         window.refresh();
     }
 

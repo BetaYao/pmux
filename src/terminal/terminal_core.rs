@@ -141,6 +141,32 @@ pub struct Terminal {
     /// The InputHandler is recreated every paint frame, so marked text must
     /// live here to survive between frames.
     ime_marked_text: Mutex<Option<String>>,
+    /// Frozen cursor position (column, visual_line) captured when IME composition starts.
+    /// While composing, the terminal may receive output that moves the grid cursor away
+    /// from where the user is typing. This field locks the cursor position so the
+    /// preedit overlay and candidate window stay at the original input location.
+    ime_cursor_frozen: Mutex<Option<(usize, i32)>>,
+    /// Cursor position (column, visual_line) saved at each paint frame.
+    /// Used as a stable reference for IME cursor freezing: TUI apps (like Claude Code)
+    /// may move the grid cursor between paint frames and key events, but the cursor
+    /// position at paint time reflects what the user actually sees on screen.
+    ime_last_paint_cursor: Mutex<(usize, i32)>,
+    /// True during a CSI ?2026h synchronized-output block.
+    /// Detected in process_output() by scanning for CSI ?2026h/l sequences.
+    /// Used to gate cx.notify() in the output loop so that renders only happen
+    /// outside sync blocks (relevant for local PTY mode; tmux strips these).
+    synchronized_output: AtomicBool,
+    /// True when this terminal is backed by tmux (control mode).
+    /// When true, paint-time `capture_pane_resync` is used to sync the VTE grid
+    /// from tmux's frame-consistent screen state before rendering, eliminating
+    /// ghosting caused by mid-frame %output processing.
+    tmux_backed: bool,
+    /// Cached resync data from the background resync thread.
+    /// Updated asynchronously every ~33ms by a dedicated thread, so paint()
+    /// never blocks on subprocess calls. Arc-shared with the background thread.
+    resync_cache: Arc<Mutex<Option<Vec<u8>>>>,
+    /// Stop signal for the background resync thread.
+    resync_stop: Arc<AtomicBool>,
 }
 
 impl Terminal {
@@ -177,7 +203,54 @@ impl Terminal {
             scroll_pixel_remainder: Mutex::new(0.0),
             utf8_remainder: Mutex::new(Vec::new()),
             ime_marked_text: Mutex::new(None),
+            ime_cursor_frozen: Mutex::new(None),
+            ime_last_paint_cursor: Mutex::new((0, 0)),
+            synchronized_output: AtomicBool::new(false),
+            tmux_backed: false,
+            resync_cache: Arc::new(Mutex::new(None)),
+            resync_stop: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Create a new Terminal backed by tmux (control mode).
+    /// Starts a background thread that refreshes the resync cache every ~33ms
+    /// via `tmux capture-pane`. Paint reads from this cache (zero blocking).
+    pub fn new_tmux(terminal_id: String, size: TerminalSize) -> Self {
+        let mut t = Self::new(terminal_id, size);
+        t.tmux_backed = true;
+
+        // Start background resync thread
+        let cache = t.resync_cache.clone();
+        let stop = t.resync_stop.clone();
+        let pane_id = t.terminal_id.clone();
+        std::thread::Builder::new()
+            .name(format!("resync-{}", pane_id))
+            .spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    if let Some(data) =
+                        crate::runtime::backends::tmux_control_mode::capture_pane_resync(&pane_id)
+                    {
+                        *cache.lock() = Some(data);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(33));
+                }
+            })
+            .ok();
+
+        t
+    }
+
+    /// Returns true if this terminal is backed by tmux control mode.
+    pub fn is_tmux_backed(&self) -> bool {
+        self.tmux_backed
+    }
+
+    /// Get the most recent cached resync data (from background thread).
+    /// Returns a clone of the cached data so every paint gets a resync,
+    /// even if multiple paints happen within the same 33ms refresh window.
+    /// Returns None if no resync is available (non-tmux or thread not started).
+    pub fn get_resync_cache(&self) -> Option<Vec<u8>> {
+        self.resync_cache.lock().clone()
     }
 
     /// Feed PTY output bytes into the VTE parser.
@@ -186,6 +259,35 @@ impl Terminal {
     /// garbled character rendering. The VTE parser receives only complete UTF-8
     /// codepoints; any trailing incomplete sequence is held until the next call.
     pub fn process_output(&self, data: &[u8]) {
+        // Detect CSI ?2026h/l (synchronized output) in the buffer.
+        // In tmux mode these sequences are consumed by tmux and never arrive,
+        // so this is effectively only active for local PTY mode.
+        let sync_start = b"\x1b[?2026h";
+        let sync_end = b"\x1b[?2026l";
+
+        let mut found_start = false;
+        let mut found_end = false;
+
+        if data.len() >= sync_start.len() {
+            for window in data.windows(sync_start.len()) {
+                if window == sync_start {
+                    found_start = true;
+                }
+                if window == sync_end {
+                    found_end = true;
+                }
+            }
+        }
+
+        // If we see start but not end, we're entering a sync block.
+        // If we see end (regardless of start), the sync block is done.
+        if found_start && !found_end {
+            self.synchronized_output.store(true, Ordering::Relaxed);
+        }
+        if found_end {
+            self.synchronized_output.store(false, Ordering::Relaxed);
+        }
+
         let mut remainder = self.utf8_remainder.lock();
         // Build the full buffer: previous remainder + new data
         let buf = if remainder.is_empty() {
@@ -246,6 +348,34 @@ impl Terminal {
         f(&term)
     }
 
+    /// Optionally process resync data, then read the grid — all under a single lock.
+    ///
+    /// When `resync_data` is `Some`, the resync escape sequences are fed through
+    /// the VTE processor to overwrite the grid, then the closure reads it. Both
+    /// operations happen while the term mutex is held, so the output-loop thread
+    /// cannot inject mid-frame data between the resync write and the grid read.
+    ///
+    /// When `resync_data` is `None`, this behaves identically to `with_content`.
+    pub fn maybe_resync_and_with_content<F, R>(&self, resync_data: Option<&[u8]>, f: F) -> R
+    where
+        F: FnOnce(&Term<TermEventProxy>) -> R,
+    {
+        if let Some(data) = resync_data {
+            let mut term = self.term.lock();
+            {
+                let mut processor = self.processor.lock();
+                // Resync data is always valid UTF-8 (generated by capture_pane_resync),
+                // so we bypass the utf8_remainder handling used by process_output().
+                processor.advance(&mut *term, data);
+            }
+            self.dirty.store(true, Ordering::Relaxed);
+            f(&term)
+        } else {
+            let term = self.term.lock();
+            f(&term)
+        }
+    }
+
     /// Resize the terminal grid (does NOT resize PTY — caller must do that)
     pub fn resize(&self, new_size: TerminalSize) {
         *self.size.lock() = new_size;
@@ -277,6 +407,16 @@ impl Terminal {
     /// Current terminal mode flags (cursor visibility, app cursor, etc.)
     pub fn mode(&self) -> TermMode {
         *self.term.lock().mode()
+    }
+
+    /// Returns true if the terminal is in alternate screen mode.
+    pub fn is_alt_screen(&self) -> bool {
+        self.mode().contains(TermMode::ALT_SCREEN)
+    }
+
+    /// Returns true during a CSI ?2026h synchronized-output block.
+    pub fn is_synchronized_output(&self) -> bool {
+        self.synchronized_output.load(Ordering::Relaxed)
     }
 
     /// Dump visible grid content as plain text (for debugging).
@@ -329,6 +469,57 @@ impl Terminal {
     /// Get current IME marked text (for rendering and marked_text_range).
     pub fn ime_marked_text(&self) -> Option<String> {
         self.ime_marked_text.lock().clone()
+    }
+
+    /// Freeze cursor position (column, visual_line) when IME composition starts.
+    /// This prevents terminal output from moving the preedit overlay mid-composition.
+    pub fn set_ime_cursor_frozen(&self, pos: Option<(usize, i32)>) {
+        *self.ime_cursor_frozen.lock() = pos;
+    }
+
+    /// Get frozen cursor position for IME preedit rendering.
+    pub fn ime_cursor_frozen(&self) -> Option<(usize, i32)> {
+        *self.ime_cursor_frozen.lock()
+    }
+
+    /// Save cursor position at paint time for later IME freezing.
+    pub fn set_ime_last_paint_cursor(&self, pos: (usize, i32)) {
+        *self.ime_last_paint_cursor.lock() = pos;
+    }
+
+    /// Get the cursor position from the most recent paint frame.
+    pub fn ime_last_paint_cursor(&self) -> (usize, i32) {
+        *self.ime_last_paint_cursor.lock()
+    }
+
+    /// Find the visual cursor drawn by TUI apps when SHOW_CURSOR is off.
+    /// TUI apps (like Claude Code) hide the real cursor and draw their own
+    /// using reverse-video cells. Returns the LAST INVERSE cell found
+    /// (bottom-most, right-most), because when multiple TUI sessions are
+    /// visible (e.g. exited Claude Code + active Cursor Agent), the active
+    /// input cursor is always the last one rendered on screen.
+    pub fn find_visual_cursor(&self) -> Option<(usize, i32)> {
+        use alacritty_terminal::grid::Dimensions;
+        use alacritty_terminal::index::{Column, Line, Point};
+        use alacritty_terminal::term::cell::Flags;
+        self.with_content(|term| {
+            let grid = term.grid();
+            let num_lines = grid.screen_lines();
+            let num_cols = grid.columns();
+            let display_offset = grid.display_offset() as i32;
+
+            let mut last: Option<(usize, i32)> = None;
+            for row in 0..num_lines {
+                let line = Line(row as i32 - display_offset);
+                for col in 0..num_cols {
+                    let cell = &grid[Point { line, column: Column(col) }];
+                    if cell.flags.contains(Flags::INVERSE) {
+                        last = Some((col, row as i32));
+                    }
+                }
+            }
+            last
+        })
     }
 
     /// Search the visible terminal grid for `query`. Returns all matches.
@@ -577,6 +768,13 @@ impl Terminal {
         let mut sel = Selection::new(SelectionType::Simple, start, Side::Left);
         sel.update(end, Side::Right);
         term.selection = Some(sel);
+    }
+}
+
+impl Drop for Terminal {
+    fn drop(&mut self) {
+        // Signal the background resync thread to stop
+        self.resync_stop.store(true, Ordering::Relaxed);
     }
 }
 
