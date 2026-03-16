@@ -10,7 +10,7 @@ use crate::ui::topbar_entity::TopBarEntity;
 use gpui::*;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
 pub struct RuntimeManager {
     pub runtime: Option<Arc<dyn AgentRuntime>>,
@@ -37,6 +37,8 @@ pub struct RuntimeManager {
 }
 
 const RUNNING_ANIMATION_INTERVAL_MS: u64 = 250;
+/// Running animation frames (currently used for display text, kept for future use)
+#[allow(dead_code)]
 const RUNNING_FRAMES: [&str; 4] = ["⠋", "⠙", "⠹", "⠸"];
 
 impl RuntimeManager {

@@ -3,7 +3,6 @@
 //! Extracted from AppRoot Phase 5.
 
 use crate::split_tree::SplitNode;
-use gpui::*;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicBool;
 
