@@ -294,6 +294,8 @@ pub struct AppRoot {
     notification_manager: Arc<Mutex<NotificationManager>>,
     /// DialogManager Entity — manages settings modal, new branch dialog, delete/close dialogs
     dialog_mgr: Option<Entity<crate::ui::dialog_manager::DialogManager>>,
+    /// NotificationCenter Entity — manages notifications, panel state, notification jump
+    notification_center: Option<Entity<crate::ui::notification_center::NotificationCenter>>,
     sidebar_visible: bool,
     /// Per-pane terminal buffers (Term = pipe-pane/control mode streaming; Legacy = error placeholder only)
     terminal_buffers: Arc<Mutex<HashMap<String, TerminalBuffer>>>,
@@ -562,6 +564,7 @@ impl AppRoot {
             status_counts: StatusCounts::new(),
             notification_manager: Arc::new(Mutex::new(NotificationManager::new())),
             dialog_mgr: None,
+            notification_center: None,
             sidebar_visible: true,
             terminal_buffers: Arc::new(Mutex::new(HashMap::new())),
             split_tree: SplitNode::pane(""),
@@ -644,6 +647,11 @@ impl AppRoot {
                 mgr
             });
             self.dialog_mgr = Some(dm);
+        }
+        // Create NotificationCenter entity (Phase 2 extraction)
+        if self.notification_center.is_none() {
+            let nc = cx.new(|_cx| crate::ui::notification_center::NotificationCenter::new());
+            self.notification_center = Some(nc);
         }
         if self.dialog_input_focus.is_none() {
             self.dialog_input_focus = Some(cx.focus_handle());
