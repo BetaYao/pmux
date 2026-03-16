@@ -1,6 +1,7 @@
 // ui/mod.rs - GUI components for pmux
 pub mod app_root;
 pub mod dialog_manager;
+pub mod notification_center;
 pub mod models;
 pub mod close_tab_dialog_ui;
 pub mod delete_worktree_dialog_ui;
