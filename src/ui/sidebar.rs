@@ -26,25 +26,11 @@ impl WorktreeItem {
     pub fn set_status(&mut self, status: AgentStatus) { self.status = status; }
 
     pub fn status_icon(&self) -> &'static str {
-        match self.status {
-            AgentStatus::Running => "●",
-            AgentStatus::Waiting => "◐",
-            AgentStatus::Idle => "○",
-            AgentStatus::Error => "✕",
-            AgentStatus::Exited => "✓",
-            AgentStatus::Unknown => "?",
-        }
+        self.status.icon()
     }
 
     pub fn status_color(&self) -> Rgba {
-        match self.status {
-            AgentStatus::Running => rgb(0x4caf50),
-            AgentStatus::Waiting => rgb(0xffc107),
-            AgentStatus::Idle => rgb(0x9e9e9e),
-            AgentStatus::Error => rgb(0xf44336),
-            AgentStatus::Exited => rgb(0x2196f3),
-            AgentStatus::Unknown => rgb(0x9c27b0),
-        }
+        self.status.gpui_color()
     }
 
     pub fn formatted_branch(&self) -> String {
@@ -57,14 +43,7 @@ impl WorktreeItem {
     }
 
     pub fn status_text(&self) -> &'static str {
-        match self.status {
-            AgentStatus::Running => "Running",
-            AgentStatus::Waiting => "Waiting",
-            AgentStatus::Idle => "Idle",
-            AgentStatus::Error => "Error detected",
-            AgentStatus::Exited => "Process exited",
-            AgentStatus::Unknown => "Unknown",
-        }
+        self.status.display_text()
     }
 }
 
