@@ -2572,6 +2572,234 @@ impl AppRoot {
     }
 
     /// Handle keyboard events
+    /// Handle search-mode keys (Escape, Enter, Backspace, printable chars).
+    /// Returns true if the key was consumed.
+    fn handle_search_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
+        match event.keystroke.key.as_str() {
+            "escape" => {
+                self.search_active = false;
+                self.search_query.clear();
+                if let Some(ref e) = self.terminal_area_entity {
+                    let _ = cx.update_entity(e, |ent: &mut TerminalAreaEntity, cx| {
+                        ent.set_search(None, 0);
+                        cx.notify();
+                    });
+                }
+                cx.notify();
+                true
+            }
+            "enter" | "g" if event.keystroke.modifiers.platform || event.keystroke.key == "enter" => {
+                if let Ok(buffers) = self.terminal_buffers.lock() {
+                    if let Some(target) = self.active_pane_target.as_ref() {
+                        if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
+                            let matches = terminal.search(&self.search_query);
+                            if !matches.is_empty() {
+                                self.search_current_match =
+                                    (self.search_current_match + 1) % matches.len();
+                                if let Some(ref e) = self.terminal_area_entity {
+                                    let _ = cx.update_entity(e, |ent: &mut TerminalAreaEntity, cx| {
+                                        ent.set_search(
+                                            Some(self.search_query.clone()),
+                                            self.search_current_match,
+                                        );
+                                        cx.notify();
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                cx.notify();
+                true
+            }
+            "backspace" => {
+                self.search_query.pop();
+                if let Some(ref e) = self.terminal_area_entity {
+                    let query = self.search_query.clone();
+                    let _ = cx.update_entity(e, |ent: &mut TerminalAreaEntity, cx| {
+                        ent.set_search(
+                            if query.is_empty() { None } else { Some(query) },
+                            self.search_current_match,
+                        );
+                        cx.notify();
+                    });
+                }
+                cx.notify();
+                true
+            }
+            _ => {
+                if event.keystroke.key.len() == 1 {
+                    let ch = event.keystroke.key.chars().next().unwrap();
+                    if ch.is_ascii_graphic() || ch == ' ' {
+                        self.search_query.push(ch);
+                        if let Some(ref e) = self.terminal_area_entity {
+                            let query = self.search_query.clone();
+                            let _ = cx.update_entity(e, |ent: &mut TerminalAreaEntity, cx| {
+                                ent.set_search(Some(query), self.search_current_match);
+                                cx.notify();
+                            });
+                        }
+                        cx.notify();
+                        return true;
+                    }
+                }
+                false
+            }
+        }
+    }
+
+    /// Handle Cmd+key application shortcuts.
+    fn handle_shortcut(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+        match event.keystroke.key.as_str() {
+            "b" => {
+                self.sidebar_visible = !self.sidebar_visible;
+                let visible = self.sidebar_visible;
+                if let Some(ref e) = self.topbar_entity {
+                    let _ = cx.update_entity(e, |t: &mut TopBarEntity, cx| {
+                        t.set_sidebar_visible(visible);
+                        cx.notify();
+                    });
+                }
+                cx.notify();
+            }
+            "f" => {
+                self.search_active = true;
+                self.search_query.clear();
+                self.search_current_match = 0;
+                if let Some(ref e) = self.terminal_area_entity {
+                    let _ = cx.update_entity(e, |ent: &mut TerminalAreaEntity, cx| {
+                        ent.set_search(Some(String::new()), 0);
+                        cx.notify();
+                    });
+                }
+                cx.notify();
+            }
+            "i" => {
+                if let Some(ref model) = self.notification_panel_model {
+                    let _ = cx.update_entity(model, |m, cx| {
+                        m.toggle_panel();
+                        cx.notify();
+                    });
+                }
+            }
+            "d" => {
+                if event.keystroke.modifiers.shift {
+                    self.handle_split_pane(false, cx);
+                } else {
+                    self.handle_split_pane(true, cx);
+                }
+            }
+            "r" => {
+                self.open_diff_view(cx);
+            }
+            "w" => {
+                if self.diff_view_entity.is_some() {
+                    self.diff_view_entity = None;
+                    cx.notify();
+                } else {
+                    self.handle_close_pane(cx);
+                }
+            }
+            "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" => {
+                if let Ok(idx) = event.keystroke.key.parse::<usize>() {
+                    let idx = idx - 1;
+                    if idx < self.workspace_manager.tab_count() {
+                        self.handle_workspace_tab_switch(idx, cx);
+                        let counts = self.compute_per_tab_active_counts();
+                        if let Some(ref e) = self.topbar_entity {
+                            let topbar = e.clone();
+                            let wm = self.workspace_manager.clone();
+                            let _ = cx.update_entity(&topbar, |t: &mut TopBarEntity, cx| {
+                                t.set_workspace_manager(wm);
+                                t.set_per_tab_active_counts(counts);
+                                cx.notify();
+                            });
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Forward a key event to the terminal runtime (xterm escape sequences, IME handling).
+    fn forward_key_to_terminal(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+        let key_name = event.keystroke.key.clone();
+        let modifiers = KeyModifiers {
+            platform: event.keystroke.modifiers.platform,
+            shift: event.keystroke.modifiers.shift,
+            alt: event.keystroke.modifiers.alt,
+            ctrl: event.keystroke.modifiers.control,
+        };
+
+        match (&self.runtime, self.active_pane_target.as_ref()) {
+            (Some(runtime), Some(target)) => {
+                // IME: defer Enter so replace_text_in_range can send committed text first
+                if (key_name == "enter" || key_name == "return" || key_name == "kp_enter")
+                    && !modifiers.shift
+                    && !modifiers.platform
+                    && !modifiers.alt
+                {
+                    self.ime_pending_enter.store(true, Ordering::SeqCst);
+                    let runtime = runtime.clone();
+                    let target = target.clone();
+                    let pending = self.ime_pending_enter.clone();
+                    cx.spawn(async move |_entity, cx| {
+                        cx.background_executor()
+                            .timer(std::time::Duration::from_millis(50))
+                            .await;
+                        if pending.swap(false, Ordering::SeqCst) {
+                            let _ = runtime.send_input(&target, b"\r");
+                        }
+                    })
+                    .detach();
+                    return;
+                }
+
+                let bytes_opt = if let Ok(buffers) = self.terminal_buffers.lock() {
+                    if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
+                        crate::terminal::key_to_bytes(event, terminal.mode())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                let has_text_char = event.keystroke.key_char.as_ref().is_some_and(|c| !c.is_empty());
+                let bytes_opt = if has_text_char {
+                    bytes_opt
+                } else {
+                    bytes_opt.or_else(|| key_to_xterm_escape(&key_name, modifiers))
+                };
+
+                if let Some(bytes) = bytes_opt {
+                    if let Ok(buffers) = self.terminal_buffers.lock() {
+                        if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
+                            if terminal.display_offset() > 0 {
+                                terminal.scroll_to_bottom();
+                            }
+                        }
+                    }
+                    let send_result = runtime.send_input(target, &bytes);
+                    if let Err(e) = send_result {
+                        eprintln!("pmux: send_input failed: {}", e);
+                    }
+                }
+            }
+            _ => {
+                if !modifiers.platform {
+                    eprintln!(
+                        "pmux: key '{}' not forwarded (runtime={} target={})",
+                        key_name,
+                        self.runtime.is_some(),
+                        self.active_pane_target.as_deref().unwrap_or("none")
+                    );
+                }
+            }
+        }
+    }
+
     fn handle_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         // Track last input time for notification suppression (方案 6b)
         if let Ok(mut t) = self.last_input_time.lock() {
@@ -2647,158 +2875,14 @@ impl AppRoot {
 
         // When search is active, handle search-specific keys
         if self.search_active {
-            match event.keystroke.key.as_str() {
-                "escape" => {
-                    self.search_active = false;
-                    self.search_query.clear();
-                    if let Some(ref e) = self.terminal_area_entity {
-                        let _ = cx.update_entity(e, |ent: &mut TerminalAreaEntity, cx| {
-                            ent.set_search(None, 0);
-                            cx.notify();
-                        });
-                    }
-                    cx.notify();
-                    return;
-                }
-                "enter" | "g" if event.keystroke.modifiers.platform => {
-                    // Cmd+G or Enter: next match (need terminal to count matches)
-                    if let Ok(buffers) = self.terminal_buffers.lock() {
-                        if let Some(target) = self.active_pane_target.as_ref() {
-                            if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
-                                let matches = terminal.search(&self.search_query);
-                                if !matches.is_empty() {
-                                    self.search_current_match =
-                                        (self.search_current_match + 1) % matches.len();
-                                    if let Some(ref e) = self.terminal_area_entity {
-                                        let _ = cx.update_entity(e, |ent: &mut TerminalAreaEntity, cx| {
-                                            ent.set_search(
-                                                Some(self.search_query.clone()),
-                                                self.search_current_match,
-                                            );
-                                            cx.notify();
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    cx.notify();
-                    return;
-                }
-                "backspace" => {
-                    self.search_query.pop();
-                    if let Some(ref e) = self.terminal_area_entity {
-                        let query = self.search_query.clone();
-                        let _ = cx.update_entity(e, |ent: &mut TerminalAreaEntity, cx| {
-                            ent.set_search(
-                                if query.is_empty() { None } else { Some(query) },
-                                self.search_current_match,
-                            );
-                            cx.notify();
-                        });
-                    }
-                    cx.notify();
-                    return;
-                }
-                _ => {
-                    // Printable: append to search_query (simplified - only ascii)
-                    if event.keystroke.key.len() == 1 {
-                        let ch = event.keystroke.key.chars().next().unwrap();
-                        if ch.is_ascii_graphic() || ch == ' ' {
-                            self.search_query.push(ch);
-                            if let Some(ref e) = self.terminal_area_entity {
-                                let query = self.search_query.clone();
-                                let _ = cx.update_entity(e, |ent: &mut TerminalAreaEntity, cx| {
-                                    ent.set_search(Some(query), self.search_current_match);
-                                    cx.notify();
-                                });
-                            }
-                            cx.notify();
-                            return;
-                        }
-                    }
-                }
+            if self.handle_search_key(event, cx) {
+                return;
             }
         }
 
         // Check for Cmd+key shortcuts (app shortcuts)
         if event.keystroke.modifiers.platform {
-            match event.keystroke.key.as_str() {
-                "b" => {
-                    self.sidebar_visible = !self.sidebar_visible;
-                    let visible = self.sidebar_visible;
-                    if let Some(ref e) = self.topbar_entity {
-                        let _ = cx.update_entity(e, |t: &mut TopBarEntity, cx| {
-                            t.set_sidebar_visible(visible);
-                            cx.notify();
-                        });
-                    }
-                    cx.notify();
-                }
-                "f" => {
-                    self.search_active = true;
-                    self.search_query.clear();
-                    self.search_current_match = 0;
-                    if let Some(ref e) = self.terminal_area_entity {
-                        let _ = cx.update_entity(e, |ent: &mut TerminalAreaEntity, cx| {
-                            ent.set_search(Some(String::new()), 0);
-                            cx.notify();
-                        });
-                    }
-                    cx.notify();
-                    return;
-                }
-                "i" => {
-                    if let Some(ref model) = self.notification_panel_model {
-                        let _ = cx.update_entity(model, |m, cx| {
-                            m.toggle_panel();
-                            cx.notify();
-                        });
-                    }
-                }
-                "d" => {
-                    if event.keystroke.modifiers.shift {
-                        self.handle_split_pane(false, cx); // horizontal
-                    } else {
-                        self.handle_split_pane(true, cx); // vertical
-                    }
-                    return;
-                }
-                "r" => {
-                    self.open_diff_view(cx);
-                    return;
-                }
-                // Note: "v" (paste) is handled via GPUI action (TerminalPaste) registered
-                // with cx.bind_keys(), not here. GPUI's macOS backend intercepts Cmd+V
-                // at the Cocoa level before on_key_down fires when an InputHandler is active.
-                "w" => {
-                    if self.diff_view_entity.is_some() {
-                        self.diff_view_entity = None;
-                        cx.notify();
-                    } else {
-                        self.handle_close_pane(cx);
-                    }
-                }
-                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" => {
-                    if let Ok(idx) = event.keystroke.key.parse::<usize>() {
-                        let idx = idx - 1; // 0-based
-                        if idx < self.workspace_manager.tab_count() {
-                            self.handle_workspace_tab_switch(idx, cx);
-                            let counts = self.compute_per_tab_active_counts();
-                            if let Some(ref e) = self.topbar_entity {
-                                let topbar = e.clone();
-                                let wm = self.workspace_manager.clone();
-                                let _ = cx.update_entity(&topbar, |t: &mut TopBarEntity, cx| {
-                                    t.set_workspace_manager(wm);
-                                    t.set_per_tab_active_counts(counts);
-                                    cx.notify();
-                                });
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
+            self.handle_shortcut(event, cx);
             return; // Don't forward Cmd+key to tmux
         }
 
@@ -2870,83 +2954,7 @@ impl AppRoot {
         }
 
         // Forward all other keys to terminal via Runtime (xterm escape sequences)
-        let key_name = event.keystroke.key.clone();
-        let modifiers = KeyModifiers {
-            platform: event.keystroke.modifiers.platform,
-            shift: event.keystroke.modifiers.shift,
-            alt: event.keystroke.modifiers.alt,
-            ctrl: event.keystroke.modifiers.control,
-        };
-
-        match (&self.runtime, self.active_pane_target.as_ref()) {
-            (Some(runtime), Some(target)) => {
-                // IME: defer Enter so replace_text_in_range can send committed text first; then we send \r (or 50ms timeout sends \r)
-                if (key_name == "enter" || key_name == "return" || key_name == "kp_enter")
-                    && !modifiers.shift
-                    && !modifiers.platform
-                    && !modifiers.alt
-                {
-                    self.ime_pending_enter.store(true, Ordering::SeqCst);
-                    let runtime = runtime.clone();
-                    let target = target.clone();
-                    let pending = self.ime_pending_enter.clone();
-                    cx.spawn(async move |_entity, cx| {
-                        cx.background_executor()
-                            .timer(std::time::Duration::from_millis(50))
-                            .await;
-                        if pending.swap(false, Ordering::SeqCst) {
-                            let _ = runtime.send_input(&target, b"\r");
-                        }
-                    })
-                    .detach();
-                    return;
-                }
-
-                let bytes_opt = if let Ok(buffers) = self.terminal_buffers.lock() {
-                    if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
-                        crate::terminal::key_to_bytes(&event, terminal.mode())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                // Only fall back to xterm_escape for non-text keys.
-                // Text characters (key_char present) are handled by InputHandler;
-                // using xterm_escape as fallback would double-send them.
-                let has_text_char = event.keystroke.key_char.as_ref().is_some_and(|c| !c.is_empty());
-                let bytes_opt = if has_text_char {
-                    bytes_opt
-                } else {
-                    bytes_opt.or_else(|| key_to_xterm_escape(&key_name, modifiers))
-                };
-
-                if let Some(bytes) = bytes_opt {
-                    if let Ok(buffers) = self.terminal_buffers.lock() {
-                        if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
-                            if terminal.display_offset() > 0 {
-                                terminal.scroll_to_bottom();
-                            }
-                        }
-                    }
-                    let send_result = runtime.send_input(target, &bytes);
-                    if let Err(e) = send_result {
-                        eprintln!("pmux: send_input failed: {}", e);
-                    }
-                }
-            }
-            _ => {
-                if !modifiers.platform {
-                    eprintln!(
-                        "pmux: key '{}' not forwarded (runtime={} target={})",
-                        key_name,
-                        self.runtime.is_some(),
-                        self.active_pane_target.as_deref().unwrap_or("none")
-                    );
-                }
-            }
-        }
+        self.forward_key_to_terminal(event, cx);
     }
 
     /// Handle split pane (⌘D vertical, ⌘⇧D horizontal)
