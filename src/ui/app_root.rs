@@ -3227,6 +3227,15 @@ impl AppRoot {
             self.start_session_for_active_tab(cx);
         }
 
+        // Evict pane statuses for closed workspace (#5 collection eviction)
+        if let Some(ref path) = closed_path {
+            let prefix = format!("local:{}", path.display());
+            if let Ok(mut statuses) = self.pane_statuses.lock() {
+                let colon_prefix = format!("{}:", prefix);
+                statuses.retain(|k, _| k != &prefix && !k.starts_with(&colon_prefix));
+            }
+        }
+
         // Kill tmux session if requested
         if kill_tmux {
             if let Some(ref path) = closed_path {
@@ -3273,6 +3282,15 @@ impl AppRoot {
             }
             if win_name != legacy_name {
                 let _ = rt.kill_window(&legacy_target);
+            }
+        }
+
+        // Evict pane statuses for deleted worktree (#5 collection eviction)
+        {
+            let prefix = format!("local:{}", worktree_path.display());
+            if let Ok(mut statuses) = self.pane_statuses.lock() {
+                let colon_prefix = format!("{}:", prefix);
+                statuses.retain(|k, _| k != &prefix && !k.starts_with(&colon_prefix));
             }
         }
 
@@ -4203,13 +4221,8 @@ impl AppRoot {
 
     fn render_workspace_view(&self, cx: &mut Context<Self>, terminal_focus: &gpui::FocusHandle, cursor_blink_visible: bool) -> impl IntoElement {
         let sidebar_visible = self.sidebar_visible;
-        let workspace_manager = self.workspace_manager.clone();
-        let terminal_buffers = Arc::clone(&self.terminal_buffers);
-        let split_tree = self.split_tree.clone();
         let focused_pane_index = self.focused_pane_index;
-        let split_divider_drag = self.split_divider_drag.clone();
         let worktree_switch_loading = self.worktree_switch_loading;
-        let pane_statuses = self.pane_statuses.clone();
         let app_root_entity = cx.entity();
 
         let repo_name = self.workspace_manager.active_tab()
@@ -4289,7 +4302,7 @@ impl AppRoot {
                                 let app_root_entity_for_ws_select = app_root_entity.clone();
                                 let app_root_entity_for_ws_close = app_root_entity.clone();
                                 el.child(
-                                    WorkspaceTabBar::new(workspace_manager.clone())
+                                    WorkspaceTabBar::new(self.workspace_manager.clone())
                                         .on_select_tab(move |idx, _window, app| {
                                             let _ = app.update_entity(&app_root_entity_for_ws_select, |this: &mut AppRoot, cx| {
                                                 this.handle_workspace_tab_switch(idx, cx);
@@ -4314,8 +4327,8 @@ impl AppRoot {
                             })
                             .child(self.build_terminal_content_area(
                                 cx, terminal_focus, &repo_name,
-                                split_tree, terminal_buffers.clone(),
-                                focused_pane_index, split_divider_drag,
+                                self.split_tree.clone(), Arc::clone(&self.terminal_buffers),
+                                focused_pane_index, self.split_divider_drag.clone(),
                                 worktree_switch_loading, cursor_blink_visible,
                             ))
                     )
