@@ -1360,6 +1360,10 @@ impl AppRoot {
                 // to avoid showing mid-frame ghosting.
                 const MAX_RENDER_DELAY: Duration = Duration::from_millis(200);
 
+                // Shell-path dirty flag: set when data is processed,
+                // cleared when render tick fires.
+                let mut dirty = false;
+
                 // Initial status check for recovered sessions.
                 // capture-pane doesn't include OSC 133 markers, so ext.shell_phase()
                 // is Unknown after the initial snapshot. Use detect_agent_in_pane()
@@ -1382,178 +1386,313 @@ impl AppRoot {
                 }
 
                 loop {
-                    // When a render is pending, use a short gap timeout to detect
-                    // when the TUI frame is complete. Otherwise use longer timeouts
-                    // for resync / idle status checks.
-                    let idle_timeout = if pending_notify {
-                        RENDER_GAP
-                    } else if Instant::now().duration_since(last_output_time) < Duration::from_secs(2) {
-                        Duration::from_millis(300)
-                    } else {
-                        Duration::from_secs(2)
-                    };
+                    let alt_screen = terminal_for_output.mode()
+                        .contains(alacritty_terminal::term::TermMode::ALT_SCREEN);
 
-                    let got_output = match coalesce_and_process_output(
-                        &rx,
-                        &terminal_for_output,
-                        &mut ext,
-                        idle_timeout,
-                        &cx,
-                    ).await {
-                        Ok(got) => got,
-                        Err(_) => break, // channel closed
-                    };
+                    if alt_screen {
+                        // ── TUI path: existing logic, unchanged ──
+                        // Reset shell state on entry
+                        dirty = false;
 
-                    if !got_output {
-                        // Output gap or true idle.
-                        if pending_notify {
-                            // Gap detected after output — TUI frame is likely complete.
-                            pending_notify = false;
-                            first_pending_time = None;
-                            if !modal_open.load(Ordering::Relaxed)
-                                && !terminal_for_output.is_synchronized_output()
+                        let idle_timeout = if pending_notify {
+                            RENDER_GAP
+                        } else if Instant::now().duration_since(last_output_time) < Duration::from_secs(2) {
+                            Duration::from_millis(300)
+                        } else {
+                            Duration::from_secs(2)
+                        };
+
+                        let got_output = match coalesce_and_process_output(
+                            &rx,
+                            &terminal_for_output,
+                            &mut ext,
+                            idle_timeout,
+                            &cx,
+                        ).await {
+                            Ok(got) => got,
+                            Err(_) => break,
+                        };
+
+                        if !got_output {
+                            if pending_notify {
+                                pending_notify = false;
+                                first_pending_time = None;
+                                if !modal_open.load(Ordering::Relaxed)
+                                    && !terminal_for_output.is_synchronized_output()
+                                {
+                                    if let Some(ref tae) = term_area_entity {
+                                        let _ = cx.update_entity(tae, |_, cx| cx.notify());
+                                    }
+                                }
+                                continue;
+                            }
+                            if terminal_for_output.take_dirty()
+                                && !modal_open.load(Ordering::Relaxed)
                             {
                                 if let Some(ref tae) = term_area_entity {
                                     let _ = cx.update_entity(tae, |_, cx| cx.notify());
                                 }
                             }
-                            // Don't fall through to resync — we just rendered fresh output.
+                            if let Some(ref agent_def) = agent_override {
+                                let screen_text = terminal_for_output.screen_tail_text(
+                                    terminal_for_output.size().rows as usize,
+                                );
+                                let detected = agent_def.detect_status(&screen_text);
+                                if let Some(ref pub_) = status_publisher {
+                                    let _ = pub_.force_status(
+                                        &status_key_clone,
+                                        detected,
+                                        &screen_text,
+                                        &agent_def.message_skip_patterns,
+                                    );
+                                }
+                            }
                             continue;
                         }
-                        // Idle resync is now handled by the background resync
-                        // thread in Terminal::new_tmux() — no subprocess calls here.
-                        if let Some(ref agent_def) = agent_override {
-                            let screen_text = terminal_for_output.screen_tail_text(
-                                terminal_for_output.size().rows as usize,
-                            );
-                            let detected = agent_def.detect_status(&screen_text);
-                            if let Some(ref pub_) = status_publisher {
-                                let _ = pub_.force_status(
-                                    &status_key_clone,
-                                    detected,
-                                    &screen_text,
-                                    &agent_def.message_skip_patterns,
+                        last_output_time = Instant::now();
+
+                        let now = Instant::now();
+                        let phase = ext.shell_phase();
+                        if phase != last_phase || alt_screen != last_alt_screen
+                            || now.duration_since(last_status_check) >= status_interval
+                        {
+                            last_status_check = now;
+                            if !alt_screen && agent_override.is_none()
+                                && matches!(phase,
+                                    crate::shell_integration::ShellPhase::Running
+                                    | crate::shell_integration::ShellPhase::Unknown)
+                            {
+                                agent_override = detect_agent_in_pane(&pane_target_clone, &agent_detect);
+                            } else if matches!(phase,
+                                crate::shell_integration::ShellPhase::Input
+                                | crate::shell_integration::ShellPhase::Prompt
+                                | crate::shell_integration::ShellPhase::Output)
+                            {
+                                agent_override = None;
+                            }
+                            last_phase = phase;
+                            last_alt_screen = alt_screen;
+
+                            if alt_screen {
+                                let content_str = ext.content_for_status(MAX_STATUS_CONTENT_LEN);
+                                let shell_info = ShellPhaseInfo {
+                                    phase: crate::shell_integration::ShellPhase::Input,
+                                    last_post_exec_exit_code: ext.last_exit_code(),
+                                };
+                                if let Some(ref pub_) = status_publisher {
+                                    let _ = pub_.check_status(
+                                        &status_key_clone,
+                                        crate::status_detector::ProcessStatus::Running,
+                                        Some(shell_info),
+                                        &content_str,
+                                        &[],
+                                    );
+                                }
+                            } else if let Some(ref agent_def) = agent_override {
+                                let screen_text = terminal_for_output.screen_tail_text(
+                                    terminal_for_output.size().rows as usize,
                                 );
+                                let detected = agent_def.detect_status(&screen_text);
+                                if let Some(ref pub_) = status_publisher {
+                                    let _ = pub_.force_status(
+                                        &status_key_clone,
+                                        detected,
+                                        &screen_text,
+                                        &agent_def.message_skip_patterns,
+                                    );
+                                }
+                            } else {
+                                let content_str = ext.content_for_status(MAX_STATUS_CONTENT_LEN);
+                                let shell_info = ShellPhaseInfo {
+                                    phase,
+                                    last_post_exec_exit_code: ext.last_exit_code(),
+                                };
+                                if let Some(ref pub_) = status_publisher {
+                                    let _ = pub_.check_status(
+                                        &status_key_clone,
+                                        crate::status_detector::ProcessStatus::Running,
+                                        Some(shell_info),
+                                        &content_str,
+                                        &[],
+                                    );
+                                }
                             }
                         }
-                        continue;
-                    }
-                    last_output_time = Instant::now();
 
-                    let alt_screen = terminal_for_output.mode()
-                        .contains(alacritty_terminal::term::TermMode::ALT_SCREEN);
-
-                    // Throttle status detection: only run on phase change or every 200ms
-                    let now = Instant::now();
-                    let phase = ext.shell_phase();
-                    if phase != last_phase || alt_screen != last_alt_screen
-                        || now.duration_since(last_status_check) >= status_interval
-                    {
-                        last_status_check = now;
-                        // Agent detection: query tmux when we need to identify the agent.
-                        // - Running/Unknown + no agent: check process tree (handles version-named binaries)
-                        // - Input/Prompt/Output: shell is back at prompt, clear agent override
-                        if !alt_screen && agent_override.is_none()
-                            && matches!(phase,
-                                crate::shell_integration::ShellPhase::Running
-                                | crate::shell_integration::ShellPhase::Unknown)
-                        {
-                            agent_override = detect_agent_in_pane(&pane_target_clone, &agent_detect);
-                        } else if matches!(phase,
-                            crate::shell_integration::ShellPhase::Input
-                            | crate::shell_integration::ShellPhase::Prompt
-                            | crate::shell_integration::ShellPhase::Output)
-                        {
-                            agent_override = None;
-                        }
-                        last_phase = phase;
-                        last_alt_screen = alt_screen;
-
-                        if alt_screen {
-                            // Alt screen TUI (vim, htop) → force Idle
-                            let content_str = ext.content_for_status(MAX_STATUS_CONTENT_LEN);
-                            let shell_info = ShellPhaseInfo {
-                                phase: crate::shell_integration::ShellPhase::Input,
-                                last_post_exec_exit_code: ext.last_exit_code(),
-                            };
-                            if let Some(ref pub_) = status_publisher {
-                                let _ = pub_.check_status(
-                                    &status_key_clone,
-                                    crate::status_detector::ProcessStatus::Running,
-                                    Some(shell_info),
-                                    &content_str,
-                                    &[],
-                                );
-                            }
-                        } else if let Some(ref agent_def) = agent_override {
-                            // Known agent CLI → detect sub-status from visible screen content.
-                            let screen_text = terminal_for_output.screen_tail_text(
-                                terminal_for_output.size().rows as usize,
-                            );
-                            let detected = agent_def.detect_status(&screen_text);
-                            if let Some(ref pub_) = status_publisher {
-                                let _ = pub_.force_status(
-                                    &status_key_clone,
-                                    detected,
-                                    &screen_text,
-                                    &agent_def.message_skip_patterns,
-                                );
-                            }
+                        // TUI rendering: deferred, wait for output gap.
+                        // Dead else-shell branch removed (we're inside if alt_screen).
+                        if modal_open.load(Ordering::Relaxed) {
+                            // skip while modal open
                         } else {
-                            // Normal shell command → use OSC 133 phase
-                            let content_str = ext.content_for_status(MAX_STATUS_CONTENT_LEN);
-                            let shell_info = ShellPhaseInfo {
-                                phase,
-                                last_post_exec_exit_code: ext.last_exit_code(),
-                            };
-                            if let Some(ref pub_) = status_publisher {
-                                let _ = pub_.check_status(
-                                    &status_key_clone,
-                                    crate::status_detector::ProcessStatus::Running,
-                                    Some(shell_info),
-                                    &content_str,
-                                    &[],
-                                );
+                            if !pending_notify {
+                                first_pending_time = Some(Instant::now());
+                            }
+                            pending_notify = true;
+
+                            if let Some(start) = first_pending_time {
+                                if start.elapsed() >= MAX_RENDER_DELAY {
+                                    if !terminal_for_output.is_synchronized_output() {
+                                        if let Some(ref tae) = term_area_entity {
+                                            let _ = cx.update_entity(tae, |_, cx| cx.notify());
+                                        }
+                                    }
+                                    pending_notify = false;
+                                    first_pending_time = None;
+                                }
                             }
                         }
-                    }
 
-                    // Rendering strategy depends on terminal mode:
-                    // - Alt-screen (TUI): defer rendering and wait for output gap to
-                    //   detect TUI frame completion. This prevents ghosting caused by
-                    //   tmux stripping CSI ?2026h synchronized-output markers.
-                    // - Normal shell: render immediately after coalescing for responsive
-                    //   keystroke echo and command output.
-                    if modal_open.load(Ordering::Relaxed) {
-                        // skip while modal open
-                    } else if alt_screen {
-                        // Alt-screen: deferred rendering.
-                        if !pending_notify {
-                            first_pending_time = Some(Instant::now());
-                        }
-                        pending_notify = true;
+                    } else {
+                        // ── Shell path: zero-wait processing + 16ms render tick ──
+                        // Reset TUI state on entry
+                        pending_notify = false;
+                        first_pending_time = None;
 
-                        // Safety: force render if deferred too long (continuous streaming).
-                        if let Some(start) = first_pending_time {
-                            if start.elapsed() >= MAX_RENDER_DELAY {
-                                // Resync is handled by background thread in
-                                // Terminal::new_tmux() — no subprocess calls here.
-                                if !terminal_for_output.is_synchronized_output() {
+                        // One-shot timers, recreated each iteration
+                        let render_tick = cx.background_executor().timer(Duration::from_millis(16));
+                        let idle_dur = if Instant::now().duration_since(last_output_time) < Duration::from_secs(2) {
+                            Duration::from_millis(300)
+                        } else {
+                            Duration::from_secs(2)
+                        };
+                        let idle_tick = cx.background_executor().timer(idle_dur);
+
+                        // Three-way select via nested select:
+                        //   Either::Left            = recv (data or channel closed)
+                        //   Either::Right(Left)     = render_tick (16ms)
+                        //   Either::Right(Right)    = idle_tick
+                        let recv = rx.recv_async();
+                        let timers = select(render_tick, idle_tick);
+                        pin_mut!(recv);
+                        pin_mut!(timers);
+
+                        match select(recv, timers).await {
+                            Either::Left((Ok(chunk), _)) => {
+                                // ── Data arrived: process immediately ──
+                                terminal_for_output.process_output(&chunk);
+                                ext.feed(&chunk);
+                                // Drain all buffered chunks
+                                while let Ok(next) = rx.try_recv() {
+                                    terminal_for_output.process_output(&next);
+                                    ext.feed(&next);
+                                }
+                                dirty = true;
+                                last_output_time = Instant::now();
+
+                                // Status detection (same throttle as TUI path,
+                                // but omit alt_screen != last_alt_screen since
+                                // alt_screen is always false in this branch)
+                                let now = Instant::now();
+                                let phase = ext.shell_phase();
+                                if phase != last_phase
+                                    || now.duration_since(last_status_check) >= status_interval
+                                {
+                                    last_status_check = now;
+                                    if agent_override.is_none()
+                                        && matches!(phase,
+                                            crate::shell_integration::ShellPhase::Running
+                                            | crate::shell_integration::ShellPhase::Unknown)
+                                    {
+                                        agent_override = detect_agent_in_pane(&pane_target_clone, &agent_detect);
+                                    } else if matches!(phase,
+                                        crate::shell_integration::ShellPhase::Input
+                                        | crate::shell_integration::ShellPhase::Prompt
+                                        | crate::shell_integration::ShellPhase::Output)
+                                    {
+                                        agent_override = None;
+                                    }
+                                    last_phase = phase;
+                                    last_alt_screen = false; // always false in shell path
+
+                                    if let Some(ref agent_def) = agent_override {
+                                        let screen_text = terminal_for_output.screen_tail_text(
+                                            terminal_for_output.size().rows as usize,
+                                        );
+                                        let detected = agent_def.detect_status(&screen_text);
+                                        if let Some(ref pub_) = status_publisher {
+                                            let _ = pub_.force_status(
+                                                &status_key_clone,
+                                                detected,
+                                                &screen_text,
+                                                &agent_def.message_skip_patterns,
+                                            );
+                                        }
+                                    } else {
+                                        let content_str = ext.content_for_status(MAX_STATUS_CONTENT_LEN);
+                                        let shell_info = ShellPhaseInfo {
+                                            phase,
+                                            last_post_exec_exit_code: ext.last_exit_code(),
+                                        };
+                                        if let Some(ref pub_) = status_publisher {
+                                            let _ = pub_.check_status(
+                                                &status_key_clone,
+                                                crate::status_detector::ProcessStatus::Running,
+                                                Some(shell_info),
+                                                &content_str,
+                                                &[],
+                                            );
+                                        }
+                                    }
+                                }
+
+                                // Recheck: data may have switched to alt screen
+                                let recheck = terminal_for_output.mode()
+                                    .contains(alacritty_terminal::term::TermMode::ALT_SCREEN);
+                                if recheck {
+                                    dirty = false;
+                                    continue;
+                                }
+                            }
+                            Either::Left((Err(_), _)) => {
+                                // Channel closed
+                                break;
+                            }
+                            Either::Right((Either::Left((_, _)), _)) => {
+                                // ── render_tick fired ──
+                                if dirty {
+                                    terminal_for_output.take_dirty();
+                                    if !modal_open.load(Ordering::Relaxed) {
+                                        if let Some(ref tae) = term_area_entity {
+                                            let _ = cx.update_entity(tae, |_, cx| cx.notify());
+                                        }
+                                    }
+                                    dirty = false;
+                                } else {
+                                    if terminal_for_output.take_dirty()
+                                        && !modal_open.load(Ordering::Relaxed)
+                                    {
+                                        if let Some(ref tae) = term_area_entity {
+                                            let _ = cx.update_entity(tae, |_, cx| cx.notify());
+                                        }
+                                    }
+                                }
+                            }
+                            Either::Right((Either::Right((_, _)), _)) => {
+                                // ── idle_tick fired ──
+                                if terminal_for_output.take_dirty()
+                                    && !modal_open.load(Ordering::Relaxed)
+                                {
                                     if let Some(ref tae) = term_area_entity {
                                         let _ = cx.update_entity(tae, |_, cx| cx.notify());
                                     }
                                 }
-                                pending_notify = false;
-                                first_pending_time = None;
+                                if let Some(ref agent_def) = agent_override {
+                                    let screen_text = terminal_for_output.screen_tail_text(
+                                        terminal_for_output.size().rows as usize,
+                                    );
+                                    let detected = agent_def.detect_status(&screen_text);
+                                    if let Some(ref pub_) = status_publisher {
+                                        let _ = pub_.force_status(
+                                            &status_key_clone,
+                                            detected,
+                                            &screen_text,
+                                            &agent_def.message_skip_patterns,
+                                        );
+                                    }
+                                }
                             }
                         }
-                    } else {
-                        // Normal shell: render immediately after coalescing.
-                        if let Some(ref tae) = term_area_entity {
-                            let _ = cx.update_entity(tae, |_, cx| cx.notify());
-                        }
                     }
-
                 }
             })
             .detach();
@@ -1739,6 +1878,10 @@ impl AppRoot {
                 const RENDER_GAP: Duration = Duration::from_millis(16);
                 const MAX_RENDER_DELAY: Duration = Duration::from_millis(200);
 
+                // Shell-path dirty flag: set when data is processed,
+                // cleared when render tick fires.
+                let mut dirty = false;
+
                 // Initial status check for recovered sessions (same as setup_local_terminal).
                 {
                     if let Some(agent_def) = detect_agent_in_pane(&pane_target_clone, &agent_detect) {
@@ -1758,155 +1901,311 @@ impl AppRoot {
                 }
 
                 loop {
-                    let idle_timeout = if pending_notify {
-                        RENDER_GAP
-                    } else if Instant::now().duration_since(last_output_time) < Duration::from_secs(2) {
-                        Duration::from_millis(300)
-                    } else {
-                        Duration::from_secs(2)
-                    };
+                    let alt_screen = terminal_for_output.mode()
+                        .contains(alacritty_terminal::term::TermMode::ALT_SCREEN);
 
-                    let got_output = match coalesce_and_process_output(
-                        &rx,
-                        &terminal_for_output,
-                        &mut ext,
-                        idle_timeout,
-                        &cx,
-                    ).await {
-                        Ok(got) => got,
-                        Err(_) => break,
-                    };
+                    if alt_screen {
+                        // ── TUI path: existing logic, unchanged ──
+                        // Reset shell state on entry
+                        dirty = false;
 
-                    if !got_output {
-                        if pending_notify {
-                            pending_notify = false;
-                            first_pending_time = None;
-                            if !modal_open.load(Ordering::Relaxed)
-                                && !terminal_for_output.is_synchronized_output()
+                        let idle_timeout = if pending_notify {
+                            RENDER_GAP
+                        } else if Instant::now().duration_since(last_output_time) < Duration::from_secs(2) {
+                            Duration::from_millis(300)
+                        } else {
+                            Duration::from_secs(2)
+                        };
+
+                        let got_output = match coalesce_and_process_output(
+                            &rx,
+                            &terminal_for_output,
+                            &mut ext,
+                            idle_timeout,
+                            &cx,
+                        ).await {
+                            Ok(got) => got,
+                            Err(_) => break,
+                        };
+
+                        if !got_output {
+                            if pending_notify {
+                                pending_notify = false;
+                                first_pending_time = None;
+                                if !modal_open.load(Ordering::Relaxed)
+                                    && !terminal_for_output.is_synchronized_output()
+                                {
+                                    if let Some(ref tae) = term_area_entity {
+                                        let _ = cx.update_entity(tae, |_, cx| cx.notify());
+                                    }
+                                }
+                                continue;
+                            }
+                            if terminal_for_output.take_dirty()
+                                && !modal_open.load(Ordering::Relaxed)
                             {
                                 if let Some(ref tae) = term_area_entity {
                                     let _ = cx.update_entity(tae, |_, cx| cx.notify());
                                 }
                             }
+                            if let Some(ref agent_def) = agent_override {
+                                let screen_text = terminal_for_output.screen_tail_text(
+                                    terminal_for_output.size().rows as usize,
+                                );
+                                let detected = agent_def.detect_status(&screen_text);
+                                if let Some(ref pub_) = status_publisher {
+                                    let _ = pub_.force_status(
+                                        &status_key_clone,
+                                        detected,
+                                        &screen_text,
+                                        &agent_def.message_skip_patterns,
+                                    );
+                                }
+                            }
                             continue;
                         }
-                        // Idle resync is now handled by the background resync
-                        // thread in Terminal::new_tmux() — no subprocess calls here.
-                        if let Some(ref agent_def) = agent_override {
-                            let screen_text = terminal_for_output.screen_tail_text(
-                                terminal_for_output.size().rows as usize,
-                            );
-                            let detected = agent_def.detect_status(&screen_text);
-                            if let Some(ref pub_) = status_publisher {
-                                let _ = pub_.force_status(
-                                    &status_key_clone,
-                                    detected,
-                                    &screen_text,
-                                    &agent_def.message_skip_patterns,
+                        last_output_time = Instant::now();
+
+                        let now = Instant::now();
+                        let phase = ext.shell_phase();
+                        if phase != last_phase || alt_screen != last_alt_screen
+                            || now.duration_since(last_status_check) >= status_interval
+                        {
+                            last_status_check = now;
+                            if !alt_screen && agent_override.is_none()
+                                && matches!(phase,
+                                    crate::shell_integration::ShellPhase::Running
+                                    | crate::shell_integration::ShellPhase::Unknown)
+                            {
+                                agent_override = detect_agent_in_pane(&pane_target_clone, &agent_detect);
+                            } else if matches!(phase,
+                                crate::shell_integration::ShellPhase::Input
+                                | crate::shell_integration::ShellPhase::Prompt
+                                | crate::shell_integration::ShellPhase::Output)
+                            {
+                                agent_override = None;
+                            }
+                            last_phase = phase;
+                            last_alt_screen = alt_screen;
+
+                            if alt_screen {
+                                let content_str = ext.content_for_status(MAX_STATUS_CONTENT_LEN);
+                                let shell_info = ShellPhaseInfo {
+                                    phase: crate::shell_integration::ShellPhase::Input,
+                                    last_post_exec_exit_code: ext.last_exit_code(),
+                                };
+                                if let Some(ref pub_) = status_publisher {
+                                    let _ = pub_.check_status(
+                                        &status_key_clone,
+                                        crate::status_detector::ProcessStatus::Running,
+                                        Some(shell_info),
+                                        &content_str,
+                                        &[],
+                                    );
+                                }
+                            } else if let Some(ref agent_def) = agent_override {
+                                let screen_text = terminal_for_output.screen_tail_text(
+                                    terminal_for_output.size().rows as usize,
                                 );
+                                let detected = agent_def.detect_status(&screen_text);
+                                if let Some(ref pub_) = status_publisher {
+                                    let _ = pub_.force_status(
+                                        &status_key_clone,
+                                        detected,
+                                        &screen_text,
+                                        &agent_def.message_skip_patterns,
+                                    );
+                                }
+                            } else {
+                                let content_str = ext.content_for_status(MAX_STATUS_CONTENT_LEN);
+                                let shell_info = ShellPhaseInfo {
+                                    phase,
+                                    last_post_exec_exit_code: ext.last_exit_code(),
+                                };
+                                if let Some(ref pub_) = status_publisher {
+                                    let _ = pub_.check_status(
+                                        &status_key_clone,
+                                        crate::status_detector::ProcessStatus::Running,
+                                        Some(shell_info),
+                                        &content_str,
+                                        &[],
+                                    );
+                                }
                             }
                         }
-                        continue;
-                    }
-                    last_output_time = Instant::now();
 
-                    // Throttle status detection: only run on phase change or every 200ms
-                    let now = Instant::now();
-                    let phase = ext.shell_phase();
-                    let alt_screen = terminal_for_output.mode()
-                        .contains(alacritty_terminal::term::TermMode::ALT_SCREEN);
-                    if phase != last_phase || alt_screen != last_alt_screen
-                        || now.duration_since(last_status_check) >= status_interval
-                    {
-                        last_status_check = now;
-                        if !alt_screen && agent_override.is_none()
-                            && matches!(phase,
-                                crate::shell_integration::ShellPhase::Running
-                                | crate::shell_integration::ShellPhase::Unknown)
-                        {
-                            agent_override = detect_agent_in_pane(&pane_target_clone, &agent_detect);
-                        } else if matches!(phase,
-                            crate::shell_integration::ShellPhase::Input
-                            | crate::shell_integration::ShellPhase::Prompt
-                            | crate::shell_integration::ShellPhase::Output)
-                        {
-                            agent_override = None;
-                        }
-                        last_phase = phase;
-                        last_alt_screen = alt_screen;
-
-                        if alt_screen {
-                            let content_str = ext.content_for_status(MAX_STATUS_CONTENT_LEN);
-                            let shell_info = ShellPhaseInfo {
-                                phase: crate::shell_integration::ShellPhase::Input,
-                                last_post_exec_exit_code: ext.last_exit_code(),
-                            };
-                            if let Some(ref pub_) = status_publisher {
-                                let _ = pub_.check_status(
-                                    &status_key_clone,
-                                    crate::status_detector::ProcessStatus::Running,
-                                    Some(shell_info),
-                                    &content_str,
-                                    &[],
-                                );
-                            }
-                        } else if let Some(ref agent_def) = agent_override {
-                            let screen_text = terminal_for_output.screen_tail_text(
-                                terminal_for_output.size().rows as usize,
-                            );
-                            let detected = agent_def.detect_status(&screen_text);
-                            if let Some(ref pub_) = status_publisher {
-                                let _ = pub_.force_status(
-                                    &status_key_clone,
-                                    detected,
-                                    &screen_text,
-                                    &agent_def.message_skip_patterns,
-                                );
-                            }
+                        // TUI rendering: deferred, wait for output gap.
+                        // Dead else-shell branch removed (we're inside if alt_screen).
+                        if modal_open.load(Ordering::Relaxed) {
+                            // skip while modal open
                         } else {
-                            let content_str = ext.content_for_status(MAX_STATUS_CONTENT_LEN);
-                            let shell_info = ShellPhaseInfo {
-                                phase,
-                                last_post_exec_exit_code: ext.last_exit_code(),
-                            };
-                            if let Some(ref pub_) = status_publisher {
-                                let _ = pub_.check_status(
-                                    &status_key_clone,
-                                    crate::status_detector::ProcessStatus::Running,
-                                    Some(shell_info),
-                                    &content_str,
-                                    &[],
-                                );
+                            if !pending_notify {
+                                first_pending_time = Some(Instant::now());
+                            }
+                            pending_notify = true;
+
+                            if let Some(start) = first_pending_time {
+                                if start.elapsed() >= MAX_RENDER_DELAY {
+                                    if !terminal_for_output.is_synchronized_output() {
+                                        if let Some(ref tae) = term_area_entity {
+                                            let _ = cx.update_entity(tae, |_, cx| cx.notify());
+                                        }
+                                    }
+                                    pending_notify = false;
+                                    first_pending_time = None;
+                                }
                             }
                         }
-                    }
 
-                    // Rendering strategy (same as local terminal loop).
-                    if modal_open.load(Ordering::Relaxed) {
-                        // skip while modal open
-                    } else if alt_screen {
-                        // Alt-screen: deferred rendering.
-                        if !pending_notify {
-                            first_pending_time = Some(Instant::now());
-                        }
-                        pending_notify = true;
+                    } else {
+                        // ── Shell path: zero-wait processing + 16ms render tick ──
+                        // Reset TUI state on entry
+                        pending_notify = false;
+                        first_pending_time = None;
 
-                        if let Some(start) = first_pending_time {
-                            if start.elapsed() >= MAX_RENDER_DELAY {
-                                // Resync handled by background thread.
-                                if !terminal_for_output.is_synchronized_output() {
+                        // One-shot timers, recreated each iteration
+                        let render_tick = cx.background_executor().timer(Duration::from_millis(16));
+                        let idle_dur = if Instant::now().duration_since(last_output_time) < Duration::from_secs(2) {
+                            Duration::from_millis(300)
+                        } else {
+                            Duration::from_secs(2)
+                        };
+                        let idle_tick = cx.background_executor().timer(idle_dur);
+
+                        // Three-way select via nested select:
+                        //   Either::Left            = recv (data or channel closed)
+                        //   Either::Right(Left)     = render_tick (16ms)
+                        //   Either::Right(Right)    = idle_tick
+                        let recv = rx.recv_async();
+                        let timers = select(render_tick, idle_tick);
+                        pin_mut!(recv);
+                        pin_mut!(timers);
+
+                        match select(recv, timers).await {
+                            Either::Left((Ok(chunk), _)) => {
+                                // ── Data arrived: process immediately ──
+                                terminal_for_output.process_output(&chunk);
+                                ext.feed(&chunk);
+                                // Drain all buffered chunks
+                                while let Ok(next) = rx.try_recv() {
+                                    terminal_for_output.process_output(&next);
+                                    ext.feed(&next);
+                                }
+                                dirty = true;
+                                last_output_time = Instant::now();
+
+                                // Status detection (same throttle as TUI path,
+                                // but omit alt_screen != last_alt_screen since
+                                // alt_screen is always false in this branch)
+                                let now = Instant::now();
+                                let phase = ext.shell_phase();
+                                if phase != last_phase
+                                    || now.duration_since(last_status_check) >= status_interval
+                                {
+                                    last_status_check = now;
+                                    if agent_override.is_none()
+                                        && matches!(phase,
+                                            crate::shell_integration::ShellPhase::Running
+                                            | crate::shell_integration::ShellPhase::Unknown)
+                                    {
+                                        agent_override = detect_agent_in_pane(&pane_target_clone, &agent_detect);
+                                    } else if matches!(phase,
+                                        crate::shell_integration::ShellPhase::Input
+                                        | crate::shell_integration::ShellPhase::Prompt
+                                        | crate::shell_integration::ShellPhase::Output)
+                                    {
+                                        agent_override = None;
+                                    }
+                                    last_phase = phase;
+                                    last_alt_screen = false; // always false in shell path
+
+                                    if let Some(ref agent_def) = agent_override {
+                                        let screen_text = terminal_for_output.screen_tail_text(
+                                            terminal_for_output.size().rows as usize,
+                                        );
+                                        let detected = agent_def.detect_status(&screen_text);
+                                        if let Some(ref pub_) = status_publisher {
+                                            let _ = pub_.force_status(
+                                                &status_key_clone,
+                                                detected,
+                                                &screen_text,
+                                                &agent_def.message_skip_patterns,
+                                            );
+                                        }
+                                    } else {
+                                        let content_str = ext.content_for_status(MAX_STATUS_CONTENT_LEN);
+                                        let shell_info = ShellPhaseInfo {
+                                            phase,
+                                            last_post_exec_exit_code: ext.last_exit_code(),
+                                        };
+                                        if let Some(ref pub_) = status_publisher {
+                                            let _ = pub_.check_status(
+                                                &status_key_clone,
+                                                crate::status_detector::ProcessStatus::Running,
+                                                Some(shell_info),
+                                                &content_str,
+                                                &[],
+                                            );
+                                        }
+                                    }
+                                }
+
+                                // Recheck: data may have switched to alt screen
+                                let recheck = terminal_for_output.mode()
+                                    .contains(alacritty_terminal::term::TermMode::ALT_SCREEN);
+                                if recheck {
+                                    dirty = false;
+                                    continue;
+                                }
+                            }
+                            Either::Left((Err(_), _)) => {
+                                // Channel closed
+                                break;
+                            }
+                            Either::Right((Either::Left((_, _)), _)) => {
+                                // ── render_tick fired ──
+                                if dirty {
+                                    terminal_for_output.take_dirty();
+                                    if !modal_open.load(Ordering::Relaxed) {
+                                        if let Some(ref tae) = term_area_entity {
+                                            let _ = cx.update_entity(tae, |_, cx| cx.notify());
+                                        }
+                                    }
+                                    dirty = false;
+                                } else {
+                                    if terminal_for_output.take_dirty()
+                                        && !modal_open.load(Ordering::Relaxed)
+                                    {
+                                        if let Some(ref tae) = term_area_entity {
+                                            let _ = cx.update_entity(tae, |_, cx| cx.notify());
+                                        }
+                                    }
+                                }
+                            }
+                            Either::Right((Either::Right((_, _)), _)) => {
+                                // ── idle_tick fired ──
+                                if terminal_for_output.take_dirty()
+                                    && !modal_open.load(Ordering::Relaxed)
+                                {
                                     if let Some(ref tae) = term_area_entity {
                                         let _ = cx.update_entity(tae, |_, cx| cx.notify());
                                     }
                                 }
-                                pending_notify = false;
-                                first_pending_time = None;
+                                if let Some(ref agent_def) = agent_override {
+                                    let screen_text = terminal_for_output.screen_tail_text(
+                                        terminal_for_output.size().rows as usize,
+                                    );
+                                    let detected = agent_def.detect_status(&screen_text);
+                                    if let Some(ref pub_) = status_publisher {
+                                        let _ = pub_.force_status(
+                                            &status_key_clone,
+                                            detected,
+                                            &screen_text,
+                                            &agent_def.message_skip_patterns,
+                                        );
+                                    }
+                                }
                             }
-                        }
-                    } else {
-                        // Normal shell: render immediately after coalescing.
-                        if let Some(ref tae) = term_area_entity {
-                            let _ = cx.update_entity(tae, |_, cx| cx.notify());
                         }
                     }
                 }

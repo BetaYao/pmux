@@ -83,6 +83,18 @@
 |------|------|
 | [2026-03-04-sidebar-multi-pane-status-fix.md](2026-03-04-sidebar-multi-pane-status-fix.md) | 修复 sidebar 只显示 primary pane 状态的 bug；添加 `highest_priority_for_prefix` 聚合多 pane；对齐 TopBar StatusCounts 语义 |
 
+## Shell 渲染延迟修复
+
+| 计划 | 目标 | 预估 |
+|------|------|------|
+| [2026-03-13-shell-input-rendering-lag.md](2026-03-13-shell-input-rendering-lag.md) | Shell 模式输出处理与渲染分离：零等待 process_output + 16ms 定频渲染，消除快速输入时的中间状态闪烁 | ~1 小时 |
+
+## Agent Hooks 集成
+
+| 计划 | 目标 | 预估 |
+|------|------|------|
+| [2026-03-16-agent-hooks-integration.md](2026-03-16-agent-hooks-integration.md) | 检测/安装/更新 Claude Code、Gemini CLI、Codex、Aider 的 hooks；本地 HTTP webhook server 接收精准 agent 状态事件 | 2~3 天 |
+
 ## 历史计划
 
 - [2026-02-25-spec2-implementation.md](2026-02-25-spec2-implementation.md) — Sidebar + Terminal 实现

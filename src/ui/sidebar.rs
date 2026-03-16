@@ -575,7 +575,7 @@ impl Sidebar {
         let mut refresh_btn = div()
             .id("refresh-worktrees-btn")
             .px(px(8.)).py(px(4.)).rounded(px(4.))
-            .text_color(rgb(0x999999)).text_size(px(14.))
+            .text_color(rgb(0x999999)).text_size(px(22.))
             .cursor_pointer()
             .hover(|s: StyleRefinement| s.text_color(rgb(0xffffff)).bg(rgb(0x3d3d3d)))
             .child("↻");
@@ -590,7 +590,7 @@ impl Sidebar {
         let mut gear = div()
             .id("sidebar-settings-btn")
             .px(px(8.)).py(px(4.)).rounded(px(4.))
-            .text_color(rgb(0x999999)).text_size(px(16.))
+            .text_color(rgb(0x999999)).text_size(px(20.))
             .cursor_pointer()
             .hover(|s: StyleRefinement| s.text_color(rgb(0xffffff)).bg(rgb(0x3d3d3d)))
             .child("⚙");
@@ -707,7 +707,7 @@ impl RenderOnce for Sidebar {
 
             let is_base = item_with_status.info.is_base;
             let inner = div()
-                .flex().flex_col().gap(px(2.)).overflow_hidden()
+                .flex().flex_col().gap(px(2.)).overflow_hidden().w_full()
                 .child(
                     div().flex().flex_row().items_center().gap(px(6.)).overflow_hidden()
                         .child(div().flex_shrink_0().text_size(px(11.)).text_color(status_color).child(status_icon_text))
