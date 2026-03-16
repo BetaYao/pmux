@@ -3570,6 +3570,235 @@ impl AppRoot {
         }
     }
 
+    /// Build the terminal right-click context menu (Copy, Paste, Select All, Clear).
+    fn build_terminal_context_menu(&self, cx: &mut Context<Self>, has_selection: bool) -> Stateful<Div> {
+        let app_root_entity = cx.entity();
+        let app_root_for_copy = app_root_entity.clone();
+        let app_root_for_paste = app_root_entity.clone();
+        let app_root_for_select_all = app_root_entity.clone();
+        let app_root_for_clear = app_root_entity.clone();
+
+        let mut menu = div()
+            .id("terminal-context-menu")
+            .min_w(px(180.))
+            .py(px(4.))
+            .rounded(px(6.))
+            .bg(rgb(0x282828))
+            .border_1().border_color(rgb(0x404040))
+            .shadow_lg()
+            .occlude()
+            .on_click(|_event, _window, cx| { cx.stop_propagation(); })
+            .flex().flex_col();
+
+        // Copy
+        if has_selection {
+            menu = menu.child(
+                div()
+                    .id("term-ctx-copy")
+                    .mx(px(4.)).px(px(8.)).py(px(6.))
+                    .rounded(px(4.))
+                    .flex().flex_row().items_center().gap(px(8.))
+                    .text_size(px(13.)).text_color(rgb(0xdddddd))
+                    .hover(|s: StyleRefinement| s.bg(rgb(0x3a3a3a)).text_color(rgb(0xffffff)))
+                    .cursor_pointer()
+                    .on_click(move |_event, _window, cx| {
+                        let _ = cx.update_entity(&app_root_for_copy, |this: &mut AppRoot, cx| {
+                            if let Some(ref target) = this.active_pane_target {
+                                if let Ok(buffers) = this.terminal_buffers.lock() {
+                                    if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
+                                        if let Some(text) = terminal.selection_text() {
+                                            if !text.is_empty() {
+                                                cx.write_to_clipboard(ClipboardItem::new_string(text));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            this.terminal_context_menu = None;
+                            cx.notify();
+                        });
+                    })
+                    .child(svg().path("icons/copy.svg").size(px(15.)).flex_shrink_0().text_color(rgb(0xaaaaaa)))
+                    .child(div().flex_1().child("Copy"))
+                    .child(div().text_size(px(11.)).text_color(rgb(0x888888)).child("⌘C"))
+            );
+        } else {
+            menu = menu.child(
+                div()
+                    .id("term-ctx-copy")
+                    .mx(px(4.)).px(px(8.)).py(px(6.))
+                    .rounded(px(4.))
+                    .flex().flex_row().items_center().gap(px(8.))
+                    .text_size(px(13.)).text_color(rgb(0x666666))
+                    .child(svg().path("icons/copy.svg").size(px(15.)).flex_shrink_0().text_color(rgb(0x555555)))
+                    .child(div().flex_1().child("Copy"))
+                    .child(div().text_size(px(11.)).text_color(rgb(0x555555)).child("⌘C"))
+            );
+        }
+
+        // Paste
+        menu = menu.child(
+            div()
+                .id("term-ctx-paste")
+                .mx(px(4.)).px(px(8.)).py(px(6.))
+                .rounded(px(4.))
+                .flex().flex_row().items_center().gap(px(8.))
+                .text_size(px(13.)).text_color(rgb(0xdddddd))
+                .hover(|s: StyleRefinement| s.bg(rgb(0x3a3a3a)).text_color(rgb(0xffffff)))
+                .cursor_pointer()
+                .on_click(move |_event, _window, cx| {
+                    let _ = cx.update_entity(&app_root_for_paste, |this: &mut AppRoot, cx| {
+                        if let Some(clipboard) = cx.read_from_clipboard() {
+                            let text = build_paste_text_from_clipboard(&clipboard);
+                            if !text.is_empty() {
+                                if let (Some(runtime), Some(target)) = (&this.runtime, this.active_pane_target.as_ref()) {
+                                    let bracketed = if let Ok(buffers) = this.terminal_buffers.lock() {
+                                        if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
+                                            if terminal.display_offset() > 0 {
+                                                terminal.scroll_to_bottom();
+                                            }
+                                            terminal.mode().contains(alacritty_terminal::term::TermMode::BRACKETED_PASTE)
+                                        } else { false }
+                                    } else { false };
+                                    let mut bytes = Vec::with_capacity(text.len() + 12);
+                                    if bracketed { bytes.extend_from_slice(b"\x1b[200~"); }
+                                    bytes.extend_from_slice(text.replace('\n', "\r").as_bytes());
+                                    if bracketed { bytes.extend_from_slice(b"\x1b[201~"); }
+                                    let _ = runtime.send_input(target, &bytes);
+                                }
+                            }
+                        }
+                        this.terminal_context_menu = None;
+                        cx.notify();
+                    });
+                })
+                .child(svg().path("icons/paste.svg").size(px(15.)).flex_shrink_0().text_color(rgb(0xaaaaaa)))
+                .child(div().flex_1().child("Paste"))
+                .child(div().text_size(px(11.)).text_color(rgb(0x888888)).child("⌘V"))
+        );
+
+        // Separator
+        menu = menu.child(div().mx(px(4.)).my(px(2.)).h(px(1.)).bg(rgb(0x3a3a3a)));
+
+        // Select All
+        menu = menu.child(
+            div()
+                .id("term-ctx-select-all")
+                .mx(px(4.)).px(px(8.)).py(px(6.))
+                .rounded(px(4.))
+                .flex().flex_row().items_center().gap(px(8.))
+                .text_size(px(13.)).text_color(rgb(0xdddddd))
+                .hover(|s: StyleRefinement| s.bg(rgb(0x3a3a3a)).text_color(rgb(0xffffff)))
+                .cursor_pointer()
+                .on_click(move |_event, _window, cx| {
+                    let _ = cx.update_entity(&app_root_for_select_all, |this: &mut AppRoot, cx| {
+                        if let Some(ref target) = this.active_pane_target {
+                            if let Ok(buffers) = this.terminal_buffers.lock() {
+                                if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
+                                    terminal.select_all();
+                                }
+                            }
+                        }
+                        this.terminal_context_menu = None;
+                        cx.notify();
+                    });
+                })
+                .child(svg().path("icons/select-all.svg").size(px(15.)).flex_shrink_0().text_color(rgb(0xaaaaaa)))
+                .child(div().flex_1().child("Select All"))
+                .child(div().text_size(px(11.)).text_color(rgb(0x888888)).child("⌘A"))
+        );
+
+        // Clear
+        menu = menu.child(
+            div()
+                .id("term-ctx-clear")
+                .mx(px(4.)).px(px(8.)).py(px(6.))
+                .rounded(px(4.))
+                .flex().flex_row().items_center().gap(px(8.))
+                .text_size(px(13.)).text_color(rgb(0xdddddd))
+                .hover(|s: StyleRefinement| s.bg(rgb(0x3a3a3a)).text_color(rgb(0xffffff)))
+                .cursor_pointer()
+                .on_click(move |_event, _window, cx| {
+                    let _ = cx.update_entity(&app_root_for_clear, |this: &mut AppRoot, cx| {
+                        if let (Some(runtime), Some(target)) = (&this.runtime, this.active_pane_target.as_ref()) {
+                            let _ = runtime.send_input(target, b"\x0c");
+                        }
+                        this.terminal_context_menu = None;
+                        cx.notify();
+                    });
+                })
+                .child(svg().path("icons/clear.svg").size(px(15.)).flex_shrink_0().text_color(rgb(0xaaaaaa)))
+                .child(div().flex_1().child("Clear"))
+                .child(div().text_size(px(11.)).text_color(rgb(0x888888)).child("⌘K"))
+        );
+
+        menu
+    }
+
+    /// Build the delete worktree confirmation dialog with callbacks.
+    fn build_delete_dialog(&self, cx: &mut Context<Self>) -> DeleteWorktreeDialogUi {
+        let app_root_entity = cx.entity();
+        let app_root_entity_for_confirm = app_root_entity.clone();
+        let app_root_entity_for_cancel = app_root_entity.clone();
+        let mut dialog = DeleteWorktreeDialogUi::new()
+            .on_confirm(move |wt, _window, cx| {
+                let _ = cx.update_entity(&app_root_entity_for_confirm, |this: &mut AppRoot, cx| {
+                    this.confirm_delete_worktree(wt, cx);
+                });
+            })
+            .on_cancel(move |_window, cx| {
+                let _ = cx.update_entity(&app_root_entity_for_cancel, |this: &mut AppRoot, cx| {
+                    this.close_delete_dialog(cx);
+                });
+            });
+        if self.delete_worktree_dialog.is_open() {
+            if let Some(wt) = self.delete_worktree_dialog.worktree() {
+                dialog.open(wt.clone(), self.delete_worktree_dialog.has_uncommitted());
+            }
+        }
+        if let Some(err) = self.delete_worktree_dialog.error_message() {
+            dialog.set_error(err);
+        }
+        dialog
+    }
+
+    /// Build the close tab confirmation dialog with callbacks.
+    fn build_close_tab_dialog(&self, cx: &mut Context<Self>) -> CloseTabDialogUi {
+        let app_root_entity = cx.entity();
+        let app_root_entity_for_confirm = app_root_entity.clone();
+        let app_root_entity_for_cancel = app_root_entity.clone();
+        let app_root_entity_for_toggle = app_root_entity.clone();
+        let mut dialog = CloseTabDialogUi::new()
+            .on_confirm(move |tab_index, kill_tmux, _window, cx| {
+                let _ = cx.update_entity(&app_root_entity_for_confirm, |this: &mut AppRoot, cx| {
+                    this.confirm_close_tab(tab_index, kill_tmux, cx);
+                });
+            })
+            .on_cancel(move |_window, cx| {
+                let _ = cx.update_entity(&app_root_entity_for_cancel, |this: &mut AppRoot, cx| {
+                    this.close_close_tab_dialog(cx);
+                });
+            })
+            .on_toggle_kill_tmux(move |_window, cx| {
+                let _ = cx.update_entity(&app_root_entity_for_toggle, |this: &mut AppRoot, cx| {
+                    this.toggle_close_tab_kill_tmux(cx);
+                });
+            });
+        if self.close_tab_dialog.is_open() {
+            if let (Some(idx), Some(path), Some(name)) = (
+                self.close_tab_dialog.tab_index(),
+                self.close_tab_dialog.workspace_path().cloned(),
+                self.close_tab_dialog.workspace_name().map(|s| s.to_string()),
+            ) {
+                dialog.open(idx, path, name);
+                if !self.close_tab_dialog.kill_tmux() {
+                    dialog.toggle_kill_tmux();
+                }
+            }
+        }
+        dialog
+    }
+
     /// Build the sidebar component with all callbacks wired.
     fn build_sidebar(
         &self,
@@ -3823,65 +4052,8 @@ impl AppRoot {
         let repo_path_for_menu_diff = repo_path.clone();
         let cached_worktrees = self.cached_worktrees.clone();
 
-        let delete_dialog = {
-            let app_root_entity_for_confirm = app_root_entity.clone();
-            let app_root_entity_for_cancel = app_root_entity.clone();
-            let mut dialog = DeleteWorktreeDialogUi::new()
-                .on_confirm(move |wt, _window, cx| {
-                    let _ = cx.update_entity(&app_root_entity_for_confirm, |this: &mut AppRoot, cx| {
-                        this.confirm_delete_worktree(wt, cx);
-                    });
-                })
-                .on_cancel(move |_window, cx| {
-                    let _ = cx.update_entity(&app_root_entity_for_cancel, |this: &mut AppRoot, cx| {
-                        this.close_delete_dialog(cx);
-                    });
-                });
-            if self.delete_worktree_dialog.is_open() {
-                if let Some(wt) = self.delete_worktree_dialog.worktree() {
-                    dialog.open(wt.clone(), self.delete_worktree_dialog.has_uncommitted());
-                }
-            }
-            if let Some(err) = self.delete_worktree_dialog.error_message() {
-                dialog.set_error(err);
-            }
-            dialog
-        };
-
-        let close_tab_dialog = {
-            let app_root_entity_for_confirm = app_root_entity.clone();
-            let app_root_entity_for_cancel = app_root_entity.clone();
-            let app_root_entity_for_toggle = app_root_entity.clone();
-            let mut dialog = CloseTabDialogUi::new()
-                .on_confirm(move |tab_index, kill_tmux, _window, cx| {
-                    let _ = cx.update_entity(&app_root_entity_for_confirm, |this: &mut AppRoot, cx| {
-                        this.confirm_close_tab(tab_index, kill_tmux, cx);
-                    });
-                })
-                .on_cancel(move |_window, cx| {
-                    let _ = cx.update_entity(&app_root_entity_for_cancel, |this: &mut AppRoot, cx| {
-                        this.close_close_tab_dialog(cx);
-                    });
-                })
-                .on_toggle_kill_tmux(move |_window, cx| {
-                    let _ = cx.update_entity(&app_root_entity_for_toggle, |this: &mut AppRoot, cx| {
-                        this.toggle_close_tab_kill_tmux(cx);
-                    });
-                });
-            if self.close_tab_dialog.is_open() {
-                if let (Some(idx), Some(path), Some(name)) = (
-                    self.close_tab_dialog.tab_index(),
-                    self.close_tab_dialog.workspace_path().cloned(),
-                    self.close_tab_dialog.workspace_name().map(|s| s.to_string()),
-                ) {
-                    dialog.open(idx, path, name);
-                    if !self.close_tab_dialog.kill_tmux() {
-                        dialog.toggle_kill_tmux();
-                    }
-                }
-            }
-            dialog
-        };
+        let delete_dialog = self.build_delete_dialog(cx);
+        let close_tab_dialog = self.build_close_tab_dialog(cx);
 
         let sidebar_context_menu = self.sidebar_context_menu;
         let terminal_context_menu = self.terminal_context_menu;
@@ -3889,10 +4061,6 @@ impl AppRoot {
 
         // Terminal context menu clones
         let app_root_for_term_menu_overlay = app_root_entity.clone();
-        let app_root_for_term_copy = app_root_entity.clone();
-        let app_root_for_term_paste = app_root_entity.clone();
-        let app_root_for_term_select_all = app_root_entity.clone();
-        let app_root_for_term_clear = app_root_entity.clone();
 
         // Get selected text for Copy menu item
         let has_selection = terminal_context_menu.is_some() && {
@@ -4243,187 +4411,7 @@ impl AppRoot {
             // Terminal context menu float
             .when(terminal_context_menu.is_some(), |el| {
                 let (click_x, click_y) = terminal_context_menu.unwrap();
-                let mut menu = div()
-                    .id("terminal-context-menu")
-                    .min_w(px(180.))
-                    .py(px(4.))
-                    .rounded(px(6.))
-                    .bg(rgb(0x282828))
-                    .border_1().border_color(rgb(0x404040))
-                    .shadow_lg()
-                    .occlude()
-                    .on_click(|_event, _window, cx| { cx.stop_propagation(); })
-                    .flex().flex_col();
-
-                // Copy
-                {
-                    let entity = app_root_for_term_copy.clone();
-                    if has_selection {
-                        menu = menu.child(
-                            div()
-                                .id("term-ctx-copy")
-                                .mx(px(4.)).px(px(8.)).py(px(6.))
-                                .rounded(px(4.))
-                                .flex().flex_row().items_center().gap(px(8.))
-                                .text_size(px(13.))
-                                .text_color(rgb(0xdddddd))
-                                .hover(|s: StyleRefinement| s.bg(rgb(0x3a3a3a)).text_color(rgb(0xffffff)))
-                                .cursor_pointer()
-                                .on_click(move |_event, _window, cx| {
-                                    let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
-                                        // Copy selected text to clipboard
-                                        if let Some(ref target) = this.active_pane_target {
-                                            if let Ok(buffers) = this.terminal_buffers.lock() {
-                                                if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
-                                                    if let Some(text) = terminal.selection_text() {
-                                                        if !text.is_empty() {
-                                                            cx.write_to_clipboard(ClipboardItem::new_string(text));
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        this.terminal_context_menu = None;
-                                        cx.notify();
-                                    });
-                                })
-                                .child(svg().path("icons/copy.svg").size(px(15.)).flex_shrink_0().text_color(rgb(0xaaaaaa)))
-                                .child(div().flex_1().child("Copy"))
-                                .child(div().text_size(px(11.)).text_color(rgb(0x888888)).child("⌘C"))
-                        );
-                    } else {
-                        menu = menu.child(
-                            div()
-                                .id("term-ctx-copy")
-                                .mx(px(4.)).px(px(8.)).py(px(6.))
-                                .rounded(px(4.))
-                                .flex().flex_row().items_center().gap(px(8.))
-                                .text_size(px(13.))
-                                .text_color(rgb(0x666666))
-                                .child(svg().path("icons/copy.svg").size(px(15.)).flex_shrink_0().text_color(rgb(0x555555)))
-                                .child(div().flex_1().child("Copy"))
-                                .child(div().text_size(px(11.)).text_color(rgb(0x555555)).child("⌘C"))
-                        );
-                    }
-                }
-
-                // Paste
-                {
-                    let entity = app_root_for_term_paste.clone();
-                    menu = menu.child(
-                        div()
-                            .id("term-ctx-paste")
-                            .mx(px(4.)).px(px(8.)).py(px(6.))
-                            .rounded(px(4.))
-                            .flex().flex_row().items_center().gap(px(8.))
-                            .text_size(px(13.))
-                            .text_color(rgb(0xdddddd))
-                            .hover(|s: StyleRefinement| s.bg(rgb(0x3a3a3a)).text_color(rgb(0xffffff)))
-                            .cursor_pointer()
-                            .on_click(move |_event, _window, cx| {
-                                let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
-                                    // Paste clipboard content to terminal (text, image, or file paths)
-                                    if let Some(clipboard) = cx.read_from_clipboard() {
-                                        let text = build_paste_text_from_clipboard(&clipboard);
-                                        if !text.is_empty() {
-                                            if let (Some(runtime), Some(target)) = (&this.runtime, this.active_pane_target.as_ref()) {
-                                                let bracketed = if let Ok(buffers) = this.terminal_buffers.lock() {
-                                                    if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
-                                                        if terminal.display_offset() > 0 {
-                                                            terminal.scroll_to_bottom();
-                                                        }
-                                                        terminal.mode().contains(alacritty_terminal::term::TermMode::BRACKETED_PASTE)
-                                                    } else { false }
-                                                } else { false };
-                                                let mut bytes = Vec::with_capacity(text.len() + 12);
-                                                if bracketed {
-                                                    bytes.extend_from_slice(b"\x1b[200~");
-                                                }
-                                                bytes.extend_from_slice(text.replace('\n', "\r").as_bytes());
-                                                if bracketed {
-                                                    bytes.extend_from_slice(b"\x1b[201~");
-                                                }
-                                                let _ = runtime.send_input(target, &bytes);
-                                            }
-                                        }
-                                    }
-                                    this.terminal_context_menu = None;
-                                    cx.notify();
-                                });
-                            })
-                            .child(svg().path("icons/paste.svg").size(px(15.)).flex_shrink_0().text_color(rgb(0xaaaaaa)))
-                            .child(div().flex_1().child("Paste"))
-                            .child(div().text_size(px(11.)).text_color(rgb(0x888888)).child("⌘V"))
-                    );
-                }
-
-                // Separator
-                menu = menu.child(
-                    div().mx(px(4.)).my(px(2.)).h(px(1.)).bg(rgb(0x3a3a3a))
-                );
-
-                // Select All
-                {
-                    let entity = app_root_for_term_select_all.clone();
-                    menu = menu.child(
-                        div()
-                            .id("term-ctx-select-all")
-                            .mx(px(4.)).px(px(8.)).py(px(6.))
-                            .rounded(px(4.))
-                            .flex().flex_row().items_center().gap(px(8.))
-                            .text_size(px(13.))
-                            .text_color(rgb(0xdddddd))
-                            .hover(|s: StyleRefinement| s.bg(rgb(0x3a3a3a)).text_color(rgb(0xffffff)))
-                            .cursor_pointer()
-                            .on_click(move |_event, _window, cx| {
-                                let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
-                                    // Select all terminal content
-                                    if let Some(ref target) = this.active_pane_target {
-                                        if let Ok(buffers) = this.terminal_buffers.lock() {
-                                            if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
-                                                terminal.select_all();
-                                            }
-                                        }
-                                    }
-                                    this.terminal_context_menu = None;
-                                    cx.notify();
-                                });
-                            })
-                            .child(svg().path("icons/select-all.svg").size(px(15.)).flex_shrink_0().text_color(rgb(0xaaaaaa)))
-                            .child(div().flex_1().child("Select All"))
-                            .child(div().text_size(px(11.)).text_color(rgb(0x888888)).child("⌘A"))
-                    );
-                }
-
-                // Clear
-                {
-                    let entity = app_root_for_term_clear.clone();
-                    menu = menu.child(
-                        div()
-                            .id("term-ctx-clear")
-                            .mx(px(4.)).px(px(8.)).py(px(6.))
-                            .rounded(px(4.))
-                            .flex().flex_row().items_center().gap(px(8.))
-                            .text_size(px(13.))
-                            .text_color(rgb(0xdddddd))
-                            .hover(|s: StyleRefinement| s.bg(rgb(0x3a3a3a)).text_color(rgb(0xffffff)))
-                            .cursor_pointer()
-                            .on_click(move |_event, _window, cx| {
-                                let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
-                                    // Send Ctrl+L to clear terminal
-                                    if let (Some(runtime), Some(target)) = (&this.runtime, this.active_pane_target.as_ref()) {
-                                        let _ = runtime.send_input(target, b"\x0c");
-                                    }
-                                    this.terminal_context_menu = None;
-                                    cx.notify();
-                                });
-                            })
-                            .child(svg().path("icons/clear.svg").size(px(15.)).flex_shrink_0().text_color(rgb(0xaaaaaa)))
-                            .child(div().flex_1().child("Clear"))
-                            .child(div().text_size(px(11.)).text_color(rgb(0x888888)).child("⌘K"))
-                    );
-                }
-
+                let menu = self.build_terminal_context_menu(cx, has_selection);
                 el.child(
                     div()
                         .id("terminal-context-menu-float")
