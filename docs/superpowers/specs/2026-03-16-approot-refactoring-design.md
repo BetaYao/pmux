@@ -2,7 +2,7 @@
 
 ## Overview
 
-Refactor the monolithic `AppRoot` (6809 lines, 143 fields, 84 methods) into 5 focused GPUI Entities (AppRoot retains render()), plus perform 5 additional improvements: merge StatusPublisher duplicated methods, unify status display logic, reduce render-path clones, replace Mutex with RwLock where read-heavy, and add collection eviction on workspace switch.
+Refactor the monolithic `AppRoot` (6809 lines, 71 fields, 84 methods) into 5 focused GPUI Entities (AppRoot retains render()), plus perform 5 additional improvements: merge StatusPublisher duplicated methods, unify status display logic, reduce render-path clones, replace Mutex with RwLock where read-heavy, and add collection eviction on workspace switch.
 
 ## Motivation
 
@@ -207,9 +207,9 @@ Key interface:
 
 ### Phase 3: RuntimeManager
 
-Extract: runtime, event_bus, status_publisher, session_scanner, pane_statuses, pane_index, hook_handler, status_key_base, status_counts, modal_overlay_open, status_counts_model, topbar_entity, pane_summary_model
+Extract: runtime, event_bus, status_publisher, session_scanner, pane_statuses, pane_index, hook_handler, status_key_base, status_counts, modal_overlay_open, status_counts_model, topbar_entity, pane_summary_model, event_bus_subscription_started, running_animation_frame, running_animation_task
 
-Rationale: Most important extraction. Separates runtime lifecycle from UI.
+Rationale: Most important extraction. Separates runtime lifecycle from UI. Running animation state belongs here since it's driven by agent status changes.
 
 Key interface:
 - `start_runtime()`, `stop_runtime()`, `runtime()`, `event_bus()`
