@@ -1,5 +1,6 @@
 // ui/mod.rs - GUI components for pmux
 pub mod app_root;
+mod app_root_render;
 pub mod dialog_manager;
 pub mod notification_center;
 pub mod runtime_manager;

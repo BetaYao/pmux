@@ -116,7 +116,7 @@ fn shell_quote_path(path: &str) -> String {
 /// - `String` entries: concatenated as-is (preserves existing text-paste behaviour).
 /// - `Image` entries: saved to a temp file, path pasted (enables Cmd+V image paste).
 /// - `ExternalPaths` entries: file paths pasted with shell quoting.
-fn build_paste_text_from_clipboard(clipboard: &ClipboardItem) -> String {
+pub(crate) fn build_paste_text_from_clipboard(clipboard: &ClipboardItem) -> String {
     let mut result = String::new();
     let mut did_cleanup = false;
     for entry in clipboard.entries() {
@@ -288,154 +288,154 @@ pub(crate) async fn coalesce_and_process_output(
 
 /// Main application root component
 pub struct AppRoot {
-    state: AppState,
-    workspace_manager: WorkspaceManager,
-    status_counts: StatusCounts,
-    notification_manager: Arc<Mutex<NotificationManager>>,
+    pub(crate) state: AppState,
+    pub(crate) workspace_manager: WorkspaceManager,
+    pub(crate) status_counts: StatusCounts,
+    pub(crate) notification_manager: Arc<Mutex<NotificationManager>>,
     /// DialogManager Entity — manages settings modal, new branch dialog, delete/close dialogs
-    dialog_mgr: Option<Entity<crate::ui::dialog_manager::DialogManager>>,
+    pub(crate) dialog_mgr: Option<Entity<crate::ui::dialog_manager::DialogManager>>,
     /// NotificationCenter Entity — manages notifications, panel state, notification jump
-    notification_center: Option<Entity<crate::ui::notification_center::NotificationCenter>>,
+    pub(crate) notification_center: Option<Entity<crate::ui::notification_center::NotificationCenter>>,
     /// RuntimeManager Entity — manages runtime lifecycle, status, animation
-    runtime_mgr: Option<Entity<crate::ui::runtime_manager::RuntimeManager>>,
+    pub(crate) runtime_mgr: Option<Entity<crate::ui::runtime_manager::RuntimeManager>>,
     /// TerminalManager Entity — manages terminal buffers, resize, focus, search
-    terminal_mgr: Option<Entity<crate::ui::terminal_manager::TerminalManager>>,
+    pub(crate) terminal_mgr: Option<Entity<crate::ui::terminal_manager::TerminalManager>>,
     /// SplitPaneManager Entity — manages split layout, pane focus, divider drag
-    split_pane_mgr: Option<Entity<crate::ui::split_pane_manager::SplitPaneManager>>,
-    sidebar_visible: bool,
+    pub(crate) split_pane_mgr: Option<Entity<crate::ui::split_pane_manager::SplitPaneManager>>,
+    pub(crate) sidebar_visible: bool,
     /// Per-pane terminal buffers (Term = pipe-pane/control mode streaming; Legacy = error placeholder only)
-    terminal_buffers: Arc<Mutex<HashMap<String, TerminalBuffer>>>,
+    pub(crate) terminal_buffers: Arc<Mutex<HashMap<String, TerminalBuffer>>>,
     /// Split layout tree (single Pane or Vertical/Horizontal with children)
-    split_tree: SplitNode,
+    pub(crate) split_tree: SplitNode,
     /// Index of focused pane in flatten() order
-    focused_pane_index: usize,
+    pub(crate) focused_pane_index: usize,
     /// When dragging a divider: (path, start_pos, start_ratio, is_vertical)
-    split_divider_drag: Option<(Vec<bool>, f32, f32, bool)>,
+    pub(crate) split_divider_drag: Option<(Vec<bool>, f32, f32, bool)>,
     /// Active pane target (e.g. "local:/path/to/worktree")
-    active_pane_target: Option<String>,
+    pub(crate) active_pane_target: Option<String>,
     /// Shared target for input routing (updated when switching panes)
-    active_pane_target_shared: Arc<Mutex<String>>,
+    pub(crate) active_pane_target_shared: Arc<Mutex<String>>,
     /// List of pane targets (for multi-pane split layout)
-    pane_targets_shared: Arc<Mutex<Vec<String>>>,
+    pub(crate) pane_targets_shared: Arc<Mutex<Vec<String>>>,
     /// Runtime for terminal/backend operations (local PTY)
-    runtime: Option<Arc<dyn AgentRuntime>>,
+    pub(crate) runtime: Option<Arc<dyn AgentRuntime>>,
     /// Real-time agent status per pane ID
-    pane_statuses: Arc<Mutex<HashMap<String, AgentStatus>>>,
+    pub(crate) pane_statuses: Arc<Mutex<HashMap<String, AgentStatus>>>,
     /// Event Bus for status/notification events
-    event_bus: Arc<EventBus>,
+    pub(crate) event_bus: Arc<EventBus>,
     /// Status publisher (publishes to EventBus, replaces StatusPoller)
-    status_publisher: Option<StatusPublisher>,
+    pub(crate) status_publisher: Option<StatusPublisher>,
     /// JSONL session scanner for supplementary agent status detection
-    session_scanner: Option<crate::session_scanner::SessionScanner>,
+    pub(crate) session_scanner: Option<crate::session_scanner::SessionScanner>,
     /// Status key base for current worktree (e.g. "local:/path/to/worktree")
-    status_key_base: Option<String>,
+    pub(crate) status_key_base: Option<String>,
     /// Whether EventBus subscription has been started (spawn once)
-    event_bus_subscription_started: bool,
+    pub(crate) event_bus_subscription_started: bool,
     /// NewBranchDialogModel + Entity - dialog state; Entity observes, re-renders only when model notifies
-    new_branch_dialog_model: Option<Entity<NewBranchDialogModel>>,
-    new_branch_dialog_entity: Option<Entity<NewBranchDialogEntity>>,
+    pub(crate) new_branch_dialog_model: Option<Entity<NewBranchDialogModel>>,
+    pub(crate) new_branch_dialog_entity: Option<Entity<NewBranchDialogEntity>>,
     /// Focus handle for new branch dialog input (focus on open)
-    dialog_input_focus: Option<FocusHandle>,
+    pub(crate) dialog_input_focus: Option<FocusHandle>,
     /// Delete worktree confirmation dialog
-    delete_worktree_dialog: DeleteWorktreeDialogUi,
+    pub(crate) delete_worktree_dialog: DeleteWorktreeDialogUi,
     /// Close tab confirmation dialog (with tmux session cleanup option)
-    close_tab_dialog: CloseTabDialogUi,
+    pub(crate) close_tab_dialog: CloseTabDialogUi,
     /// Pending worktree selection to be processed on next render
-    pending_worktree_selection: Option<usize>,
+    pub(crate) pending_worktree_selection: Option<usize>,
     /// When Some(idx): switching to worktree idx, show loading in terminal area
-    worktree_switch_loading: Option<usize>,
+    pub(crate) worktree_switch_loading: Option<usize>,
     /// Current active worktree index (synced with Sidebar/TabBar)
-    active_worktree_index: Option<usize>,
+    pub(crate) active_worktree_index: Option<usize>,
     /// Cached worktrees for active repo. Refreshed on workspace change, branch create/delete, explicit refresh.
     /// Avoids calling discover_worktrees in render path.
-    cached_worktrees: Vec<crate::worktree::WorktreeInfo>,
+    pub(crate) cached_worktrees: Vec<crate::worktree::WorktreeInfo>,
     /// Repo path for which cached_worktrees is valid
-    cached_worktrees_repo: Option<PathBuf>,
+    pub(crate) cached_worktrees_repo: Option<PathBuf>,
     /// Cached tmux window names for the current repo; filled once when opening repo to avoid repeated list-windows calls.
-    cached_tmux_windows: Option<(PathBuf, Vec<String>)>,
+    pub(crate) cached_tmux_windows: Option<(PathBuf, Vec<String>)>,
     /// Maps worktree path → repo path (workspace tab path). Built incrementally
     /// when worktrees are discovered for each repo. Used for per-tab agent counts.
-    worktree_to_repo_map: HashMap<PathBuf, PathBuf>,
+    pub(crate) worktree_to_repo_map: HashMap<PathBuf, PathBuf>,
     /// Sidebar context menu: which worktree index has menu open, and mouse (x, y) position
-    sidebar_context_menu: Option<(usize, f32, f32)>,
+    pub(crate) sidebar_context_menu: Option<(usize, f32, f32)>,
     /// Terminal context menu: mouse (x, y) position when right-clicked
-    terminal_context_menu: Option<(f32, f32)>,
+    pub(crate) terminal_context_menu: Option<(f32, f32)>,
     /// Built-in diff view entity (replaces nvim+diffview overlay)
-    diff_view_entity: Option<Entity<DiffViewOverlay>>,
+    pub(crate) diff_view_entity: Option<Entity<DiffViewOverlay>>,
     /// Sidebar width in pixels (persisted to state.json)
-    sidebar_width: u32,
+    pub(crate) sidebar_width: u32,
     /// When Some, dependency check failed - show self-check page
-    dependency_check: Option<DependencyCheckResult>,
+    pub(crate) dependency_check: Option<DependencyCheckResult>,
     /// When true, focus terminal area on next frame (keyboard input without clicking first)
-    terminal_needs_focus: bool,
+    pub(crate) terminal_needs_focus: bool,
     /// Stable focus handle for terminal area (must persist across renders for key events)
-    terminal_focus: Option<FocusHandle>,
+    pub(crate) terminal_focus: Option<FocusHandle>,
     /// ResizeController: debounced window bounds → (cols, rows) for runtime resize.
     /// Resize is driven here; gpui-terminal uses with_resize_callback.
-    resize_controller: ResizeController,
+    pub(crate) resize_controller: ResizeController,
     /// Last (cols, rows) we resized to. Used to initialize new engines at full size (avoids flash).
-    preferred_terminal_dims: Option<(u16, u16)>,
+    pub(crate) preferred_terminal_dims: Option<(u16, u16)>,
     /// Shared dims updated by resize callback (callable from paint phase without cx).
-    shared_terminal_dims: Arc<std::sync::Mutex<Option<(u16, u16)>>>,
+    pub(crate) shared_terminal_dims: Arc<std::sync::Mutex<Option<(u16, u16)>>>,
     /// When true, show the Settings modal overlay
-    show_settings: bool,
+    pub(crate) show_settings: bool,
     /// Draft config when Settings is open; None when closed. Updated on open and by toggles.
-    settings_draft: Option<Config>,
+    pub(crate) settings_draft: Option<Config>,
     /// Draft secrets when Settings is open; None when closed.
-    settings_secrets_draft: Option<Secrets>,
+    pub(crate) settings_secrets_draft: Option<Secrets>,
     /// Which channel config panel is open: "discord", "kook", "feishu"
-    settings_configuring_channel: Option<String>,
+    pub(crate) settings_configuring_channel: Option<String>,
     /// Which agent is being edited in the Agent Detect settings (index into agent_detect.agents)
-    settings_editing_agent: Option<usize>,
+    pub(crate) settings_editing_agent: Option<usize>,
     /// Active settings tab: "channels" or "agent_detect"
-    settings_tab: String,
+    pub(crate) settings_tab: String,
     /// Focus handle for the settings modal (steals focus from terminal when open)
-    settings_focus: Option<FocusHandle>,
+    pub(crate) settings_focus: Option<FocusHandle>,
     /// Which settings text field is focused: "agent-name-{idx}", "rule-patterns-{agent_idx}-{rule_idx}"
-    settings_focused_field: Option<String>,
+    pub(crate) settings_focused_field: Option<String>,
     /// StatusCountsModel - TopBar/StatusBar observe this for entity-scoped re-render (Phase 0 spike)
-    status_counts_model: Option<Entity<StatusCountsModel>>,
+    pub(crate) status_counts_model: Option<Entity<StatusCountsModel>>,
     /// TopBar Entity - observes StatusCountsModel, re-renders only when status changes
-    topbar_entity: Option<Entity<TopBarEntity>>,
+    pub(crate) topbar_entity: Option<Entity<TopBarEntity>>,
     /// NotificationPanelModel - show_panel, unread_count; Panel + bell observe this
-    notification_panel_model: Option<Entity<NotificationPanelModel>>,
+    pub(crate) notification_panel_model: Option<Entity<NotificationPanelModel>>,
     /// NotificationPanel Entity - observes model, re-renders only when panel state changes
-    notification_panel_entity: Option<Entity<NotificationPanelEntity>>,
+    pub(crate) notification_panel_entity: Option<Entity<NotificationPanelEntity>>,
     /// Terminal area Entity - when content changes, notify this instead of AppRoot (Phase 4)
-    terminal_area_entity: Option<Entity<TerminalAreaEntity>>,
+    pub(crate) terminal_area_entity: Option<Entity<TerminalAreaEntity>>,
     /// When true, new branch (or other modal) dialog is open; terminal output loop skips
     /// notifying terminal area so the main thread stays responsive for dialog input (e.g. in large repos).
-    modal_overlay_open: Arc<AtomicBool>,
+    pub(crate) modal_overlay_open: Arc<AtomicBool>,
     /// When true, a split divider is being dragged; resize callbacks skip runtime.resize()
     /// to prevent tmux feedback loop (resize-pane redistributes space, fighting the UI ratio).
-    split_dragging: Arc<AtomicBool>,
+    pub(crate) split_dragging: Arc<AtomicBool>,
     /// IME: set on Enter (no Cmd/Alt); cleared when replace_text_in_range runs or after 50ms timeout. Ensures "commit + Enter" sends text then \\r (no extra newline).
-    ime_pending_enter: Arc<AtomicBool>,
+    pub(crate) ime_pending_enter: Arc<AtomicBool>,
     /// When true, search bar is visible and keyboard input appends to search_query
-    search_active: bool,
+    pub(crate) search_active: bool,
     /// Current search query (when search_active)
-    search_query: String,
+    pub(crate) search_query: String,
     /// Index of current match when cycling (Enter/Cmd+G)
-    search_current_match: usize,
+    pub(crate) search_current_match: usize,
     /// PaneSummaryModel - per-pane last_line + status_since for Sidebar
-    pane_summary_model: Option<Entity<PaneSummaryModel>>,
+    pub(crate) pane_summary_model: Option<Entity<PaneSummaryModel>>,
     /// Running animation frame index (cycles through RUNNING_FRAMES)
-    running_animation_frame: usize,
+    pub(crate) running_animation_frame: usize,
     /// Running animation timer task (250ms tick)
-    running_animation_task: Option<gpui::Task<()>>,
+    pub(crate) running_animation_task: Option<gpui::Task<()>>,
     /// Whether the pmux window is focused (shared with event loop for notification suppression)
-    window_focused_shared: Arc<AtomicBool>,
+    pub(crate) window_focused_shared: Arc<AtomicBool>,
     /// Timestamp of last user keyboard input (shared with event loop for notification suppression)
-    last_input_time: Arc<Mutex<std::time::Instant>>,
+    pub(crate) last_input_time: Arc<Mutex<std::time::Instant>>,
     /// Pending notification jump target: (pane_id, timestamp). Set when a system notification is
     /// sent so that clicking the notification (which activates the window) auto-focuses the pane.
-    pending_notification_jump: Arc<Mutex<Option<(String, std::time::Instant)>>>,
+    pub(crate) pending_notification_jump: Arc<Mutex<Option<(String, std::time::Instant)>>>,
     /// Previous window focus state, used to detect unfocused→focused transitions for notification click-to-focus.
-    was_window_focused: bool,
+    pub(crate) was_window_focused: bool,
     /// Available update info (set by background check)
-    update_available: Option<crate::updater::UpdateInfo>,
+    pub(crate) update_available: Option<crate::updater::UpdateInfo>,
     /// Whether an update download is in progress
-    update_downloading: bool,
+    pub(crate) update_downloading: bool,
     /// Webhook pane index (maps agent IDs to pane targets for hook routing)
     pub pane_index: Option<std::sync::Arc<std::sync::RwLock<crate::hooks::handler::PaneIndex>>>,
     /// Webhook hook event handler (processes HookEvents from WebhookServer)
@@ -1062,7 +1062,7 @@ impl AppRoot {
     }
 
     /// Download and install the available update, then relaunch.
-    fn trigger_update(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn trigger_update(&mut self, cx: &mut Context<Self>) {
         let info = match &self.update_available {
             Some(info) => info.clone(),
             None => return,
@@ -1103,7 +1103,7 @@ impl AppRoot {
     }
 
     /// Skip the currently available update version.
-    fn skip_update_version(&mut self) {
+    pub(crate) fn skip_update_version(&mut self) {
         if let Some(ref info) = self.update_available {
             let version_tag = info.latest_version.display();
             if let Ok(mut config) = Config::load() {
@@ -1429,7 +1429,7 @@ impl AppRoot {
     }
 
     /// Handle adding a new workspace
-    fn handle_add_workspace(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn handle_add_workspace(&mut self, cx: &mut Context<Self>) {
         cx.spawn(async move |entity, cx| {
             let selected = show_folder_picker_async().await;
             if let Some(path) = selected {
@@ -1478,7 +1478,7 @@ impl AppRoot {
     }
 
     /// Switch to a workspace tab by index. Saves/restores Sidebar/TabBar state per repo.
-    fn handle_workspace_tab_switch(&mut self, idx: usize, cx: &mut Context<Self>) {
+    pub(crate) fn handle_workspace_tab_switch(&mut self, idx: usize, cx: &mut Context<Self>) {
         if idx >= self.workspace_manager.tab_count() {
             return;
         }
@@ -1538,7 +1538,7 @@ impl AppRoot {
 
     /// Start tmux session for the currently active workspace tab.
     /// Tries recover (match by tmux window name); else uses first worktree.
-    fn start_session_for_active_tab(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn start_session_for_active_tab(&mut self, cx: &mut Context<Self>) {
         if let Some(tab) = self.workspace_manager.active_tab() {
             let repo_path = tab.path.clone();
             self.refresh_worktrees_for_repo(&repo_path);
@@ -2029,7 +2029,7 @@ impl AppRoot {
 
     /// Process pending worktree selection (called from render context).
     /// Reuses the existing -CC connection when switching worktrees within the same session.
-    fn process_pending_worktree_selection(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn process_pending_worktree_selection(&mut self, cx: &mut Context<Self>) {
         let idx = match self.pending_worktree_selection.take() {
             Some(i) => i,
             None => return,
@@ -2327,7 +2327,7 @@ impl AppRoot {
     /// - Switching workspace tab
     /// - After create_branch / delete worktree
     /// - On explicit user refresh (future)
-    fn refresh_worktrees_for_repo(&mut self, repo_path: &Path) {
+    pub(crate) fn refresh_worktrees_for_repo(&mut self, repo_path: &Path) {
         match crate::worktree::discover_worktrees(repo_path) {
             Ok(wt) => {
                 // Populate worktree→repo mapping for per-tab agent counts
@@ -2367,7 +2367,7 @@ impl AppRoot {
     }
 
     /// Get worktrees for current repo (from cache). Call from render.
-    fn worktrees_for_render(&self, repo_path: &Path) -> &[crate::worktree::WorktreeInfo] {
+    pub(crate) fn worktrees_for_render(&self, repo_path: &Path) -> &[crate::worktree::WorktreeInfo] {
         if self.cached_worktrees_repo.as_deref() == Some(repo_path) {
             &self.cached_worktrees
         } else {
@@ -2377,7 +2377,7 @@ impl AppRoot {
 
     /// Tmux window names that have no corresponding worktree (worktree removed externally). Empty when not tmux backend.
     /// Uses cached_tmux_windows when repo matches to avoid repeated list-windows calls.
-    fn orphan_tmux_windows_for_repo(&self, repo_path: &Path) -> Vec<String> {
+    pub(crate) fn orphan_tmux_windows_for_repo(&self, repo_path: &Path) -> Vec<String> {
         let backend = self.effective_backend();
         if backend != "tmux" && backend != "tmux-cc" {
             return Vec::new();
@@ -2425,7 +2425,7 @@ impl AppRoot {
     /// Compute per-tab active agent counts from pane_statuses.
     /// Groups panes by worktree, then maps to repo/tab via worktree_to_repo_map.
     /// Active = Running, Error, or Waiting.
-    fn compute_per_tab_active_counts(&self) -> Vec<usize> {
+    pub(crate) fn compute_per_tab_active_counts(&self) -> Vec<usize> {
         let num_tabs = self.workspace_manager.tab_count();
         let mut counts = vec![0usize; num_tabs];
         if let Ok(statuses) = self.pane_statuses.lock() {
@@ -2492,7 +2492,7 @@ impl AppRoot {
     /// Stop current session.
     /// Does NOT clear pane_statuses - preserves last known status for worktrees we're leaving
     /// (avoids flicker: main=Idle, switch to feature/test → main stays Idle, feature/test gets its status)
-    fn stop_current_session(&mut self) {
+    pub(crate) fn stop_current_session(&mut self) {
         self.detach_ui_from_runtime();
         self.runtime = None;
     }
@@ -2563,232 +2563,6 @@ impl AppRoot {
     /// Handle keyboard events
     /// Handle search-mode keys (Escape, Enter, Backspace, printable chars).
     /// Returns true if the key was consumed.
-    fn handle_search_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
-        match event.keystroke.key.as_str() {
-            "escape" => {
-                self.search_active = false;
-                self.search_query.clear();
-                if let Some(ref e) = self.terminal_area_entity {
-                    let _ = cx.update_entity(e, |ent: &mut TerminalAreaEntity, cx| {
-                        ent.set_search(None, 0);
-                        cx.notify();
-                    });
-                }
-                cx.notify();
-                true
-            }
-            "enter" | "g" if event.keystroke.modifiers.platform || event.keystroke.key == "enter" => {
-                if let Ok(buffers) = self.terminal_buffers.lock() {
-                    if let Some(target) = self.active_pane_target.as_ref() {
-                        if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
-                            let matches = terminal.search(&self.search_query);
-                            if !matches.is_empty() {
-                                self.search_current_match =
-                                    (self.search_current_match + 1) % matches.len();
-                                if let Some(ref e) = self.terminal_area_entity {
-                                    let _ = cx.update_entity(e, |ent: &mut TerminalAreaEntity, cx| {
-                                        ent.set_search(
-                                            Some(self.search_query.clone()),
-                                            self.search_current_match,
-                                        );
-                                        cx.notify();
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-                cx.notify();
-                true
-            }
-            "backspace" => {
-                self.search_query.pop();
-                if let Some(ref e) = self.terminal_area_entity {
-                    let query = self.search_query.clone();
-                    let _ = cx.update_entity(e, |ent: &mut TerminalAreaEntity, cx| {
-                        ent.set_search(
-                            if query.is_empty() { None } else { Some(query) },
-                            self.search_current_match,
-                        );
-                        cx.notify();
-                    });
-                }
-                cx.notify();
-                true
-            }
-            _ => {
-                if event.keystroke.key.len() == 1 {
-                    let ch = event.keystroke.key.chars().next().unwrap();
-                    if ch.is_ascii_graphic() || ch == ' ' {
-                        self.search_query.push(ch);
-                        if let Some(ref e) = self.terminal_area_entity {
-                            let query = self.search_query.clone();
-                            let _ = cx.update_entity(e, |ent: &mut TerminalAreaEntity, cx| {
-                                ent.set_search(Some(query), self.search_current_match);
-                                cx.notify();
-                            });
-                        }
-                        cx.notify();
-                        return true;
-                    }
-                }
-                false
-            }
-        }
-    }
-
-    /// Handle Cmd+key application shortcuts.
-    fn handle_shortcut(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
-        match event.keystroke.key.as_str() {
-            "b" => {
-                self.sidebar_visible = !self.sidebar_visible;
-                let visible = self.sidebar_visible;
-                if let Some(ref e) = self.topbar_entity {
-                    let _ = cx.update_entity(e, |t: &mut TopBarEntity, cx| {
-                        t.set_sidebar_visible(visible);
-                        cx.notify();
-                    });
-                }
-                cx.notify();
-            }
-            "f" => {
-                self.search_active = true;
-                self.search_query.clear();
-                self.search_current_match = 0;
-                if let Some(ref e) = self.terminal_area_entity {
-                    let _ = cx.update_entity(e, |ent: &mut TerminalAreaEntity, cx| {
-                        ent.set_search(Some(String::new()), 0);
-                        cx.notify();
-                    });
-                }
-                cx.notify();
-            }
-            "i" => {
-                if let Some(ref model) = self.notification_panel_model {
-                    let _ = cx.update_entity(model, |m, cx| {
-                        m.toggle_panel();
-                        cx.notify();
-                    });
-                }
-            }
-            "d" => {
-                if event.keystroke.modifiers.shift {
-                    self.handle_split_pane(false, cx);
-                } else {
-                    self.handle_split_pane(true, cx);
-                }
-            }
-            "r" => {
-                self.open_diff_view(cx);
-            }
-            "w" => {
-                if self.diff_view_entity.is_some() {
-                    self.diff_view_entity = None;
-                    cx.notify();
-                } else {
-                    self.handle_close_pane(cx);
-                }
-            }
-            "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" => {
-                if let Ok(idx) = event.keystroke.key.parse::<usize>() {
-                    let idx = idx - 1;
-                    if idx < self.workspace_manager.tab_count() {
-                        self.handle_workspace_tab_switch(idx, cx);
-                        let counts = self.compute_per_tab_active_counts();
-                        if let Some(ref e) = self.topbar_entity {
-                            let topbar = e.clone();
-                            let wm = self.workspace_manager.clone();
-                            let _ = cx.update_entity(&topbar, |t: &mut TopBarEntity, cx| {
-                                t.set_workspace_manager(wm);
-                                t.set_per_tab_active_counts(counts);
-                                cx.notify();
-                            });
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// Forward a key event to the terminal runtime (xterm escape sequences, IME handling).
-    fn forward_key_to_terminal(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
-        let key_name = event.keystroke.key.clone();
-        let modifiers = KeyModifiers {
-            platform: event.keystroke.modifiers.platform,
-            shift: event.keystroke.modifiers.shift,
-            alt: event.keystroke.modifiers.alt,
-            ctrl: event.keystroke.modifiers.control,
-        };
-
-        match (&self.runtime, self.active_pane_target.as_ref()) {
-            (Some(runtime), Some(target)) => {
-                // IME: defer Enter so replace_text_in_range can send committed text first
-                if (key_name == "enter" || key_name == "return" || key_name == "kp_enter")
-                    && !modifiers.shift
-                    && !modifiers.platform
-                    && !modifiers.alt
-                {
-                    self.ime_pending_enter.store(true, Ordering::SeqCst);
-                    let runtime = runtime.clone();
-                    let target = target.clone();
-                    let pending = self.ime_pending_enter.clone();
-                    cx.spawn(async move |_entity, cx| {
-                        cx.background_executor()
-                            .timer(std::time::Duration::from_millis(50))
-                            .await;
-                        if pending.swap(false, Ordering::SeqCst) {
-                            let _ = runtime.send_input(&target, b"\r");
-                        }
-                    })
-                    .detach();
-                    return;
-                }
-
-                let bytes_opt = if let Ok(buffers) = self.terminal_buffers.lock() {
-                    if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
-                        crate::terminal::key_to_bytes(event, terminal.mode())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                let has_text_char = event.keystroke.key_char.as_ref().is_some_and(|c| !c.is_empty());
-                let bytes_opt = if has_text_char {
-                    bytes_opt
-                } else {
-                    bytes_opt.or_else(|| key_to_xterm_escape(&key_name, modifiers))
-                };
-
-                if let Some(bytes) = bytes_opt {
-                    if let Ok(buffers) = self.terminal_buffers.lock() {
-                        if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
-                            if terminal.display_offset() > 0 {
-                                terminal.scroll_to_bottom();
-                            }
-                        }
-                    }
-                    let send_result = runtime.send_input(target, &bytes);
-                    if let Err(e) = send_result {
-                        eprintln!("pmux: send_input failed: {}", e);
-                    }
-                }
-            }
-            _ => {
-                if !modifiers.platform {
-                    eprintln!(
-                        "pmux: key '{}' not forwarded (runtime={} target={})",
-                        key_name,
-                        self.runtime.is_some(),
-                        self.active_pane_target.as_deref().unwrap_or("none")
-                    );
-                }
-            }
-        }
-    }
-
     fn handle_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         // Track last input time for notification suppression (方案 6b)
         if let Ok(mut t) = self.last_input_time.lock() {
@@ -2947,7 +2721,7 @@ impl AppRoot {
     }
 
     /// Handle split pane (⌘D vertical, ⌘⇧D horizontal)
-    fn handle_split_pane(&mut self, vertical: bool, cx: &mut Context<Self>) {
+    pub(crate) fn handle_split_pane(&mut self, vertical: bool, cx: &mut Context<Self>) {
         let Some(target) = self.split_tree.focus_index_to_pane_target(self.focused_pane_index) else {
             return;
         };
@@ -2998,7 +2772,7 @@ impl AppRoot {
     }
 
     /// Handle close focused pane (⌘W). No-op if only one pane remains.
-    fn handle_close_pane(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn handle_close_pane(&mut self, cx: &mut Context<Self>) {
         if self.split_tree.pane_count() <= 1 {
             return;
         }
@@ -3058,12 +2832,12 @@ impl AppRoot {
     }
 
     /// Opens diff view for the given worktree index (or current if None)
-    fn open_diff_view(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn open_diff_view(&mut self, cx: &mut Context<Self>) {
         self.open_diff_view_for_worktree(self.active_worktree_index, cx);
     }
 
     /// Opens diff view for a specific worktree index
-    fn open_diff_view_for_worktree(&mut self, worktree_idx: Option<usize>, cx: &mut Context<Self>) {
+    pub(crate) fn open_diff_view_for_worktree(&mut self, worktree_idx: Option<usize>, cx: &mut Context<Self>) {
         let repo_path = self.workspace_manager.active_tab()
             .map(|t| t.path.clone())
             .unwrap_or_else(|| PathBuf::from("."));
@@ -3074,7 +2848,7 @@ impl AppRoot {
     }
 
     /// Opens diff view using cached worktrees (no refresh). Call after cache is populated.
-    fn open_diff_view_for_worktree_with_cache(&mut self, idx: usize, cx: &mut Context<Self>) {
+    pub(crate) fn open_diff_view_for_worktree_with_cache(&mut self, idx: usize, cx: &mut Context<Self>) {
         let worktrees = &self.cached_worktrees;
         let worktree = match worktrees.get(idx) {
             Some(w) => w,
@@ -3101,7 +2875,7 @@ impl AppRoot {
     }
 
     /// Opens the new branch dialog
-    fn open_new_branch_dialog(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn open_new_branch_dialog(&mut self, cx: &mut Context<Self>) {
         self.ensure_entities(cx);
         self.modal_overlay_open.store(true, Ordering::Relaxed);
         if let Some(ref model) = self.new_branch_dialog_model {
@@ -3203,20 +2977,20 @@ impl AppRoot {
     }
 
     /// Closes the close-tab confirmation dialog
-    fn close_close_tab_dialog(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn close_close_tab_dialog(&mut self, cx: &mut Context<Self>) {
         self.close_tab_dialog.close();
         self.terminal_needs_focus = true;
         cx.notify();
     }
 
     /// Toggles the kill_tmux checkbox in the close-tab dialog
-    fn toggle_close_tab_kill_tmux(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn toggle_close_tab_kill_tmux(&mut self, cx: &mut Context<Self>) {
         self.close_tab_dialog.toggle_kill_tmux();
         cx.notify();
     }
 
     /// Confirms tab close: removes tab, stops session, optionally kills tmux session
-    fn confirm_close_tab(&mut self, tab_index: usize, kill_tmux: bool, cx: &mut Context<Self>) {
+    pub(crate) fn confirm_close_tab(&mut self, tab_index: usize, kill_tmux: bool, cx: &mut Context<Self>) {
         let closed_path = self.workspace_manager.get_tab(tab_index).map(|t| t.path.clone());
         self.workspace_manager.close_tab(tab_index);
 
@@ -3257,14 +3031,14 @@ impl AppRoot {
     }
 
     /// Closes the delete worktree dialog
-    fn close_delete_dialog(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn close_delete_dialog(&mut self, cx: &mut Context<Self>) {
         self.delete_worktree_dialog.close();
         self.terminal_needs_focus = true;
         cx.notify();
     }
 
     /// Confirms worktree deletion (tmux kill-window + git worktree remove)
-    fn confirm_delete_worktree(&mut self, worktree: crate::worktree::WorktreeInfo, cx: &mut Context<Self>) {
+    pub(crate) fn confirm_delete_worktree(&mut self, worktree: crate::worktree::WorktreeInfo, cx: &mut Context<Self>) {
         let repo_path = self.workspace_manager.active_tab()
             .map(|t| t.path.clone())
             .unwrap_or_else(|| PathBuf::from("."));
@@ -3335,889 +3109,6 @@ impl AppRoot {
         }))
     }
 
-
-    fn render_dependency_check_page(
-        &self,
-        deps: &DependencyCheckResult,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let missing: Vec<String> = deps.missing.clone();
-
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .items_center()
-            .justify_center()
-            .gap(px(24.))
-            .bg(rgb(0x1e1e1e))
-            .child(
-                div()
-                    .text_size(px(24.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(rgb(0xffffff))
-                    .child("Dependency Check")
-            )
-            .child(
-                div()
-                    .text_size(px(14.))
-                    .text_color(rgb(0x999999))
-                    .child("pmux requires the following dependencies. Please install any missing items:")
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(12.))
-                    .max_w(px(480.))
-                    .children(missing.into_iter().map(|cmd| {
-                        let install = deps::installation_instructions(&cmd);
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(4.))
-                            .px(px(16.))
-                            .py(px(12.))
-                            .rounded(px(6.))
-                            .bg(rgb(0x2a2a2a))
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(8.))
-                                    .child(
-                                        div()
-                                            .text_color(rgb(0xff6666))
-                                            .child("✗ ")
-                                    )
-                                    .child(
-                                        div()
-                                            .text_color(rgb(0xffffff))
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .child(cmd.clone())
-                                    )
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(12.))
-                                    .text_color(rgb(0xaaaaaa))
-                                    .font_family("ui-monospace")
-                                    .child(install)
-                            )
-                    }))
-            )
-            .child(
-                div()
-                    .text_size(px(12.))
-                    .text_color(rgb(0x888888))
-                    .child("After installing, click the button below to recheck")
-            )
-            .child(
-                div()
-                    .id("recheck-deps-btn")
-                    .px(px(24.))
-                    .py(px(12.))
-                    .rounded(px(6.))
-                    .bg(rgb(0x0066cc))
-                    .text_color(rgb(0xffffff))
-                    .text_size(px(15.))
-                    .font_weight(FontWeight::MEDIUM)
-                    .cursor_pointer()
-                    .hover(|style: StyleRefinement| style.bg(rgb(0x0077dd)))
-                    .on_click(cx.listener(move |this, _event, _window, cx| {
-                        let result = deps::check_dependencies_detailed();
-                        if result.is_ok() {
-                            this.dependency_check = None;
-                        } else {
-                            this.dependency_check = Some(result);
-                        }
-                        cx.notify();
-                    }))
-                    .child("Recheck")
-            )
-    }
-
-    fn render_startup_page(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let has_error = self.state.error_message.is_some();
-        let error_msg = self.state.error_message.clone();
-
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .items_center()
-            .justify_center()
-            .gap(px(20.))
-            .bg(rgb(0x1e1e1e))
-            .child(
-                div()
-                    .text_size(px(28.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(rgb(0xffffff))
-                    .child("Welcome to pmux")
-            )
-            .child(
-                div()
-                    .text_size(px(14.))
-                    .text_color(rgb(0x999999))
-                    .child("Select a Git repository to manage your AI agents")
-            )
-            .child(
-                div()
-                    .id("select-workspace-btn")
-                    .px(px(24.))
-                    .py(px(12.))
-                    .rounded(px(6.))
-                    .bg(rgb(0x0066cc))
-                    .text_color(rgb(0xffffff))
-                    .text_size(px(15.))
-                    .font_weight(FontWeight::MEDIUM)
-                    .cursor_pointer()
-                    .hover(|style: StyleRefinement| style.bg(rgb(0x0077dd)))
-                    .on_click(cx.listener(|this, _event, _window, cx| {
-                        this.handle_add_workspace(cx);
-                    }))
-                    .child("Select Workspace")
-            )
-            .when(has_error, |el: Div| {
-                if let Some(msg) = error_msg {
-                    el.child(
-                        div()
-                            .px(px(16.))
-                            .py(px(8.))
-                            .rounded(px(4.))
-                            .bg(rgb(0x3a1111))
-                            .text_color(rgb(0xff4444))
-                            .text_size(px(13.))
-                            .max_w(px(400.))
-                            .child(SharedString::from(msg))
-                    )
-                } else {
-                    el
-                }
-            })
-    }
-
-    /// Render the update available/downloading banner (if any).
-    fn render_update_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if self.update_available.is_some() && !self.update_downloading {
-            let version = self.update_available.as_ref().map(|i| i.latest_version.display()).unwrap_or_default();
-            Some(
-                div()
-                    .id("update-banner")
-                    .w_full()
-                    .h(px(28.))
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(12.))
-                    .bg(rgb(0x1a3a2a))
-                    .border_t_1()
-                    .border_color(rgb(0x2d5f3f))
-                    .text_size(px(12.))
-                    .text_color(rgb(0x4ec9b0))
-                    .child(format!("pmux {} is available", version))
-                    .child(
-                        div()
-                            .id("update-now-btn")
-                            .px(px(12.))
-                            .py(px(2.))
-                            .rounded(px(3.))
-                            .bg(rgb(0x0e7a0d))
-                            .text_color(rgb(0xffffff))
-                            .text_size(px(11.))
-                            .cursor_pointer()
-                            .hover(|s| s.bg(rgb(0x12991e)))
-                            .on_click(cx.listener(|this, _event: &ClickEvent, _window, cx| {
-                                this.trigger_update(cx);
-                            }))
-                            .child("Update Now"),
-                    )
-                    .child(
-                        div()
-                            .id("update-later-btn")
-                            .px(px(8.))
-                            .py(px(2.))
-                            .cursor_pointer()
-                            .text_color(rgb(0x888888))
-                            .text_size(px(11.))
-                            .hover(|s| s.text_color(rgb(0xcccccc)))
-                            .on_click(cx.listener(|this, _event: &ClickEvent, _window, cx| {
-                                this.update_available = None;
-                                cx.notify();
-                            }))
-                            .child("Later"),
-                    )
-                    .child(
-                        div()
-                            .id("update-skip-btn")
-                            .px(px(8.))
-                            .py(px(2.))
-                            .cursor_pointer()
-                            .text_color(rgb(0x666666))
-                            .text_size(px(11.))
-                            .hover(|s| s.text_color(rgb(0xaaaaaa)))
-                            .on_click(cx.listener(|this, _event: &ClickEvent, _window, cx| {
-                                this.skip_update_version();
-                                cx.notify();
-                            }))
-                            .child("Skip"),
-                    )
-                    .into_any_element()
-            )
-        } else if self.update_downloading {
-            Some(
-                div()
-                    .id("update-progress-banner")
-                    .w_full()
-                    .h(px(28.))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .bg(rgb(0x1a2a3a))
-                    .border_t_1()
-                    .border_color(rgb(0x2d4f6f))
-                    .text_size(px(12.))
-                    .text_color(rgb(0x6cb6ff))
-                    .child("Downloading update...")
-                    .into_any_element()
-            )
-        } else {
-            None
-        }
-    }
-
-    /// Build the terminal content area (loading state, terminal entity, or split pane container).
-    fn build_terminal_content_area(
-        &self,
-        cx: &mut Context<Self>,
-        terminal_focus: &FocusHandle,
-        repo_name: &str,
-        split_tree: SplitNode,
-        terminal_buffers: Arc<Mutex<HashMap<String, TerminalBuffer>>>,
-        focused_pane_index: usize,
-        split_divider_drag: Option<(Vec<bool>, f32, f32, bool)>,
-        worktree_switch_loading: Option<usize>,
-        cursor_blink_visible: bool,
-    ) -> Div {
-        let app_root_entity = cx.entity();
-        let app_root_entity_for_ratio = app_root_entity.clone();
-        let app_root_entity_for_drag = app_root_entity.clone();
-        let app_root_entity_for_drag_end = app_root_entity.clone();
-        let app_root_entity_for_pane_click = app_root_entity.clone();
-        let terminal_focus_for_pane = terminal_focus.clone();
-        div()
-            .flex_1()
-            .min_h_0()
-            .overflow_hidden()
-            .cursor(gpui::CursorStyle::IBeam)
-            .relative()
-            .child(
-                if worktree_switch_loading.is_some() {
-                    div()
-                        .size_full()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .bg(rgb(0x1e1e1e))
-                        .text_color(rgb(0x888888))
-                        .text_size(px(14.))
-                        .child("Connecting to worktree...")
-                        .into_any_element()
-                } else if let Some(ref term_entity) = self.terminal_area_entity {
-                    div().size_full().child(term_entity.clone()).into_any_element()
-                } else {
-                    SplitPaneContainer::new(
-                        split_tree,
-                        terminal_buffers,
-                        focused_pane_index,
-                        repo_name,
-                    )
-                    .with_cursor_blink_visible(cursor_blink_visible)
-                    .with_drag_state(split_divider_drag)
-                    .with_search(
-                        if self.search_active { Some(self.search_query.clone()) } else { None },
-                        self.search_current_match,
-                    )
-                    .on_ratio_change(move |path, ratio, _window, cx| {
-                        let _ = cx.update_entity(&app_root_entity_for_ratio, |this: &mut AppRoot, cx| {
-                            this.split_tree.update_ratio(&path, ratio);
-                            cx.notify();
-                        });
-                    })
-                    .on_divider_drag_start(move |path, pos, ratio, is_vertical, _window, cx| {
-                        let _ = cx.update_entity(&app_root_entity_for_drag, |this: &mut AppRoot, cx| {
-                            this.split_divider_drag = Some((path, pos, ratio, is_vertical));
-                            cx.notify();
-                        });
-                    })
-                    .on_divider_drag_end(move |_window, cx| {
-                        let _ = cx.update_entity(&app_root_entity_for_drag_end, |this: &mut AppRoot, cx| {
-                            this.split_divider_drag = None;
-                            cx.notify();
-                        });
-                    })
-                    .on_pane_click(move |pane_idx, window, cx| {
-                        let _ = cx.update_entity(&app_root_entity_for_pane_click, |this: &mut AppRoot, cx| {
-                            this.focused_pane_index = pane_idx;
-                            if let Some(target) = this.split_tree.focus_index_to_pane_target(pane_idx) {
-                                if let Some(rt) = &this.runtime {
-                                    let _ = rt.focus_pane(&target);
-                                }
-                                this.active_pane_target = Some(target.clone());
-                                if let Ok(mut guard) = this.active_pane_target_shared.lock() {
-                                    *guard = target.clone();
-                                }
-                                this.terminal_needs_focus = false;
-                                if let Ok(buffers) = this.terminal_buffers.lock() {
-                                    if let Some(TerminalBuffer::Terminal { focus_handle, .. }) = buffers.get(&target) {
-                                        window.focus(focus_handle, cx);
-                                    } else {
-                                        drop(buffers);
-                                        window.focus(&terminal_focus_for_pane, cx);
-                                    }
-                                } else {
-                                    window.focus(&terminal_focus_for_pane, cx);
-                                }
-                            } else {
-                                this.terminal_needs_focus = true;
-                            }
-                            cx.notify();
-                        });
-                    })
-                    .into_any_element()
-                }
-            )
-            .when(self.search_active, |el| {
-                el.child(
-                    div()
-                        .absolute()
-                        .top(px(2.0))
-                        .right(px(12.0))
-                        .bg(rgb(0x2e343e))
-                        .border_1()
-                        .border_color(rgb(0x5c6370))
-                        .rounded(px(4.0))
-                        .px(px(8.0))
-                        .py(px(4.0))
-                        .child(format!("🔍 {}_", self.search_query))
-                )
-            })
-    }
-
-    /// Build the sidebar right-click context menu (View Diff, Delete).
-    fn build_sidebar_context_menu(
-        &self,
-        cx: &mut Context<Self>,
-        idx: usize,
-        repo_path: &std::path::Path,
-        cached_worktrees: &[crate::worktree::WorktreeInfo],
-    ) -> impl IntoElement {
-        let app_root_entity = cx.entity();
-        let on_view_diff: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>> = {
-            let entity = app_root_entity.clone();
-            let repo_path = repo_path.to_path_buf();
-            Some(Arc::new(move |idx, _window, cx| {
-                let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
-                    this.sidebar_context_menu = None;
-                    cx.notify();
-                });
-                let entity2 = entity.clone();
-                let repo_path2 = repo_path.clone();
-                cx.spawn(async move |cx| {
-                    let result = blocking::unblock(move || {
-                        crate::worktree::discover_worktrees(&repo_path2).ok().map(|wt| (wt, repo_path2))
-                    }).await;
-                    let _ = cx.update_entity(&entity2, |this: &mut AppRoot, cx: &mut _| {
-                        if let Some((wt, rp)) = result {
-                            this.cached_worktrees = wt;
-                            this.cached_worktrees_repo = Some(rp);
-                        }
-                        this.open_diff_view_for_worktree_with_cache(idx, cx);
-                    });
-                }).detach();
-            }))
-        };
-        let on_delete: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>> = {
-            let entity = app_root_entity.clone();
-            let repo_path = repo_path.to_path_buf();
-            Some(Arc::new(move |idx, _window, cx| {
-                let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
-                    this.sidebar_context_menu = None;
-                    cx.notify();
-                });
-                let entity2 = entity.clone();
-                let repo_path2 = repo_path.clone();
-                cx.spawn(async move |cx| {
-                    let result = blocking::unblock(move || {
-                        let worktrees = crate::worktree::discover_worktrees(&repo_path2).ok()?;
-                        let worktree = worktrees.get(idx).cloned()?;
-                        let has_uncommitted = crate::worktree::has_uncommitted_changes(&worktree.path);
-                        Some((worktrees, worktree, has_uncommitted, repo_path2))
-                    }).await;
-                    if let Some((worktrees, worktree, has_uncommitted, rp)) = result {
-                        let _ = cx.update_entity(&entity2, |this: &mut AppRoot, cx: &mut _| {
-                            this.cached_worktrees = worktrees;
-                            this.cached_worktrees_repo = Some(rp);
-                            this.delete_worktree_dialog.open(worktree, has_uncommitted);
-                            cx.notify();
-                        });
-                    }
-                }).detach();
-            }))
-        };
-        Sidebar::render_context_menu(idx, on_view_diff, on_delete, cached_worktrees)
-    }
-
-    /// Build the terminal right-click context menu (Copy, Paste, Select All, Clear).
-    fn build_terminal_context_menu(&self, cx: &mut Context<Self>, has_selection: bool) -> Stateful<Div> {
-        let app_root_entity = cx.entity();
-        let app_root_for_copy = app_root_entity.clone();
-        let app_root_for_paste = app_root_entity.clone();
-        let app_root_for_select_all = app_root_entity.clone();
-        let app_root_for_clear = app_root_entity.clone();
-
-        let mut menu = div()
-            .id("terminal-context-menu")
-            .min_w(px(180.))
-            .py(px(4.))
-            .rounded(px(6.))
-            .bg(rgb(0x282828))
-            .border_1().border_color(rgb(0x404040))
-            .shadow_lg()
-            .occlude()
-            .on_click(|_event, _window, cx| { cx.stop_propagation(); })
-            .flex().flex_col();
-
-        // Copy
-        if has_selection {
-            menu = menu.child(
-                div()
-                    .id("term-ctx-copy")
-                    .mx(px(4.)).px(px(8.)).py(px(6.))
-                    .rounded(px(4.))
-                    .flex().flex_row().items_center().gap(px(8.))
-                    .text_size(px(13.)).text_color(rgb(0xdddddd))
-                    .hover(|s: StyleRefinement| s.bg(rgb(0x3a3a3a)).text_color(rgb(0xffffff)))
-                    .cursor_pointer()
-                    .on_click(move |_event, _window, cx| {
-                        let _ = cx.update_entity(&app_root_for_copy, |this: &mut AppRoot, cx| {
-                            if let Some(ref target) = this.active_pane_target {
-                                if let Ok(buffers) = this.terminal_buffers.lock() {
-                                    if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
-                                        if let Some(text) = terminal.selection_text() {
-                                            if !text.is_empty() {
-                                                cx.write_to_clipboard(ClipboardItem::new_string(text));
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            this.terminal_context_menu = None;
-                            cx.notify();
-                        });
-                    })
-                    .child(svg().path("icons/copy.svg").size(px(15.)).flex_shrink_0().text_color(rgb(0xaaaaaa)))
-                    .child(div().flex_1().child("Copy"))
-                    .child(div().text_size(px(11.)).text_color(rgb(0x888888)).child("⌘C"))
-            );
-        } else {
-            menu = menu.child(
-                div()
-                    .id("term-ctx-copy")
-                    .mx(px(4.)).px(px(8.)).py(px(6.))
-                    .rounded(px(4.))
-                    .flex().flex_row().items_center().gap(px(8.))
-                    .text_size(px(13.)).text_color(rgb(0x666666))
-                    .child(svg().path("icons/copy.svg").size(px(15.)).flex_shrink_0().text_color(rgb(0x555555)))
-                    .child(div().flex_1().child("Copy"))
-                    .child(div().text_size(px(11.)).text_color(rgb(0x555555)).child("⌘C"))
-            );
-        }
-
-        // Paste
-        menu = menu.child(
-            div()
-                .id("term-ctx-paste")
-                .mx(px(4.)).px(px(8.)).py(px(6.))
-                .rounded(px(4.))
-                .flex().flex_row().items_center().gap(px(8.))
-                .text_size(px(13.)).text_color(rgb(0xdddddd))
-                .hover(|s: StyleRefinement| s.bg(rgb(0x3a3a3a)).text_color(rgb(0xffffff)))
-                .cursor_pointer()
-                .on_click(move |_event, _window, cx| {
-                    let _ = cx.update_entity(&app_root_for_paste, |this: &mut AppRoot, cx| {
-                        if let Some(clipboard) = cx.read_from_clipboard() {
-                            let text = build_paste_text_from_clipboard(&clipboard);
-                            if !text.is_empty() {
-                                if let (Some(runtime), Some(target)) = (&this.runtime, this.active_pane_target.as_ref()) {
-                                    let bracketed = if let Ok(buffers) = this.terminal_buffers.lock() {
-                                        if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
-                                            if terminal.display_offset() > 0 {
-                                                terminal.scroll_to_bottom();
-                                            }
-                                            terminal.mode().contains(alacritty_terminal::term::TermMode::BRACKETED_PASTE)
-                                        } else { false }
-                                    } else { false };
-                                    let mut bytes = Vec::with_capacity(text.len() + 12);
-                                    if bracketed { bytes.extend_from_slice(b"\x1b[200~"); }
-                                    bytes.extend_from_slice(text.replace('\n', "\r").as_bytes());
-                                    if bracketed { bytes.extend_from_slice(b"\x1b[201~"); }
-                                    let _ = runtime.send_input(target, &bytes);
-                                }
-                            }
-                        }
-                        this.terminal_context_menu = None;
-                        cx.notify();
-                    });
-                })
-                .child(svg().path("icons/paste.svg").size(px(15.)).flex_shrink_0().text_color(rgb(0xaaaaaa)))
-                .child(div().flex_1().child("Paste"))
-                .child(div().text_size(px(11.)).text_color(rgb(0x888888)).child("⌘V"))
-        );
-
-        // Separator
-        menu = menu.child(div().mx(px(4.)).my(px(2.)).h(px(1.)).bg(rgb(0x3a3a3a)));
-
-        // Select All
-        menu = menu.child(
-            div()
-                .id("term-ctx-select-all")
-                .mx(px(4.)).px(px(8.)).py(px(6.))
-                .rounded(px(4.))
-                .flex().flex_row().items_center().gap(px(8.))
-                .text_size(px(13.)).text_color(rgb(0xdddddd))
-                .hover(|s: StyleRefinement| s.bg(rgb(0x3a3a3a)).text_color(rgb(0xffffff)))
-                .cursor_pointer()
-                .on_click(move |_event, _window, cx| {
-                    let _ = cx.update_entity(&app_root_for_select_all, |this: &mut AppRoot, cx| {
-                        if let Some(ref target) = this.active_pane_target {
-                            if let Ok(buffers) = this.terminal_buffers.lock() {
-                                if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
-                                    terminal.select_all();
-                                }
-                            }
-                        }
-                        this.terminal_context_menu = None;
-                        cx.notify();
-                    });
-                })
-                .child(svg().path("icons/select-all.svg").size(px(15.)).flex_shrink_0().text_color(rgb(0xaaaaaa)))
-                .child(div().flex_1().child("Select All"))
-                .child(div().text_size(px(11.)).text_color(rgb(0x888888)).child("⌘A"))
-        );
-
-        // Clear
-        menu = menu.child(
-            div()
-                .id("term-ctx-clear")
-                .mx(px(4.)).px(px(8.)).py(px(6.))
-                .rounded(px(4.))
-                .flex().flex_row().items_center().gap(px(8.))
-                .text_size(px(13.)).text_color(rgb(0xdddddd))
-                .hover(|s: StyleRefinement| s.bg(rgb(0x3a3a3a)).text_color(rgb(0xffffff)))
-                .cursor_pointer()
-                .on_click(move |_event, _window, cx| {
-                    let _ = cx.update_entity(&app_root_for_clear, |this: &mut AppRoot, cx| {
-                        if let (Some(runtime), Some(target)) = (&this.runtime, this.active_pane_target.as_ref()) {
-                            let _ = runtime.send_input(target, b"\x0c");
-                        }
-                        this.terminal_context_menu = None;
-                        cx.notify();
-                    });
-                })
-                .child(svg().path("icons/clear.svg").size(px(15.)).flex_shrink_0().text_color(rgb(0xaaaaaa)))
-                .child(div().flex_1().child("Clear"))
-                .child(div().text_size(px(11.)).text_color(rgb(0x888888)).child("⌘K"))
-        );
-
-        menu
-    }
-
-    /// Build the delete worktree confirmation dialog with callbacks.
-    fn build_delete_dialog(&self, cx: &mut Context<Self>) -> DeleteWorktreeDialogUi {
-        let app_root_entity = cx.entity();
-        let app_root_entity_for_confirm = app_root_entity.clone();
-        let app_root_entity_for_cancel = app_root_entity.clone();
-        let mut dialog = DeleteWorktreeDialogUi::new()
-            .on_confirm(move |wt, _window, cx| {
-                let _ = cx.update_entity(&app_root_entity_for_confirm, |this: &mut AppRoot, cx| {
-                    this.confirm_delete_worktree(wt, cx);
-                });
-            })
-            .on_cancel(move |_window, cx| {
-                let _ = cx.update_entity(&app_root_entity_for_cancel, |this: &mut AppRoot, cx| {
-                    this.close_delete_dialog(cx);
-                });
-            });
-        if self.delete_worktree_dialog.is_open() {
-            if let Some(wt) = self.delete_worktree_dialog.worktree() {
-                dialog.open(wt.clone(), self.delete_worktree_dialog.has_uncommitted());
-            }
-        }
-        if let Some(err) = self.delete_worktree_dialog.error_message() {
-            dialog.set_error(err);
-        }
-        dialog
-    }
-
-    /// Build the close tab confirmation dialog with callbacks.
-    fn build_close_tab_dialog(&self, cx: &mut Context<Self>) -> CloseTabDialogUi {
-        let app_root_entity = cx.entity();
-        let app_root_entity_for_confirm = app_root_entity.clone();
-        let app_root_entity_for_cancel = app_root_entity.clone();
-        let app_root_entity_for_toggle = app_root_entity.clone();
-        let mut dialog = CloseTabDialogUi::new()
-            .on_confirm(move |tab_index, kill_tmux, _window, cx| {
-                let _ = cx.update_entity(&app_root_entity_for_confirm, |this: &mut AppRoot, cx| {
-                    this.confirm_close_tab(tab_index, kill_tmux, cx);
-                });
-            })
-            .on_cancel(move |_window, cx| {
-                let _ = cx.update_entity(&app_root_entity_for_cancel, |this: &mut AppRoot, cx| {
-                    this.close_close_tab_dialog(cx);
-                });
-            })
-            .on_toggle_kill_tmux(move |_window, cx| {
-                let _ = cx.update_entity(&app_root_entity_for_toggle, |this: &mut AppRoot, cx| {
-                    this.toggle_close_tab_kill_tmux(cx);
-                });
-            });
-        if self.close_tab_dialog.is_open() {
-            if let (Some(idx), Some(path), Some(name)) = (
-                self.close_tab_dialog.tab_index(),
-                self.close_tab_dialog.workspace_path().cloned(),
-                self.close_tab_dialog.workspace_name().map(|s| s.to_string()),
-            ) {
-                dialog.open(idx, path, name);
-                if !self.close_tab_dialog.kill_tmux() {
-                    dialog.toggle_kill_tmux();
-                }
-            }
-        }
-        dialog
-    }
-
-    /// Build the sidebar component with all callbacks wired.
-    fn build_sidebar(
-        &self,
-        cx: &mut Context<Self>,
-        repo_name: &str,
-        repo_path: &std::path::Path,
-        terminal_focus: &gpui::FocusHandle,
-    ) -> Sidebar {
-        let app_root_entity = cx.entity();
-        let pane_statuses = self.pane_statuses.clone();
-        let pane_summaries_data = self.pane_summary_model.as_ref()
-            .map(|m| m.read(cx).summaries().clone())
-            .unwrap_or_default();
-        let running_frame = self.running_animation_frame;
-        let notification_unread = self
-            .notification_panel_model
-            .as_ref()
-            .map(|m| m.read(cx).unread_count)
-            .unwrap_or_else(|| self.notification_manager.lock().map(|m| m.unread_count()).unwrap_or(0));
-        let notification_panel_model_for_toggle = self.notification_panel_model.clone();
-        let app_root_entity_for_toggle = app_root_entity.clone();
-        let app_root_entity_for_add_ws = app_root_entity.clone();
-
-        let mut sidebar = Sidebar::new(repo_name, repo_path.to_path_buf())
-            .with_statuses(pane_statuses.clone())
-            .with_pane_summaries(pane_summaries_data)
-            .with_running_frame(running_frame)
-            .with_context_menu(self.sidebar_context_menu)
-            .on_toggle_sidebar(move |_window, cx| {
-                let _ = cx.update_entity(&app_root_entity_for_toggle, |this: &mut AppRoot, cx| {
-                    this.sidebar_visible = !this.sidebar_visible;
-                    let visible = this.sidebar_visible;
-                    if let Some(ref e) = this.topbar_entity {
-                        let _ = cx.update_entity(e, |t: &mut TopBarEntity, cx| {
-                            t.set_sidebar_visible(visible);
-                            cx.notify();
-                        });
-                    }
-                    cx.notify();
-                });
-            })
-            .on_toggle_notifications(move |_window, cx| {
-                if let Some(ref model) = notification_panel_model_for_toggle {
-                    let _ = cx.update_entity(model, |m, cx| {
-                        m.toggle_panel();
-                        cx.notify();
-                    });
-                }
-            })
-            .on_add_workspace(move |_window, cx| {
-                let _ = cx.update_entity(&app_root_entity_for_add_ws, |this: &mut AppRoot, cx| {
-                    this.handle_add_workspace(cx);
-                });
-            })
-            .with_notification_count(notification_unread);
-
-        // Use cached worktrees (never call git in render)
-        let worktrees = self.worktrees_for_render(&repo_path).to_vec();
-        if !worktrees.is_empty() {
-            sidebar.set_worktrees(worktrees);
-            if let Some(idx) = self.active_worktree_index {
-                if idx < sidebar.worktree_count() {
-                    sidebar.select(idx);
-                }
-            } else {
-                sidebar.select(0);
-            }
-        }
-        let orphan_windows = self.orphan_tmux_windows_for_repo(&repo_path);
-        sidebar.set_orphan_windows(orphan_windows);
-
-        // Set up select callback
-        let app_root_entity_for_sidebar = app_root_entity.clone();
-        let terminal_focus_for_select = terminal_focus.clone();
-        sidebar.on_select(move |idx: usize, window: &mut Window, cx: &mut App| {
-            let _ = cx.update_entity(&app_root_entity_for_sidebar, |this: &mut AppRoot, cx| {
-                this.pending_worktree_selection = Some(idx);
-                this.process_pending_worktree_selection(cx);
-                cx.notify();
-            });
-            // Clicking the sidebar may defocus the terminal. Restore focus immediately
-            // so keyboard input works without waiting for the async switch to complete.
-            let focus = terminal_focus_for_select.clone();
-            window.on_next_frame(move |window, cx| {
-                window.focus(&focus, cx);
-            });
-        });
-
-        // Set up New Branch callback - opens the dialog
-        let app_root_entity_for_new_branch = app_root_entity.clone();
-        let dialog_focus = self.dialog_input_focus.clone();
-        sidebar.on_new_branch(move |window, cx| {
-            let _ = cx.update_entity(&app_root_entity_for_new_branch, |this: &mut AppRoot, cx| {
-                this.open_new_branch_dialog(cx);
-            });
-            // Double on_next_frame so dialog DOM (and focusable input) is fully mounted before focus
-            if let Some(ref focus) = dialog_focus {
-                let focus = focus.clone();
-                window.on_next_frame(move |window, _cx| {
-                    let focus = focus.clone();
-                    window.on_next_frame(move |window, cx| {
-                        window.focus(&focus, cx);
-                    });
-                });
-            }
-        });
-
-        // Set up Refresh callback - refreshes worktree list
-        let app_root_entity_for_refresh = app_root_entity.clone();
-        sidebar.on_refresh(move |_window, cx| {
-            let _ = cx.update_entity(&app_root_entity_for_refresh, |this: &mut AppRoot, cx| {
-                if let Some(repo_path) = this.workspace_manager.active_tab().map(|t| t.path.clone()) {
-                    this.refresh_worktrees_for_repo(&repo_path);
-                }
-                cx.notify();
-            });
-        });
-
-        // Set up Settings callback - opens the settings modal
-        let app_root_entity_for_settings = app_root_entity.clone();
-        let settings_focus_for_cb = self.settings_focus.clone().expect("settings_focus created in ensure_entities");
-        sidebar.on_settings(move |window, cx| {
-            let _ = cx.update_entity(&app_root_entity_for_settings, |this: &mut AppRoot, cx| {
-                this.show_settings = true;
-                this.settings_draft = Config::load().ok();
-                this.settings_secrets_draft = Secrets::load().ok();
-                // Sync to DialogManager
-                if let Some(ref dm) = this.dialog_mgr {
-                    let config = Config::load().unwrap_or_default();
-                    let secrets = Secrets::load().unwrap_or_default();
-                    dm.update(cx, |dm, cx| dm.open_settings(config, secrets, cx));
-                }
-                cx.notify();
-            });
-            // Focus settings overlay on next frame (after DOM is mounted)
-            let focus = settings_focus_for_cb.clone();
-            window.on_next_frame(move |window, cx| {
-                window.focus(&focus, cx);
-            });
-        });
-
-        let app_root_entity_for_delete = app_root_entity.clone();
-        let app_root_entity_for_view_diff = app_root_entity.clone();
-        let app_root_entity_for_right_click = app_root_entity.clone();
-        let app_root_entity_for_close_orphan = app_root_entity.clone();
-        let repo_path = repo_path.to_path_buf();
-        let repo_path_for_delete = repo_path.clone();
-        let repo_path_for_close_orphan = repo_path.clone();
-        let repo_path_for_view_diff = repo_path.clone();
-        // Extra clones for the root-level context menu overlay
-        let app_root_entity_for_menu_delete = app_root_entity.clone();
-        let app_root_entity_for_menu_diff = app_root_entity.clone();
-        let repo_path_for_menu_delete = repo_path.clone();
-        let repo_path_for_menu_diff = repo_path.clone();
-        sidebar.on_delete(move |idx, _window, cx| {
-            let _ = cx.update_entity(&app_root_entity_for_delete, |this: &mut AppRoot, cx| {
-                this.sidebar_context_menu = None;
-                cx.notify();
-            });
-            let repo_path = repo_path_for_delete.clone();
-            let entity = app_root_entity_for_delete.clone();
-            cx.spawn(async move |cx| {
-                let result = blocking::unblock(move || {
-                    let worktrees = crate::worktree::discover_worktrees(&repo_path).ok()?;
-                    let worktree = worktrees.get(idx).cloned()?;
-                    let has_uncommitted = crate::worktree::has_uncommitted_changes(&worktree.path);
-                    Some((worktrees, worktree, has_uncommitted, repo_path))
-                }).await;
-                if let Some((worktrees, worktree, has_uncommitted, repo_path)) = result {
-                    let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx: &mut _| {
-                        this.cached_worktrees = worktrees;
-                        this.cached_worktrees_repo = Some(repo_path);
-                        this.delete_worktree_dialog.open(worktree, has_uncommitted);
-                        cx.notify();
-                    });
-                }
-            }).detach();
-        });
-        sidebar.on_close_orphan(move |window_name, _window, cx: &mut App| {
-            let repo_path = repo_path_for_close_orphan.clone();
-            let entity = app_root_entity_for_close_orphan.clone();
-            let window_name = window_name.to_string();
-            cx.spawn(async move |cx| {
-                let _ = blocking::unblock(move || kill_tmux_window(&repo_path, &window_name)).await;
-                let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx: &mut _| {
-                    this.cached_tmux_windows = None;
-                    cx.notify();
-                });
-            }).detach();
-        });
-        sidebar.on_view_diff(move |idx, _window, cx| {
-            let _ = cx.update_entity(&app_root_entity_for_view_diff, |this: &mut AppRoot, cx| {
-                this.sidebar_context_menu = None;
-                cx.notify();
-            });
-            let entity = app_root_entity_for_view_diff.clone();
-            let repo_path = repo_path_for_view_diff.clone();
-            cx.spawn(async move |cx| {
-                let result = blocking::unblock(move || {
-                    crate::worktree::discover_worktrees(&repo_path).ok().map(|wt| (wt, repo_path))
-                }).await;
-                let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx: &mut _| {
-                    if let Some((wt, repo_path)) = result {
-                        this.cached_worktrees = wt;
-                        this.cached_worktrees_repo = Some(repo_path);
-                    }
-                    this.open_diff_view_for_worktree_with_cache(idx, cx);
-                });
-            }).detach();
-        });
-        sidebar.on_right_click(move |idx, x, y, _window, cx| {
-            let _ = cx.update_entity(&app_root_entity_for_right_click, |this: &mut AppRoot, cx| {
-                this.sidebar_context_menu = Some((idx, x, y));
-                cx.notify();
-            });
-        });
-
-        sidebar
-    }
 
     fn render_workspace_view(&self, cx: &mut Context<Self>, terminal_focus: &gpui::FocusHandle, cursor_blink_visible: bool) -> impl IntoElement {
         let sidebar_visible = self.sidebar_visible;
