@@ -748,193 +748,182 @@ impl AppRoot {
             let model = cx.new(|_cx| NotificationPanelModel::new());
             self.notification_panel_model = Some(model);
         }
-        if self.notification_panel_entity.is_none() {
-            if let Some(ref model) = self.notification_panel_model {
-                let model = model.clone();
-                let notif_mgr = Arc::clone(&self.notification_manager);
-                let app_root_entity = cx.entity();
-                let on_close = {
-                    let model = model.clone();
-                    Arc::new(move |_window: &mut Window, cx: &mut App| {
-                        let _ = cx.update_entity(&model, |m: &mut NotificationPanelModel, cx| {
-                            m.set_show_panel(false);
-                            cx.notify();
-                        });
-                    })
-                };
-                let on_mark_read = {
-                    let model = model.clone();
-                    let mgr = notif_mgr.clone();
-                    Arc::new(move |id: uuid::Uuid, _window: &mut Window, cx: &mut App| {
-                        if let Ok(mut m) = mgr.lock() {
-                            m.mark_read(id);
-                            let count = m.unread_count();
-                            drop(m);
-                            let _ = cx.update_entity(&model, |m: &mut NotificationPanelModel, cx| {
-                                m.set_unread_count(count);
-                                cx.notify();
-                            });
-                        }
-                    })
-                };
-                let on_clear_all = {
-                    let model = model.clone();
-                    let mgr = notif_mgr.clone();
-                    Arc::new(move |_window: &mut Window, cx: &mut App| {
-                        if let Ok(mut m) = mgr.lock() {
-                            m.clear_all();
-                            drop(m);
-                            let _ = cx.update_entity(&model, |m: &mut NotificationPanelModel, cx| {
-                                m.set_unread_count(0);
-                                cx.notify();
-                            });
-                        }
-                    })
-                };
-                let on_jump_to_pane = {
-                    let entity = app_root_entity.clone();
-                    Arc::new(move |pane_id: &str, _window: &mut Window, cx: &mut App| {
-                        let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
-                            if let Some(idx) = this.split_tree.flatten().into_iter().position(|(t, _)| t == pane_id) {
-                                if this.focused_pane_index != idx {
-                                    this.focused_pane_index = idx;
-                                    this.active_pane_target = Some(pane_id.to_string());
-                                    if let Ok(mut guard) = this.active_pane_target_shared.lock() {
-                                        *guard = pane_id.to_string();
-                                    }
-                                    if let Some(ref rt) = this.runtime {
-                                        let _ = rt.focus_pane(&pane_id.to_string());
-                                    }
-                                    this.terminal_needs_focus = true;
-                                }
-                            }
-                            cx.notify();
-                        });
-                    })
-                };
-                let on_dismiss_and_jump = {
-                    let entity = app_root_entity.clone();
-                    let mgr = notif_mgr.clone();
-                    let np_model = model.clone();
-                    Arc::new(move |uuid: uuid::Uuid, pane_id: &str, _window: &mut Window, cx: &mut App| {
-                        // Clear the notification
-                        let unread_after = if let Ok(mut m) = mgr.lock() {
-                            m.clear(uuid);
-                            m.unread_count()
-                        } else { 0 };
-                        // Update unread count in model
-                        let _ = cx.update_entity(&np_model, |m: &mut crate::ui::models::NotificationPanelModel, cx| {
-                            m.set_unread_count(unread_after);
-                            cx.notify();
-                        });
-                        // Jump to the source pane
-                        let pane_id = pane_id.to_string();
-                        let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
-                            if let Some(idx) = this.split_tree.flatten().into_iter().position(|(t, _)| t == pane_id) {
-                                this.focused_pane_index = idx;
-                                this.active_pane_target = Some(pane_id.clone());
-                                if let Ok(mut guard) = this.active_pane_target_shared.lock() {
-                                    *guard = pane_id.clone();
-                                }
-                                if let Some(ref rt) = this.runtime {
-                                    let _ = rt.focus_pane(&pane_id);
-                                }
-                                this.terminal_needs_focus = true;
-                            }
-                            cx.notify();
-                        });
-                    })
-                };
-                let entity = cx.new(move |cx| {
-                    NotificationPanelEntity::new(
-                        model,
-                        notif_mgr,
-                        on_close,
-                        on_mark_read,
-                        on_clear_all,
-                        on_jump_to_pane,
-                        on_dismiss_and_jump,
-                        cx,
-                    )
+        self.ensure_notification_panel_entity(cx);
+        self.ensure_new_branch_dialog_entity(cx);
+    }
+
+    /// Create NotificationPanelEntity with all callbacks.
+    fn ensure_notification_panel_entity(&mut self, cx: &mut Context<Self>) {
+        if self.notification_panel_entity.is_some() { return; }
+        let Some(ref model) = self.notification_panel_model else { return; };
+        let model = model.clone();
+        let notif_mgr = Arc::clone(&self.notification_manager);
+        let app_root_entity = cx.entity();
+        let on_close = {
+            let model = model.clone();
+            Arc::new(move |_window: &mut Window, cx: &mut App| {
+                let _ = cx.update_entity(&model, |m: &mut NotificationPanelModel, cx| {
+                    m.set_show_panel(false);
+                    cx.notify();
                 });
-                self.notification_panel_entity = Some(entity);
-            }
-        }
+            })
+        };
+        let on_mark_read = {
+            let model = model.clone();
+            let mgr = notif_mgr.clone();
+            Arc::new(move |id: uuid::Uuid, _window: &mut Window, cx: &mut App| {
+                if let Ok(mut m) = mgr.lock() {
+                    m.mark_read(id);
+                    let count = m.unread_count();
+                    drop(m);
+                    let _ = cx.update_entity(&model, |m: &mut NotificationPanelModel, cx| {
+                        m.set_unread_count(count);
+                        cx.notify();
+                    });
+                }
+            })
+        };
+        let on_clear_all = {
+            let model = model.clone();
+            let mgr = notif_mgr.clone();
+            Arc::new(move |_window: &mut Window, cx: &mut App| {
+                if let Ok(mut m) = mgr.lock() {
+                    m.clear_all();
+                    drop(m);
+                    let _ = cx.update_entity(&model, |m: &mut NotificationPanelModel, cx| {
+                        m.set_unread_count(0);
+                        cx.notify();
+                    });
+                }
+            })
+        };
+        let on_jump_to_pane = {
+            let entity = app_root_entity.clone();
+            Arc::new(move |pane_id: &str, _window: &mut Window, cx: &mut App| {
+                let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
+                    if let Some(idx) = this.split_tree.flatten().into_iter().position(|(t, _)| t == pane_id) {
+                        if this.focused_pane_index != idx {
+                            this.focused_pane_index = idx;
+                            this.active_pane_target = Some(pane_id.to_string());
+                            if let Ok(mut guard) = this.active_pane_target_shared.lock() {
+                                *guard = pane_id.to_string();
+                            }
+                            if let Some(ref rt) = this.runtime {
+                                let _ = rt.focus_pane(&pane_id.to_string());
+                            }
+                            this.terminal_needs_focus = true;
+                        }
+                    }
+                    cx.notify();
+                });
+            })
+        };
+        let on_dismiss_and_jump = {
+            let entity = app_root_entity.clone();
+            let mgr = notif_mgr.clone();
+            let np_model = model.clone();
+            Arc::new(move |uuid: uuid::Uuid, pane_id: &str, _window: &mut Window, cx: &mut App| {
+                let unread_after = if let Ok(mut m) = mgr.lock() {
+                    m.clear(uuid);
+                    m.unread_count()
+                } else { 0 };
+                let _ = cx.update_entity(&np_model, |m: &mut crate::ui::models::NotificationPanelModel, cx| {
+                    m.set_unread_count(unread_after);
+                    cx.notify();
+                });
+                let pane_id = pane_id.to_string();
+                let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
+                    if let Some(idx) = this.split_tree.flatten().into_iter().position(|(t, _)| t == pane_id) {
+                        this.focused_pane_index = idx;
+                        this.active_pane_target = Some(pane_id.clone());
+                        if let Ok(mut guard) = this.active_pane_target_shared.lock() {
+                            *guard = pane_id.clone();
+                        }
+                        if let Some(ref rt) = this.runtime {
+                            let _ = rt.focus_pane(&pane_id);
+                        }
+                        this.terminal_needs_focus = true;
+                    }
+                    cx.notify();
+                });
+            })
+        };
+        let entity = cx.new(move |cx| {
+            NotificationPanelEntity::new(
+                model, notif_mgr, on_close, on_mark_read, on_clear_all,
+                on_jump_to_pane, on_dismiss_and_jump, cx,
+            )
+        });
+        self.notification_panel_entity = Some(entity);
+    }
+
+    /// Create NewBranchDialogEntity with callbacks.
+    fn ensure_new_branch_dialog_entity(&mut self, cx: &mut Context<Self>) {
         if self.new_branch_dialog_model.is_none() {
             let model = cx.new(|_cx| NewBranchDialogModel::new());
             self.new_branch_dialog_model = Some(model);
         }
-        if self.new_branch_dialog_entity.is_none() {
-            if let (Some(ref model), Some(ref focus)) =
-                (&self.new_branch_dialog_model, &self.dialog_input_focus)
-            {
-                let model = model.clone();
-                let focus = focus.clone();
-                let app_root_entity = cx.entity();
-                let app_root_for_close = app_root_entity.clone();
-                let entity_holder: std::sync::Arc<parking_lot::Mutex<Option<Entity<NewBranchDialogEntity>>>> =
-                    Arc::new(parking_lot::Mutex::new(None));
-                let on_create = {
-                    let model = model.clone();
-                    let entity_holder = Arc::clone(&entity_holder);
-                    Arc::new(move |_window: &mut Window, cx: &mut App| {
-                        let branch_name = entity_holder
-                            .lock()
-                            .as_ref()
-                            .map(|e| e.update(cx, |this, _| this.branch_name().to_string()))
-                            .unwrap_or_else(|| model.read(cx).branch_name.clone());
-                        if branch_name.trim().is_empty() {
-                            return;
-                        }
-                        let _ = cx.update_entity(&model, |m: &mut NewBranchDialogModel, cx| {
-                            m.set_branch_name(&branch_name);
-                            m.start_creating();
-                            cx.notify();
-                        });
-                        let _ = cx.update_entity(&app_root_entity, |this: &mut AppRoot, cx| {
-                            this.create_branch_from_model(cx);
-                        });
-                    }) as Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>
-                };
-                let on_close = {
-                    let model = model.clone();
-                    Arc::new(move |_window: &mut Window, cx: &mut App| {
-                        let _ = cx.update_entity(&model, |m: &mut NewBranchDialogModel, cx| {
-                            m.close();
-                            cx.notify();
-                        });
-                        let _ = cx.update_entity(&app_root_for_close, |this: &mut AppRoot, cx| {
-                            this.modal_overlay_open.store(false, Ordering::Relaxed);
-                            this.terminal_needs_focus = true;
-                            cx.notify();
-                        });
-                    }) as Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>
-                };
-                let on_branch_name_change = {
-                    let entity_holder = Arc::clone(&entity_holder);
-                    Arc::new(move |new_value: String, _window: &mut Window, cx: &mut App| {
-                        if let Some(ref entity) = *entity_holder.lock() {
-                            let _ = entity.update(cx, |this, cx| {
-                                this.set_branch_name(new_value);
-                                cx.notify();
-                            });
-                        }
-                    }) as Arc<dyn Fn(String, &mut Window, &mut App) + Send + Sync>
-                };
-                let entity = cx.new(move |cx| {
-                    NewBranchDialogEntity::new(
-                        model,
-                        focus,
-                        on_create,
-                        on_close,
-                        on_branch_name_change,
-                        cx,
-                    )
+        if self.new_branch_dialog_entity.is_some() { return; }
+        let (Some(ref model), Some(ref focus)) =
+            (&self.new_branch_dialog_model, &self.dialog_input_focus) else { return; };
+        let model = model.clone();
+        let focus = focus.clone();
+        let app_root_entity = cx.entity();
+        let app_root_for_close = app_root_entity.clone();
+        let entity_holder: std::sync::Arc<parking_lot::Mutex<Option<Entity<NewBranchDialogEntity>>>> =
+            Arc::new(parking_lot::Mutex::new(None));
+        let on_create = {
+            let model = model.clone();
+            let entity_holder = Arc::clone(&entity_holder);
+            Arc::new(move |_window: &mut Window, cx: &mut App| {
+                let branch_name = entity_holder
+                    .lock()
+                    .as_ref()
+                    .map(|e| e.update(cx, |this, _| this.branch_name().to_string()))
+                    .unwrap_or_else(|| model.read(cx).branch_name.clone());
+                if branch_name.trim().is_empty() {
+                    return;
+                }
+                let _ = cx.update_entity(&model, |m: &mut NewBranchDialogModel, cx| {
+                    m.set_branch_name(&branch_name);
+                    m.start_creating();
+                    cx.notify();
                 });
-                *entity_holder.lock() = Some(entity.clone());
-                self.new_branch_dialog_entity = Some(entity);
-            }
-        }
+                let _ = cx.update_entity(&app_root_entity, |this: &mut AppRoot, cx| {
+                    this.create_branch_from_model(cx);
+                });
+            }) as Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>
+        };
+        let on_close = {
+            let model = model.clone();
+            Arc::new(move |_window: &mut Window, cx: &mut App| {
+                let _ = cx.update_entity(&model, |m: &mut NewBranchDialogModel, cx| {
+                    m.close();
+                    cx.notify();
+                });
+                let _ = cx.update_entity(&app_root_for_close, |this: &mut AppRoot, cx| {
+                    this.modal_overlay_open.store(false, Ordering::Relaxed);
+                    this.terminal_needs_focus = true;
+                    cx.notify();
+                });
+            }) as Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>
+        };
+        let on_branch_name_change = {
+            let entity_holder = Arc::clone(&entity_holder);
+            Arc::new(move |new_value: String, _window: &mut Window, cx: &mut App| {
+                if let Some(ref entity) = *entity_holder.lock() {
+                    let _ = entity.update(cx, |this, cx| {
+                        this.set_branch_name(new_value);
+                        cx.notify();
+                    });
+                }
+            }) as Arc<dyn Fn(String, &mut Window, &mut App) + Send + Sync>
+        };
+        let entity = cx.new(move |cx| {
+            NewBranchDialogEntity::new(model, focus, on_create, on_close, on_branch_name_change, cx)
+        });
+        *entity_holder.lock() = Some(entity.clone());
+        self.new_branch_dialog_entity = Some(entity);
     }
 
     /// Initialize workspace restoration (call after AppRoot is created).
