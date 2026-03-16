@@ -905,6 +905,19 @@ impl AppRoot {
                 let srv = crate::hooks::server::WebhookServer::new(port, Arc::clone(&self.event_bus));
                 if let Err(e) = srv.start() {
                     eprintln!("pmux: webhook server failed to start on port {}: {}", port, e);
+                } else {
+                    // Auto-install hooks for Claude Code, Gemini CLI, Codex, Aider if not configured
+                    let check = crate::hooks::setup_check::SetupCheckResult::run(port);
+                    if !check.is_all_good() {
+                        let results = check.install_all(port);
+                        for (tool, ok) in &results {
+                            if *ok {
+                                eprintln!("pmux: installed hooks for {}", tool);
+                            } else {
+                                eprintln!("pmux: failed to install hooks for {}", tool);
+                            }
+                        }
+                    }
                 }
             }
         }
