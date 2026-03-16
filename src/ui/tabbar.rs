@@ -127,6 +127,7 @@ impl TabBar {
         let index = tab.index;
         let is_active = tab.is_active;
         let label = tab.full_label();
+        let shortcut = tab.shortcut();
         let status_icon = tab.status_icon.clone();
         let on_select = self.on_select_tab.clone();
         let on_close = self.on_close_tab.clone();
@@ -136,35 +137,56 @@ impl TabBar {
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(4.))
-            .px(px(10.))
-            .py(px(5.))
+            .flex_1()
+            .min_w(px(0.))
+            .px(px(12.))
+            .py(px(6.))
+            .rounded(px(6.))
             .when(is_active, |el: Stateful<Div>| {
-                el.bg(rgb(0x2d2d2d)).border_b_2().border_color(rgb(0x0066cc))
+                el.bg(rgb(0x3a3a3a))
             })
             .when(!is_active, |el: Stateful<Div>| {
-                el.bg(rgb(0x252525)).hover(|s: StyleRefinement| s.bg(rgb(0x303030)))
+                el.hover(|s: StyleRefinement| s.bg(rgb(0x2a2a2a)))
             })
             .cursor_pointer()
             .on_click(move |_, window, cx| { on_select(index, window, cx); })
+            // Left: shortcut label
+            .when(shortcut.is_some(), |el: Stateful<Div>| {
+                let sc = shortcut.clone().unwrap();
+                el.child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(rgb(0x666666))
+                        .mr(px(8.))
+                        .flex_shrink_0()
+                        .child(sc)
+                )
+            })
+            // Center: tab name + status icon
             .child(
                 div()
                     .flex().flex_row().items_center().gap(px(6.))
+                    .flex_1().min_w(px(0.)).overflow_x_hidden()
                     .child(
                         div()
-                            .text_size(px(11.))
+                            .text_size(px(12.))
                             .text_color(if is_active { rgb(0xffffff) } else { rgb(0xaaaaaa) })
+                            .overflow_x_hidden()
+                            .whitespace_nowrap()
                             .child(label)
                     )
                     .when(status_icon.is_some(), |el: Div| {
-                        el.child(div().text_size(px(9.)).text_color(rgb(0x888888)).child(status_icon.unwrap()))
+                        el.child(div().text_size(px(9.)).text_color(rgb(0x888888)).flex_shrink_0().child(status_icon.unwrap()))
                     })
             )
+            // Right: close button
             .child(
                 div()
                     .id(format!("close-pane-tab-{}", index))
-                    .ml(px(4.)).px(px(3.)).text_size(px(10.)).text_color(rgb(0x666666))
-                    .hover(|s: StyleRefinement| s.text_color(rgb(0xffffff)))
+                    .ml(px(8.)).px(px(3.)).py(px(1.)).rounded(px(3.))
+                    .text_size(px(12.)).text_color(rgb(0x555555))
+                    .flex_shrink_0()
+                    .hover(|s: StyleRefinement| s.text_color(rgb(0xffffff)).bg(rgb(0x555555)))
                     .cursor_pointer()
                     .on_click(move |_, window, cx| { on_close(index, window, cx); })
                     .child("×")
@@ -183,9 +205,9 @@ impl RenderOnce for TabBar {
 
         div()
             .id("tab-bar")
-            .w_full().h(px(32.)).flex().flex_row().items_center()
-            .px(px(4.)).gap(px(2.)).bg(rgb(0x1e1e1e))
-            .border_b_1().border_color(rgb(0x3d3d3d))
+            .w_full().h(px(40.)).flex().flex_row().items_center()
+            .px(px(6.)).gap(px(2.)).bg(rgb(0x1e1e1e))
+            .border_b_1().border_color(rgb(0x2a2a2a))
             .child(
                 div()
                     .flex_1().flex().flex_row().items_center().gap(px(2.)).overflow_x_hidden()
@@ -198,8 +220,8 @@ impl RenderOnce for TabBar {
             .child(
                 div()
                     .id("new-tab-btn")
-                    .px(px(8.)).py(px(4.)).rounded(px(4.))
-                    .hover(|s: StyleRefinement| s.bg(rgb(0x3d3d3d)))
+                    .px(px(6.)).py(px(4.)).rounded(px(6.))
+                    .hover(|s: StyleRefinement| s.bg(rgb(0x3a3a3a)))
                     .cursor_pointer()
                     .on_click(move |_, window, cx| { on_new_tab(window, cx); })
                     .child(div().text_size(px(14.)).text_color(rgb(0x888888)).child("+"))

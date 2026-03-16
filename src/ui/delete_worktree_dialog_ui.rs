@@ -119,6 +119,7 @@ impl IntoElement for DeleteWorktreeDialogUi {
             .items_center()
             .justify_center()
             .bg(rgba(0x00000099u32))
+            .occlude()
             .on_click(move |_event, window, cx| {
                 if let Some(ref cb) = on_cancel_overlay {
                     cb(window, cx);

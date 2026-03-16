@@ -37,46 +37,61 @@ impl WorkspaceTabBar {
         let is_modified = tab.is_modified();
         let on_select = self.on_select_tab.clone();
         let on_close = self.on_close_tab.clone();
+        let shortcut = if index < 8 { Some(format!("⌘{}", index + 1)) } else { None };
 
         div()
             .id(format!("workspace-tab-{}", index))
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(4.))
             .px(px(12.))
-            .py(px(8.))
+            .py(px(6.))
             .flex_1()
-            .min_w(px(80.))
-            .max_w(px(200.))
+            .min_w(px(0.))
+            .rounded(px(6.))
             .when(is_active, |el: Stateful<Div>| {
-                el.bg(rgb(0x2d2d2d))
-                    .border_b_2()
-                    .border_color(rgb(0x0066cc))
+                el.bg(rgb(0x3a3a3a))
             })
             .when(!is_active, |el: Stateful<Div>| {
-                el.bg(rgb(0x1e1e1e))
-                    .hover(|style: StyleRefinement| style.bg(rgb(0x2d2d2d)))
+                el.hover(|style: StyleRefinement| style.bg(rgb(0x2a2a2a)))
             })
             .cursor_pointer()
             .on_click(move |_, window, cx| { on_select(index, window, cx); })
+            // Left: shortcut
+            .when(shortcut.is_some(), |el: Stateful<Div>| {
+                let sc = shortcut.clone().unwrap();
+                el.child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(rgb(0x666666))
+                        .mr(px(8.))
+                        .flex_shrink_0()
+                        .child(sc)
+                )
+            })
+            // Center: tab name
             .child(
                 div()
                     .flex_1()
+                    .min_w(px(0.))
                     .overflow_hidden()
                     .text_ellipsis()
                     .text_size(px(12.))
                     .text_color(if is_active { rgb(0xffffff) } else { rgb(0xaaaaaa) })
                     .child(SharedString::from(if is_modified { format!("{} ●", name) } else { name }))
             )
+            // Right: close button
             .child(
                 div()
                     .id(format!("close-workspace-tab-{}", index))
-                    .ml(px(4.))
-                    .px(px(4.))
-                    .text_size(px(11.))
-                    .text_color(rgb(0x888888))
-                    .hover(|style: StyleRefinement| style.text_color(rgb(0xffffff)))
+                    .ml(px(8.))
+                    .px(px(3.))
+                    .py(px(1.))
+                    .rounded(px(3.))
+                    .text_size(px(12.))
+                    .text_color(rgb(0x555555))
+                    .flex_shrink_0()
+                    .hover(|style: StyleRefinement| style.text_color(rgb(0xffffff)).bg(rgb(0x555555)))
                     .cursor_pointer()
                     .on_click(move |_, window, cx| { on_close(index, window, cx); })
                     .child("×")
@@ -96,14 +111,15 @@ impl RenderOnce for WorkspaceTabBar {
         div()
             .id("workspace-tab-bar")
             .w_full()
-            .h(px(36.))
+            .h(px(40.))
             .flex()
             .flex_row()
             .items_center()
             .gap(px(2.))
+            .px(px(6.))
             .bg(rgb(0x1e1e1e))
             .border_b_1()
-            .border_color(rgb(0x3d3d3d))
+            .border_color(rgb(0x2a2a2a))
             .children(
                 (0..self.workspace_manager.tab_count())
                     .filter_map(|i| {

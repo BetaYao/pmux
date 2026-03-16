@@ -297,6 +297,9 @@ impl Element for TerminalElement {
         let line_height = state.line_height;
         let font_size = state.font_size;
 
+        // Anti-ghosting: a background thread applies `tmux capture-pane` data
+        // directly to the VTE grid (only when new output arrives). Paint just
+        // reads the grid — zero VTE processing overhead on the main thread.
 
         let default_bg = self.palette.background();
         window.paint_quad(quad(
@@ -522,7 +525,8 @@ impl Element for TerminalElement {
             }
 
             (layout_rects, text_runs)
-        });
+        },
+        );
 
         for rect in layout_rects {
             rect.paint(origin, cell_width, line_height, window);
@@ -623,16 +627,33 @@ impl Element for TerminalElement {
             ));
         }
 
+        // Read cursor position ONCE and reuse for cursor block + IME.
+        // Multiple with_content() calls would race with TUI app output
+        // that moves the grid cursor between calls.
+        let grid_cursor = self.terminal.with_content(|term| {
+            let grid = term.grid();
+            let cursor_point = grid.cursor.point;
+            let display_offset = grid.display_offset() as i32;
+            let visual_line = cursor_point.line.0 + display_offset;
+            (cursor_point.column.0, visual_line)
+        });
+
+        // When SHOW_CURSOR is false, TUI apps (like Claude Code) hide the real
+        // cursor and draw their own using reverse-video cells. The grid cursor
+        // position is unreliable (often at the bottom of the screen). Instead,
+        // scan the grid for the visual cursor drawn by the TUI app.
+        let show_cursor = self.terminal.mode().contains(TermMode::SHOW_CURSOR);
+        let paint_cursor = if show_cursor {
+            grid_cursor
+        } else {
+            self.terminal.find_visual_cursor().unwrap_or(grid_cursor)
+        };
+        // Cache for InputHandler to use when IME composition starts.
+        self.terminal.set_ime_last_paint_cursor(paint_cursor);
+
         if self.terminal.mode().contains(TermMode::SHOW_CURSOR) {
-            let (cursor_x, cursor_y) = self.terminal.with_content(|term| {
-                let grid = term.grid();
-                let cursor_point = grid.cursor.point;
-                let display_offset = grid.display_offset() as i32;
-                let visual_line = cursor_point.line.0 + display_offset;
-                let cursor_x = origin.x + cell_width * (cursor_point.column.0 as f32);
-                let cursor_y = origin.y + line_height * (visual_line as f32);
-                (cursor_x, cursor_y)
-            });
+            let cursor_x = origin.x + cell_width * (paint_cursor.0 as f32);
+            let cursor_y = origin.y + line_height * (paint_cursor.1 as f32);
 
             let cursor_color = self.palette.cursor();
             let cursor_bounds = Bounds::new(
@@ -828,93 +849,89 @@ impl Element for TerminalElement {
         }
 
         // Register InputHandler for text input (IME path).
-        // Compute cursor screen bounds at paint time so the IME candidate
-        // window is positioned next to the terminal cursor.
+        // Reuse paint_cursor from the cursor block step above — no extra
+        // with_content() call, so no race with TUI background output.
         if self.focused {
             if let Some(ref send_fn) = self.on_input {
-                let ime_cursor_bounds = self.terminal.with_content(|term| {
-                    let grid = term.grid();
-                    let cursor_point = grid.cursor.point;
-                    let display_offset = grid.display_offset() as i32;
-                    let visual_line = cursor_point.line.0 + display_offset;
-                    if visual_line < 0 {
-                        return None;
-                    }
-                    let cx = origin.x + cell_width * (cursor_point.column.0 as f32);
-                    let cy = origin.y + line_height * (visual_line as f32);
-                    Some(Bounds::new(Point::new(cx, cy), Size::new(cell_width, line_height)))
-                });
+                // When IME composition is active, use the frozen cursor position
+                // that was captured in the InputHandler at composition start.
+                let (col, visual_line) = self.terminal.ime_cursor_frozen()
+                    .unwrap_or(paint_cursor);
+
+                let ime_cursor_bounds = if visual_line < 0 {
+                    None
+                } else {
+                    let cx_px = origin.x + cell_width * (col as f32);
+                    let cy_px = origin.y + line_height * (visual_line as f32);
+                    Some(Bounds::new(Point::new(cx_px, cy_px), Size::new(cell_width, line_height)))
+                };
+
                 let handler = crate::terminal::terminal_input_handler::TerminalInputHandler::new(
                     self.terminal.clone(),
                     send_fn.clone(),
                 ).with_cursor_bounds(ime_cursor_bounds);
                 window.handle_input(&self.focus_handle, handler, cx);
-            }
 
-            // Render IME preedit (marked) text overlay at cursor position.
-            // This shows the composing text (e.g. pinyin) on top of the terminal
-            // so the user can see what they're typing before committing.
-            if let Some(marked_text) = self.terminal.ime_marked_text() {
-                if !marked_text.is_empty() {
-                    let ime_pos = self.terminal.with_content(|term| {
-                        let grid = term.grid();
-                        let cursor_point = grid.cursor.point;
-                        let display_offset = grid.display_offset() as i32;
-                        let visual_line = cursor_point.line.0 + display_offset;
-                        let px_x = origin.x + cell_width * (cursor_point.column.0 as f32);
-                        let px_y = origin.y + line_height * (visual_line as f32);
-                        Point::new(px_x, px_y)
-                    });
+                // Render IME preedit (marked) text overlay at cursor position.
+                // This shows the composing text (e.g. pinyin) on top of the terminal
+                // so the user can see what they're typing before committing.
+                if let Some(ref marked_text) = self.terminal.ime_marked_text() {
+                    if !marked_text.is_empty() && visual_line >= 0 {
+                        let ime_pos = Point::new(
+                            origin.x + cell_width * (col as f32),
+                            origin.y + line_height * (visual_line as f32),
+                        );
 
-                    let ime_font = Font {
-                        family: FONT_FAMILY.into(),
-                        features: FontFeatures::default(),
-                        fallbacks: None,
-                        weight: FontWeight::NORMAL,
-                        style: FontStyle::Normal,
-                    };
-                    let ime_color = Hsla { h: 0.0, s: 0.0, l: 0.95, a: 1.0 };
-                    let ime_run = TextRun {
-                        len: marked_text.len(),
-                        font: ime_font,
-                        color: ime_color,
-                        background_color: None,
-                        underline: Some(UnderlineStyle {
-                            color: Some(ime_color),
-                            thickness: px(1.0),
-                            wavy: false,
-                        }),
-                        strikethrough: None,
-                    };
-                    let shaped = window.text_system().shape_line(
-                        marked_text.clone().into(),
-                        font_size,
-                        &[ime_run],
-                        None,
-                    );
-                    // Paint background to cover terminal text behind marked text
-                    let bg_bounds = Bounds::new(
-                        ime_pos,
-                        Size::new(shaped.width, line_height),
-                    );
-                    let bg_color = Hsla { h: 0.0, s: 0.0, l: 0.12, a: 1.0 };
-                    window.paint_quad(quad(
-                        bg_bounds,
-                        px(0.0),
-                        bg_color,
-                        Edges::default(),
-                        transparent_black(),
-                        Default::default(),
-                    ));
-                    // Paint the marked text
-                    let _ = shaped.paint(
-                        ime_pos,
-                        line_height,
-                        gpui::TextAlign::Left,
-                        None,
-                        window,
-                        cx,
-                    );
+                        let ime_font = Font {
+                            family: FONT_FAMILY.into(),
+                            features: FontFeatures::default(),
+                            fallbacks: None,
+                            weight: FontWeight::NORMAL,
+                            style: FontStyle::Normal,
+                        };
+                        let ime_color = Hsla { h: 0.0, s: 0.0, l: 0.95, a: 1.0 };
+                        let ime_run = TextRun {
+                            len: marked_text.len(),
+                            font: ime_font,
+                            color: ime_color,
+                            background_color: None,
+                            underline: Some(UnderlineStyle {
+                                color: Some(ime_color),
+                                thickness: px(1.0),
+                                wavy: false,
+                            }),
+                            strikethrough: None,
+                        };
+                        let shaped = window.text_system().shape_line(
+                            marked_text.clone().into(),
+                            font_size,
+                            &[ime_run],
+                            None,
+                        );
+                        // Paint background to cover terminal text behind marked text
+                        let bg_bounds = Bounds::new(
+                            ime_pos,
+                            Size::new(shaped.width, line_height),
+                        );
+                        let bg_color = Hsla { h: 0.0, s: 0.0, l: 0.15, a: 0.95 };
+                        window.paint_quad(quad(
+                            bg_bounds,
+                            px(0.0),
+                            bg_color,
+                            Edges::default(),
+                            transparent_black(),
+                            Default::default(),
+                        ));
+                        // Paint the marked text
+                        let _ = shaped.paint(
+                            ime_pos,
+                            line_height,
+                            gpui::TextAlign::Left,
+                            None,
+                            window,
+                            cx,
+                        );
+                    }
                 }
             }
         }
