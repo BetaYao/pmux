@@ -12,7 +12,7 @@ pub mod backends;
 pub use agent::Agent;
 pub use agent_runtime::{AgentId, AgentStateChange, PaneId, RuntimeError, TerminalEvent};
 pub use agent_runtime::AgentRuntime;
-pub use event_bus::{AgentStateChange as EventAgentStateChange, EventBus, Notification, NotificationType, RuntimeEvent, SharedEventBus, TerminalOutput};
+pub use event_bus::{AgentStateChange as EventAgentStateChange, EventBus, HookEvent, Notification, NotificationType, RuntimeEvent, SharedEventBus, TerminalOutput};
 pub use state::{RuntimeState, RuntimeStateError, WorktreeState, WorkspaceState};
 pub use status_publisher::StatusPublisher;
 
