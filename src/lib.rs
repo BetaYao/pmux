@@ -10,6 +10,7 @@ pub mod syntax_highlight;
 pub mod empty_state;
 pub mod file_selector;
 pub mod git_utils;
+pub mod hooks;
 pub mod help_panel;
 pub mod input;
 pub mod keyboard_shortcuts;
