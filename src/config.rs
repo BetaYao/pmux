@@ -33,6 +33,14 @@ fn default_idle_str() -> String {
     "Idle".to_string()
 }
 
+fn default_webhook_port() -> u16 {
+    7070
+}
+
+fn default_webhook_enabled() -> bool {
+    true
+}
+
 fn default_agent_detect() -> AgentDetectConfig {
     AgentDetectConfig {
         agents: default_agent_detect_agents(),
@@ -212,6 +220,23 @@ pub struct AgentRule {
     pub patterns: Vec<String>,
 }
 
+/// Local HTTP webhook server configuration.
+/// Receives hook events from Claude Code, Gemini CLI, Codex, Aider.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebhookConfig {
+    #[serde(default = "default_webhook_enabled")]
+    pub enabled: bool,
+    /// Port to bind on localhost (default: 7070)
+    #[serde(default = "default_webhook_port")]
+    pub port: u16,
+}
+
+impl Default for WebhookConfig {
+    fn default() -> Self {
+        Self { enabled: true, port: 7070 }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RemoteChannelsConfig {
     #[serde(default)]
@@ -318,6 +343,7 @@ impl Default for Config {
             tui_programs: default_tui_programs(),
             agent_detect: default_agent_detect(),
             auto_update: UpdateConfig::default(),
+            webhook: WebhookConfig::default(),
         }
     }
 }
@@ -372,6 +398,9 @@ pub struct Config {
     /// Auto-update preferences
     #[serde(default = "default_auto_update")]
     pub auto_update: UpdateConfig,
+    /// Local webhook server for receiving AI tool hook events
+    #[serde(default)]
+    pub webhook: WebhookConfig,
 }
 
 impl Config {
@@ -767,6 +796,34 @@ mod tests {
         let config = Config::load_from_path(&path).unwrap();
         // Should have default agent_detect
         assert_eq!(config.agent_detect.agents.len(), 4);
+    }
+
+    #[test]
+    fn test_webhook_config_defaults() {
+        let config = Config::default();
+        assert!(config.webhook.enabled);
+        assert_eq!(config.webhook.port, 7070);
+    }
+
+    #[test]
+    fn test_webhook_config_serialization() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("config.json");
+        std::fs::write(&path, r#"{"webhook":{"enabled":false,"port":8080}}"#).unwrap();
+        let config = Config::load_from_path(&path).unwrap();
+        assert!(!config.webhook.enabled);
+        assert_eq!(config.webhook.port, 8080);
+    }
+
+    #[test]
+    fn test_webhook_config_backward_compat() {
+        // Old configs without webhook field should get defaults
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("config.json");
+        std::fs::write(&path, r#"{"backend": "tmux"}"#).unwrap();
+        let config = Config::load_from_path(&path).unwrap();
+        assert!(config.webhook.enabled);
+        assert_eq!(config.webhook.port, 7070);
     }
 
     /// Test: migrate_from_legacy populates workspace_paths from recent_workspace
