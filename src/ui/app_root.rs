@@ -300,6 +300,8 @@ pub struct AppRoot {
     runtime_mgr: Option<Entity<crate::ui::runtime_manager::RuntimeManager>>,
     /// TerminalManager Entity — manages terminal buffers, resize, focus, search
     terminal_mgr: Option<Entity<crate::ui::terminal_manager::TerminalManager>>,
+    /// SplitPaneManager Entity — manages split layout, pane focus, divider drag
+    split_pane_mgr: Option<Entity<crate::ui::split_pane_manager::SplitPaneManager>>,
     sidebar_visible: bool,
     /// Per-pane terminal buffers (Term = pipe-pane/control mode streaming; Legacy = error placeholder only)
     terminal_buffers: Arc<Mutex<HashMap<String, TerminalBuffer>>>,
@@ -571,6 +573,7 @@ impl AppRoot {
             notification_center: None,
             runtime_mgr: None,
             terminal_mgr: None,
+            split_pane_mgr: None,
             sidebar_visible: true,
             terminal_buffers: Arc::new(Mutex::new(HashMap::new())),
             split_tree: SplitNode::pane(""),
@@ -666,6 +669,11 @@ impl AppRoot {
                 )
             });
             self.runtime_mgr = Some(rm);
+        }
+        // Create SplitPaneManager entity (Phase 5 extraction)
+        if self.split_pane_mgr.is_none() {
+            let spm = cx.new(|_cx| crate::ui::split_pane_manager::SplitPaneManager::new());
+            self.split_pane_mgr = Some(spm);
         }
         // Create TerminalManager entity (Phase 4 extraction)
         if self.terminal_mgr.is_none() {
