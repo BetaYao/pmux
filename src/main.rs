@@ -65,6 +65,18 @@ fn main() {
     // Write OSC 133 shell integration scripts to ~/.config/pmux/
     pmux::shell_integration_inject::ensure_shell_integration_scripts();
 
+    // Configure webhook port from config before AppRoot starts
+    if let Ok(cfg) = pmux::config::Config::load() {
+        if cfg.webhook.enabled {
+            pmux::hooks::WEBHOOK_PORT.store(
+                cfg.webhook.port as u32,
+                std::sync::atomic::Ordering::SeqCst,
+            );
+        } else {
+            pmux::hooks::WEBHOOK_PORT.store(0, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
     let resources = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources");
     gpui_platform::application()
         .with_assets(Assets { base: resources })

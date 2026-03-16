@@ -426,6 +426,10 @@ pub struct AppRoot {
     update_available: Option<crate::updater::UpdateInfo>,
     /// Whether an update download is in progress
     update_downloading: bool,
+    /// Webhook pane index (maps agent IDs to pane targets for hook routing)
+    pub pane_index: Option<std::sync::Arc<std::sync::RwLock<crate::hooks::handler::PaneIndex>>>,
+    /// Webhook hook event handler (processes HookEvents from WebhookServer)
+    pub hook_handler: Option<std::sync::Arc<crate::hooks::handler::HookEventHandler>>,
 }
 
 const RUNNING_ANIMATION_INTERVAL_MS: u64 = 250;
@@ -620,6 +624,8 @@ impl AppRoot {
             was_window_focused: true,
             update_available: None,
             update_downloading: false,
+            pane_index: None,
+            hook_handler: None,
         }
     }
 
@@ -878,6 +884,29 @@ impl AppRoot {
         self.ensure_entities(cx);
         if self.terminal_focus.is_none() {
             self.terminal_focus = Some(cx.focus_handle());
+        }
+
+        // Start webhook server for AI tool hooks (Claude Code, Gemini CLI, Codex, Aider)
+        {
+            use std::sync::{Arc, RwLock};
+            let port = crate::hooks::WEBHOOK_PORT.load(std::sync::atomic::Ordering::SeqCst) as u16;
+            if port > 0 {
+                // Set up PaneIndex and HookEventHandler
+                let pane_index = Arc::new(RwLock::new(crate::hooks::handler::PaneIndex::default()));
+                let hook_handler = Arc::new(crate::hooks::handler::HookEventHandler::new(
+                    Arc::clone(&pane_index),
+                    Arc::clone(&self.event_bus),
+                ));
+                // Store on self for use in the event loop
+                self.pane_index = Some(pane_index);
+                self.hook_handler = Some(hook_handler);
+
+                // Start the HTTP server in background
+                let srv = crate::hooks::server::WebhookServer::new(port, Arc::clone(&self.event_bus));
+                if let Err(e) = srv.start() {
+                    eprintln!("pmux: webhook server failed to start on port {}: {}", port, e);
+                }
+            }
         }
 
         // Start background update check
@@ -2578,6 +2607,7 @@ impl AppRoot {
         let active_pane_shared = Arc::clone(&self.active_pane_target_shared);
         let last_input_time = Arc::clone(&self.last_input_time);
         let pending_notification_jump = Arc::clone(&self.pending_notification_jump);
+        let hook_handler = self.hook_handler.clone();
         cx.spawn(async move |entity, cx| {
             let rx = std::sync::Arc::new(std::sync::Mutex::new(event_bus.subscribe()));
             let mut last_branch_check: HashMap<PathBuf, std::time::Instant> = HashMap::new();
@@ -2694,6 +2724,11 @@ impl AppRoot {
                                     cx.notify();
                                 });
                             }
+                        }
+                    }
+                    Ok(RuntimeEvent::HookEvent(hook_ev)) => {
+                        if let Some(ref handler) = hook_handler {
+                            handler.handle(&hook_ev);
                         }
                     }
                     Err(_) => break,
