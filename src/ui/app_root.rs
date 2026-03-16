@@ -298,6 +298,8 @@ pub struct AppRoot {
     notification_center: Option<Entity<crate::ui::notification_center::NotificationCenter>>,
     /// RuntimeManager Entity — manages runtime lifecycle, status, animation
     runtime_mgr: Option<Entity<crate::ui::runtime_manager::RuntimeManager>>,
+    /// TerminalManager Entity — manages terminal buffers, resize, focus, search
+    terminal_mgr: Option<Entity<crate::ui::terminal_manager::TerminalManager>>,
     sidebar_visible: bool,
     /// Per-pane terminal buffers (Term = pipe-pane/control mode streaming; Legacy = error placeholder only)
     terminal_buffers: Arc<Mutex<HashMap<String, TerminalBuffer>>>,
@@ -568,6 +570,7 @@ impl AppRoot {
             dialog_mgr: None,
             notification_center: None,
             runtime_mgr: None,
+            terminal_mgr: None,
             sidebar_visible: true,
             terminal_buffers: Arc::new(Mutex::new(HashMap::new())),
             split_tree: SplitNode::pane(""),
@@ -663,6 +666,15 @@ impl AppRoot {
                 )
             });
             self.runtime_mgr = Some(rm);
+        }
+        // Create TerminalManager entity (Phase 4 extraction)
+        if self.terminal_mgr.is_none() {
+            let tm = cx.new(|cx| {
+                let mut mgr = crate::ui::terminal_manager::TerminalManager::new();
+                mgr.ensure_focus(cx);
+                mgr
+            });
+            self.terminal_mgr = Some(tm);
         }
         // Create NotificationCenter entity (Phase 2 extraction)
         if self.notification_center.is_none() {
