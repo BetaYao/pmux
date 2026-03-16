@@ -3483,47 +3483,120 @@ impl AppRoot {
             })
     }
 
-    fn render_workspace_view(&self, cx: &mut Context<Self>, terminal_focus: &gpui::FocusHandle, cursor_blink_visible: bool) -> impl IntoElement {
-        let sidebar_visible = self.sidebar_visible;
-        let workspace_manager = self.workspace_manager.clone();
-        let terminal_buffers = Arc::clone(&self.terminal_buffers);
-        let split_tree = self.split_tree.clone();
-        let focused_pane_index = self.focused_pane_index;
-        let split_divider_drag = self.split_divider_drag.clone();
-        let worktree_switch_loading = self.worktree_switch_loading;
-        let _status_counts = self.status_counts.clone();
-        let pane_statuses = self.pane_statuses.clone();
+    /// Render the update available/downloading banner (if any).
+    fn render_update_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.update_available.is_some() && !self.update_downloading {
+            let version = self.update_available.as_ref().map(|i| i.latest_version.display()).unwrap_or_default();
+            Some(
+                div()
+                    .id("update-banner")
+                    .w_full()
+                    .h(px(28.))
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(12.))
+                    .bg(rgb(0x1a3a2a))
+                    .border_t_1()
+                    .border_color(rgb(0x2d5f3f))
+                    .text_size(px(12.))
+                    .text_color(rgb(0x4ec9b0))
+                    .child(format!("pmux {} is available", version))
+                    .child(
+                        div()
+                            .id("update-now-btn")
+                            .px(px(12.))
+                            .py(px(2.))
+                            .rounded(px(3.))
+                            .bg(rgb(0x0e7a0d))
+                            .text_color(rgb(0xffffff))
+                            .text_size(px(11.))
+                            .cursor_pointer()
+                            .hover(|s| s.bg(rgb(0x12991e)))
+                            .on_click(cx.listener(|this, _event: &ClickEvent, _window, cx| {
+                                this.trigger_update(cx);
+                            }))
+                            .child("Update Now"),
+                    )
+                    .child(
+                        div()
+                            .id("update-later-btn")
+                            .px(px(8.))
+                            .py(px(2.))
+                            .cursor_pointer()
+                            .text_color(rgb(0x888888))
+                            .text_size(px(11.))
+                            .hover(|s| s.text_color(rgb(0xcccccc)))
+                            .on_click(cx.listener(|this, _event: &ClickEvent, _window, cx| {
+                                this.update_available = None;
+                                cx.notify();
+                            }))
+                            .child("Later"),
+                    )
+                    .child(
+                        div()
+                            .id("update-skip-btn")
+                            .px(px(8.))
+                            .py(px(2.))
+                            .cursor_pointer()
+                            .text_color(rgb(0x666666))
+                            .text_size(px(11.))
+                            .hover(|s| s.text_color(rgb(0xaaaaaa)))
+                            .on_click(cx.listener(|this, _event: &ClickEvent, _window, cx| {
+                                this.skip_update_version();
+                                cx.notify();
+                            }))
+                            .child("Skip"),
+                    )
+                    .into_any_element()
+            )
+        } else if self.update_downloading {
+            Some(
+                div()
+                    .id("update-progress-banner")
+                    .w_full()
+                    .h(px(28.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(rgb(0x1a2a3a))
+                    .border_t_1()
+                    .border_color(rgb(0x2d4f6f))
+                    .text_size(px(12.))
+                    .text_color(rgb(0x6cb6ff))
+                    .child("Downloading update...")
+                    .into_any_element()
+            )
+        } else {
+            None
+        }
+    }
+
+    /// Build the sidebar component with all callbacks wired.
+    fn build_sidebar(
+        &self,
+        cx: &mut Context<Self>,
+        repo_name: &str,
+        repo_path: &std::path::Path,
+        terminal_focus: &gpui::FocusHandle,
+    ) -> Sidebar {
         let app_root_entity = cx.entity();
-
-        // Get repo name and path for sidebar header
-        let repo_name = self.workspace_manager.active_tab()
-            .map(|t| t.name.clone())
-            .unwrap_or_else(|| "workspace".to_string());
-        let repo_path = self.workspace_manager.active_tab()
-            .map(|t| t.path.clone())
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
-
+        let pane_statuses = self.pane_statuses.clone();
+        let pane_summaries_data = self.pane_summary_model.as_ref()
+            .map(|m| m.read(cx).summaries().clone())
+            .unwrap_or_default();
+        let running_frame = self.running_animation_frame;
         let notification_unread = self
             .notification_panel_model
             .as_ref()
             .map(|m| m.read(cx).unread_count)
             .unwrap_or_else(|| self.notification_manager.lock().map(|m| m.unread_count()).unwrap_or(0));
-        let app_root_entity_for_toggle = app_root_entity.clone();
         let notification_panel_model_for_toggle = self.notification_panel_model.clone();
-        let notification_panel_model_for_overlay = self.notification_panel_model.clone();
-        let notification_panel_is_open = self.notification_panel_model.as_ref()
-            .map(|m| m.read(cx).show_panel)
-            .unwrap_or(false);
+        let app_root_entity_for_toggle = app_root_entity.clone();
         let app_root_entity_for_add_ws = app_root_entity.clone();
 
-        // Collect pane summaries for sidebar display
-        let pane_summaries_data = self.pane_summary_model.as_ref()
-            .map(|m| m.read(cx).summaries().clone())
-            .unwrap_or_default();
-        let running_frame = self.running_animation_frame;
-
-        // Create sidebar with callbacks (cmux style: top controls in sidebar)
-        let mut sidebar = Sidebar::new(&repo_name, repo_path.clone())
+        let mut sidebar = Sidebar::new(repo_name, repo_path.to_path_buf())
             .with_statuses(pane_statuses.clone())
             .with_pane_summaries(pane_summaries_data)
             .with_running_frame(running_frame)
@@ -3644,8 +3717,8 @@ impl AppRoot {
         let app_root_entity_for_delete = app_root_entity.clone();
         let app_root_entity_for_view_diff = app_root_entity.clone();
         let app_root_entity_for_right_click = app_root_entity.clone();
-        let app_root_entity_for_clear_menu = app_root_entity.clone();
         let app_root_entity_for_close_orphan = app_root_entity.clone();
+        let repo_path = repo_path.to_path_buf();
         let repo_path_for_delete = repo_path.clone();
         let repo_path_for_close_orphan = repo_path.clone();
         let repo_path_for_view_diff = repo_path.clone();
@@ -3716,6 +3789,42 @@ impl AppRoot {
                 cx.notify();
             });
         });
+
+        sidebar
+    }
+
+    fn render_workspace_view(&self, cx: &mut Context<Self>, terminal_focus: &gpui::FocusHandle, cursor_blink_visible: bool) -> impl IntoElement {
+        let sidebar_visible = self.sidebar_visible;
+        let workspace_manager = self.workspace_manager.clone();
+        let terminal_buffers = Arc::clone(&self.terminal_buffers);
+        let split_tree = self.split_tree.clone();
+        let focused_pane_index = self.focused_pane_index;
+        let split_divider_drag = self.split_divider_drag.clone();
+        let worktree_switch_loading = self.worktree_switch_loading;
+        let pane_statuses = self.pane_statuses.clone();
+        let app_root_entity = cx.entity();
+
+        let repo_name = self.workspace_manager.active_tab()
+            .map(|t| t.name.clone())
+            .unwrap_or_else(|| "workspace".to_string());
+        let repo_path = self.workspace_manager.active_tab()
+            .map(|t| t.path.clone())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+        let notification_panel_model_for_overlay = self.notification_panel_model.clone();
+        let notification_panel_is_open = self.notification_panel_model.as_ref()
+            .map(|m| m.read(cx).show_panel)
+            .unwrap_or(false);
+
+        let sidebar = self.build_sidebar(cx, &repo_name, &repo_path, terminal_focus);
+
+        // Entity clones for context menus and dialogs
+        let app_root_entity_for_clear_menu = app_root_entity.clone();
+        let app_root_entity_for_menu_delete = app_root_entity.clone();
+        let app_root_entity_for_menu_diff = app_root_entity.clone();
+        let repo_path_for_menu_delete = repo_path.clone();
+        let repo_path_for_menu_diff = repo_path.clone();
+        let cached_worktrees = self.cached_worktrees.clone();
 
         let delete_dialog = {
             let app_root_entity_for_confirm = app_root_entity.clone();
@@ -3971,90 +4080,7 @@ impl AppRoot {
                     )
             )
             // Update banner (above status bar)
-            .children(if self.update_available.is_some() && !self.update_downloading {
-                let version = self.update_available.as_ref().map(|i| i.latest_version.display()).unwrap_or_default();
-                Some(
-                    div()
-                        .id("update-banner")
-                        .w_full()
-                        .h(px(28.))
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .justify_center()
-                        .gap(px(12.))
-                        .bg(rgb(0x1a3a2a))
-                        .border_t_1()
-                        .border_color(rgb(0x2d5f3f))
-                        .text_size(px(12.))
-                        .text_color(rgb(0x4ec9b0))
-                        .child(format!("pmux {} is available", version))
-                        .child(
-                            div()
-                                .id("update-now-btn")
-                                .px(px(12.))
-                                .py(px(2.))
-                                .rounded(px(3.))
-                                .bg(rgb(0x0e7a0d))
-                                .text_color(rgb(0xffffff))
-                                .text_size(px(11.))
-                                .cursor_pointer()
-                                .hover(|s| s.bg(rgb(0x12991e)))
-                                .on_click(cx.listener(|this, _event: &ClickEvent, _window, cx| {
-                                    this.trigger_update(cx);
-                                }))
-                                .child("Update Now"),
-                        )
-                        .child(
-                            div()
-                                .id("update-later-btn")
-                                .px(px(8.))
-                                .py(px(2.))
-                                .cursor_pointer()
-                                .text_color(rgb(0x888888))
-                                .text_size(px(11.))
-                                .hover(|s| s.text_color(rgb(0xcccccc)))
-                                .on_click(cx.listener(|this, _event: &ClickEvent, _window, cx| {
-                                    this.update_available = None;
-                                    cx.notify();
-                                }))
-                                .child("Later"),
-                        )
-                        .child(
-                            div()
-                                .id("update-skip-btn")
-                                .px(px(8.))
-                                .py(px(2.))
-                                .cursor_pointer()
-                                .text_color(rgb(0x666666))
-                                .text_size(px(11.))
-                                .hover(|s| s.text_color(rgb(0xaaaaaa)))
-                                .on_click(cx.listener(|this, _event: &ClickEvent, _window, cx| {
-                                    this.skip_update_version();
-                                    cx.notify();
-                                }))
-                                .child("Skip"),
-                        )
-                )
-            } else if self.update_downloading {
-                Some(
-                    div()
-                        .id("update-progress-banner")
-                        .w_full()
-                        .h(px(28.))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .bg(rgb(0x1a2a3a))
-                        .border_t_1()
-                        .border_color(rgb(0x2d4f6f))
-                        .text_size(px(12.))
-                        .text_color(rgb(0x6cb6ff))
-                        .child("Downloading update...")
-                )
-            } else {
-                None
-            })
+            .children(self.render_update_banner(cx))
             .child({
                 let repo_path = self.workspace_manager.active_tab().map(|t| t.path.clone());
                 let worktree_branch = repo_path.and_then(|p| {
