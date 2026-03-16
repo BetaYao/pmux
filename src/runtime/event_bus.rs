@@ -11,6 +11,7 @@ pub enum RuntimeEvent {
     AgentStateChange(AgentStateChange),
     TerminalOutput(TerminalOutput),
     Notification(Notification),
+    HookEvent(HookEvent),
 }
 
 #[derive(Clone, Debug)]
@@ -43,6 +44,22 @@ pub enum NotificationType {
     WaitingInput,
     Error,
     Info,
+}
+
+/// Raw hook event received from an AI coding tool (Claude Code, Gemini CLI, etc.)
+/// AppRoot resolves cwd/session_id to a pane_id and converts to AgentStateChange.
+#[derive(Clone, Debug)]
+pub struct HookEvent {
+    /// Tool session identifier (e.g. Claude Code session_id)
+    pub session_id: String,
+    /// Working directory of the tool process
+    pub cwd: String,
+    /// Event name as sent by the tool (e.g. "Stop", "PreToolUse", "aider_waiting")
+    pub hook_event_name: String,
+    /// Tool name for PreToolUse/PostToolUse events
+    pub tool_name: Option<String>,
+    /// Which tool sent this event ("claude_code", "gemini_cli", "codex", "aider")
+    pub source_tool: String,
 }
 
 /// Event Bus - publish/subscribe for runtime events.
@@ -101,6 +118,27 @@ mod tests {
                 assert_eq!(a.pane_id, Some("%0".to_string()));
             }
             _ => panic!("expected AgentStateChange"),
+        }
+    }
+
+    #[test]
+    fn test_hook_event_publish_subscribe() {
+        let bus = EventBus::new(8);
+        let rx = bus.subscribe();
+        bus.publish(RuntimeEvent::HookEvent(HookEvent {
+            session_id: "sess-abc".to_string(),
+            cwd: "/workspace/repo".to_string(),
+            hook_event_name: "Stop".to_string(),
+            tool_name: None,
+            source_tool: "claude_code".to_string(),
+        }));
+        let ev = rx.recv().unwrap();
+        match ev {
+            RuntimeEvent::HookEvent(h) => {
+                assert_eq!(h.session_id, "sess-abc");
+                assert_eq!(h.hook_event_name, "Stop");
+            }
+            _ => panic!("expected HookEvent"),
         }
     }
 }
