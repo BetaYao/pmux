@@ -3570,6 +3570,188 @@ impl AppRoot {
         }
     }
 
+    /// Build the terminal content area (loading state, terminal entity, or split pane container).
+    fn build_terminal_content_area(
+        &self,
+        cx: &mut Context<Self>,
+        terminal_focus: &FocusHandle,
+        repo_name: &str,
+        split_tree: SplitNode,
+        terminal_buffers: Arc<Mutex<HashMap<String, TerminalBuffer>>>,
+        focused_pane_index: usize,
+        split_divider_drag: Option<(Vec<bool>, f32, f32, bool)>,
+        worktree_switch_loading: Option<usize>,
+        cursor_blink_visible: bool,
+    ) -> Div {
+        let app_root_entity = cx.entity();
+        let app_root_entity_for_ratio = app_root_entity.clone();
+        let app_root_entity_for_drag = app_root_entity.clone();
+        let app_root_entity_for_drag_end = app_root_entity.clone();
+        let app_root_entity_for_pane_click = app_root_entity.clone();
+        let terminal_focus_for_pane = terminal_focus.clone();
+        div()
+            .flex_1()
+            .min_h_0()
+            .overflow_hidden()
+            .cursor(gpui::CursorStyle::IBeam)
+            .relative()
+            .child(
+                if worktree_switch_loading.is_some() {
+                    div()
+                        .size_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(rgb(0x1e1e1e))
+                        .text_color(rgb(0x888888))
+                        .text_size(px(14.))
+                        .child("Connecting to worktree...")
+                        .into_any_element()
+                } else if let Some(ref term_entity) = self.terminal_area_entity {
+                    div().size_full().child(term_entity.clone()).into_any_element()
+                } else {
+                    SplitPaneContainer::new(
+                        split_tree,
+                        terminal_buffers,
+                        focused_pane_index,
+                        repo_name,
+                    )
+                    .with_cursor_blink_visible(cursor_blink_visible)
+                    .with_drag_state(split_divider_drag)
+                    .with_search(
+                        if self.search_active { Some(self.search_query.clone()) } else { None },
+                        self.search_current_match,
+                    )
+                    .on_ratio_change(move |path, ratio, _window, cx| {
+                        let _ = cx.update_entity(&app_root_entity_for_ratio, |this: &mut AppRoot, cx| {
+                            this.split_tree.update_ratio(&path, ratio);
+                            cx.notify();
+                        });
+                    })
+                    .on_divider_drag_start(move |path, pos, ratio, is_vertical, _window, cx| {
+                        let _ = cx.update_entity(&app_root_entity_for_drag, |this: &mut AppRoot, cx| {
+                            this.split_divider_drag = Some((path, pos, ratio, is_vertical));
+                            cx.notify();
+                        });
+                    })
+                    .on_divider_drag_end(move |_window, cx| {
+                        let _ = cx.update_entity(&app_root_entity_for_drag_end, |this: &mut AppRoot, cx| {
+                            this.split_divider_drag = None;
+                            cx.notify();
+                        });
+                    })
+                    .on_pane_click(move |pane_idx, window, cx| {
+                        let _ = cx.update_entity(&app_root_entity_for_pane_click, |this: &mut AppRoot, cx| {
+                            this.focused_pane_index = pane_idx;
+                            if let Some(target) = this.split_tree.focus_index_to_pane_target(pane_idx) {
+                                if let Some(rt) = &this.runtime {
+                                    let _ = rt.focus_pane(&target);
+                                }
+                                this.active_pane_target = Some(target.clone());
+                                if let Ok(mut guard) = this.active_pane_target_shared.lock() {
+                                    *guard = target.clone();
+                                }
+                                this.terminal_needs_focus = false;
+                                if let Ok(buffers) = this.terminal_buffers.lock() {
+                                    if let Some(TerminalBuffer::Terminal { focus_handle, .. }) = buffers.get(&target) {
+                                        window.focus(focus_handle, cx);
+                                    } else {
+                                        drop(buffers);
+                                        window.focus(&terminal_focus_for_pane, cx);
+                                    }
+                                } else {
+                                    window.focus(&terminal_focus_for_pane, cx);
+                                }
+                            } else {
+                                this.terminal_needs_focus = true;
+                            }
+                            cx.notify();
+                        });
+                    })
+                    .into_any_element()
+                }
+            )
+            .when(self.search_active, |el| {
+                el.child(
+                    div()
+                        .absolute()
+                        .top(px(2.0))
+                        .right(px(12.0))
+                        .bg(rgb(0x2e343e))
+                        .border_1()
+                        .border_color(rgb(0x5c6370))
+                        .rounded(px(4.0))
+                        .px(px(8.0))
+                        .py(px(4.0))
+                        .child(format!("🔍 {}_", self.search_query))
+                )
+            })
+    }
+
+    /// Build the sidebar right-click context menu (View Diff, Delete).
+    fn build_sidebar_context_menu(
+        &self,
+        cx: &mut Context<Self>,
+        idx: usize,
+        repo_path: &std::path::Path,
+        cached_worktrees: &[crate::worktree::WorktreeInfo],
+    ) -> impl IntoElement {
+        let app_root_entity = cx.entity();
+        let on_view_diff: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>> = {
+            let entity = app_root_entity.clone();
+            let repo_path = repo_path.to_path_buf();
+            Some(Arc::new(move |idx, _window, cx| {
+                let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
+                    this.sidebar_context_menu = None;
+                    cx.notify();
+                });
+                let entity2 = entity.clone();
+                let repo_path2 = repo_path.clone();
+                cx.spawn(async move |cx| {
+                    let result = blocking::unblock(move || {
+                        crate::worktree::discover_worktrees(&repo_path2).ok().map(|wt| (wt, repo_path2))
+                    }).await;
+                    let _ = cx.update_entity(&entity2, |this: &mut AppRoot, cx: &mut _| {
+                        if let Some((wt, rp)) = result {
+                            this.cached_worktrees = wt;
+                            this.cached_worktrees_repo = Some(rp);
+                        }
+                        this.open_diff_view_for_worktree_with_cache(idx, cx);
+                    });
+                }).detach();
+            }))
+        };
+        let on_delete: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>> = {
+            let entity = app_root_entity.clone();
+            let repo_path = repo_path.to_path_buf();
+            Some(Arc::new(move |idx, _window, cx| {
+                let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
+                    this.sidebar_context_menu = None;
+                    cx.notify();
+                });
+                let entity2 = entity.clone();
+                let repo_path2 = repo_path.clone();
+                cx.spawn(async move |cx| {
+                    let result = blocking::unblock(move || {
+                        let worktrees = crate::worktree::discover_worktrees(&repo_path2).ok()?;
+                        let worktree = worktrees.get(idx).cloned()?;
+                        let has_uncommitted = crate::worktree::has_uncommitted_changes(&worktree.path);
+                        Some((worktrees, worktree, has_uncommitted, repo_path2))
+                    }).await;
+                    if let Some((worktrees, worktree, has_uncommitted, rp)) = result {
+                        let _ = cx.update_entity(&entity2, |this: &mut AppRoot, cx: &mut _| {
+                            this.cached_worktrees = worktrees;
+                            this.cached_worktrees_repo = Some(rp);
+                            this.delete_worktree_dialog.open(worktree, has_uncommitted);
+                            cx.notify();
+                        });
+                    }
+                }).detach();
+            }))
+        };
+        Sidebar::render_context_menu(idx, on_view_diff, on_delete, cached_worktrees)
+    }
+
     /// Build the terminal right-click context menu (Copy, Paste, Select All, Clear).
     fn build_terminal_context_menu(&self, cx: &mut Context<Self>, has_selection: bool) -> Stateful<Div> {
         let app_root_entity = cx.entity();
@@ -4044,12 +4226,8 @@ impl AppRoot {
 
         let sidebar = self.build_sidebar(cx, &repo_name, &repo_path, terminal_focus);
 
-        // Entity clones for context menus and dialogs
+        // Entity clones for context menus
         let app_root_entity_for_clear_menu = app_root_entity.clone();
-        let app_root_entity_for_menu_delete = app_root_entity.clone();
-        let app_root_entity_for_menu_diff = app_root_entity.clone();
-        let repo_path_for_menu_delete = repo_path.clone();
-        let repo_path_for_menu_diff = repo_path.clone();
         let cached_worktrees = self.cached_worktrees.clone();
 
         let delete_dialog = self.build_delete_dialog(cx);
@@ -4134,114 +4312,12 @@ impl AppRoot {
                                         })
                                 )
                             })
-                            .child({
-                                let app_root_entity_for_ratio = app_root_entity.clone();
-                                let app_root_entity_for_drag = app_root_entity.clone();
-                                let app_root_entity_for_drag_end = app_root_entity.clone();
-                                let app_root_entity_for_pane_click = app_root_entity.clone();
-                                let terminal_focus_for_pane = terminal_focus.clone();
-                                div()
-                                    .flex_1()
-                                    .min_h_0()
-                                    .overflow_hidden()
-                                    .cursor(gpui::CursorStyle::IBeam)
-                                    .relative()
-                                    .child(
-                                        if worktree_switch_loading.is_some() {
-                                            div()
-                                                .size_full()
-                                                .flex()
-                                                .items_center()
-                                                .justify_center()
-                                                .bg(rgb(0x1e1e1e))
-                                                .text_color(rgb(0x888888))
-                                                .text_size(px(14.))
-                                                .child("Connecting to worktree...")
-                                                .into_any_element()
-                                        } else if let Some(ref term_entity) = self.terminal_area_entity {
-                                            div().size_full().child(term_entity.clone()).into_any_element()
-                                        } else {
-                                            SplitPaneContainer::new(
-                                                split_tree,
-                                                terminal_buffers.clone(),
-                                                focused_pane_index,
-                                                &repo_name,
-                                            )
-                                            .with_cursor_blink_visible(cursor_blink_visible)
-                                            .with_drag_state(split_divider_drag)
-                                            .with_search(
-                                                if self.search_active {
-                                                    Some(self.search_query.clone())
-                                                } else {
-                                                    None
-                                                },
-                                                self.search_current_match,
-                                            )
-                                            .on_ratio_change(move |path, ratio, _window, cx| {
-                                                let _ = cx.update_entity(&app_root_entity_for_ratio, |this: &mut AppRoot, cx| {
-                                                    this.split_tree.update_ratio(&path, ratio);
-                                                    cx.notify();
-                                                });
-                                            })
-                                            .on_divider_drag_start(move |path, pos, ratio, is_vertical, _window, cx| {
-                                                let _ = cx.update_entity(&app_root_entity_for_drag, |this: &mut AppRoot, cx| {
-                                                    this.split_divider_drag = Some((path, pos, ratio, is_vertical));
-                                                    cx.notify();
-                                                });
-                                            })
-                                            .on_divider_drag_end(move |_window, cx| {
-                                                let _ = cx.update_entity(&app_root_entity_for_drag_end, |this: &mut AppRoot, cx| {
-                                                    this.split_divider_drag = None;
-                                                    cx.notify();
-                                                });
-                                            })
-                                            .on_pane_click(move |pane_idx, window, cx| {
-                                                let _ = cx.update_entity(&app_root_entity_for_pane_click, |this: &mut AppRoot, cx| {
-                                                    this.focused_pane_index = pane_idx;
-                                                    if let Some(target) = this.split_tree.focus_index_to_pane_target(pane_idx) {
-                                                        if let Some(rt) = &this.runtime {
-                                                            let _ = rt.focus_pane(&target);
-                                                        }
-                                                        this.active_pane_target = Some(target.clone());
-                                                        if let Ok(mut guard) = this.active_pane_target_shared.lock() {
-                                                            *guard = target.clone();
-                                                        }
-                                                        this.terminal_needs_focus = false;
-                                                        if let Ok(buffers) = this.terminal_buffers.lock() {
-                                                            if let Some(TerminalBuffer::Terminal { focus_handle, .. }) = buffers.get(&target) {
-                                                                window.focus(focus_handle, cx);
-                                                            } else {
-                                                                drop(buffers);
-                                                                window.focus(&terminal_focus_for_pane, cx);
-                                                            }
-                                                        } else {
-                                                            window.focus(&terminal_focus_for_pane, cx);
-                                                        }
-                                                    } else {
-                                                        this.terminal_needs_focus = true;
-                                                    }
-                                                    cx.notify();
-                                                });
-                                            })
-                                            .into_any_element()
-                                        }
-                                    )
-                                    .when(self.search_active, |el| {
-                                        el.child(
-                                            div()
-                                                .absolute()
-                                                .top(px(2.0))
-                                                .right(px(12.0))
-                                                .bg(rgb(0x2e343e))
-                                                .border_1()
-                                                .border_color(rgb(0x5c6370))
-                                                .rounded(px(4.0))
-                                                .px(px(8.0))
-                                                .py(px(4.0))
-                                                .child(format!("🔍 {}_", self.search_query))
-                                        )
-                                    })
-                            })
+                            .child(self.build_terminal_content_area(
+                                cx, terminal_focus, &repo_name,
+                                split_tree, terminal_buffers.clone(),
+                                focused_pane_index, split_divider_drag,
+                                worktree_switch_loading, cursor_blink_visible,
+                            ))
                     )
             )
             // Update banner (above status bar)
@@ -4317,59 +4393,7 @@ impl AppRoot {
             })
             .when(sidebar_context_menu.is_some(), |el| {
                 let (idx, click_x, click_y) = sidebar_context_menu.unwrap();
-                let on_view_diff: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>> = {
-                    let entity = app_root_entity_for_menu_diff.clone();
-                    let repo_path = repo_path_for_menu_diff.clone();
-                    Some(Arc::new(move |idx, _window, cx| {
-                        let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
-                            this.sidebar_context_menu = None;
-                            cx.notify();
-                        });
-                        let entity2 = entity.clone();
-                        let repo_path2 = repo_path.clone();
-                        cx.spawn(async move |cx| {
-                            let result = blocking::unblock(move || {
-                                crate::worktree::discover_worktrees(&repo_path2).ok().map(|wt| (wt, repo_path2))
-                            }).await;
-                            let _ = cx.update_entity(&entity2, |this: &mut AppRoot, cx: &mut _| {
-                                if let Some((wt, rp)) = result {
-                                    this.cached_worktrees = wt;
-                                    this.cached_worktrees_repo = Some(rp);
-                                }
-                                this.open_diff_view_for_worktree_with_cache(idx, cx);
-                            });
-                        }).detach();
-                    }))
-                };
-                let on_delete: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>> = {
-                    let entity = app_root_entity_for_menu_delete.clone();
-                    let repo_path = repo_path_for_menu_delete.clone();
-                    Some(Arc::new(move |idx, _window, cx| {
-                        let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
-                            this.sidebar_context_menu = None;
-                            cx.notify();
-                        });
-                        let entity2 = entity.clone();
-                        let repo_path2 = repo_path.clone();
-                        cx.spawn(async move |cx| {
-                            let result = blocking::unblock(move || {
-                                let worktrees = crate::worktree::discover_worktrees(&repo_path2).ok()?;
-                                let worktree = worktrees.get(idx).cloned()?;
-                                let has_uncommitted = crate::worktree::has_uncommitted_changes(&worktree.path);
-                                Some((worktrees, worktree, has_uncommitted, repo_path2))
-                            }).await;
-                            if let Some((worktrees, worktree, has_uncommitted, rp)) = result {
-                                let _ = cx.update_entity(&entity2, |this: &mut AppRoot, cx: &mut _| {
-                                    this.cached_worktrees = worktrees;
-                                    this.cached_worktrees_repo = Some(rp);
-                                    this.delete_worktree_dialog.open(worktree, has_uncommitted);
-                                    cx.notify();
-                                });
-                            }
-                        }).detach();
-                    }))
-                };
-                let menu = Sidebar::render_context_menu(idx, on_view_diff, on_delete, &cached_worktrees);
+                let menu = self.build_sidebar_context_menu(cx, idx, &repo_path, &cached_worktrees);
                 el.child(
                     div()
                         .id("root-context-menu-float")
