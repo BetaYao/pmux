@@ -18,6 +18,7 @@ pub mod sidebar;
 pub mod split_pane_container;
 pub mod status_bar;
 pub mod tabbar;
+pub mod task_dialog;
 pub mod terminal_controller;
 pub mod terminal_area_entity;
 pub mod terminal_view;
