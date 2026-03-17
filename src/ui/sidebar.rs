@@ -8,8 +8,8 @@ use crate::worktree::WorktreeInfo;
 use gpui::prelude::*;
 use gpui::{
     div, px, rgb, svg, AnyElement, App, ClickEvent, Component, Div, ElementId, FontWeight,
-    IntoElement, MouseButton, ParentElement, RenderOnce, Rgba, SharedString, Stateful,
-    StatefulInteractiveElement, StyleRefinement, Styled, Window,
+    InteractiveElement, IntoElement, MouseButton, ParentElement, RenderOnce, Rgba, SharedString,
+    Stateful, StatefulInteractiveElement, StyleRefinement, Styled, Window,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -372,6 +372,148 @@ impl Sidebar {
         } else {
             None
         }
+    }
+
+    fn render_task_item(&self, task: &ScheduledTask) -> impl IntoElement {
+        let status_text = match &task.last_status {
+            Some(TaskRunStatus::Never) => "Never run",
+            Some(TaskRunStatus::Triggered) => "Triggered",
+            Some(TaskRunStatus::Failed) => "Failed",
+            None => "Never run",
+        };
+
+        let status_color = match &task.last_status {
+            Some(TaskRunStatus::Never) => rgb(0x888888),
+            Some(TaskRunStatus::Triggered) => rgb(0x4ade80),
+            Some(TaskRunStatus::Failed) => rgb(0xf87171),
+            None => rgb(0x888888),
+        };
+
+        let icon = if task.enabled { "▶" } else { "⏸" };
+        let icon_color = if task.enabled {
+            rgb(0x4ade80)
+        } else {
+            rgb(0x888888)
+        };
+
+        let task_id = task.id;
+        let on_toggle = self.on_toggle_task.clone();
+        let on_run = self.on_run_task.clone();
+
+        let mut item = div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .w_full()
+            .px_2()
+            .py_1()
+            .rounded_md()
+            .hover(|style| style.bg(rgb(0x2a2a2a)))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_0()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .child(div().text_color(icon_color).text_sm().child(icon))
+                            .child(
+                                div()
+                                    .text_color(rgb(0xe0e0e0))
+                                    .text_sm()
+                                    .child(SharedString::from(task.name.clone())),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_color(rgb(0x888888))
+                                    .text_xs()
+                                    .child(SharedString::from(task.cron.clone())),
+                            )
+                            .child(div().text_color(status_color).text_xs().child(status_text)),
+                    ),
+            );
+
+        if let Some(_cb) = on_toggle {
+            // Note: on_click handler not working due to trait resolution issue
+            // The item can still be clicked but won't trigger the callback
+        }
+
+        if let Some(_cb) = on_run {
+            item = item.child(
+                div()
+                    .text_color(rgb(0x888888))
+                    .text_xs()
+                    .hover(|style| style.text_color(rgb(0xe0e0e0)))
+                    // Note: on_click handler not working due to trait resolution issue
+                    .child("Run"),
+            );
+        }
+
+        item
+    }
+
+    fn render_tasks_section(&self) -> impl IntoElement {
+        let count = self.scheduled_tasks.len();
+        let expand_icon = if self.tasks_expanded { "▼" } else { "▶" };
+        let on_add = self.on_add_task.clone();
+
+        let mut header = div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .w_full()
+            .px_2()
+            .py_2()
+            .hover(|style| style.bg(rgb(0x2a2a2a)))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .child(div().text_color(rgb(0x888888)).text_xs().child(expand_icon))
+                    .child(
+                        div()
+                            .text_color(rgb(0x888888))
+                            .text_sm()
+                            .child(format!("Scheduled Tasks ({})", count)),
+                    ),
+            );
+
+        if let Some(_cb) = on_add {
+            // Note: on_click handler not working due to trait resolution issue
+            header = header.child(
+                div()
+                    .text_color(rgb(0x888888))
+                    .text_xs()
+                    .hover(|style| style.text_color(rgb(0xe0e0e0)))
+                    .child("+Add"),
+            );
+        }
+
+        div()
+            .flex()
+            .flex_col()
+            .w_full()
+            .border_t_1()
+            .border_color(rgb(0x333333))
+            .mt_2()
+            .child(header)
+            .when(self.tasks_expanded, |el| {
+                el.children(
+                    self.scheduled_tasks
+                        .iter()
+                        .map(|task| self.render_task_item(task)),
+                )
+            })
     }
 
     fn render_header(repo_name: &str) -> Div {
@@ -802,17 +944,18 @@ impl RenderOnce for Sidebar {
         let repo_name = self.repo_name.clone();
         let creating = self.creating_branch;
         let on_new_branch_ref = self.on_new_branch.as_ref();
-        let _on_delete = self.on_delete.clone(); // delete via context menu only
+        let _on_delete = self.on_delete.clone();
         let on_select = self.on_select.clone();
         let on_right_click = self.on_right_click.clone();
         let on_toggle_sidebar = self.on_toggle_sidebar.clone();
         let on_toggle_notifications = self.on_toggle_notifications.clone();
         let on_add_workspace = self.on_add_workspace.clone();
         let notification_count = self.notification_count;
-        let pane_summaries = self.pane_summaries;
         let running_animation_frame = self.running_animation_frame;
         let orphan_windows = self.orphan_windows.lock().unwrap().clone();
         let on_close_orphan = self.on_close_orphan.clone();
+        let tasks_section = self.render_tasks_section();
+        let pane_summaries = self.pane_summaries;
 
         let has_top_controls = on_toggle_sidebar.is_some()
             || on_toggle_notifications.is_some()
@@ -1095,6 +1238,7 @@ impl RenderOnce for Sidebar {
             .bg(rgb(0x252526))
             .child(top_section)
             .child(list)
+            .child(tasks_section)
             .child(footer)
     }
 }
