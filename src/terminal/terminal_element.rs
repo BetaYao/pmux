@@ -8,8 +8,10 @@ use alacritty_terminal::index::{Column, Line, Point as AlacPoint, Side};
 use alacritty_terminal::selection::{SelectionRange, SelectionType};
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::TermMode;
-use gpui::*;
+use gpui::prelude::*;
+use gpui::{App, Bounds, Edges, ElementId, FocusHandle, Font, FontFeatures, FontStyle, FontWeight, GlobalElementId, Hsla, InspectorElementId, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta, ScrollWheelEvent, Size, StrikethroughStyle, Style, StyleRefinement, TextRun, UnderlineStyle, Window, px, quad, transparent_black};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 pub struct TerminalElement {
     terminal: Arc<Terminal>,
@@ -782,6 +784,12 @@ impl Element for TerminalElement {
                     };
                     terminal.clear_selection();
                     terminal.start_selection(pt, side, sel_type);
+                    terminal.selecting().store(true, Ordering::Relaxed);
+                    let now_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0);
+                    terminal.selecting_since().store(now_ms, Ordering::Relaxed);
                     window.refresh();
                 }
             });
@@ -834,6 +842,11 @@ impl Element for TerminalElement {
                 if !phase.bubble() || event.button != MouseButton::Left {
                     return;
                 }
+                // Clear selecting flag unconditionally on mouse-up
+                // (regardless of mouse mode or position)
+                terminal.selecting().store(false, Ordering::Relaxed);
+                terminal.selecting_since().store(0, Ordering::Relaxed);
+
                 let mode = terminal.mode();
 
                 if is_mouse_mode(mode) {

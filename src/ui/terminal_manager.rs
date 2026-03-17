@@ -15,7 +15,8 @@ use crate::ui::terminal_view::TerminalBuffer;
 use crate::ui::terminal_area_entity::TerminalAreaEntity;
 use futures_util::future::{select, Either};
 use futures_util::pin_mut;
-use gpui::*;
+use gpui::prelude::*;
+use gpui::{App, Context, Entity, FocusHandle, Task};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -744,9 +745,22 @@ impl TerminalManager {
                             }
                             Either::Right((Either::Left((_, _)), _)) => {
                                 // ── render_tick fired ──
+                                let mut is_selecting = terminal_for_output.selecting().load(std::sync::atomic::Ordering::Relaxed);
+                                if is_selecting {
+                                    let sel_start = terminal_for_output.selecting_since().load(std::sync::atomic::Ordering::Relaxed);
+                                    let now_ms = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .map(|d| d.as_millis() as u64)
+                                        .unwrap_or(0);
+                                    if sel_start > 0 && now_ms.saturating_sub(sel_start) >= 5000 {
+                                        terminal_for_output.selecting().store(false, std::sync::atomic::Ordering::Relaxed);
+                                        terminal_for_output.selecting_since().store(0, std::sync::atomic::Ordering::Relaxed);
+                                        is_selecting = false;
+                                    }
+                                }
                                 if dirty {
                                     terminal_for_output.take_dirty();
-                                    if !modal_open.load(Ordering::Relaxed) {
+                                    if !modal_open.load(Ordering::Relaxed) && !is_selecting {
                                         if let Some(ref tae) = term_area_entity {
                                             let _ = cx.update_entity(tae, |_, cx| cx.notify());
                                         }
@@ -755,6 +769,7 @@ impl TerminalManager {
                                 } else {
                                     if terminal_for_output.take_dirty()
                                         && !modal_open.load(Ordering::Relaxed)
+                                        && !is_selecting
                                     {
                                         if let Some(ref tae) = term_area_entity {
                                             let _ = cx.update_entity(tae, |_, cx| cx.notify());
@@ -764,8 +779,22 @@ impl TerminalManager {
                             }
                             Either::Right((Either::Right((_, _)), _)) => {
                                 // ── idle_tick fired ──
+                                let mut is_selecting = terminal_for_output.selecting().load(std::sync::atomic::Ordering::Relaxed);
+                                if is_selecting {
+                                    let sel_start = terminal_for_output.selecting_since().load(std::sync::atomic::Ordering::Relaxed);
+                                    let now_ms = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .map(|d| d.as_millis() as u64)
+                                        .unwrap_or(0);
+                                    if sel_start > 0 && now_ms.saturating_sub(sel_start) >= 5000 {
+                                        terminal_for_output.selecting().store(false, std::sync::atomic::Ordering::Relaxed);
+                                        terminal_for_output.selecting_since().store(0, std::sync::atomic::Ordering::Relaxed);
+                                        is_selecting = false;
+                                    }
+                                }
                                 if terminal_for_output.take_dirty()
                                     && !modal_open.load(Ordering::Relaxed)
+                                    && !is_selecting
                                 {
                                     if let Some(ref tae) = term_area_entity {
                                         let _ = cx.update_entity(tae, |_, cx| cx.notify());
@@ -1259,9 +1288,22 @@ impl TerminalManager {
                             }
                             Either::Right((Either::Left((_, _)), _)) => {
                                 // ── render_tick fired ──
+                                let mut is_selecting = terminal_for_output.selecting().load(std::sync::atomic::Ordering::Relaxed);
+                                if is_selecting {
+                                    let sel_start = terminal_for_output.selecting_since().load(std::sync::atomic::Ordering::Relaxed);
+                                    let now_ms = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .map(|d| d.as_millis() as u64)
+                                        .unwrap_or(0);
+                                    if sel_start > 0 && now_ms.saturating_sub(sel_start) >= 5000 {
+                                        terminal_for_output.selecting().store(false, std::sync::atomic::Ordering::Relaxed);
+                                        terminal_for_output.selecting_since().store(0, std::sync::atomic::Ordering::Relaxed);
+                                        is_selecting = false;
+                                    }
+                                }
                                 if dirty {
                                     terminal_for_output.take_dirty();
-                                    if !modal_open.load(Ordering::Relaxed) {
+                                    if !modal_open.load(Ordering::Relaxed) && !is_selecting {
                                         if let Some(ref tae) = term_area_entity {
                                             let _ = cx.update_entity(tae, |_, cx| cx.notify());
                                         }
@@ -1270,6 +1312,7 @@ impl TerminalManager {
                                 } else {
                                     if terminal_for_output.take_dirty()
                                         && !modal_open.load(Ordering::Relaxed)
+                                        && !is_selecting
                                     {
                                         if let Some(ref tae) = term_area_entity {
                                             let _ = cx.update_entity(tae, |_, cx| cx.notify());
@@ -1279,8 +1322,22 @@ impl TerminalManager {
                             }
                             Either::Right((Either::Right((_, _)), _)) => {
                                 // ── idle_tick fired ──
+                                let mut is_selecting = terminal_for_output.selecting().load(std::sync::atomic::Ordering::Relaxed);
+                                if is_selecting {
+                                    let sel_start = terminal_for_output.selecting_since().load(std::sync::atomic::Ordering::Relaxed);
+                                    let now_ms = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .map(|d| d.as_millis() as u64)
+                                        .unwrap_or(0);
+                                    if sel_start > 0 && now_ms.saturating_sub(sel_start) >= 5000 {
+                                        terminal_for_output.selecting().store(false, std::sync::atomic::Ordering::Relaxed);
+                                        terminal_for_output.selecting_since().store(0, std::sync::atomic::Ordering::Relaxed);
+                                        is_selecting = false;
+                                    }
+                                }
                                 if terminal_for_output.take_dirty()
                                     && !modal_open.load(Ordering::Relaxed)
+                                    && !is_selecting
                                 {
                                     if let Some(ref tae) = term_area_entity {
                                         let _ = cx.update_entity(tae, |_, cx| cx.notify());
