@@ -15,6 +15,7 @@ use crate::runtime::{AgentRuntime, EventBus, RuntimeEvent, StatusPublisher};
 use crate::runtime::backends::{create_runtime_from_env, kill_tmux_window, legacy_window_name_for_worktree, list_tmux_windows, migrate_tmux_window_name, recover_runtime, resolve_backend, session_name_for_workspace, window_name_for_worktree, window_target};
 use crate::runtime::{RuntimeState, WorktreeState};
 use crate::ui::{AppState, sidebar::Sidebar, workspace_tabbar::WorkspaceTabBar, terminal_controller::ResizeController, terminal_view::TerminalBuffer, terminal_area_entity::TerminalAreaEntity, notification_panel_entity::NotificationPanelEntity, new_branch_dialog_entity::NewBranchDialogEntity, close_tab_dialog_ui::CloseTabDialogUi, delete_worktree_dialog_ui::DeleteWorktreeDialogUi, split_pane_container::SplitPaneContainer, diff_view::DiffViewOverlay, status_bar::StatusBar, models::{StatusCountsModel, NotificationPanelModel, NewBranchDialogModel, PaneSummaryModel}, topbar_entity::TopBarEntity};
+use crate::scheduler::SchedulerManager;
 use crate::split_tree::SplitNode;
 use crate::workspace_manager::WorkspaceManager;
 use crate::input::{key_to_xterm_escape, KeyModifiers};
@@ -24,7 +25,8 @@ use crate::window_state::PersistentAppState;
 use crate::new_branch_orchestrator::{NewBranchOrchestrator, CreationResult, NotificationSender};
 use crate::notification::Notification;
 use gpui::prelude::FluentBuilder;
-use gpui::*;
+use gpui::prelude::*;
+use gpui::{actions, AnyElement, App, AsyncApp, ClipboardEntry, ClipboardItem, Div, Entity, FocusHandle, Image, ImageFormat, KeyDownEvent, MouseButton, SharedString, Stateful, StyleRefinement, Window, div, px, rgb, rgba, svg};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -302,6 +304,8 @@ pub struct AppRoot {
     pub(crate) terminal_mgr: Option<Entity<crate::ui::terminal_manager::TerminalManager>>,
     /// SplitPaneManager Entity — manages split layout, pane focus, divider drag
     pub(crate) split_pane_mgr: Option<Entity<crate::ui::split_pane_manager::SplitPaneManager>>,
+    /// SchedulerManager Entity — manages scheduled tasks and cron jobs
+    pub(crate) scheduler_manager: Option<Entity<SchedulerManager>>,
     pub(crate) sidebar_visible: bool,
     /// Per-pane terminal buffers (Term = pipe-pane/control mode streaming; Legacy = error placeholder only)
     pub(crate) terminal_buffers: Arc<Mutex<HashMap<String, TerminalBuffer>>>,
@@ -574,6 +578,7 @@ impl AppRoot {
             runtime_mgr: None,
             terminal_mgr: None,
             split_pane_mgr: None,
+            scheduler_manager: None,
             sidebar_visible: true,
             terminal_buffers: Arc::new(Mutex::new(HashMap::new())),
             split_tree: SplitNode::pane(""),
@@ -690,6 +695,11 @@ impl AppRoot {
         if self.notification_center.is_none() {
             let nc = cx.new(|_cx| crate::ui::notification_center::NotificationCenter::new());
             self.notification_center = Some(nc);
+        }
+        // Create SchedulerManager entity
+        if self.scheduler_manager.is_none() {
+            let sm = cx.new(|cx| SchedulerManager::new(cx));
+            self.scheduler_manager = Some(sm);
         }
         if self.dialog_input_focus.is_none() {
             self.dialog_input_focus = Some(cx.focus_handle());
@@ -834,6 +844,7 @@ impl AppRoot {
                 let pane_id = pane_id.to_string();
                 let _ = cx.update_entity(&entity, |this: &mut AppRoot, cx| {
                     if let Some(idx) = this.split_tree.flatten().into_iter().position(|(t, _)| t == pane_id) {
+                        // Pane is in the current split tree — focus it directly
                         this.focused_pane_index = idx;
                         this.active_pane_target = Some(pane_id.clone());
                         if let Ok(mut guard) = this.active_pane_target_shared.lock() {
@@ -843,6 +854,16 @@ impl AppRoot {
                             let _ = rt.focus_pane(&pane_id);
                         }
                         this.terminal_needs_focus = true;
+                    } else if let Some(wt_path) = extract_worktree_path_from_pane_id(&pane_id) {
+                        // Pane is in a different worktree — switch to it
+                        if let Some(wt_idx) = this.cached_worktrees.iter().position(|wt| wt.path == wt_path) {
+                            let branch = this.cached_worktrees[wt_idx].short_branch_name().to_string();
+                            this.active_worktree_index = Some(wt_idx);
+                            if let Some(tab) = this.workspace_manager.active_tab() {
+                                let repo_path = tab.path.clone();
+                                this.schedule_switch_to_worktree_async(&repo_path, &wt_path, &branch, wt_idx, cx);
+                            }
+                        }
                     }
                     cx.notify();
                 });
@@ -1349,8 +1370,16 @@ impl AppRoot {
 
         let term_entity_for_setup = self.terminal_area_entity.clone();
         if let Some(ref tm) = self.terminal_mgr {
-            // Sync shared state to TerminalManager before setup
+            // Sync shared state to TerminalManager before setup.
+            // CRITICAL: tm.focus must use AppRoot's terminal_focus, NOT its own.
+            // The on_key_down div tracks terminal_focus; if TerminalBuffer uses a different
+            // FocusHandle, focusing the terminal for InputHandler breaks on_key_down delivery.
+            let app_focus = self.terminal_focus.clone();
             tm.update(cx, |tm, _cx| {
+                tm.buffers = self.terminal_buffers.clone();
+                if let Some(f) = app_focus {
+                    tm.focus = Some(f);
+                }
                 tm.status_publisher = self.status_publisher.clone();
                 tm.area_entity = self.terminal_area_entity.clone();
             });
@@ -2754,7 +2783,11 @@ impl AppRoot {
                 let rt = rt.clone();
                 let te = self.terminal_area_entity.clone();
                 let sp = self.status_publisher.clone();
+                let bufs = self.terminal_buffers.clone();
+                let app_focus = self.terminal_focus.clone();
                 tm.update(cx, |tm, cx| {
+                    tm.buffers = bufs;
+                    if let Some(f) = app_focus { tm.focus = Some(f); }
                     tm.status_publisher = sp;
                     tm.area_entity = te.clone();
                     tm.setup_pane_terminal_output(rt, &new_target, &new_status_key, te, cx);
@@ -3510,6 +3543,10 @@ impl Default for AppRoot {
         Self::new()
     }
 }
+
+#[cfg(test)]
+#[path = "app_root_test.rs"]
+mod app_root_test;
 
 #[cfg(test)]
 mod tests {
