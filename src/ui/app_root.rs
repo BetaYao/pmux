@@ -307,6 +307,7 @@ pub struct AppRoot {
     /// SchedulerManager Entity — manages scheduled tasks and cron jobs
     pub(crate) scheduler_manager: Option<Entity<SchedulerManager>>,
     pub(crate) sidebar_visible: bool,
+    pub(crate) tasks_expanded: bool,
     /// Per-pane terminal buffers (Term = pipe-pane/control mode streaming; Legacy = error placeholder only)
     pub(crate) terminal_buffers: Arc<Mutex<HashMap<String, TerminalBuffer>>>,
     /// Split layout tree (single Pane or Vertical/Horizontal with children)
@@ -580,6 +581,7 @@ impl AppRoot {
             split_pane_mgr: None,
             scheduler_manager: None,
             sidebar_visible: true,
+            tasks_expanded: true,
             terminal_buffers: Arc::new(Mutex::new(HashMap::new())),
             split_tree: SplitNode::pane(""),
             focused_pane_index: 0,

@@ -22,7 +22,8 @@ use crate::ui::topbar_entity::TopBarEntity;
 use crate::ui::workspace_tabbar::WorkspaceTabBar;
 use crate::deps;
 use gpui::prelude::FluentBuilder;
-use gpui::*;
+use gpui::prelude::*;
+use gpui::{AnyElement, App, ClickEvent, ClipboardItem, Div, Entity, FocusHandle, FontWeight, KeyDownEvent, SharedString, Stateful, StyleRefinement, Window, div, px, rgb, rgba, svg, uniform_list, ScrollStrategy, UniformListScrollHandle, font};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::Ordering;
@@ -517,7 +518,7 @@ impl AppRoot {
         terminal_buffers: Arc<Mutex<HashMap<String, TerminalBuffer>>>,
         focused_pane_index: usize,
         split_divider_drag: Option<(Vec<bool>, f32, f32, bool)>,
-        worktree_switch_loading: Option<usize>,
+        _worktree_switch_loading: Option<usize>,
         cursor_blink_visible: bool,
     ) -> Div {
         let app_root_entity = cx.entity();
@@ -533,18 +534,7 @@ impl AppRoot {
             .cursor(gpui::CursorStyle::IBeam)
             .relative()
             .child(
-                if worktree_switch_loading.is_some() {
-                    div()
-                        .size_full()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .bg(rgb(0x1e1e1e))
-                        .text_color(rgb(0x888888))
-                        .text_size(px(14.))
-                        .child("Connecting to worktree...")
-                        .into_any_element()
-                } else if let Some(ref term_entity) = self.terminal_area_entity {
+                if let Some(ref term_entity) = self.terminal_area_entity {
                     div().size_full().child(term_entity.clone()).into_any_element()
                 } else {
                     SplitPaneContainer::new(
@@ -937,6 +927,9 @@ impl AppRoot {
             .as_ref()
             .map(|m| m.read(cx).unread_count)
             .unwrap_or_else(|| self.notification_manager.lock().map(|m| m.unread_count()).unwrap_or(0));
+        let scheduled_tasks = self.scheduler_manager.as_ref()
+            .map(|m| m.read(cx).tasks().to_vec())
+            .unwrap_or_default();
         let notification_panel_model_for_toggle = self.notification_panel_model.clone();
         let app_root_entity_for_toggle = app_root_entity.clone();
         let app_root_entity_for_add_ws = app_root_entity.clone();
@@ -946,6 +939,7 @@ impl AppRoot {
             .with_pane_summaries(pane_summaries_data)
             .with_running_frame(running_frame)
             .with_context_menu(self.sidebar_context_menu)
+            .with_tasks_expanded(self.tasks_expanded)
             .on_toggle_sidebar(move |_window, cx| {
                 let _ = cx.update_entity(&app_root_entity_for_toggle, |this: &mut AppRoot, cx| {
                     this.sidebar_visible = !this.sidebar_visible;
@@ -988,6 +982,7 @@ impl AppRoot {
         }
         let orphan_windows = self.orphan_tmux_windows_for_repo(&repo_path);
         sidebar.set_orphan_windows(orphan_windows);
+        sidebar.set_scheduled_tasks(scheduled_tasks);
 
         // Set up select callback
         let app_root_entity_for_sidebar = app_root_entity.clone();
@@ -1134,6 +1129,23 @@ impl AppRoot {
                 cx.notify();
             });
         });
+
+        // Task callbacks
+        let app_root_entity_for_toggle_task = app_root_entity.clone();
+        let app_root_entity_for_run_task = app_root_entity.clone();
+        let app_root_entity_for_add_task = app_root_entity.clone();
+        sidebar = sidebar
+            .on_toggle_task(move |id, _window, cx| {
+                let _ = cx.update_entity(&app_root_entity_for_toggle_task, |_this: &mut AppRoot, _cx| {
+                    // TODO: Toggle task enabled state
+                });
+            })
+            .on_run_task(move |_id, _window, _cx| {
+                // TODO: Run task immediately
+            })
+            .on_add_task(move |_window, _cx| {
+                // TODO: Open add task dialog
+            });
 
         sidebar
     }
