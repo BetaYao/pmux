@@ -38,3 +38,4 @@ pub mod worktree;
 pub mod worktree_manager;
 pub mod workspace_manager;
 pub mod workspace_state;
+pub mod scheduler;
