@@ -139,7 +139,26 @@ impl SchedulerManager {
         }
         Ok(())
     }
-    
+
+    pub fn execute_task(&mut self, task_id: Uuid, cx: &mut Context<Self>) {
+        if let Some(task) = self.tasks.iter().find(|t| t.id == task_id).cloned() {
+            println!("Executing task: {} - {}", task.name, task.cron);
+
+            // Mark as triggered
+            if let Err(e) = self.mark_triggered(task_id, cx) {
+                eprintln!("Failed to mark task as triggered: {}", e);
+            }
+
+            // TODO: Integrate with RuntimeManager to actually execute the task
+            // This requires:
+            // 1. Get RuntimeManager reference
+            // 2. Switch to/create appropriate pane based on TaskTarget
+            // 3. Send command based on TaskType (Agent or Shell)
+            // 4. Send notification if configured
+            // 5. Handle cleanup if TaskTarget::AutoCreate with cleanup=true
+        }
+    }
+
     fn save(&self) -> Result<(), StorageError> {
         let store = ScheduledTasksStore {
             tasks: self.tasks.clone(),
