@@ -531,13 +531,42 @@ impl AppRoot {
         }
     }
 
-    // -- Test accessors (used by integration tests) --
-    #[cfg(test)]
+    // -- Test accessors and helpers (used by integration tests) --
     pub fn has_task_dialog(&self) -> bool { self.task_dialog.is_some() }
-    #[cfg(test)]
     pub fn is_tasks_expanded(&self) -> bool { self.tasks_expanded }
-    #[cfg(test)]
     pub fn is_task_list_focused(&self) -> bool { self.task_list_focused }
+    pub fn selected_task_index(&self) -> Option<usize> { self.selected_task_index }
+    pub fn has_task_pending_delete(&self) -> bool { self.task_pending_delete.is_some() }
+    /// Get scheduled task names via the SchedulerManager entity.
+    pub fn task_names(&self, cx: &gpui::App) -> Vec<String> {
+        self.scheduler_manager.as_ref()
+            .map(|m| m.read(cx).tasks().iter().map(|t| t.name.clone()).collect())
+            .unwrap_or_default()
+    }
+    /// Get scheduled task count.
+    pub fn task_count(&self, cx: &gpui::App) -> usize {
+        self.scheduler_manager.as_ref()
+            .map(|m| m.read(cx).tasks().len())
+            .unwrap_or(0)
+    }
+    /// Set task list focused state and selected index for tests.
+    pub fn set_task_list_focused_for_test(&mut self, focused: bool, index: usize) {
+        self.task_list_focused = focused;
+        self.selected_task_index = Some(index);
+    }
+    /// Initialize entities needed for rendering in test environments.
+    pub fn ensure_entities_for_test(&mut self, cx: &mut Context<Self>) {
+        self.ensure_entities(cx);
+    }
+    /// Focus the terminal_focus handle so on_key_down events are delivered in tests.
+    pub fn focus_for_test(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) {
+        if self.terminal_focus.is_none() {
+            self.terminal_focus = Some(cx.focus_handle());
+        }
+        if let Some(ref focus) = self.terminal_focus {
+            window.focus(focus, cx);
+        }
+    }
 
     /// Create StatusCountsModel and TopBarEntity when has_workspaces (Phase 0 spike).
     /// Called from init_workspace_restoration before attach_runtime so EventBus handler can use model.

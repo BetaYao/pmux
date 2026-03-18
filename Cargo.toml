@@ -56,6 +56,7 @@ ghostty_vt = { path = "crates/ghostty_vt" }
 [dev-dependencies]
 tempfile = "3.8"
 flume = "0.11"
+gpui = { git = "https://github.com/zed-industries/zed", features = ["test-support"] }
 
 [[bin]]
 name = "pmux"
