@@ -1,7 +1,7 @@
 // ui/terminal_view.rs - Terminal view component with GPUI render
 // Renders via self-built Terminal, simple div for Error, or placeholder for Empty.
 use gpui::prelude::*;
-use gpui::*;
+use gpui::{AnyElement, App, Component, Window, div, px, rgb};
 use std::sync::Arc;
 
 /// Content source for TerminalView - self-built terminal, error placeholder, or empty.
@@ -18,6 +18,10 @@ pub enum TerminalBuffer {
         resize_callback: Option<Arc<dyn Fn(u16, u16) + Send + Sync>>,
         input_callback: Option<Arc<dyn Fn(&[u8]) + Send + Sync>>,
     },
+    /// gpui-ghostty backed terminal
+    GhosttyTerminal {
+        view: gpui::Entity<gpui_ghostty_terminal::view::TerminalView>,
+    },
 }
 
 impl TerminalBuffer {
@@ -29,6 +33,7 @@ impl TerminalBuffer {
             TerminalBuffer::Empty => None,
             TerminalBuffer::Error(s) => Some(s.clone()),
             TerminalBuffer::Terminal { .. } => None,
+            TerminalBuffer::GhosttyTerminal { .. } => None,
         }
     }
 }
@@ -197,6 +202,12 @@ impl RenderOnce for TerminalView {
                     .bg(rgb(0x2e343e))
                     .text_color(rgb(0x6d6d6d))
                     .child("—")
+                    .into_any_element()
+            }
+            TerminalBuffer::GhosttyTerminal { view } => {
+                div()
+                    .size_full()
+                    .child(view.clone())
                     .into_any_element()
             }
         };

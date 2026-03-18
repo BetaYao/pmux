@@ -17,3 +17,8 @@ pub use terminal_core::{DetectedLink, SearchMatch, Terminal, TerminalSize};
 pub use alacritty_terminal::selection::SelectionType;
 pub use alacritty_terminal::index::Side;
 pub use input::{sgr_mouse_press, sgr_mouse_release, sgr_mouse_motion, sgr_mouse_scroll};
+pub use input::{mouse_press, mouse_release, mouse_motion, mouse_scroll};
+
+// gpui-ghostty re-exports (new terminal engine)
+pub use gpui_ghostty_terminal::{TerminalConfig, TerminalSession};
+pub use gpui_ghostty_terminal::view::{TerminalInput, TerminalView as GhosttyTerminalView};
