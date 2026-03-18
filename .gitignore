@@ -105,5 +105,9 @@ temp/
 # Ghostty vendor source (large; fetched via bootstrap script)
 vendor/ghostty/
 
+# E2E test binaries and results
+tests/e2e/ocr_tool
+tests/e2e/results/
+
 # Logo / design assets (not needed for building the project)
 布丁logo_极简线条.png
