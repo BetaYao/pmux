@@ -219,16 +219,28 @@ impl TmuxStandardBackend {
             .args(["pipe-pane", "-t", target, "-o", &pipe_cmd])
             .output();
 
+        // Seed initial screen content: pipe-pane only captures NEW output,
+        // so the shell prompt (sent before pipe-pane) is missing.
+        // Send C-l to force the shell to clear and redraw — the redraw output
+        // flows through pipe-pane, giving us the current prompt.
+        let _ = Command::new("tmux")
+            .args(["send-keys", "-t", target, "C-l"])
+            .output();
+
         let pipe_file_for_reader = pipe_file.clone();
         let output_tx_clone = output_tx.clone();
         thread::spawn(move || {
             use std::fs::OpenOptions;
             // Wait for the file to be created by pipe-pane
-            for _ in 0..50 {
+            for _ in 0..100 {
                 if std::path::Path::new(&pipe_file_for_reader).exists() {
                     break;
                 }
                 thread::sleep(std::time::Duration::from_millis(20));
+            }
+            // If pipe file still doesn't exist, create it so we don't block forever
+            if !std::path::Path::new(&pipe_file_for_reader).exists() {
+                let _ = std::fs::File::create(&pipe_file_for_reader);
             }
             let file = match OpenOptions::new().read(true).open(&pipe_file_for_reader) {
                 Ok(f) => f,
