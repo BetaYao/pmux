@@ -1493,7 +1493,7 @@ impl AppRoot {
         cx: &mut Context<Self>,
     ) -> bool {
         let backend = self.effective_backend();
-        if backend != "tmux" && backend != "tmux-cc" {
+        if !backend.starts_with("tmux") {
             return false;
         }
         let state = match RuntimeState::load() {
@@ -1568,7 +1568,7 @@ impl AppRoot {
         cx: &mut Context<Self>,
     ) -> bool {
         let backend = self.effective_backend();
-        if backend != "tmux" && backend != "tmux-cc" {
+        if !backend.starts_with("tmux") {
             return false;
         }
         let state = match RuntimeState::load() {
@@ -2148,7 +2148,7 @@ impl AppRoot {
     /// Uses cached_tmux_windows when repo matches to avoid repeated list-windows calls.
     pub(crate) fn orphan_tmux_windows_for_repo(&self, repo_path: &Path) -> Vec<String> {
         let backend = self.effective_backend();
-        if backend != "tmux" && backend != "tmux-cc" {
+        if !backend.starts_with("tmux") {
             return Vec::new();
         }
         let all: Vec<String> = if self.cached_tmux_windows.as_ref().map(|(p, _)| p.as_path()) == Some(repo_path) {

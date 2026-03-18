@@ -167,27 +167,46 @@ pub fn tmux_available() -> bool {
     false
 }
 
-/// List tmux window names for the session of the given workspace.
-/// Returns empty vec if tmux is unavailable, session does not exist, or command fails.
+/// List tmux window names for all pmux sessions matching this workspace.
+/// Checks both legacy naming (`pmux-<repo>`) and new naming (`pmux-<repo>-*`).
+/// Returns empty vec if tmux is unavailable or no matching sessions exist.
 #[cfg(unix)]
 pub fn list_tmux_windows(workspace_path: &Path) -> Vec<String> {
     if !tmux_available() {
         return Vec::new();
     }
-    let session = session_name_for_workspace(workspace_path);
-    let output = match std::process::Command::new("tmux")
-        .args(["list-windows", "-t", &session, "-F", "#{window_name}"])
+    // Find all tmux sessions matching this workspace
+    let repo_prefix = session_name_for_workspace(workspace_path);
+    let all_sessions = match std::process::Command::new("tmux")
+        .args(["list-sessions", "-F", "#{session_name}"])
         .output()
     {
         Ok(o) if o.status.success() => o,
         _ => return Vec::new(),
     };
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    stdout
+    let matching_sessions: Vec<String> = String::from_utf8_lossy(&all_sessions.stdout)
         .lines()
         .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
+        .filter(|s| s == &repo_prefix || s.starts_with(&format!("{}-", repo_prefix)))
+        .collect();
+
+    let mut result = Vec::new();
+    for session in &matching_sessions {
+        let output = match std::process::Command::new("tmux")
+            .args(["list-windows", "-t", session, "-F", "#{window_name}"])
+            .output()
+        {
+            Ok(o) if o.status.success() => o,
+            _ => continue,
+        };
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for name in stdout.lines().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            if !result.contains(&name.to_string()) {
+                result.push(name.to_string());
+            }
+        }
+    }
+    result
 }
 
 #[cfg(not(unix))]
@@ -196,21 +215,45 @@ pub fn list_tmux_windows(_workspace_path: &Path) -> Vec<String> {
 }
 
 /// Kill a tmux window by workspace path and window name (e.g. for orphan cleanup).
+/// Searches across all pmux sessions matching the workspace (legacy + new naming).
 #[cfg(unix)]
 pub fn kill_tmux_window(workspace_path: &Path, window_name: &str) -> Result<(), RuntimeError> {
+    // Try the legacy target first
     let target = window_target(workspace_path, window_name);
     let status = std::process::Command::new("tmux")
         .args(["kill-window", "-t", &target])
-        .status()
-        .map_err(|e| RuntimeError::Backend(format!("tmux kill-window: {}", e)))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(RuntimeError::Backend(format!(
-            "tmux kill-window -t {} failed",
-            target
-        )))
+        .status();
+    if let Ok(s) = &status {
+        if s.success() {
+            return Ok(());
+        }
     }
+    // Fallback: search across all pmux sessions matching this workspace
+    let repo_prefix = session_name_for_workspace(workspace_path);
+    if let Ok(output) = std::process::Command::new("tmux")
+        .args(["list-sessions", "-F", "#{session_name}"])
+        .output()
+    {
+        for session in String::from_utf8_lossy(&output.stdout).lines() {
+            let session = session.trim();
+            if session == &repo_prefix || session.starts_with(&format!("{}-", repo_prefix)) {
+                let target = format!("{}:{}", session, window_name);
+                let result = std::process::Command::new("tmux")
+                    .args(["kill-window", "-t", &target])
+                    .status();
+                if let Ok(s) = result {
+                    if s.success() {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
+    Err(RuntimeError::Backend(format!(
+        "tmux kill-window for '{}' in workspace '{}' failed",
+        window_name,
+        workspace_path.display()
+    )))
 }
 
 #[cfg(not(unix))]
@@ -546,6 +589,56 @@ mod tests {
         };
         let result = recover_runtime("unknown_backend", &state, None, 80, 24);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_session_name_for_workspace_is_prefix_of_tmux_standard_name() {
+        // Ensures list_tmux_windows can find new-format sessions by prefix
+        let workspace_path = Path::new("/Users/me/work/my-project");
+        let legacy_name = session_name_for_workspace(workspace_path);
+        assert_eq!(legacy_name, "pmux-my-project");
+
+        let new_name = tmux_standard::session_name(workspace_path, "main");
+        assert_eq!(new_name, "pmux-my-project-main");
+
+        // New name starts with legacy prefix + "-"
+        assert!(
+            new_name.starts_with(&format!("{}-", legacy_name)),
+            "new session name '{}' should start with legacy prefix '{}-'",
+            new_name,
+            legacy_name
+        );
+    }
+
+    #[test]
+    fn test_list_tmux_windows_finds_new_format_sessions() {
+        // Integration test: create a session with new naming, verify list_tmux_windows finds it
+        if !tmux_available() {
+            return;
+        }
+        let session = "pmux-list-test-main";
+        let _ = std::process::Command::new("tmux")
+            .args(["kill-session", "-t", session])
+            .output();
+
+        // Create session with new-format name
+        let _ = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", session, "-x", "80", "-y", "24"])
+            .output();
+
+        // list_tmux_windows should find windows via prefix matching
+        let workspace = Path::new("/tmp/list-test");
+        let windows = list_tmux_windows(workspace);
+        // The session name "pmux-list-test-main" starts with "pmux-list-test-"
+        // which is the prefix from session_name_for_workspace("/tmp/list-test") = "pmux-list-test"
+        assert!(
+            !windows.is_empty(),
+            "list_tmux_windows should find windows in new-format session"
+        );
+
+        let _ = std::process::Command::new("tmux")
+            .args(["kill-session", "-t", session])
+            .output();
     }
 
     #[test]

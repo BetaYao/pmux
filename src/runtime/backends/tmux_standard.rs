@@ -552,7 +552,28 @@ impl AgentRuntime for TmuxStandardBackend {
     }
 
     fn session_info(&self) -> Option<(String, String)> {
-        Some((self.session_name.clone(), "main".to_string()))
+        // Return the current tmux window name (for worktree matching on recovery)
+        let output = Command::new("tmux")
+            .args([
+                "display-message",
+                "-t",
+                &self.session_name,
+                "-p",
+                "#{window_name}",
+            ])
+            .output()
+            .ok()?;
+        let window_name = String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .to_string();
+        Some((
+            self.session_name.clone(),
+            if window_name.is_empty() {
+                "main".to_string()
+            } else {
+                window_name
+            },
+        ))
     }
 }
 
