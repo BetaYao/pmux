@@ -193,6 +193,85 @@ impl AppRoot {
                     }
                 }
             }
+            "n" => {
+                if event.keystroke.modifiers.shift {
+                    self.open_new_branch_dialog(cx);
+                } else {
+                    self.handle_add_workspace(cx);
+                }
+            }
+            "," => {
+                self.show_settings = !self.show_settings;
+                if self.show_settings {
+                    if let Some(ref dm) = self.dialog_mgr {
+                        let config = Config::load().unwrap_or_default();
+                        let secrets = Secrets::load().unwrap_or_default();
+                        dm.update(cx, |dm, cx| dm.open_settings(config, secrets, cx));
+                    }
+                } else {
+                    self.settings_draft = None;
+                    self.settings_secrets_draft = None;
+                    self.settings_configuring_channel = None;
+                    self.settings_editing_agent = None;
+                    self.settings_focused_field = None;
+                    if let Some(ref dm) = self.dialog_mgr {
+                        dm.update(cx, |dm, cx| dm.close_settings(cx));
+                    }
+                }
+                cx.notify();
+            }
+            "]" => {
+                let count = self.workspace_manager.tab_count();
+                if let (Some(current), true) = (self.workspace_manager.active_tab_index(), count > 1) {
+                    let next = (current + 1) % count;
+                    self.handle_workspace_tab_switch(next, cx);
+                    let counts = self.compute_per_tab_active_counts();
+                    if let Some(ref e) = self.topbar_entity {
+                        let topbar = e.clone();
+                        let wm = self.workspace_manager.clone();
+                        let _ = cx.update_entity(&topbar, |t: &mut TopBarEntity, cx| {
+                            t.set_workspace_manager(wm);
+                            t.set_per_tab_active_counts(counts);
+                            cx.notify();
+                        });
+                    }
+                }
+            }
+            "[" => {
+                let count = self.workspace_manager.tab_count();
+                if let (Some(current), true) = (self.workspace_manager.active_tab_index(), count > 1) {
+                    let prev = (current + count - 1) % count;
+                    self.handle_workspace_tab_switch(prev, cx);
+                    let counts = self.compute_per_tab_active_counts();
+                    if let Some(ref e) = self.topbar_entity {
+                        let topbar = e.clone();
+                        let wm = self.workspace_manager.clone();
+                        let _ = cx.update_entity(&topbar, |t: &mut TopBarEntity, cx| {
+                            t.set_workspace_manager(wm);
+                            t.set_per_tab_active_counts(counts);
+                            cx.notify();
+                        });
+                    }
+                }
+            }
+            "down" => {
+                let wt_count = self.cached_worktrees.len();
+                if wt_count > 1 {
+                    let current = self.active_worktree_index.unwrap_or(0);
+                    let next = (current + 1) % wt_count;
+                    self.pending_worktree_selection = Some(next);
+                    cx.notify();
+                }
+            }
+            "up" => {
+                let wt_count = self.cached_worktrees.len();
+                if wt_count > 1 {
+                    let current = self.active_worktree_index.unwrap_or(0);
+                    let prev = (current + wt_count - 1) % wt_count;
+                    self.pending_worktree_selection = Some(prev);
+                    cx.notify();
+                }
+            }
             _ => {}
         }
     }

@@ -227,7 +227,7 @@ mod tests {
     fn test_help_panel_default() {
         let panel = HelpPanel::new();
         assert!(!panel.is_open());
-        assert_eq!(panel.all_bindings.len(), 30); // Default bindings count
+        assert_eq!(panel.all_bindings.len(), 35); // Default bindings count
     }
 
     #[test]
@@ -259,7 +259,7 @@ mod tests {
 
         // Without search, should return all bindings
         let all = panel.filtered_bindings();
-        assert_eq!(all.len(), 30);
+        assert_eq!(all.len(), 35);
 
         // Search for "new"
         panel.set_search("new");

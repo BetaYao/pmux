@@ -531,6 +531,14 @@ impl AppRoot {
         }
     }
 
+    // -- Test accessors (used by integration tests) --
+    #[cfg(test)]
+    pub fn has_task_dialog(&self) -> bool { self.task_dialog.is_some() }
+    #[cfg(test)]
+    pub fn is_tasks_expanded(&self) -> bool { self.tasks_expanded }
+    #[cfg(test)]
+    pub fn is_task_list_focused(&self) -> bool { self.task_list_focused }
+
     /// Create StatusCountsModel and TopBarEntity when has_workspaces (Phase 0 spike).
     /// Called from init_workspace_restoration before attach_runtime so EventBus handler can use model.
     fn ensure_entities(&mut self, cx: &mut Context<Self>) {
@@ -2427,27 +2435,31 @@ impl AppRoot {
         if self.task_list_focused {
             match event.keystroke.key.as_str() {
                 "up" => {
-                    if let Some(idx) = self.selected_task_index {
-                        if idx > 0 {
-                            self.selected_task_index = Some(idx - 1);
-                            self.task_pending_delete = None; // cancel pending delete on nav
-                            cx.notify();
+                    if !event.keystroke.modifiers.platform {
+                        if let Some(idx) = self.selected_task_index {
+                            if idx > 0 {
+                                self.selected_task_index = Some(idx - 1);
+                                self.task_pending_delete = None; // cancel pending delete on nav
+                                cx.notify();
+                            }
                         }
+                        return;
                     }
-                    return;
                 }
                 "down" => {
-                    let task_count = self.scheduler_manager.as_ref()
-                        .map(|m| m.read(cx).tasks().len())
-                        .unwrap_or(0);
-                    if let Some(idx) = self.selected_task_index {
-                        if idx + 1 < task_count {
-                            self.selected_task_index = Some(idx + 1);
-                            self.task_pending_delete = None;
-                            cx.notify();
+                    if !event.keystroke.modifiers.platform {
+                        let task_count = self.scheduler_manager.as_ref()
+                            .map(|m| m.read(cx).tasks().len())
+                            .unwrap_or(0);
+                        if let Some(idx) = self.selected_task_index {
+                            if idx + 1 < task_count {
+                                self.selected_task_index = Some(idx + 1);
+                                self.task_pending_delete = None;
+                                cx.notify();
+                            }
                         }
+                        return;
                     }
-                    return;
                 }
                 "enter" => {
                     // Confirm pending delete
