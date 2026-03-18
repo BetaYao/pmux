@@ -2370,6 +2370,11 @@ impl AppRoot {
             }
         }
 
+        // Modal: when task dialog is open, block all keys (TaskDialog handles its own keys)
+        if self.task_dialog.is_some() {
+            return;
+        }
+
         // Check for Alt+Cmd+arrows (pane focus switch)
         if event.keystroke.modifiers.platform && event.keystroke.modifiers.alt {
             let pane_count = self.split_tree.pane_count();
