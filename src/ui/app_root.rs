@@ -2423,6 +2423,69 @@ impl AppRoot {
             }
         }
 
+        // Task list focused: arrow keys navigate tasks, Enter/Escape handle confirmation
+        if self.task_list_focused {
+            match event.keystroke.key.as_str() {
+                "up" => {
+                    if let Some(idx) = self.selected_task_index {
+                        if idx > 0 {
+                            self.selected_task_index = Some(idx - 1);
+                            self.task_pending_delete = None; // cancel pending delete on nav
+                            cx.notify();
+                        }
+                    }
+                    return;
+                }
+                "down" => {
+                    let task_count = self.scheduler_manager.as_ref()
+                        .map(|m| m.read(cx).tasks().len())
+                        .unwrap_or(0);
+                    if let Some(idx) = self.selected_task_index {
+                        if idx + 1 < task_count {
+                            self.selected_task_index = Some(idx + 1);
+                            self.task_pending_delete = None;
+                            cx.notify();
+                        }
+                    }
+                    return;
+                }
+                "enter" => {
+                    // Confirm pending delete
+                    if let Some(id) = self.task_pending_delete.take() {
+                        if let Some(ref manager) = self.scheduler_manager {
+                            manager.update(cx, |m, cx| {
+                                let _ = m.remove_task(id, cx);
+                            });
+                        }
+                        // Adjust selected index
+                        let task_count = self.scheduler_manager.as_ref()
+                            .map(|m| m.read(cx).tasks().len())
+                            .unwrap_or(0);
+                        if task_count == 0 {
+                            self.selected_task_index = None;
+                        } else if let Some(idx) = self.selected_task_index {
+                            if idx >= task_count {
+                                self.selected_task_index = Some(task_count - 1);
+                            }
+                        }
+                        cx.notify();
+                    }
+                    return;
+                }
+                "escape" => {
+                    if self.task_pending_delete.is_some() {
+                        self.task_pending_delete = None;
+                    } else {
+                        self.task_list_focused = false;
+                        self.selected_task_index = None;
+                    }
+                    cx.notify();
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         // Check for Cmd+key shortcuts (app shortcuts)
         if event.keystroke.modifiers.platform {
             self.handle_shortcut(event, cx);
