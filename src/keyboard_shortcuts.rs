@@ -9,6 +9,7 @@ pub enum ShortcutCategory {
     Navigation,
     Workspace,
     View,
+    Tasks,
 }
 
 /// Shortcut actions
@@ -48,6 +49,11 @@ pub enum ShortcutAction {
     ZoomOut,
     ResetZoom,
     ViewDiff,
+
+    // Tasks
+    ToggleTaskList,
+    NewTask,
+    DeleteTask,
 }
 
 /// Key binding structure
@@ -274,6 +280,28 @@ impl KeyBinding {
                 "Open diff view for current branch",
                 ShortcutCategory::View,
             ),
+            // Tasks
+            Self::new(
+                ShortcutAction::ToggleTaskList,
+                "Toggle Task List",
+                "⌘⇧L",
+                "Show/hide and focus the scheduled tasks list",
+                ShortcutCategory::Tasks,
+            ),
+            Self::new(
+                ShortcutAction::NewTask,
+                "New Task",
+                "⌘⇧T",
+                "Create a new scheduled task",
+                ShortcutCategory::Tasks,
+            ),
+            Self::new(
+                ShortcutAction::DeleteTask,
+                "Delete Task",
+                "⌘⇧⌫",
+                "Delete the selected scheduled task",
+                ShortcutCategory::Tasks,
+            ),
         ]
     }
 }
@@ -395,8 +423,8 @@ mod tests {
     #[test]
     fn test_default_bindings_count() {
         let bindings = KeyBinding::all_defaults();
-        // General(6) + Navigation(9) + Workspace(7) + View(5) = 27
-        assert_eq!(bindings.len(), 27, "VerticalSplit/HorizontalSplit and other defaults");
+        // General(6) + Navigation(9) + Workspace(7) + View(5) + Tasks(3) = 30
+        assert_eq!(bindings.len(), 30, "VerticalSplit/HorizontalSplit and other defaults");
     }
 
     #[test]
@@ -481,8 +509,9 @@ mod tests {
             ShortcutCategory::Navigation,
             ShortcutCategory::Workspace,
             ShortcutCategory::View,
+            ShortcutCategory::Tasks,
         ];
-        assert_eq!(cats.len(), 4);
+        assert_eq!(cats.len(), 5);
     }
 
     #[test]

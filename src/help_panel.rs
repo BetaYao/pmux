@@ -214,6 +214,7 @@ fn category_name(category: ShortcutCategory) -> &'static str {
         Navigation => "Navigation",
         Workspace => "Workspace",
         View => "View",
+        Tasks => "Tasks",
     }
 }
 
