@@ -1,9 +1,9 @@
 //! Tmux Standard Mode backend - session-per-worktree, window-per-terminal.
 //!
 //! Each worktree maps to a tmux session named `pmux-<repo>-<branch>`.
-//! Each terminal maps to a tmux window (single pane per window = independent PTY).
-//! We own the PTY master via `portable-pty` for direct byte-level I/O.
-//! tmux only provides session persistence (survives GUI restarts).
+//! Each terminal maps to a tmux window (single pane per window).
+//! I/O uses pipe-pane (output) and direct TTY write (input).
+//! tmux owns the shell — it survives GUI restarts and tab switches.
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -12,8 +12,6 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-
-use portable_pty::PtySize;
 
 use crate::runtime::agent_runtime::{AgentId, AgentRuntime, PaneId, RuntimeError};
 
@@ -52,13 +50,15 @@ pub fn window_target(session: &str, window_index: u32) -> String {
 struct WindowState {
     window_index: u32,
     pane_id: PaneId,
-    /// PTY master - None for recovered windows (tmux send-keys used instead)
-    master: Mutex<Option<Box<dyn portable_pty::MasterPty + Send>>>,
+    /// Reserved for future use (was PTY master in portable-pty era)
+    #[allow(dead_code)]
+    master: Mutex<Option<()>>,
     input_tx: flume::Sender<Vec<u8>>,
     output_rx: Mutex<Option<flume::Receiver<Vec<u8>>>>,
     cols: AtomicU16,
     rows: AtomicU16,
-    _child: Mutex<Option<Box<dyn portable_pty::Child + Send + Sync>>>,
+    #[allow(dead_code)]
+    _child: Mutex<Option<()>>,
     /// Session name, needed for send-keys in recovered mode
     session_name: String,
     /// Whether this window was recovered (no PTY master)
@@ -119,11 +119,12 @@ impl TmuxStandardBackend {
         Ok(backend)
     }
 
-    /// Create a new window backed by the tmux session's shell.
+    /// Create or reuse a tmux window.
     ///
-    /// Uses tmux's own PTY (via send-keys for input, pipe-pane for output).
-    /// This ensures the shell survives backend drops (tab switches) and can
-    /// be recovered later.
+    /// The shell lives inside tmux (survives backend drops / tab switches).
+    /// I/O goes through:
+    ///   - Input:  direct write to the pane's TTY device (`/dev/ttysXXX`)
+    ///   - Output: `pipe-pane -o` for raw VT byte stream
     fn create_window(&self, name: &str) -> Result<PaneId, RuntimeError> {
         let window_idx = self.window_counter.fetch_add(1, Ordering::SeqCst) as u32;
         let pane_id = format!("tmux-std:{}:{}:{}", self.session_name, window_idx, name);
@@ -132,7 +133,6 @@ impl TmuxStandardBackend {
         // For subsequent windows, create a new tmux window.
         let tmux_window_index: u32;
         if window_idx == 0 {
-            // Rename initial tmux window (created by new-session)
             let _ = Command::new("tmux")
                 .args([
                     "rename-window",
@@ -143,7 +143,6 @@ impl TmuxStandardBackend {
                 .output();
             tmux_window_index = 0;
         } else {
-            // Create new tmux window
             let output = Command::new("tmux")
                 .args([
                     "new-window",
@@ -166,54 +165,8 @@ impl TmuxStandardBackend {
         }
 
         let target = window_target(&self.session_name, tmux_window_index);
-
-        // Set up output via pipe-pane polling (capture-pane)
-        let (output_tx, output_rx) = flume::unbounded::<Vec<u8>>();
-        let target_for_output = target.clone();
-        thread::spawn(move || {
-            let mut last_content = String::new();
-            loop {
-                thread::sleep(std::time::Duration::from_millis(50));
-                let result = Command::new("tmux")
-                    .args(["capture-pane", "-t", &target_for_output, "-p", "-e"])
-                    .output();
-                match result {
-                    Ok(output) if output.status.success() => {
-                        let content = String::from_utf8_lossy(&output.stdout).to_string();
-                        if content != last_content {
-                            if output_tx.send(content.as_bytes().to_vec()).is_err() {
-                                break;
-                            }
-                            last_content = content;
-                        }
-                    }
-                    _ => break,
-                }
-            }
-        });
-
-        // Set up input via tmux send-keys
-        let (input_tx, input_rx) = flume::unbounded::<Vec<u8>>();
-        let target_for_input = target.clone();
-        thread::spawn(move || {
-            loop {
-                match input_rx.recv() {
-                    Ok(bytes) => {
-                        // Collect additional pending bytes
-                        let mut all_bytes = bytes;
-                        while let Ok(more) = input_rx.try_recv() {
-                            all_bytes.extend_from_slice(&more);
-                        }
-                        // Send via tmux send-keys with literal flag
-                        let text = String::from_utf8_lossy(&all_bytes).to_string();
-                        let _ = Command::new("tmux")
-                            .args(["send-keys", "-t", &target_for_input, "-l", &text])
-                            .output();
-                    }
-                    Err(_) => break,
-                }
-            }
-        });
+        let (_output_tx, output_rx, input_tx) =
+            Self::setup_pane_io(&target)?;
 
         let state = Arc::new(WindowState {
             window_index: tmux_window_index,
@@ -233,6 +186,142 @@ impl TmuxStandardBackend {
         }
 
         Ok(pane_id)
+    }
+
+    /// Set up I/O channels for a tmux pane.
+    ///
+    /// - Output: `pipe-pane -o` streams raw VT bytes to a temp file, reader thread
+    ///   tails the file and sends chunks to the output channel.
+    /// - Input: direct write to the pane's TTY device (`/dev/ttysXXX`).
+    ///   Falls back to `tmux send-keys` if TTY is unavailable.
+    fn setup_pane_io(
+        target: &str,
+    ) -> Result<(flume::Sender<Vec<u8>>, flume::Receiver<Vec<u8>>, flume::Sender<Vec<u8>>), RuntimeError>
+    {
+        let (output_tx, output_rx) = flume::unbounded::<Vec<u8>>();
+
+        // === Output: pipe-pane -o → temp file → reader thread ===
+        // pipe-pane streams the raw VT byte output of the pane to a file.
+        // A reader thread tails the file and sends chunks to the channel.
+        // Each setup gets a unique pipe file to avoid conflicts with stale readers
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let pipe_file = format!("/tmp/pmux-pipe-{}-{}-{}", std::process::id(), target.replace(':', "-"), ts);
+
+        // Stop any existing pipe-pane first, then start ours
+        let _ = Command::new("tmux")
+            .args(["pipe-pane", "-t", target])
+            .output();
+        let pipe_cmd = format!("cat >> {}", pipe_file);
+        let _ = Command::new("tmux")
+            .args(["pipe-pane", "-t", target, "-o", &pipe_cmd])
+            .output();
+
+        let pipe_file_for_reader = pipe_file.clone();
+        let output_tx_clone = output_tx.clone();
+        thread::spawn(move || {
+            use std::fs::OpenOptions;
+            // Wait for the file to be created by pipe-pane
+            for _ in 0..50 {
+                if std::path::Path::new(&pipe_file_for_reader).exists() {
+                    break;
+                }
+                thread::sleep(std::time::Duration::from_millis(20));
+            }
+            let file = match OpenOptions::new().read(true).open(&pipe_file_for_reader) {
+                Ok(f) => f,
+                Err(_) => return,
+            };
+            let mut reader = std::io::BufReader::new(file);
+            let mut buf = [0u8; 4096];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => {
+                        // EOF — file exists but no new data yet, wait and retry
+                        thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    Ok(n) => {
+                        if output_tx_clone.send(buf[..n].to_vec()).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => {
+                        thread::sleep(std::time::Duration::from_millis(50));
+                    }
+                }
+            }
+        });
+
+        // === Input: direct TTY write ===
+        let (input_tx, input_rx) = flume::unbounded::<Vec<u8>>();
+
+        // Resolve the pane's TTY for direct write
+        let pane_tty = Command::new("tmux")
+            .args(["display-message", "-t", target, "-p", "#{pane_tty}"])
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    let tty = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    if !tty.is_empty() && std::path::Path::new(&tty).exists() {
+                        Some(tty)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            });
+
+        if let Some(tty_path) = pane_tty {
+            // Direct write to pane's TTY — zero overhead, supports all escape sequences
+            thread::spawn(move || {
+                use std::fs::OpenOptions;
+                use std::io::Write;
+                let mut file = match OpenOptions::new().write(true).open(&tty_path) {
+                    Ok(f) => f,
+                    Err(_) => return,
+                };
+                loop {
+                    match input_rx.recv() {
+                        Ok(bytes) => {
+                            let mut all_bytes = bytes;
+                            while let Ok(more) = input_rx.try_recv() {
+                                all_bytes.extend_from_slice(&more);
+                            }
+                            if file.write_all(&all_bytes).is_err() || file.flush().is_err() {
+                                break;
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+            });
+        } else {
+            // Fallback: tmux send-keys
+            let target_for_input = target.to_string();
+            thread::spawn(move || {
+                loop {
+                    match input_rx.recv() {
+                        Ok(bytes) => {
+                            let mut all_bytes = bytes;
+                            while let Ok(more) = input_rx.try_recv() {
+                                all_bytes.extend_from_slice(&more);
+                            }
+                            let text = String::from_utf8_lossy(&all_bytes).to_string();
+                            let _ = Command::new("tmux")
+                                .args(["send-keys", "-t", &target_for_input, "-l", &text])
+                                .output();
+                        }
+                        Err(_) => break,
+                    }
+                }
+            });
+        }
+
+        Ok((output_tx, output_rx, input_tx))
     }
 
     /// Get a reference to a window by pane ID.
@@ -339,64 +428,11 @@ impl TmuxStandardBackend {
                 session_name, window_index, window_name
             );
 
-            // Set up pipe-pane for output streaming
-            let (output_tx, output_rx) = flume::unbounded::<Vec<u8>>();
             let target = window_target(session_name, *window_index);
+            let (_output_tx, output_rx, input_tx) =
+                Self::setup_pane_io(&target)?;
 
-            // Use pipe-pane to capture output from the existing tmux window.
-            // We spawn a background thread that reads from a pipe-pane subprocess.
-            let target_clone = target.clone();
-            thread::spawn(move || {
-                // Use tmux capture-pane in a loop as a simple polling mechanism
-                // for recovered windows. pipe-pane requires a file target, so we
-                // use periodic capture-pane -p instead.
-                let mut last_content = String::new();
-                loop {
-                    thread::sleep(std::time::Duration::from_millis(100));
-                    let result = Command::new("tmux")
-                        .args(["capture-pane", "-t", &target_clone, "-p"])
-                        .output();
-                    match result {
-                        Ok(output) if output.status.success() => {
-                            let content = String::from_utf8_lossy(&output.stdout).to_string();
-                            if content != last_content {
-                                let diff_bytes = content.as_bytes().to_vec();
-                                if output_tx.send(diff_bytes).is_err() {
-                                    break;
-                                }
-                                last_content = content;
-                            }
-                        }
-                        _ => break,
-                    }
-                }
-            });
-
-            // Set up input via tmux send-keys
-            let (input_tx, input_rx) = flume::unbounded::<Vec<u8>>();
-            let target_for_input = target.clone();
-            thread::spawn(move || {
-                loop {
-                    match input_rx.recv() {
-                        Ok(bytes) => {
-                            // Collect any additional pending bytes
-                            let mut all_bytes = bytes;
-                            while let Ok(more) = input_rx.try_recv() {
-                                all_bytes.extend_from_slice(&more);
-                            }
-                            // Send via tmux send-keys with literal flag
-                            let text = String::from_utf8_lossy(&all_bytes).to_string();
-                            let _ = Command::new("tmux")
-                                .args(["send-keys", "-t", &target_for_input, "-l", &text])
-                                .output();
-                        }
-                        Err(_) => break,
-                    }
-                }
-            });
-
-            let idx = backend.window_counter.fetch_add(1, Ordering::SeqCst) as u32;
-            let _ = idx; // We use the discovered window_index instead
+            let _idx = backend.window_counter.fetch_add(1, Ordering::SeqCst) as u32;
 
             let state = Arc::new(WindowState {
                 window_index: *window_index,
@@ -460,35 +496,19 @@ impl AgentRuntime for TmuxStandardBackend {
             .ok_or_else(|| RuntimeError::PaneNotFound(pane_id.clone()))?;
         window.cols.store(cols, Ordering::SeqCst);
         window.rows.store(rows, Ordering::SeqCst);
-        let guard = window
-            .master
-            .lock()
-            .map_err(|e| RuntimeError::Backend(e.to_string()))?;
-        if let Some(ref master) = *guard {
-            master
-                .resize(PtySize {
-                    rows,
-                    cols,
-                    pixel_width: cols.saturating_mul(8),
-                    pixel_height: rows.saturating_mul(17),
-                })
-                .map_err(|e| RuntimeError::Backend(e.to_string()))
-        } else {
-            // Recovered window: resize via tmux
-            let target = window_target(&window.session_name, window.window_index);
-            let _ = Command::new("tmux")
-                .args([
-                    "resize-window",
-                    "-t",
-                    &target,
-                    "-x",
-                    &cols.to_string(),
-                    "-y",
-                    &rows.to_string(),
-                ])
-                .output();
-            Ok(())
-        }
+        let target = window_target(&window.session_name, window.window_index);
+        let _ = Command::new("tmux")
+            .args([
+                "resize-window",
+                "-t",
+                &target,
+                "-x",
+                &cols.to_string(),
+                "-y",
+                &rows.to_string(),
+            ])
+            .output();
+        Ok(())
     }
 
     fn subscribe_output(&self, pane_id: &PaneId) -> Option<flume::Receiver<Vec<u8>>> {
