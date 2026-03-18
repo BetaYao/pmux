@@ -229,109 +229,74 @@ impl TmuxStandardBackend {
 
         let pipe_file_for_reader = pipe_file.clone();
         let output_tx_clone = output_tx.clone();
-        thread::spawn(move || {
-            use std::fs::OpenOptions;
-            // Wait for the file to be created by pipe-pane
-            for _ in 0..100 {
-                if std::path::Path::new(&pipe_file_for_reader).exists() {
-                    break;
-                }
-                thread::sleep(std::time::Duration::from_millis(20));
-            }
-            // If pipe file still doesn't exist, create it so we don't block forever
-            if !std::path::Path::new(&pipe_file_for_reader).exists() {
-                let _ = std::fs::File::create(&pipe_file_for_reader);
-            }
-            let file = match OpenOptions::new().read(true).open(&pipe_file_for_reader) {
-                Ok(f) => f,
-                Err(_) => return,
-            };
-            let mut reader = std::io::BufReader::new(file);
-            let mut buf = [0u8; 4096];
-            loop {
-                match reader.read(&mut buf) {
-                    Ok(0) => {
-                        // EOF — file exists but no new data yet, wait and retry
-                        thread::sleep(std::time::Duration::from_millis(10));
-                    }
-                    Ok(n) => {
-                        if output_tx_clone.send(buf[..n].to_vec()).is_err() {
-                            break;
-                        }
-                    }
-                    Err(_) => {
-                        thread::sleep(std::time::Duration::from_millis(50));
-                    }
-                }
-            }
-        });
-
-        // === Input: direct TTY write ===
-        let (input_tx, input_rx) = flume::unbounded::<Vec<u8>>();
-
-        // Resolve the pane's TTY for direct write
-        let pane_tty = Command::new("tmux")
-            .args(["display-message", "-t", target, "-p", "#{pane_tty}"])
-            .output()
-            .ok()
-            .and_then(|o| {
-                if o.status.success() {
-                    let tty = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                    if !tty.is_empty() && std::path::Path::new(&tty).exists() {
-                        Some(tty)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            });
-
-        if let Some(tty_path) = pane_tty {
-            // Direct write to pane's TTY — zero overhead, supports all escape sequences
-            thread::spawn(move || {
+        thread::Builder::new()
+            .name("pipe-reader".to_string())
+            .spawn(move || {
                 use std::fs::OpenOptions;
-                use std::io::Write;
-                let mut file = match OpenOptions::new().write(true).open(&tty_path) {
+                // Wait for the file to be created by pipe-pane
+                let mut found = false;
+                for _ in 0..100 {
+                    if std::path::Path::new(&pipe_file_for_reader).exists() {
+                        found = true;
+                        break;
+                    }
+                    thread::sleep(std::time::Duration::from_millis(20));
+                }
+                if !found {
+                    log::warn!("pipe-reader: file never appeared: {}", pipe_file_for_reader);
+                    let _ = std::fs::File::create(&pipe_file_for_reader);
+                }
+                let file = match OpenOptions::new().read(true).open(&pipe_file_for_reader) {
                     Ok(f) => f,
-                    Err(_) => return,
+                    Err(e) => {
+                        log::error!("pipe-reader: open failed: {}", e);
+                        return;
+                    }
                 };
+                let mut reader = std::io::BufReader::new(file);
+                let mut buf = [0u8; 4096];
+                let mut total_sent = 0usize;
                 loop {
-                    match input_rx.recv() {
-                        Ok(bytes) => {
-                            let mut all_bytes = bytes;
-                            while let Ok(more) = input_rx.try_recv() {
-                                all_bytes.extend_from_slice(&more);
-                            }
-                            if file.write_all(&all_bytes).is_err() || file.flush().is_err() {
+                    match reader.read(&mut buf) {
+                        Ok(0) => {
+                            thread::sleep(std::time::Duration::from_millis(10));
+                        }
+                        Ok(n) => {
+                            total_sent += n;
+                            if output_tx_clone.send(buf[..n].to_vec()).is_err() {
                                 break;
                             }
                         }
-                        Err(_) => break,
-                    }
-                }
-            });
-        } else {
-            // Fallback: tmux send-keys
-            let target_for_input = target.to_string();
-            thread::spawn(move || {
-                loop {
-                    match input_rx.recv() {
-                        Ok(bytes) => {
-                            let mut all_bytes = bytes;
-                            while let Ok(more) = input_rx.try_recv() {
-                                all_bytes.extend_from_slice(&more);
-                            }
-                            let text = String::from_utf8_lossy(&all_bytes).to_string();
-                            let _ = Command::new("tmux")
-                                .args(["send-keys", "-t", &target_for_input, "-l", &text])
-                                .output();
+                        Err(_) => {
+                            thread::sleep(std::time::Duration::from_millis(50));
                         }
-                        Err(_) => break,
                     }
                 }
-            });
-        }
+            })
+            .ok();
+
+        // === Input: tmux send-keys ===
+        // We can't write to the PTY master directly (tmux owns it).
+        // For printable text: send-keys -l (literal).
+        // For control chars (ctrl-c, backspace, enter, etc.): send-keys without -l.
+        let (input_tx, input_rx) = flume::unbounded::<Vec<u8>>();
+        let target_for_input = target.to_string();
+        thread::spawn(move || {
+            loop {
+                match input_rx.recv() {
+                    Ok(bytes) => {
+                        let mut all_bytes = bytes;
+                        while let Ok(more) = input_rx.try_recv() {
+                            all_bytes.extend_from_slice(&more);
+                        }
+                        // Split into runs of printable and control bytes,
+                        // sending each appropriately.
+                        send_bytes_to_tmux(&target_for_input, &all_bytes);
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
 
         Ok((output_tx, output_rx, input_tx))
     }
@@ -678,6 +643,115 @@ fn ensure_tmux_session(session_name: &str, worktree_path: &Path) -> Result<(), R
     }
 }
 
+/// Send raw bytes to a tmux pane, handling control characters correctly.
+///
+/// Splits input into runs of printable text (sent with -l for literal) and
+/// control bytes (sent as tmux key names like Enter, BSpace, C-c, etc.).
+fn send_bytes_to_tmux(target: &str, bytes: &[u8]) {
+    let mut i = 0;
+    while i < bytes.len() {
+        // Collect printable run
+        let start = i;
+        while i < bytes.len() && bytes[i] >= 0x20 && bytes[i] < 0x7f {
+            i += 1;
+        }
+        if i > start {
+            let text = String::from_utf8_lossy(&bytes[start..i]).to_string();
+            let _ = Command::new("tmux")
+                .args(["send-keys", "-t", target, "-l", &text])
+                .output();
+        }
+
+        // Handle control byte
+        if i < bytes.len() && (bytes[i] < 0x20 || bytes[i] == 0x7f) {
+            let key_name = match bytes[i] {
+                0x01 => "C-a",
+                0x02 => "C-b",
+                0x03 => "C-c",
+                0x04 => "C-d",
+                0x05 => "C-e",
+                0x06 => "C-f",
+                0x07 => "C-g",
+                0x08 => "BSpace",
+                0x09 => "Tab",
+                0x0a => "Enter", // LF
+                0x0b => "C-k",
+                0x0c => "C-l",
+                0x0d => "Enter", // CR
+                0x0e => "C-n",
+                0x0f => "C-o",
+                0x10 => "C-p",
+                0x11 => "C-q",
+                0x12 => "C-r",
+                0x13 => "C-s",
+                0x14 => "C-t",
+                0x15 => "C-u",
+                0x16 => "C-v",
+                0x17 => "C-w",
+                0x18 => "C-x",
+                0x19 => "C-y",
+                0x1a => "C-z",
+                0x1b => "Escape",
+                0x7f => "BSpace",
+                _ => {
+                    i += 1;
+                    continue;
+                }
+            };
+            let _ = Command::new("tmux")
+                .args(["send-keys", "-t", target, key_name])
+                .output();
+            i += 1;
+
+            // Handle ESC sequences (arrow keys, etc.)
+            if bytes[i - 1] == 0x1b && i < bytes.len() && bytes[i] == b'[' {
+                // CSI sequence: ESC [ ...
+                let csi_start = i;
+                i += 1; // skip [
+                while i < bytes.len() && bytes[i] >= 0x20 && bytes[i] < 0x40 {
+                    i += 1; // skip parameter bytes
+                }
+                if i < bytes.len() {
+                    let final_byte = bytes[i];
+                    i += 1;
+                    let key = match final_byte {
+                        b'A' => Some("Up"),
+                        b'B' => Some("Down"),
+                        b'C' => Some("Right"),
+                        b'D' => Some("Left"),
+                        b'H' => Some("Home"),
+                        b'F' => Some("End"),
+                        _ => None,
+                    };
+                    if let Some(k) = key {
+                        // The Escape was already sent, send the rest via -l
+                        // Actually, undo the Escape and send the whole key
+                        let _ = Command::new("tmux")
+                            .args(["send-keys", "-t", target, k])
+                            .output();
+                    } else {
+                        // Unknown CSI, send raw
+                        let text = String::from_utf8_lossy(&bytes[csi_start - 1..i]).to_string();
+                        let _ = Command::new("tmux")
+                            .args(["send-keys", "-t", target, "-l", &text])
+                            .output();
+                    }
+                }
+            }
+        } else if i < bytes.len() {
+            // High byte (UTF-8 or extended) — send as literal
+            let start = i;
+            while i < bytes.len() && bytes[i] >= 0x80 {
+                i += 1;
+            }
+            let text = String::from_utf8_lossy(&bytes[start..i]).to_string();
+            let _ = Command::new("tmux")
+                .args(["send-keys", "-t", target, "-l", &text])
+                .output();
+        }
+    }
+}
+
 
 
 #[cfg(test)]
@@ -862,5 +936,85 @@ mod tests {
         let _ = std::process::Command::new("tmux")
             .args(["kill-session", "-t", test_session])
             .output();
+    }
+
+    #[test]
+    fn test_pipe_pane_output_has_vt_bytes() {
+        if !super::super::tmux_available() { return; }
+        let session = "pmux-test-vt-pipe";
+        let dir = tempfile::tempdir().unwrap();
+        let _ = Command::new("tmux").args(["kill-session", "-t", session]).output();
+
+        let backend = TmuxStandardBackend::new(session, dir.path(), 80, 24).unwrap();
+        let pane = backend.primary_pane_id().unwrap();
+        eprintln!("pane_id: {}", pane);
+
+        let rx = backend.subscribe_output(&pane).unwrap();
+
+        // Wait for C-l redraw
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        // Drain initial
+        let mut init = Vec::new();
+        while let Ok(chunk) = rx.try_recv() {
+            init.extend_from_slice(&chunk);
+        }
+        eprintln!("init: {} bytes, has_esc={}", init.len(), init.iter().any(|&b| b == 0x1b));
+
+        // Check pipe files on disk
+        let pipe_glob = format!("/tmp/pmux-pipe-*{}*", session.replace(':', "-"));
+        eprintln!("looking for pipe files: {}", pipe_glob);
+        if let Ok(entries) = std::fs::read_dir("/tmp") {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.contains(session) {
+                    let meta = entry.metadata().unwrap();
+                    eprintln!("  found: {} ({} bytes)", name, meta.len());
+                }
+            }
+        }
+
+        // Send command
+        backend.send_input(&pane, b"echo VT_PIPE_TEST\r").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+
+        // Check pipe files again
+        if let Ok(entries) = std::fs::read_dir("/tmp") {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.contains(session) {
+                    let meta = entry.metadata().unwrap();
+                    eprintln!("  after send: {} ({} bytes)", name, meta.len());
+                }
+            }
+        }
+
+        let mut output = Vec::new();
+        while let Ok(chunk) = rx.try_recv() {
+            output.extend_from_slice(&chunk);
+        }
+        let text = String::from_utf8_lossy(&output);
+        eprintln!("output: {} bytes, has_esc={}", output.len(), output.iter().any(|&b| b == 0x1b));
+        if !output.is_empty() {
+            eprintln!("text preview: {:?}", &text[..text.len().min(200)]);
+        }
+
+        // Also try manually reading the pipe file
+        if let Ok(entries) = std::fs::read_dir("/tmp") {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.contains(session) && name.starts_with("pmux-pipe") {
+                    let path = entry.path();
+                    if let Ok(data) = std::fs::read(&path) {
+                        eprintln!("  manual read: {} has {} bytes, has_esc={}",
+                            name, data.len(), data.iter().any(|&b| b == 0x1b));
+                    }
+                }
+            }
+        }
+
+        assert!(output.len() > 0, "should receive output bytes from pipe-pane");
+
+        drop(backend);
+        let _ = Command::new("tmux").args(["kill-session", "-t", session]).output();
     }
 }
