@@ -6,14 +6,14 @@
 //! tmux only provides session persistence (survives GUI restarts).
 
 use std::collections::HashMap;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use portable_pty::PtySize;
 
 use crate::runtime::agent_runtime::{AgentId, AgentRuntime, PaneId, RuntimeError};
 
@@ -113,100 +113,117 @@ impl TmuxStandardBackend {
             default_rows: rows,
         };
 
-        // Create primary window
+        // Create primary window (portable-pty + tracking tmux window)
         backend.create_window("main")?;
 
         Ok(backend)
     }
 
-    /// Create a new window with its own PTY.
+    /// Create a new window backed by the tmux session's shell.
+    ///
+    /// Uses tmux's own PTY (via send-keys for input, pipe-pane for output).
+    /// This ensures the shell survives backend drops (tab switches) and can
+    /// be recovered later.
     fn create_window(&self, name: &str) -> Result<PaneId, RuntimeError> {
         let window_idx = self.window_counter.fetch_add(1, Ordering::SeqCst) as u32;
         let pane_id = format!("tmux-std:{}:{}:{}", self.session_name, window_idx, name);
 
-        // Open PTY pair
-        let pty_system = native_pty_system();
-        let pair = pty_system
-            .openpty(PtySize {
-                rows: self.default_rows,
-                cols: self.default_cols,
-                pixel_width: (self.default_cols).saturating_mul(8),
-                pixel_height: (self.default_rows).saturating_mul(17),
-            })
-            .map_err(|e| RuntimeError::Backend(format!("openpty: {}", e)))?;
+        // For the first window (index 0), reuse the initial tmux window.
+        // For subsequent windows, create a new tmux window.
+        let tmux_window_index: u32;
+        if window_idx == 0 {
+            // Rename initial tmux window (created by new-session)
+            let _ = Command::new("tmux")
+                .args([
+                    "rename-window",
+                    "-t",
+                    &format!("{}:0", self.session_name),
+                    name,
+                ])
+                .output();
+            tmux_window_index = 0;
+        } else {
+            // Create new tmux window
+            let output = Command::new("tmux")
+                .args([
+                    "new-window",
+                    "-t",
+                    &self.session_name,
+                    "-n",
+                    name,
+                    "-c",
+                    &self.worktree_path.to_string_lossy(),
+                    "-P",
+                    "-F",
+                    "#{window_index}",
+                ])
+                .output()
+                .map_err(|e| RuntimeError::Backend(format!("tmux new-window: {}", e)))?;
+            tmux_window_index = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse()
+                .unwrap_or(window_idx);
+        }
 
-        // Spawn shell in worktree directory
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "bash".to_string());
-        let mut cmd = CommandBuilder::new(&shell);
-        cmd.cwd(&self.worktree_path);
+        let target = window_target(&self.session_name, tmux_window_index);
 
-        let child: Box<dyn portable_pty::Child + Send + Sync> = pair
-            .slave
-            .spawn_command(cmd)
-            .map_err(|e| RuntimeError::Backend(format!("spawn: {}", e)))?;
-
-        let master = pair.master;
-
-        // Set up output reader thread
-        let reader = master
-            .try_clone_reader()
-            .map_err(|e| RuntimeError::Backend(format!("clone_reader: {}", e)))?;
-        let (output_tx, output_rx) = flume::unbounded();
-
+        // Set up output via pipe-pane polling (capture-pane)
+        let (output_tx, output_rx) = flume::unbounded::<Vec<u8>>();
+        let target_for_output = target.clone();
         thread::spawn(move || {
-            let mut buf = [0u8; 4096];
-            let mut reader = reader;
+            let mut last_content = String::new();
             loop {
-                match reader.read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        if output_tx.send(buf[..n].to_vec()).is_err() {
-                            break;
+                thread::sleep(std::time::Duration::from_millis(50));
+                let result = Command::new("tmux")
+                    .args(["capture-pane", "-t", &target_for_output, "-p", "-e"])
+                    .output();
+                match result {
+                    Ok(output) if output.status.success() => {
+                        let content = String::from_utf8_lossy(&output.stdout).to_string();
+                        if content != last_content {
+                            if output_tx.send(content.as_bytes().to_vec()).is_err() {
+                                break;
+                            }
+                            last_content = content;
                         }
                     }
-                    Err(_) => break,
+                    _ => break,
                 }
             }
         });
 
-        // Set up input writer thread (batched writes)
-        let writer = master
-            .take_writer()
-            .map_err(|e| RuntimeError::Backend(format!("take_writer: {}", e)))?;
+        // Set up input via tmux send-keys
         let (input_tx, input_rx) = flume::unbounded::<Vec<u8>>();
-
+        let target_for_input = target.clone();
         thread::spawn(move || {
-            let mut writer = writer;
-            let mut buffer = Vec::new();
             loop {
                 match input_rx.recv() {
                     Ok(bytes) => {
-                        buffer.extend_from_slice(&bytes);
-                        while let Ok(bytes) = input_rx.try_recv() {
-                            buffer.extend_from_slice(&bytes);
+                        // Collect additional pending bytes
+                        let mut all_bytes = bytes;
+                        while let Ok(more) = input_rx.try_recv() {
+                            all_bytes.extend_from_slice(&more);
                         }
-                        if writer.write_all(&buffer).is_err() || writer.flush().is_err() {
-                            break;
-                        }
-                        buffer.clear();
+                        // Send via tmux send-keys with literal flag
+                        let text = String::from_utf8_lossy(&all_bytes).to_string();
+                        let _ = Command::new("tmux")
+                            .args(["send-keys", "-t", &target_for_input, "-l", &text])
+                            .output();
                     }
                     Err(_) => break,
                 }
             }
         });
 
-        // Create corresponding tmux window for persistence
-        create_tmux_window(&self.session_name, name);
-
         let state = Arc::new(WindowState {
-            window_index: window_idx,
+            window_index: tmux_window_index,
             pane_id: pane_id.clone(),
-            master: Mutex::new(Some(master)),
+            master: Mutex::new(None),
             input_tx,
             output_rx: Mutex::new(Some(output_rx)),
             cols: AtomicU16::new(self.default_cols),
             rows: AtomicU16::new(self.default_rows),
-            _child: Mutex::new(Some(child)),
+            _child: Mutex::new(None),
             session_name: self.session_name.clone(),
             recovered: false,
         });
@@ -629,18 +646,7 @@ fn ensure_tmux_session(session_name: &str, worktree_path: &Path) -> Result<(), R
     }
 }
 
-/// Create a tmux window within the session (best-effort, for persistence tracking).
-fn create_tmux_window(session_name: &str, window_name: &str) {
-    let _ = std::process::Command::new("tmux")
-        .args([
-            "new-window",
-            "-t",
-            session_name,
-            "-n",
-            window_name,
-        ])
-        .output();
-}
+
 
 #[cfg(test)]
 mod tests {
