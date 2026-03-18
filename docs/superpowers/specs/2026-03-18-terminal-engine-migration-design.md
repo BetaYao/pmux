@@ -181,7 +181,7 @@ tmux list-windows -t "pmux-<wt>" -F "#{window_index}:#{pane_pid}:#{pane_current_
 | File | Changes |
 |------|---------|
 | `src/terminal/mod.rs` | Re-export gpui-ghostty types instead of custom types |
-| `src/terminal/stream_adapter.rs` | Simplify: direct PTY read/write, remove tee complexity |
+| `src/terminal/content_extractor.rs` | No change (operates on raw bytes, independent of terminal engine) |
 | `src/terminal/content_extractor.rs` | No change (operates on raw bytes, independent of terminal engine) |
 | `src/ui/terminal_view.rs` | Wrap gpui-ghostty TerminalView instead of custom TerminalElement |
 | `src/ui/terminal_area_entity.rs` | Adapt to new terminal view API |
