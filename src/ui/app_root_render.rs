@@ -951,6 +951,9 @@ impl AppRoot {
             .with_running_frame(running_frame)
             .with_context_menu(self.sidebar_context_menu)
             .with_tasks_expanded(self.tasks_expanded)
+            .with_selected_task_index(self.selected_task_index)
+            .with_task_list_focused(self.task_list_focused)
+            .with_task_pending_delete(self.task_pending_delete)
             .on_toggle_sidebar(move |_window, cx| {
                 let _ = cx.update_entity(&app_root_entity_for_toggle, |this: &mut AppRoot, cx| {
                     this.sidebar_visible = !this.sidebar_visible;

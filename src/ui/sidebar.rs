@@ -99,6 +99,10 @@ pub struct Sidebar {
     on_toggle_task: Option<Arc<dyn Fn(Uuid, &mut Window, &mut App) + Send + Sync>>,
     on_run_task: Option<Arc<dyn Fn(Uuid, &mut Window, &mut App) + Send + Sync>>,
     on_add_task: Option<Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
+    on_delete_task: Option<Arc<dyn Fn(Uuid, &mut Window, &mut App) + Send + Sync>>,
+    selected_task_index: Option<usize>,
+    task_list_focused: bool,
+    task_pending_delete: Option<Uuid>,
 }
 
 impl Sidebar {
@@ -132,6 +136,10 @@ impl Sidebar {
             on_toggle_task: None,
             on_run_task: None,
             on_add_task: None,
+            on_delete_task: None,
+            selected_task_index: None,
+            task_list_focused: false,
+            task_pending_delete: None,
         }
     }
 
@@ -312,6 +320,29 @@ impl Sidebar {
         self
     }
 
+    pub fn on_delete_task<F: Fn(Uuid, &mut Window, &mut App) + Send + Sync + 'static>(
+        mut self,
+        f: F,
+    ) -> Self {
+        self.on_delete_task = Some(Arc::new(f));
+        self
+    }
+
+    pub fn with_selected_task_index(mut self, index: Option<usize>) -> Self {
+        self.selected_task_index = index;
+        self
+    }
+
+    pub fn with_task_list_focused(mut self, focused: bool) -> Self {
+        self.task_list_focused = focused;
+        self
+    }
+
+    pub fn with_task_pending_delete(mut self, id: Option<Uuid>) -> Self {
+        self.task_pending_delete = id;
+        self
+    }
+
     pub fn add_worktree(&mut self, info: WorktreeInfo) {
         if let Ok(mut guard) = self.worktrees.lock() {
             guard.push(WorktreeItem::new(info));
@@ -374,7 +405,18 @@ impl Sidebar {
         }
     }
 
-    fn render_task_item(&self, task: &ScheduledTask) -> impl IntoElement {
+    fn render_task_item(&self, task: &ScheduledTask, index: usize) -> impl IntoElement {
+        let is_selected = self.task_list_focused && self.selected_task_index == Some(index);
+        let is_pending_delete = self.task_pending_delete == Some(task.id);
+
+        let bg = if is_pending_delete {
+            rgb(0x4a1c1c) // red tint for pending delete
+        } else if is_selected {
+            rgb(0x3a3a3a) // highlight for selected
+        } else {
+            rgb(0x00000000) // transparent
+        };
+
         let status_text = match &task.last_status {
             Some(TaskRunStatus::Never) => "Never run",
             Some(TaskRunStatus::Triggered) => "Triggered",
@@ -408,7 +450,8 @@ impl Sidebar {
             .px_2()
             .py_1()
             .rounded_md()
-            .hover(|style| style.bg(rgb(0x2a2a2a)))
+            .bg(bg)
+            .when(!is_pending_delete, |el| el.hover(|style| style.bg(rgb(0x2a2a2a))))
             .child(
                 div()
                     .flex()
@@ -455,6 +498,15 @@ impl Sidebar {
                     .hover(|style| style.text_color(rgb(0xe0e0e0)))
                     // Note: on_click handler not working due to trait resolution issue
                     .child("Run"),
+            );
+        }
+
+        if is_pending_delete {
+            item = item.child(
+                div()
+                    .text_color(rgb(0xf87171))
+                    .text_xs()
+                    .child("Delete? Enter/Esc"),
             );
         }
 
@@ -515,7 +567,8 @@ impl Sidebar {
                 el.children(
                     self.scheduled_tasks
                         .iter()
-                        .map(|task| self.render_task_item(task)),
+                        .enumerate()
+                        .map(|(i, task)| self.render_task_item(task, i)),
                 )
             })
     }
