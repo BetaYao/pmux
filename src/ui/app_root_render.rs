@@ -156,6 +156,43 @@ impl AppRoot {
                     }
                 }
             }
+            "l" => {
+                if event.keystroke.modifiers.shift {
+                    self.tasks_expanded = !self.tasks_expanded;
+                    if self.tasks_expanded {
+                        self.task_list_focused = true;
+                        // Select first task if none selected
+                        if self.selected_task_index.is_none() {
+                            let task_count = self.scheduler_manager.as_ref()
+                                .map(|m| m.read(cx).tasks().len())
+                                .unwrap_or(0);
+                            if task_count > 0 {
+                                self.selected_task_index = Some(0);
+                            }
+                        }
+                    } else {
+                        self.task_list_focused = false;
+                    }
+                    cx.notify();
+                }
+            }
+            "t" => {
+                if event.keystroke.modifiers.shift {
+                    self.open_task_dialog(cx);
+                }
+            }
+            "backspace" => {
+                if event.keystroke.modifiers.shift && self.task_list_focused {
+                    if let Some(idx) = self.selected_task_index {
+                        let task_id = self.scheduler_manager.as_ref()
+                            .and_then(|m| m.read(cx).tasks().get(idx).map(|t| t.id));
+                        if let Some(id) = task_id {
+                            self.task_pending_delete = Some(id);
+                            cx.notify();
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
