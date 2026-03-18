@@ -1,6 +1,6 @@
 // ui/status_bar.rs - Bottom status bar (Zed-style)
 use gpui::prelude::*;
-use gpui::*;
+use gpui::{App, Component, Window, div, px, rgb};
 use crate::agent_status::StatusCounts;
 
 /// Status bar item - left or right aligned

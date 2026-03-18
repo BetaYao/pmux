@@ -4,7 +4,7 @@ use crate::split_tree::SplitNode;
 use crate::ui::split_pane_container::SplitPaneContainer;
 use crate::ui::terminal_view::TerminalBuffer;
 use gpui::prelude::*;
-use gpui::*;
+use gpui::{App, Context, Window};
 use std::collections::HashMap;
 use std::sync::Arc;
 

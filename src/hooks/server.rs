@@ -126,7 +126,7 @@ fn handle_connection(stream: &mut std::net::TcpStream, event_bus: &SharedEventBu
         }));
     }
 
-    let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK");
+    let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}");
 }
 
 #[cfg(test)]
@@ -190,7 +190,7 @@ mod tests {
         let port = probe.local_addr().unwrap().port();
         drop(probe);
 
-        let bus = Arc::new(crate::runtime::event_bus::EventBus::new(16));
+        let bus = Arc::new(crate::runtime::EventBus::new(16));
         let rx = bus.subscribe();
 
         WebhookServer::new(port, Arc::clone(&bus)).start().unwrap();

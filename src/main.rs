@@ -1,7 +1,11 @@
 // main.rs - pmux GUI application using gpui
 use std::path::PathBuf;
 
-use gpui::{actions, point, px, size, AssetSource, KeyBinding, TitlebarOptions, WindowBounds, WindowOptions, *};
+use gpui::prelude::*;
+use gpui::{
+    actions, point, px, size, App, AssetSource, Bounds, KeyBinding, Menu, MenuItem, SharedString,
+    TitlebarOptions, WindowBounds, WindowOptions,
+};
 use pmux::ui::app_root::{AppRoot, TerminalPaste, TerminalCopy};
 
 /// Resolve the user's full login-shell PATH.

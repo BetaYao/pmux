@@ -265,7 +265,10 @@ fn parse_worktree_list(output: &str) -> Result<Vec<WorktreeInfo>, String> {
             current_detached = true;
         } else if line.is_empty() {
             // End of worktree entry
-            if let (Some(path), Some(branch)) = (current_path.take(), current_branch.take()) {
+            if let Some(path) = current_path.take() {
+                let branch = current_branch.take().unwrap_or_else(|| {
+                    if current_detached { "(detached)".to_string() } else { "(unknown)".to_string() }
+                });
                 worktrees.push(WorktreeInfo {
                     path,
                     branch,
@@ -278,7 +281,10 @@ fn parse_worktree_list(output: &str) -> Result<Vec<WorktreeInfo>, String> {
     }
 
     // Handle last worktree if output doesn't end with empty line
-    if let (Some(path), Some(branch)) = (current_path, current_branch) {
+    if let Some(path) = current_path {
+        let branch = current_branch.unwrap_or_else(|| {
+            if current_detached { "(detached)".to_string() } else { "(unknown)".to_string() }
+        });
         worktrees.push(WorktreeInfo {
             path,
             branch,

@@ -3,7 +3,7 @@
 use crate::git_diff::{DiffLineKind, FileDiff};
 use crate::syntax_highlight::HighlightedLine;
 use gpui::prelude::*;
-use gpui::*;
+use gpui::{AnyElement, App, Div, ElementId, Font, FontWeight, Hsla, Rgba, SharedString, Stateful, StyleRefinement, StyledText, TextRun, Window, div, font, px, rgb, rgba};
 use std::sync::Arc;
 
 pub type RejectHunkCallback = Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>;

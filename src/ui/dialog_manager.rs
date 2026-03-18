@@ -10,7 +10,8 @@ use crate::ui::new_branch_dialog_entity::NewBranchDialogEntity;
 use crate::ui::close_tab_dialog_ui::CloseTabDialogUi;
 use crate::ui::delete_worktree_dialog_ui::DeleteWorktreeDialogUi;
 use gpui::prelude::FluentBuilder;
-use gpui::*;
+use gpui::prelude::*;
+use gpui::{App, Div, Entity, FocusHandle, FontWeight, KeyDownEvent, SharedString, StyleRefinement, div, px, rgb, rgba};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 

@@ -8,7 +8,7 @@ use crate::notification::NotificationType;
 use crate::notification_manager::NotificationManager;
 use crate::ui::models::NotificationPanelModel;
 use crate::ui::notification_panel_entity::NotificationPanelEntity;
-use gpui::*;
+use gpui::{App, Context, Entity};
 use std::sync::{Arc, Mutex};
 
 pub struct NotificationCenter {

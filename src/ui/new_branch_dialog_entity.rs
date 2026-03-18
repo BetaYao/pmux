@@ -3,7 +3,7 @@
 use crate::ui::models::NewBranchDialogModel;
 use crate::ui::new_branch_dialog_ui::NewBranchDialogUi;
 use gpui::prelude::*;
-use gpui::*;
+use gpui::{App, Context, Entity, FocusHandle, Window, div, px};
 use std::sync::Arc;
 
 /// NewBranchDialog Entity - observes NewBranchDialogModel; re-renders when model notifies.

@@ -396,7 +396,7 @@ impl Sidebar {
             rgb(0x888888)
         };
 
-        let task_id = task.id;
+        let _task_id = task.id;
         let on_toggle = self.on_toggle_task.clone();
         let on_run = self.on_run_task.clone();
 
@@ -488,13 +488,17 @@ impl Sidebar {
                     ),
             );
 
-        if let Some(_cb) = on_add {
-            // Note: on_click handler not working due to trait resolution issue
+        if let Some(cb) = on_add {
             header = header.child(
                 div()
+                    .id("sidebar-add-task-btn")
                     .text_color(rgb(0x888888))
                     .text_xs()
+                    .cursor_pointer()
                     .hover(|style| style.text_color(rgb(0xe0e0e0)))
+                    .on_click(move |_event, window, cx| {
+                        cb(window, cx);
+                    })
                     .child("+Add"),
             );
         }

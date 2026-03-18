@@ -12,6 +12,7 @@ pub struct SchedulerManager {
     scheduler: Option<Arc<Mutex<JobScheduler>>>,
     tasks: Vec<ScheduledTask>,
     store_path: PathBuf,
+    #[allow(dead_code)]
     runtime_handle: Option<tokio::runtime::Handle>,
 }
 
@@ -78,11 +79,11 @@ impl SchedulerManager {
         &self.tasks
     }
     
-    pub fn add_task(&mut self, mut task: ScheduledTask, cx: &mut Context<Self>) -> Result<Uuid, StorageError> {
+    pub fn add_task(&mut self, task: ScheduledTask, cx: &mut Context<Self>) -> Result<Uuid, StorageError> {
         let id = task.id;
-        
+
         if task.enabled {
-            if let Some(ref scheduler) = self.scheduler {
+            if let Some(ref _scheduler) = self.scheduler {
                 // Note: This would need to be async to work properly
                 // For now, we just store the task
                 eprintln!("Note: Task scheduling happens at startup only. Restart to enable new task.");

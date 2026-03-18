@@ -1,6 +1,6 @@
 // ui/topbar.rs - TopBar component with workspace tabs and status overview
 use gpui::prelude::*;
-use gpui::*;
+use gpui::{App, Component, Div, FontWeight, Stateful, StyleRefinement, Window, div, px, rgb};
 use std::sync::Arc;
 use crate::agent_status::StatusCounts;
 use crate::workspace_manager::{WorkspaceManager, WorkspaceTab};
@@ -300,7 +300,7 @@ mod tests {
     #[test]
     fn test_callback_registration() {
         let manager = WorkspaceManager::new();
-        let called = std::sync::Arc::new(std::sync::AtomicBool::new(false));
+        let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let called_clone = called.clone();
         let _topbar = TopBar::new(manager).on_add_workspace(move |_, _| {
             called_clone.store(true, std::sync::atomic::Ordering::SeqCst);

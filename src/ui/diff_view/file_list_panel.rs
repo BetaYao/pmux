@@ -1,7 +1,7 @@
 // ui/diff_view/file_list_panel.rs - Left panel: file list with status icons
 use crate::git_diff::{ChangedFile, FileChangeStatus};
 use gpui::prelude::*;
-use gpui::*;
+use gpui::{AnyElement, App, Component, ElementId, FontWeight, SharedString, StyleRefinement, Window, div, px, rgb};
 use std::sync::Arc;
 
 pub type FileSelectCallback = Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>;

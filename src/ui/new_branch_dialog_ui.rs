@@ -1,6 +1,6 @@
 // ui/new_branch_dialog_ui.rs - New branch dialog UI component with GPUI rendering
 use gpui::prelude::*;
-use gpui::*;
+use gpui::{AnyElement, App, FontWeight, SharedString, StyleRefinement, Window, div, px, rgb, rgba};
 use std::sync::Arc;
 use crate::new_branch_dialog::NewBranchDialog;
 

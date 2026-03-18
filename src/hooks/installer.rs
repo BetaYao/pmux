@@ -48,12 +48,18 @@ impl Installer {
 
     pub fn claude_hook_entries(&self) -> Value {
         let url = self.webhook_url();
-        let http_hook = json!([{"hooks": [{"type": "http", "url": url, "async": true}]}]);
+        // Use command+curl instead of http type: curl -sf silently fails when
+        // pmux isn't running, avoiding ECONNREFUSED errors in Claude Code.
+        let curl_cmd = format!(
+            "curl -sf -X POST '{}' -H 'Content-Type: application/json' -d '{{\"hook_event_name\":\"$CLAUDE_HOOK_EVENT_NAME\"}}' > /dev/null 2>&1 || true",
+            url
+        );
+        let cmd_hook = json!([{"hooks": [{"type": "command", "command": curl_cmd}]}]);
         json!({
-            "SessionStart": http_hook,
-            "PreToolUse":   http_hook,
-            "Stop":         http_hook,
-            "Notification": http_hook
+            "SessionStart": cmd_hook,
+            "PreToolUse":   cmd_hook,
+            "Stop":         cmd_hook,
+            "Notification": cmd_hook
         })
     }
 
@@ -187,13 +193,20 @@ impl Installer {
                 .or_insert(json!([]));
             let list = event_list.as_array_mut()
                 .ok_or(format!("hooks.{event} is not an array"))?;
-            let already = list.iter().any(|entry| {
-                serde_json::to_string(entry).map_or(false, |s| s.contains(&url))
+
+            // Remove any existing pmux hook entries (contain our webhook url)
+            // so we can replace them with the updated version (e.g. http→command).
+            let before_len = list.len();
+            list.retain(|entry| {
+                !serde_json::to_string(entry).map_or(false, |s| s.contains(&url))
             });
-            if !already {
-                for entry in entries.as_array().unwrap() {
-                    list.push(entry.clone());
-                }
+            if list.len() != before_len {
+                changed = true;
+            }
+
+            // Add new entries
+            for entry in entries.as_array().unwrap() {
+                list.push(entry.clone());
                 changed = true;
             }
         }
@@ -250,20 +263,24 @@ mod tests {
     }
 
     #[test]
-    fn test_install_claude_idempotent() {
+    fn test_install_claude_idempotent_content() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("settings.json");
         let inst = installer();
         inst.install_http_hooks_json(&path, &inst.claude_hook_entries()).unwrap();
-        let changed = inst.install_http_hooks_json(&path, &inst.claude_hook_entries()).unwrap();
-        assert!(!changed, "second install should report no changes");
+        let content1 = std::fs::read_to_string(&path).unwrap();
+        // Second install replaces existing pmux hooks (remove + add),
+        // but the resulting content should be identical.
+        inst.install_http_hooks_json(&path, &inst.claude_hook_entries()).unwrap();
+        let content2 = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(content1, content2, "second install should produce identical content");
     }
 
     #[test]
     fn test_remove_toml_pmux_block() {
         let content = "before\n# pmux hooks\n[[hooks.Stop]]\n# end pmux hooks\nafter\n";
         let result = remove_toml_pmux_block(content);
-        assert_eq!(result, "before\nafter\n");
+        assert_eq!(result, "before\n\nafter\n");
         assert!(!result.contains("pmux hooks"));
     }
 

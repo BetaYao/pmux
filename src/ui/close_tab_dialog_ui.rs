@@ -1,6 +1,6 @@
 // ui/close_tab_dialog_ui.rs - Close workspace tab confirmation dialog
 use gpui::prelude::*;
-use gpui::*;
+use gpui::{AnyElement, App, FontWeight, StyleRefinement, Window, div, px, rgb, rgba};
 use std::path::PathBuf;
 use std::sync::Arc;
 

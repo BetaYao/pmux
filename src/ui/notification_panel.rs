@@ -1,6 +1,6 @@
 // ui/notification_panel.rs - Notification panel component with GPUI render
 use gpui::prelude::*;
-use gpui::*;
+use gpui::{App, Component, Div, FontWeight, Rgba, Stateful, StyleRefinement, Window, div, px, relative, rgb};
 use std::sync::Arc;
 use crate::notification::{Notification, NotificationType};
 use std::time::Instant;

@@ -7,7 +7,7 @@ use crate::agent_status::{AgentStatus, StatusCounts};
 use crate::runtime::{AgentRuntime, EventBus, StatusPublisher};
 use crate::ui::models::{StatusCountsModel, PaneSummaryModel};
 use crate::ui::topbar_entity::TopBarEntity;
-use gpui::*;
+use gpui::{Context, Entity};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicBool;
@@ -156,10 +156,9 @@ mod tests {
 
         rm.clear_statuses_for_prefix("local:/path/feat");
 
-        if let Ok(statuses) = rm.pane_statuses.lock() {
-            assert_eq!(statuses.len(), 1);
-            assert!(statuses.contains_key("local:/path/main"));
-        }
+        let statuses = rm.pane_statuses.lock().unwrap();
+        assert_eq!(statuses.len(), 1);
+        assert!(statuses.contains_key("local:/path/main"));
     }
 
     #[test]

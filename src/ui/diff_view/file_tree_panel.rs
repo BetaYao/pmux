@@ -1,7 +1,7 @@
 // ui/diff_view/file_tree_panel.rs - Left panel: nested file tree showing only changed files
 use crate::git_diff::{ChangedFile, FileChangeStatus};
 use gpui::prelude::*;
-use gpui::*;
+use gpui::{AnyElement, App, Component, ElementId, FontWeight, SharedString, StyleRefinement, Window, div, px, rgb};
 use std::collections::HashMap;
 use std::sync::Arc;
 

@@ -10,7 +10,7 @@ use crate::syntax_highlight::{HighlightedLine, LineHighlighter};
 use diff_panel::{build_flat_rows, build_flat_rows_sbs, render_binary_notice, render_diff_row, render_empty_state, render_no_changes, DiffFlatRow, RejectHunkCallback};
 use file_tree_panel::{build_file_tree, FileTreeNode};
 use gpui::prelude::*;
-use gpui::*;
+use gpui::{AnyElement, App, Context, Div, FontWeight, ScrollStrategy, SharedString, Stateful, StyleRefinement, UniformListScrollHandle, Window, div, px, rgb, uniform_list};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;

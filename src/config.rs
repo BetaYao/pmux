@@ -112,7 +112,13 @@ fn default_agent_detect_agents() -> Vec<AgentDef> {
                 },
                 AgentRule {
                     status: "Waiting".to_string(),
-                    patterns: vec!["?".to_string(), "> ".to_string()],
+                    patterns: vec![
+                        "?".to_string(),
+                        "\u{ff1f}".to_string(), // Full-width ？
+                        "> ".to_string(),
+                        "esc dismiss".to_string(), // Bubble Tea selection dialog
+                        "enter submit".to_string(), // Bubble Tea selection dialog
+                    ],
                 },
             ],
             default_status: "Idle".to_string(),
@@ -708,15 +714,16 @@ mod tests {
         assert_eq!(config.remote_channels.feishu.chat_id.as_deref(), Some("oc_abc"));
     }
 
-    /// Test: agent_detect default has 4 agents
+    /// Test: agent_detect default has 5 agents
     #[test]
     fn test_agent_detect_default_config() {
         let config = Config::default();
-        assert_eq!(config.agent_detect.agents.len(), 4);
+        assert_eq!(config.agent_detect.agents.len(), 5);
         assert_eq!(config.agent_detect.agents[0].name, "claude");
         assert_eq!(config.agent_detect.agents[1].name, "agent");
-        assert_eq!(config.agent_detect.agents[2].name, "aider");
-        assert_eq!(config.agent_detect.agents[3].name, "cursor");
+        assert_eq!(config.agent_detect.agents[2].name, "opencode");
+        assert_eq!(config.agent_detect.agents[3].name, "aider");
+        assert_eq!(config.agent_detect.agents[4].name, "cursor");
     }
 
     /// Test: agent_detect finds agent by name (case-insensitive)
@@ -780,7 +787,7 @@ mod tests {
         config.save_to_path(&config_path).unwrap();
 
         let loaded = Config::load_from_path(&config_path).unwrap();
-        assert_eq!(loaded.agent_detect.agents.len(), 4);
+        assert_eq!(loaded.agent_detect.agents.len(), 5);
         assert_eq!(loaded.agent_detect.agents[0].name, "claude");
         assert_eq!(loaded.agent_detect.agents[0].rules.len(), 3);
         assert_eq!(loaded.agent_detect.agents[0].rules[0].status, "Running");
@@ -795,7 +802,7 @@ mod tests {
         std::fs::write(&path, r#"{"backend": "tmux"}"#).unwrap();
         let config = Config::load_from_path(&path).unwrap();
         // Should have default agent_detect
-        assert_eq!(config.agent_detect.agents.len(), 4);
+        assert_eq!(config.agent_detect.agents.len(), 5);
     }
 
     #[test]
