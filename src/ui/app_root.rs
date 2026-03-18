@@ -175,6 +175,12 @@ pub struct AppRoot {
     pub(crate) scheduler_manager: Option<Entity<SchedulerManager>>,
     pub(crate) sidebar_visible: bool,
     pub(crate) tasks_expanded: bool,
+    /// Index of currently selected task in the task list (for keyboard navigation)
+    pub(crate) selected_task_index: Option<usize>,
+    /// Whether the task list area has keyboard focus (arrow keys navigate tasks)
+    pub(crate) task_list_focused: bool,
+    /// Task ID pending deletion (waiting for Enter/Escape confirmation)
+    pub(crate) task_pending_delete: Option<uuid::Uuid>,
     /// Per-pane terminal buffers (Term = pipe-pane/control mode streaming; Legacy = error placeholder only)
     pub(crate) terminal_buffers: Arc<Mutex<HashMap<String, TerminalBuffer>>>,
     /// Split layout tree (single Pane or Vertical/Horizontal with children)
@@ -452,6 +458,9 @@ impl AppRoot {
             scheduler_manager: None,
             sidebar_visible: true,
             tasks_expanded: true,
+            selected_task_index: None,
+            task_list_focused: false,
+            task_pending_delete: None,
             terminal_buffers: Arc::new(Mutex::new(HashMap::new())),
             split_tree: SplitNode::pane(""),
             focused_pane_index: 0,
