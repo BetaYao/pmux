@@ -1,7 +1,7 @@
 // ui/diff_view/changes_panel.rs - Left panel: commit list with expandable file lists
 use crate::git_diff::{ChangedFile, CommitInfo, FileChangeStatus};
 use gpui::prelude::*;
-use gpui::*;
+use gpui::{AnyElement, App, Component, ElementId, FontWeight, SharedString, StyleRefinement, Window, div, px, rgb};
 use std::sync::Arc;
 
 /// Callback: (file_path, commit_hash, &mut Window, &mut App)

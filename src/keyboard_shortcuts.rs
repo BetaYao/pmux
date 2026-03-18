@@ -9,6 +9,7 @@ pub enum ShortcutCategory {
     Navigation,
     Workspace,
     View,
+    Tasks,
 }
 
 /// Shortcut actions
@@ -21,6 +22,7 @@ pub enum ShortcutAction {
     ToggleSidebar,
     OpenNotifications,
     ShowHelp,
+    OpenSettings,
 
     // Navigation
     SwitchTab1,
@@ -32,6 +34,10 @@ pub enum ShortcutAction {
     SwitchTab7,
     SwitchTab8,
     JumpToUnread,
+    NextTab,
+    PrevTab,
+    NextWorktree,
+    PrevWorktree,
 
     // Workspace
     VerticalSplit,
@@ -48,6 +54,11 @@ pub enum ShortcutAction {
     ZoomOut,
     ResetZoom,
     ViewDiff,
+
+    // Tasks
+    ToggleTaskList,
+    NewTask,
+    DeleteTask,
 }
 
 /// Key binding structure
@@ -124,6 +135,13 @@ impl KeyBinding {
                 "Show keyboard shortcuts help",
                 ShortcutCategory::General,
             ),
+            Self::new(
+                ShortcutAction::OpenSettings,
+                "Open Settings",
+                "⌘,",
+                "Open or close the settings panel",
+                ShortcutCategory::General,
+            ),
             // Navigation
             Self::new(
                 ShortcutAction::SwitchTab1,
@@ -186,6 +204,34 @@ impl KeyBinding {
                 "Jump to Unread",
                 "⌘⇧U",
                 "Jump to the most recent unread notification",
+                ShortcutCategory::Navigation,
+            ),
+            Self::new(
+                ShortcutAction::NextTab,
+                "Next Tab",
+                "⌘]",
+                "Switch to the next workspace tab",
+                ShortcutCategory::Navigation,
+            ),
+            Self::new(
+                ShortcutAction::PrevTab,
+                "Previous Tab",
+                "⌘[",
+                "Switch to the previous workspace tab",
+                ShortcutCategory::Navigation,
+            ),
+            Self::new(
+                ShortcutAction::NextWorktree,
+                "Next Worktree",
+                "⌘↓",
+                "Switch to the next worktree in current workspace",
+                ShortcutCategory::Navigation,
+            ),
+            Self::new(
+                ShortcutAction::PrevWorktree,
+                "Previous Worktree",
+                "⌘↑",
+                "Switch to the previous worktree in current workspace",
                 ShortcutCategory::Navigation,
             ),
             // Workspace
@@ -273,6 +319,28 @@ impl KeyBinding {
                 "⌘⇧R",
                 "Open diff view for current branch",
                 ShortcutCategory::View,
+            ),
+            // Tasks
+            Self::new(
+                ShortcutAction::ToggleTaskList,
+                "Toggle Task List",
+                "⌘⇧L",
+                "Show/hide and focus the scheduled tasks list",
+                ShortcutCategory::Tasks,
+            ),
+            Self::new(
+                ShortcutAction::NewTask,
+                "New Task",
+                "⌘⇧T",
+                "Create a new scheduled task",
+                ShortcutCategory::Tasks,
+            ),
+            Self::new(
+                ShortcutAction::DeleteTask,
+                "Delete Task",
+                "⌘⇧⌫",
+                "Delete the selected scheduled task",
+                ShortcutCategory::Tasks,
             ),
         ]
     }
@@ -395,8 +463,8 @@ mod tests {
     #[test]
     fn test_default_bindings_count() {
         let bindings = KeyBinding::all_defaults();
-        // General(6) + Navigation(9) + Workspace(7) + View(5) = 27
-        assert_eq!(bindings.len(), 27, "VerticalSplit/HorizontalSplit and other defaults");
+        // General(7) + Navigation(13) + Workspace(7) + View(5) + Tasks(3) = 35
+        assert_eq!(bindings.len(), 35, "Expected 35 default bindings");
     }
 
     #[test]
@@ -416,6 +484,16 @@ mod tests {
             registry.lookup("⌘B"),
             Some(ShortcutAction::ToggleSidebar)
         );
+    }
+
+    #[test]
+    fn test_new_shortcut_lookups() {
+        let registry = ShortcutRegistry::new();
+        assert_eq!(registry.lookup("⌘]"), Some(ShortcutAction::NextTab));
+        assert_eq!(registry.lookup("⌘["), Some(ShortcutAction::PrevTab));
+        assert_eq!(registry.lookup("⌘,"), Some(ShortcutAction::OpenSettings));
+        assert_eq!(registry.lookup("⌘↓"), Some(ShortcutAction::NextWorktree));
+        assert_eq!(registry.lookup("⌘↑"), Some(ShortcutAction::PrevWorktree));
     }
 
     #[test]
@@ -481,8 +559,9 @@ mod tests {
             ShortcutCategory::Navigation,
             ShortcutCategory::Workspace,
             ShortcutCategory::View,
+            ShortcutCategory::Tasks,
         ];
-        assert_eq!(cats.len(), 4);
+        assert_eq!(cats.len(), 5);
     }
 
     #[test]

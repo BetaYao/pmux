@@ -1,5 +1,7 @@
 // agent_status.rs - Agent status enumeration and display
 
+use gpui::Rgba;
+
 /// Represents the current status of an AI agent in a tmux pane
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AgentStatus {
@@ -52,6 +54,14 @@ impl AgentStatus {
             AgentStatus::Exited => (33, 150, 243),   // #2196f3 blue
             AgentStatus::Unknown => (156, 39, 176),  // #9c27b0 purple
         }
+    }
+
+    /// Get the GPUI Rgba color for UI rendering.
+    /// Single source of truth — all UI components should use this instead of
+    /// duplicating color values in match arms.
+    pub fn gpui_color(&self) -> Rgba {
+        let (r, g, b) = self.rgb_color();
+        gpui::rgba(((r as u32) << 24) | ((g as u32) << 16) | ((b as u32) << 8) | 0xff).into()
     }
 
     /// Get the icon/indicator character for this status

@@ -2,7 +2,12 @@
 use crate::split_tree::SplitNode;
 use crate::ui::terminal_view::{TerminalBuffer, TerminalView};
 use gpui::prelude::*;
-use gpui::{relative, CursorStyle, *};
+use gpui::{
+    div, px, relative, rgb, App, Component, CursorStyle,
+    IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
+    ParentElement, RenderOnce, Styled,
+    StyleRefinement, Window,
+};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};

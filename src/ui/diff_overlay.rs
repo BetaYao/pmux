@@ -1,7 +1,7 @@
 // ui/diff_overlay.rs - Diff view overlay component
 use crate::ui::terminal_view::{TerminalBuffer, TerminalView};
 use gpui::prelude::*;
-use gpui::*;
+use gpui::{AnyElement, App, FontWeight, StyleRefinement, Window, div, px, rgb};
 use std::sync::Arc;
 
 /// Callback type for closing the diff overlay

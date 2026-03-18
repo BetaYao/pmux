@@ -33,6 +33,14 @@ fn default_idle_str() -> String {
     "Idle".to_string()
 }
 
+fn default_webhook_port() -> u16 {
+    7070
+}
+
+fn default_webhook_enabled() -> bool {
+    true
+}
+
 fn default_agent_detect() -> AgentDetectConfig {
     AgentDetectConfig {
         agents: default_agent_detect_agents(),
@@ -104,7 +112,13 @@ fn default_agent_detect_agents() -> Vec<AgentDef> {
                 },
                 AgentRule {
                     status: "Waiting".to_string(),
-                    patterns: vec!["?".to_string(), "> ".to_string()],
+                    patterns: vec![
+                        "?".to_string(),
+                        "\u{ff1f}".to_string(), // Full-width ？
+                        "> ".to_string(),
+                        "esc dismiss".to_string(), // Bubble Tea selection dialog
+                        "enter submit".to_string(), // Bubble Tea selection dialog
+                    ],
                 },
             ],
             default_status: "Idle".to_string(),
@@ -210,6 +224,23 @@ pub struct AgentRule {
     /// Text patterns. Case-insensitive substring match.
     /// If ANY pattern is found in the terminal content, this rule matches.
     pub patterns: Vec<String>,
+}
+
+/// Local HTTP webhook server configuration.
+/// Receives hook events from Claude Code, Gemini CLI, Codex, Aider.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebhookConfig {
+    #[serde(default = "default_webhook_enabled")]
+    pub enabled: bool,
+    /// Port to bind on localhost (default: 7070)
+    #[serde(default = "default_webhook_port")]
+    pub port: u16,
+}
+
+impl Default for WebhookConfig {
+    fn default() -> Self {
+        Self { enabled: true, port: 7070 }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -318,6 +349,7 @@ impl Default for Config {
             tui_programs: default_tui_programs(),
             agent_detect: default_agent_detect(),
             auto_update: UpdateConfig::default(),
+            webhook: WebhookConfig::default(),
         }
     }
 }
@@ -372,6 +404,9 @@ pub struct Config {
     /// Auto-update preferences
     #[serde(default = "default_auto_update")]
     pub auto_update: UpdateConfig,
+    /// Local webhook server for receiving AI tool hook events
+    #[serde(default)]
+    pub webhook: WebhookConfig,
 }
 
 impl Config {
@@ -679,15 +714,16 @@ mod tests {
         assert_eq!(config.remote_channels.feishu.chat_id.as_deref(), Some("oc_abc"));
     }
 
-    /// Test: agent_detect default has 4 agents
+    /// Test: agent_detect default has 5 agents
     #[test]
     fn test_agent_detect_default_config() {
         let config = Config::default();
-        assert_eq!(config.agent_detect.agents.len(), 4);
+        assert_eq!(config.agent_detect.agents.len(), 5);
         assert_eq!(config.agent_detect.agents[0].name, "claude");
         assert_eq!(config.agent_detect.agents[1].name, "agent");
-        assert_eq!(config.agent_detect.agents[2].name, "aider");
-        assert_eq!(config.agent_detect.agents[3].name, "cursor");
+        assert_eq!(config.agent_detect.agents[2].name, "opencode");
+        assert_eq!(config.agent_detect.agents[3].name, "aider");
+        assert_eq!(config.agent_detect.agents[4].name, "cursor");
     }
 
     /// Test: agent_detect finds agent by name (case-insensitive)
@@ -751,7 +787,7 @@ mod tests {
         config.save_to_path(&config_path).unwrap();
 
         let loaded = Config::load_from_path(&config_path).unwrap();
-        assert_eq!(loaded.agent_detect.agents.len(), 4);
+        assert_eq!(loaded.agent_detect.agents.len(), 5);
         assert_eq!(loaded.agent_detect.agents[0].name, "claude");
         assert_eq!(loaded.agent_detect.agents[0].rules.len(), 3);
         assert_eq!(loaded.agent_detect.agents[0].rules[0].status, "Running");
@@ -766,7 +802,35 @@ mod tests {
         std::fs::write(&path, r#"{"backend": "tmux"}"#).unwrap();
         let config = Config::load_from_path(&path).unwrap();
         // Should have default agent_detect
-        assert_eq!(config.agent_detect.agents.len(), 4);
+        assert_eq!(config.agent_detect.agents.len(), 5);
+    }
+
+    #[test]
+    fn test_webhook_config_defaults() {
+        let config = Config::default();
+        assert!(config.webhook.enabled);
+        assert_eq!(config.webhook.port, 7070);
+    }
+
+    #[test]
+    fn test_webhook_config_serialization() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("config.json");
+        std::fs::write(&path, r#"{"webhook":{"enabled":false,"port":8080}}"#).unwrap();
+        let config = Config::load_from_path(&path).unwrap();
+        assert!(!config.webhook.enabled);
+        assert_eq!(config.webhook.port, 8080);
+    }
+
+    #[test]
+    fn test_webhook_config_backward_compat() {
+        // Old configs without webhook field should get defaults
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("config.json");
+        std::fs::write(&path, r#"{"backend": "tmux"}"#).unwrap();
+        let config = Config::load_from_path(&path).unwrap();
+        assert!(config.webhook.enabled);
+        assert_eq!(config.webhook.port, 7070);
     }
 
     /// Test: migrate_from_legacy populates workspace_paths from recent_workspace

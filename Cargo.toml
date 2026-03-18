@@ -1,3 +1,16 @@
+[workspace]
+resolver = "2"
+members = [
+    ".",
+    "crates/ghostty_vt_sys",
+    "crates/ghostty_vt",
+    "crates/gpui_ghostty_terminal",
+]
+
+[workspace.dependencies]
+gpui = { git = "https://github.com/zed-industries/zed" }
+smallvec = { version = "1.15", features = ["const_new"] }
+
 [package]
 name = "pmux"
 version = "0.1.4"
@@ -30,14 +43,20 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "blo
 open = "5"
 tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
 futures-util = "0.3"
-alacritty_terminal = "0.25"
 parking_lot = "0.12"
 syntect = { version = "5", default-features = false, features = ["default-syntaxes", "default-themes", "parsing", "regex-fancy"] }
 similar = "2"
+tiny_http = "0.12"
+which = "6"
+tokio-cron-scheduler = "0.13"
+chrono = { version = "0.4", features = ["serde"] }
+gpui_ghostty_terminal = { path = "crates/gpui_ghostty_terminal" }
+ghostty_vt = { path = "crates/ghostty_vt" }
 
 [dev-dependencies]
 tempfile = "3.8"
 flume = "0.11"
+gpui = { git = "https://github.com/zed-industries/zed", features = ["test-support"] }
 
 [[bin]]
 name = "pmux"

@@ -28,14 +28,14 @@ impl ValidationError {
 /// - Can contain: alphanumeric, hyphen, underscore, forward slash
 pub fn validate_branch_name(name: &str) -> Result<(), ValidationError> {
     let trimmed = name.trim();
-    
+
     // Check empty
     if trimmed.is_empty() {
         return Err(ValidationError::new("Branch name cannot be empty"));
     }
-    
-    // Check for spaces
-    if trimmed.contains(' ') {
+
+    // Check for spaces (including leading/trailing) in the original name
+    if name.contains(' ') {
         return Err(ValidationError::new("Branch name cannot contain spaces"));
     }
     
@@ -347,7 +347,9 @@ mod tests {
     fn test_new_branch_dialog_cannot_close_while_creating() {
         let mut dialog = NewBranchDialog::new();
         dialog.open();
+        dialog.set_branch_name("feature/test");
         dialog.start_creating();
+        assert!(dialog.is_creating());
         dialog.close();
         assert!(dialog.is_open()); // Should remain open
     }

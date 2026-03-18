@@ -1,6 +1,6 @@
 // ui/delete_worktree_dialog_ui.rs - Delete worktree confirmation dialog
 use gpui::prelude::*;
-use gpui::*;
+use gpui::{AnyElement, App, FontWeight, StyleRefinement, Window, div, px, rgb, rgba};
 use std::sync::Arc;
 use crate::worktree::WorktreeInfo;
 

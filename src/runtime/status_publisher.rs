@@ -49,23 +49,12 @@ impl StatusPublisher {
         }
     }
 
-    /// Check status for a specific pane and publish if changed.
-    ///
-    /// Call this when terminal content changes (e.g., after processing new PTY output).
-    ///
-    /// # Arguments
-    /// * `pane_id` - The pane to check
-    /// * `process_status` - Process lifecycle status from runtime
-    /// * `shell_info` - Optional shell phase info from OSC 133 markers
-    /// * `content` - Current terminal content (reserved for future use)
-    ///
-    /// # Returns
-    /// `true` if status changed and was published
-    pub fn check_status(
+    /// Internal: publish a status change event and optional notification.
+    /// Returns `true` if status changed.
+    fn publish_status_change(
         &self,
         pane_id: &str,
-        process_status: ProcessStatus,
-        shell_info: Option<ShellPhaseInfo>,
+        new_status: AgentStatus,
         content: &str,
         skip_patterns: &[String],
     ) -> bool {
@@ -79,13 +68,7 @@ impl StatusPublisher {
             None => return false,
         };
 
-        // Save previous status before update
         let prev_status = tracker.current_status();
-
-        // Detect status (process lifecycle > OSC 133 shell phase)
-        let new_status = self.detector.detect(process_status, shell_info, content);
-
-        // Check if status changed (with debouncing)
         let changed = tracker.update_with_status(new_status);
 
         if changed {
@@ -98,7 +81,6 @@ impl StatusPublisher {
                 Some(last_line.clone())
             };
 
-            // Publish state change event (with prev_state and last_line)
             self.event_bus
                 .publish(RuntimeEvent::AgentStateChange(AgentStateChange {
                     agent_id: agent_id.clone(),
@@ -108,7 +90,6 @@ impl StatusPublisher {
                     last_line: last_line_opt,
                 }));
 
-            // Determine if notification should fire
             let should_notify = matches!(
                 (prev_status, current_status),
                 (AgentStatus::Running, AgentStatus::Idle)
@@ -142,6 +123,24 @@ impl StatusPublisher {
         changed
     }
 
+    /// Check status for a specific pane and publish if changed.
+    ///
+    /// Call this when terminal content changes (e.g., after processing new PTY output).
+    ///
+    /// # Returns
+    /// `true` if status changed and was published
+    pub fn check_status(
+        &self,
+        pane_id: &str,
+        process_status: ProcessStatus,
+        shell_info: Option<ShellPhaseInfo>,
+        content: &str,
+        skip_patterns: &[String],
+    ) -> bool {
+        let new_status = self.detector.detect(process_status, shell_info, content);
+        self.publish_status_change(pane_id, new_status, content, skip_patterns)
+    }
+
     /// Force a specific status for a pane (bypassing OSC 133 / ProcessStatus detection).
     /// Used when agent text pattern matching determines status independently.
     ///
@@ -154,69 +153,7 @@ impl StatusPublisher {
         content: &str,
         skip_patterns: &[String],
     ) -> bool {
-        let mut tracker_guard = match self.tracker.lock() {
-            Ok(g) => g,
-            Err(_) => return false,
-        };
-
-        let tracker = match tracker_guard.get_mut(pane_id) {
-            Some(t) => t,
-            None => return false,
-        };
-
-        let prev_status = tracker.current_status();
-        let changed = tracker.update_with_status(status);
-
-        if changed {
-            let current_status = tracker.current_status();
-            let agent_id = pane_id.split(':').next().unwrap_or(pane_id).to_string();
-            let last_line = extract_last_line_filtered(content, 80, skip_patterns);
-            let last_line_opt = if last_line.is_empty() {
-                None
-            } else {
-                Some(last_line.clone())
-            };
-
-            self.event_bus
-                .publish(RuntimeEvent::AgentStateChange(AgentStateChange {
-                    agent_id: agent_id.clone(),
-                    pane_id: Some(pane_id.to_string()),
-                    state: current_status,
-                    prev_state: Some(prev_status),
-                    last_line: last_line_opt,
-                }));
-
-            let should_notify = matches!(
-                (prev_status, current_status),
-                (AgentStatus::Running, AgentStatus::Idle)
-                    | (_, AgentStatus::Waiting)
-                    | (_, AgentStatus::Error)
-                    | (_, AgentStatus::Exited)
-            );
-
-            if should_notify {
-                let notif_type = match current_status {
-                    AgentStatus::Error => NotificationType::Error,
-                    AgentStatus::Waiting => NotificationType::WaitingInput,
-                    AgentStatus::Idle | AgentStatus::Exited => NotificationType::Info,
-                    _ => return true,
-                };
-                let message = if last_line.is_empty() {
-                    current_status.display_text().to_string()
-                } else {
-                    last_line
-                };
-                self.event_bus
-                    .publish(RuntimeEvent::Notification(Notification {
-                        agent_id,
-                        pane_id: Some(pane_id.to_string()),
-                        message,
-                        notif_type,
-                    }));
-            }
-        }
-
-        changed
+        self.publish_status_change(pane_id, status, content, skip_patterns)
     }
 
     /// Get current status for a pane.
@@ -360,5 +297,28 @@ mod tests {
             }
         }
         assert!(found_notification, "Running→Idle should publish Info notification");
+    }
+
+    #[test]
+    fn test_force_status_publishes_same_events_as_before() {
+        let bus = Arc::new(EventBus::new(32));
+        let rx = bus.subscribe();
+        let pub_ = StatusPublisher::new(Arc::clone(&bus));
+        pub_.register_pane("pane-1");
+
+        // Force to Running
+        let changed = pub_.force_status("pane-1", AgentStatus::Running, "some output", &[]);
+        assert!(changed);
+        assert_eq!(pub_.current_status("pane-1"), AgentStatus::Running);
+
+        // Drain events
+        let mut state_change_count = 0;
+        while let Ok(ev) = rx.try_recv() {
+            if let RuntimeEvent::AgentStateChange(sc) = ev {
+                assert_eq!(sc.state, AgentStatus::Running);
+                state_change_count += 1;
+            }
+        }
+        assert_eq!(state_change_count, 1);
     }
 }

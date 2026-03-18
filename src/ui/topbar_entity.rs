@@ -4,7 +4,7 @@ use crate::agent_status::StatusCounts;
 use crate::ui::models::StatusCountsModel;
 use crate::workspace_manager::{WorkspaceManager, WorkspaceTab};
 use gpui::prelude::*;
-use gpui::*;
+use gpui::{App, Context, Div, Entity, SharedString, Stateful, StyleRefinement, Window, div, px, rgb};
 use std::sync::Arc;
 
 /// TopBar Entity - observes StatusCountsModel; re-renders only when model notifies.

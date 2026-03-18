@@ -13,7 +13,7 @@ fn tmux_available() -> bool {
 
 #[test]
 #[ignore]
-fn test_tmux_pipe_pane_and_input() {
+fn test_tmux_standard_pipe_and_input() {
     if !tmux_available() {
         eprintln!("tmux not available, skip");
         return;
@@ -27,7 +27,11 @@ fn test_tmux_pipe_pane_and_input() {
     // Clean session
     let _ = Command::new("tmux").args(["kill-session", "-t", &session]).output();
 
-    let rt = pmux::runtime::backends::TmuxRuntime::new(&session, "main", Some(test_dir));
+    let rt = pmux::runtime::backends::tmux_standard::TmuxStandardBackend::new(
+        &session, test_dir, 120, 36,
+    )
+    .expect("TmuxStandardBackend::new");
+
     let pane_id = rt
         .primary_pane_id()
         .unwrap_or_else(|| panic!("no primary pane"));
@@ -36,15 +40,12 @@ fn test_tmux_pipe_pane_and_input() {
         .subscribe_output(&pane_id)
         .unwrap_or_else(|| panic!("subscribe_output failed"));
 
-    // Focus pane to prewarm PTY cache
-    let _ = rt.focus_pane(&pane_id);
-
     // Send echo command
     let marker = "PMUX_TEST_MARKER_OK";
     rt.send_input(&pane_id, format!("echo {}\r", marker).as_bytes())
         .expect("send_input");
 
-    // Read from pipe-pane until we see marker or timeout (5s)
+    // Read from output until we see marker or timeout (5s)
     let mut all = Vec::new();
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
@@ -64,7 +65,7 @@ fn test_tmux_pipe_pane_and_input() {
 
     let _ = Command::new("tmux").args(["kill-session", "-t", &session]).output();
     panic!(
-        "timeout: pipe-pane did not receive '{}'. Received {} bytes: {:?}",
+        "timeout: output did not receive '{}'. Received {} bytes: {:?}",
         marker,
         all.len(),
         String::from_utf8_lossy(&all[..all.len().min(500)])

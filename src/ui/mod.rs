@@ -1,5 +1,11 @@
 // ui/mod.rs - GUI components for pmux
 pub mod app_root;
+mod app_root_render;
+pub mod dialog_manager;
+pub mod notification_center;
+pub mod runtime_manager;
+pub mod terminal_manager;
+pub mod split_pane_manager;
 pub mod models;
 pub mod close_tab_dialog_ui;
 pub mod delete_worktree_dialog_ui;
@@ -12,6 +18,7 @@ pub mod sidebar;
 pub mod split_pane_container;
 pub mod status_bar;
 pub mod tabbar;
+pub mod task_dialog;
 pub mod terminal_controller;
 pub mod terminal_area_entity;
 pub mod terminal_view;

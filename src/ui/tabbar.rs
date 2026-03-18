@@ -1,6 +1,6 @@
 // ui/tabbar.rs - TabBar component for pane switching within a workspace
 use gpui::prelude::*;
-use gpui::*;
+use gpui::{App, Component, Div, Stateful, StyleRefinement, Window, div, px, rgb};
 use std::sync::Arc;
 
 /// Kind of tab: pane (terminal within current worktree) or review (diff view)

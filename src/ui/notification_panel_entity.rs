@@ -4,7 +4,7 @@ use crate::notification_manager::NotificationManager;
 use crate::ui::models::NotificationPanelModel;
 use crate::ui::notification_panel::{NotificationItem, NotificationPanel};
 use gpui::prelude::*;
-use gpui::*;
+use gpui::{App, Context, Entity, Window, div, px};
 use std::sync::Arc;
 use uuid::Uuid;
 

@@ -1,22 +1,19 @@
 // ui/terminal_view.rs - Terminal view component with GPUI render
 // Renders via self-built Terminal, simple div for Error, or placeholder for Empty.
 use gpui::prelude::*;
-use gpui::*;
-use std::sync::Arc;
+use gpui::{AnyElement, App, Component, Window, div, px, rgb};
 
-/// Content source for TerminalView - self-built terminal, error placeholder, or empty.
+/// Content source for TerminalView - gpui-ghostty terminal, error placeholder, or empty.
 #[derive(Clone)]
 pub enum TerminalBuffer {
     /// Placeholder when pane has no buffer yet (gray bg, "—")
     Empty,
     /// Error: static message when streaming unavailable (no screen snapshot)
     Error(String),
-    /// Self-built terminal: Arc<Terminal> + dedicated FocusHandle
-    Terminal {
-        terminal: Arc<crate::terminal::Terminal>,
+    /// gpui-ghostty backed terminal
+    GhosttyTerminal {
+        view: gpui::Entity<gpui_ghostty_terminal::view::TerminalView>,
         focus_handle: gpui::FocusHandle,
-        resize_callback: Option<Arc<dyn Fn(u16, u16) + Send + Sync>>,
-        input_callback: Option<Arc<dyn Fn(&[u8]) + Send + Sync>>,
     },
 }
 
@@ -28,7 +25,7 @@ impl TerminalBuffer {
         match self {
             TerminalBuffer::Empty => None,
             TerminalBuffer::Error(s) => Some(s.clone()),
-            TerminalBuffer::Terminal { .. } => None,
+            TerminalBuffer::GhosttyTerminal { .. } => None,
         }
     }
 }
@@ -144,47 +141,6 @@ impl IntoElement for TerminalView {
 impl RenderOnce for TerminalView {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let content_elem: AnyElement = match &self.buffer {
-            TerminalBuffer::Terminal { terminal, focus_handle, resize_callback, input_callback } => {
-                use crate::terminal::terminal_element::TerminalElement;
-                use crate::terminal::ColorPalette;
-                let matches = self
-                    .search_query
-                    .as_ref()
-                    .map(|q| terminal.search_cached(q))
-                    .unwrap_or_default();
-                let search_current = self.search_current_match.and_then(|i| {
-                    if i < matches.len() {
-                        Some(i)
-                    } else {
-                        matches.len().checked_sub(1)
-                    }
-                });
-                let links = terminal.detect_links_cached();
-                let selection_range = terminal.selection_range();
-                // Inactive panes get a slightly darker background to distinguish focus
-                let palette = if self.is_focused {
-                    ColorPalette::default()
-                } else {
-                    ColorPalette::builder().background(0x19, 0x1c, 0x22).build()
-                };
-                let mut elem = TerminalElement::new(
-                    terminal.clone(),
-                    focus_handle.clone(),
-                    palette,
-                )
-                .with_focused(self.is_focused)
-                .with_search(matches, search_current)
-                .with_links(links, None)
-                .with_selection(selection_range);
-                if let Some(cb) = resize_callback {
-                    let cb = cb.clone();
-                    elem = elem.with_resize_callback(move |cols, rows| cb(cols, rows));
-                }
-                if let Some(cb) = input_callback {
-                    elem = elem.with_input_handler(cb.clone());
-                }
-                elem.size_full().into_any_element()
-            }
             TerminalBuffer::Error(msg) => {
                 self.render_error(msg).into_any_element()
             }
@@ -197,6 +153,12 @@ impl RenderOnce for TerminalView {
                     .bg(rgb(0x2e343e))
                     .text_color(rgb(0x6d6d6d))
                     .child("—")
+                    .into_any_element()
+            }
+            TerminalBuffer::GhosttyTerminal { view, .. } => {
+                div()
+                    .size_full()
+                    .child(view.clone())
                     .into_any_element()
             }
         };

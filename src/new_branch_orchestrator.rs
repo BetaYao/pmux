@@ -176,7 +176,7 @@ mod tests {
     }
 
     impl NotificationSender for MockNotificationSender {
-        fn send(&mut self, notification: Notification) {
+        fn send(&self, notification: Notification) {
             let mut notifications = self.notifications.lock().unwrap();
             notifications.push(notification);
         }
@@ -216,13 +216,14 @@ mod tests {
     /// Test: Notification sending
     #[test]
     fn test_notification_sending() {
-        let mock_sender = Arc::new(Mutex::new(MockNotificationSender::new()));
+        let mock_sender = Arc::new(StdMutex::new(MockNotificationSender::new()));
         let orchestrator = NewBranchOrchestrator::new(PathBuf::from("/tmp/test"))
             .with_notification_sender(mock_sender.clone());
 
         orchestrator.send_notification(NotificationType::Info, "Test message");
 
-        let notifications = mock_sender.lock().unwrap();
+        let sender = mock_sender.lock().unwrap();
+        let notifications = sender.get_notifications();
         assert_eq!(notifications.len(), 1);
         assert_eq!(notifications[0].message(), "Test message");
     }

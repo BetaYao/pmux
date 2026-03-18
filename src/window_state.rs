@@ -86,6 +86,8 @@ pub struct PersistentAppState {
     pub window_state: WindowState,
     /// Sidebar width in pixels
     pub sidebar_width: u32,
+    /// Whether tasks section is expanded in sidebar
+    pub tasks_expanded: bool,
     /// Active workspace index
     pub active_workspace_index: usize,
     /// Recent workspaces list
@@ -99,6 +101,7 @@ impl Default for PersistentAppState {
         Self {
             window_state: WindowState::default(),
             sidebar_width: 280,
+            tasks_expanded: true,
             active_workspace_index: 0,
             recent_workspaces: Vec::new(),
             last_saved: None,
@@ -151,8 +154,7 @@ impl PersistentAppState {
 
     /// Save to config file
     pub fn save(&mut self) -> Result<(), StatePersistenceError> {
-        let path = Self::config_path()
-            .ok_or(StatePersistenceError::ConfigDirNotFound)?;
+        let path = Self::config_path().ok_or(StatePersistenceError::ConfigDirNotFound)?;
 
         // Ensure directory exists
         if let Some(parent) = path.parent() {
@@ -171,8 +173,7 @@ impl PersistentAppState {
 
     /// Load from config file
     pub fn load() -> Result<Self, StatePersistenceError> {
-        let path = Self::config_path()
-            .ok_or(StatePersistenceError::ConfigDirNotFound)?;
+        let path = Self::config_path().ok_or(StatePersistenceError::ConfigDirNotFound)?;
 
         if !path.exists() {
             return Ok(Self::default());
@@ -185,9 +186,7 @@ impl PersistentAppState {
 
     /// Check if config file exists
     pub fn exists() -> bool {
-        Self::config_path()
-            .map(|p| p.exists())
-            .unwrap_or(false)
+        Self::config_path().map(|p| p.exists()).unwrap_or(false)
     }
 }
 
@@ -338,7 +337,7 @@ mod tests {
     #[test]
     fn test_persistent_app_state_default() {
         let state = PersistentAppState::default();
-        assert_eq!(state.sidebar_width, 250);
+        assert_eq!(state.sidebar_width, 280);
         assert_eq!(state.active_workspace_index, 0);
         assert!(state.recent_workspaces.is_empty());
         assert!(state.last_saved.is_none());
@@ -401,10 +400,13 @@ mod tests {
         assert!(!manager.should_save());
 
         manager.mark_dirty();
-        // Won't save immediately because interval hasn't passed
-        assert!(manager.should_save()); // But should_save returns true when dirty + interval passed
+        // Won't save immediately because 60s interval hasn't passed
+        assert!(!manager.should_save());
 
-        // Since we can't wait in tests, let's just verify the logic
+        // Simulate interval elapsed by setting last_save in the past
+        manager.last_save = Instant::now() - Duration::from_secs(61);
+        assert!(manager.should_save()); // dirty + interval passed
+
         manager.dirty = false;
         assert!(!manager.should_save());
     }

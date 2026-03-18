@@ -1,6 +1,6 @@
 // ui/workspace_tabbar.rs - Workspace tab bar for Content area (Chrome/ghostty style)
 use gpui::prelude::*;
-use gpui::*;
+use gpui::{App, Component, Div, SharedString, Stateful, StyleRefinement, Window, div, px, rgb};
 use std::sync::Arc;
 use crate::workspace_manager::{WorkspaceManager, WorkspaceTab};
 
