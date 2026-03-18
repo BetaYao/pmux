@@ -220,3 +220,137 @@ fn test_escape_cancels_pending_delete(cx: &mut TestAppContext) {
     cx.simulate_keystrokes(window.into(), "enter");
     cx.run_until_parked();
 }
+
+// ─── Tab switch state preservation tests ─────────────────────────────
+
+/// Helper: create fake WorktreeInfo for testing.
+fn fake_worktree(name: &str) -> pmux::worktree::WorktreeInfo {
+    pmux::worktree::WorktreeInfo::new(
+        std::path::PathBuf::from(format!("/tmp/fake_wt_{}", name)),
+        &format!("refs/heads/{}", name),
+        "abc1234",
+    )
+}
+
+#[gpui::test]
+fn test_tab_switch_preserves_worktree_index(cx: &mut TestAppContext) {
+    let window = setup_app(cx);
+
+    window.update(cx, |app, _w, _cx| {
+        // Record initial tab count (setup_app may have loaded config tabs)
+        let base = app.workspace_tab_count();
+
+        // Add 2 workspace tabs
+        let tab_a = app.add_workspace_for_test(std::path::PathBuf::from("/tmp/project_a"));
+        let tab_b = app.add_workspace_for_test(std::path::PathBuf::from("/tmp/project_b"));
+        assert_eq!(app.workspace_tab_count(), base + 2);
+
+        // Switch to tab_a first
+        app.handle_workspace_tab_switch_for_test(tab_a);
+
+        // Inject fake worktrees and set index to 1
+        app.set_cached_worktrees_for_test(vec![
+            fake_worktree("main"),
+            fake_worktree("feature"),
+        ]);
+        app.set_active_worktree_index_for_test(Some(1));
+
+        // Switch to tab_b
+        app.handle_workspace_tab_switch_for_test(tab_b);
+
+        // active_worktree_index should now be None (tab_b has no saved index)
+        assert_eq!(app.active_tab_index_for_test(), Some(tab_b));
+        assert_eq!(app.active_worktree_index_for_test(), None);
+
+        // Inject worktrees for tab_b
+        app.set_cached_worktrees_for_test(vec![fake_worktree("dev")]);
+        app.set_active_worktree_index_for_test(Some(0));
+
+        // Switch back to tab_a
+        app.handle_workspace_tab_switch_for_test(tab_a);
+
+        // Should restore worktree index = 1 from tab_a
+        assert_eq!(app.active_tab_index_for_test(), Some(tab_a));
+        assert_eq!(app.active_worktree_index_for_test(), Some(1),
+            "Worktree index should be restored after tab round-trip");
+    }).unwrap();
+}
+
+#[gpui::test]
+fn test_tab_switch_round_trip_three_tabs(cx: &mut TestAppContext) {
+    let window = setup_app(cx);
+
+    window.update(cx, |app, _w, _cx| {
+        let t0 = app.add_workspace_for_test(std::path::PathBuf::from("/tmp/rt_p1"));
+        let t1 = app.add_workspace_for_test(std::path::PathBuf::from("/tmp/rt_p2"));
+        let t2 = app.add_workspace_for_test(std::path::PathBuf::from("/tmp/rt_p3"));
+
+        // Switch to t0, set worktree index 2
+        app.handle_workspace_tab_switch_for_test(t0);
+        app.set_cached_worktrees_for_test(vec![
+            fake_worktree("a"), fake_worktree("b"), fake_worktree("c"),
+        ]);
+        app.set_active_worktree_index_for_test(Some(2));
+
+        // Switch to t1: set worktree index 0
+        app.handle_workspace_tab_switch_for_test(t1);
+        app.set_cached_worktrees_for_test(vec![fake_worktree("x")]);
+        app.set_active_worktree_index_for_test(Some(0));
+
+        // Switch to t2
+        app.handle_workspace_tab_switch_for_test(t2);
+
+        // Switch back to t0
+        app.handle_workspace_tab_switch_for_test(t0);
+        assert_eq!(app.active_worktree_index_for_test(), Some(2),
+            "Tab 0 should restore worktree index 2");
+
+        // Switch to t1
+        app.handle_workspace_tab_switch_for_test(t1);
+        assert_eq!(app.active_worktree_index_for_test(), Some(0),
+            "Tab 1 should restore worktree index 0");
+    }).unwrap();
+}
+
+#[gpui::test]
+fn test_tab_switch_to_same_tab_is_noop(cx: &mut TestAppContext) {
+    let window = setup_app(cx);
+
+    window.update(cx, |app, _w, _cx| {
+        let t0 = app.add_workspace_for_test(std::path::PathBuf::from("/tmp/noop_p1"));
+        let _t1 = app.add_workspace_for_test(std::path::PathBuf::from("/tmp/noop_p2"));
+
+        // Switch to t0 and set worktree index
+        app.handle_workspace_tab_switch_for_test(t0);
+        app.set_active_worktree_index_for_test(Some(1));
+
+        // Switch to the same tab (t0)
+        app.handle_workspace_tab_switch_for_test(t0);
+
+        // Should be a noop — worktree index unchanged
+        assert_eq!(app.active_worktree_index_for_test(), Some(1));
+    }).unwrap();
+}
+
+#[gpui::test]
+fn test_tab_switch_with_no_worktrees(cx: &mut TestAppContext) {
+    let window = setup_app(cx);
+
+    window.update(cx, |app, _w, _cx| {
+        let t0 = app.add_workspace_for_test(std::path::PathBuf::from("/tmp/nowt_p1"));
+        let t1 = app.add_workspace_for_test(std::path::PathBuf::from("/tmp/nowt_p2"));
+
+        // Switch to t0
+        app.handle_workspace_tab_switch_for_test(t0);
+
+        // No worktrees injected, index is None
+        assert_eq!(app.active_worktree_index_for_test(), None);
+
+        // Switch to t1 and back
+        app.handle_workspace_tab_switch_for_test(t1);
+        app.handle_workspace_tab_switch_for_test(t0);
+
+        // Should be None — no crash, graceful handling
+        assert_eq!(app.active_worktree_index_for_test(), None);
+    }).unwrap();
+}

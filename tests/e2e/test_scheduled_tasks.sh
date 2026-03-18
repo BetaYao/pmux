@@ -6,16 +6,26 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/helpers.sh"
 
-# Cleanup on exit
-trap cleanup EXIT
+# Cleanup on exit (only if we started pmux ourselves)
+if [ "${1:-}" != "--attach" ]; then
+    trap cleanup EXIT
+fi
 
 echo "=== E2E Test: Scheduled Tasks Create & Delete ==="
 echo ""
 
 # Setup
 ensure_ocr_tool
-start_pmux
-wait_for_window 30
+
+# Use existing pmux instance if --attach flag, otherwise start new one
+if [ "${1:-}" = "--attach" ]; then
+    echo "Attaching to existing pmux instance..."
+    mkdir -p "$RESULTS_DIR"
+    wait_for_window 5
+else
+    start_pmux
+    wait_for_window 30
+fi
 
 sleep 2  # let UI fully render
 
@@ -27,7 +37,8 @@ assert_contains "task_list_visible" "Scheduled Tasks" || true
 
 # Test 2: Open TaskDialog with Cmd+Shift+T
 echo "--- Test 2: Open TaskDialog ---"
-send_key "cmd shift" "t"
+# Use key code 17 (T) instead of keystroke to avoid macOS interception
+send_special_key 17 "cmd shift"
 sleep 1
 assert_contains "task_dialog_open" "New Scheduled Task" || true
 

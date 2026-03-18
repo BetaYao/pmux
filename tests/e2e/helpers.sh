@@ -40,21 +40,22 @@ wait_for_window() {
     local elapsed=0
     echo "Waiting for pmux window (timeout: ${timeout}s)..."
     while [ $elapsed -lt $timeout ]; do
-        WINDOW_ID=$(osascript -e '
-            tell application "System Events"
-                set pmuxProcs to (every process whose name is "pmux")
-                if (count of pmuxProcs) > 0 then
-                    tell (first process whose name is "pmux")
-                        if (count of windows) > 0 then
-                            return id of front window
-                        end if
-                    end tell
-                end if
-            end tell
-            return ""
-        ' 2>/dev/null || true)
+        # GPUI windows are invisible to System Events, use CGWindowListCopyWindowInfo via Swift
+        WINDOW_ID=$(swift -e '
+            import CoreGraphics
+            let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
+            for w in windows {
+                let owner = w["kCGWindowOwnerName"] as? String ?? ""
+                if owner == "pmux" {
+                    if let wid = w["kCGWindowNumber"] as? Int {
+                        print(wid)
+                        break
+                    }
+                }
+            }
+        ' 2>/dev/null | head -1 || true)
         if [ -n "$WINDOW_ID" ] && [ "$WINDOW_ID" != "" ]; then
-            echo "Found pmux window: $WINDOW_ID"
+            echo "Found pmux window (CGWindowID): $WINDOW_ID"
             sleep 1  # extra settle time
             return 0
         fi
@@ -233,6 +234,26 @@ report() {
         return 1
     fi
     return 0
+}
+
+detect_tab_count() {
+    # Read tab count from pmux config file
+    local config="$HOME/.config/pmux/config.json"
+    if [ -f "$config" ]; then
+        # Count "workspaces" array entries
+        local count
+        count=$(python3 -c "
+import json, sys
+try:
+    c = json.load(open('$config'))
+    print(len(c.get('workspaces', [])))
+except:
+    print(0)
+" 2>/dev/null || echo 0)
+        echo "$count"
+    else
+        echo "0"
+    fi
 }
 
 cleanup() {

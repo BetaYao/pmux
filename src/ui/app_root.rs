@@ -559,6 +559,50 @@ impl AppRoot {
     pub fn ensure_entities_for_test(&mut self, cx: &mut Context<Self>) {
         self.ensure_entities(cx);
     }
+    /// Read active worktree index.
+    pub fn active_worktree_index_for_test(&self) -> Option<usize> {
+        self.active_worktree_index
+    }
+    /// Read workspace tab count.
+    pub fn workspace_tab_count(&self) -> usize {
+        self.workspace_manager.tab_count()
+    }
+    /// Read active tab index.
+    pub fn active_tab_index_for_test(&self) -> Option<usize> {
+        self.workspace_manager.active_tab_index()
+    }
+    /// Add a workspace tab for testing (bypasses file dialog).
+    pub fn add_workspace_for_test(&mut self, path: std::path::PathBuf) -> usize {
+        self.workspace_manager.add_workspace(path)
+    }
+    /// Set active worktree index for testing.
+    pub fn set_active_worktree_index_for_test(&mut self, index: Option<usize>) {
+        self.active_worktree_index = index;
+    }
+    /// Inject fake worktrees for testing (bypasses git discovery).
+    pub fn set_cached_worktrees_for_test(&mut self, worktrees: Vec<crate::worktree::WorktreeInfo>) {
+        self.cached_worktrees = worktrees;
+    }
+    /// Tab switch that only exercises save/restore logic, no I/O.
+    /// Mirrors the state transitions in handle_workspace_tab_switch without
+    /// calling save_config, stop_current_session, refresh_worktrees_for_repo, etc.
+    pub fn handle_workspace_tab_switch_for_test(&mut self, idx: usize) {
+        if idx >= self.workspace_manager.tab_count() {
+            return;
+        }
+        if self.workspace_manager.active_tab_index() == Some(idx) {
+            return;
+        }
+        // Save worktree index to departing tab
+        if let Some(current_tab) = self.workspace_manager.active_tab_mut() {
+            current_tab.save_worktree_index(self.active_worktree_index);
+        }
+        self.workspace_manager.switch_to_tab(idx);
+        // Restore worktree index from incoming tab
+        if let Some(tab) = self.workspace_manager.active_tab() {
+            self.active_worktree_index = tab.last_worktree_index();
+        }
+    }
     /// Focus the terminal_focus handle so on_key_down events are delivered in tests.
     pub fn focus_for_test(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) {
         if self.terminal_focus.is_none() {
