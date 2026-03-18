@@ -65,18 +65,6 @@ pub trait AgentRuntime: Send + Sync + DowncastSync {
     /// - local_pty: None (no session to recover)
     fn session_info(&self) -> Option<(String, String)>;
 
-    /// Tell the runtime to skip capture_initial_content on the next subscribe_output call.
-    /// Used when pane dimensions don't match — the caller will send C-l instead.
-    fn set_skip_initial_capture(&self) {}
-
-
-    /// Switch to a different window within the same session.
-    /// Used when switching worktrees within the same repo — avoids destroying
-    /// and recreating the control-mode connection.
-    /// Creates the window if it doesn't exist yet.
-    fn switch_window(&self, _window_name: &str, _start_dir: Option<&Path>) -> Result<(), RuntimeError> {
-        Err(RuntimeError::Backend("switch_window not supported by this backend".into()))
-    }
 }
 
 downcast_rs::impl_downcast!(sync AgentRuntime);

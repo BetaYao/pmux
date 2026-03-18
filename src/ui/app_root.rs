@@ -9,16 +9,14 @@ use crate::git_utils::{is_git_repository, get_git_error_message, GitError};
 use crate::notification::NotificationType;
 use crate::notification_manager::NotificationManager;
 use crate::system_notifier;
-use crate::shell_integration::ShellPhaseInfo;
 use crate::terminal::ContentExtractor;
 use crate::runtime::{AgentRuntime, EventBus, RuntimeEvent, StatusPublisher};
-use crate::runtime::backends::{create_runtime_from_env, kill_tmux_window, legacy_window_name_for_worktree, list_tmux_windows, migrate_tmux_window_name, recover_runtime, resolve_backend, session_name_for_workspace, window_name_for_worktree, window_target};
+use crate::runtime::backends::{create_runtime_from_env, legacy_window_name_for_worktree, list_tmux_windows, recover_runtime, resolve_backend, window_name_for_worktree, window_target};
 use crate::runtime::{RuntimeState, WorktreeState};
-use crate::ui::{AppState, sidebar::Sidebar, workspace_tabbar::WorkspaceTabBar, terminal_controller::ResizeController, terminal_view::TerminalBuffer, terminal_area_entity::TerminalAreaEntity, notification_panel_entity::NotificationPanelEntity, new_branch_dialog_entity::NewBranchDialogEntity, close_tab_dialog_ui::CloseTabDialogUi, delete_worktree_dialog_ui::DeleteWorktreeDialogUi, split_pane_container::SplitPaneContainer, diff_view::DiffViewOverlay, status_bar::StatusBar, models::{StatusCountsModel, NotificationPanelModel, NewBranchDialogModel, PaneSummaryModel}, topbar_entity::TopBarEntity};
+use crate::ui::{AppState, workspace_tabbar::WorkspaceTabBar, terminal_controller::ResizeController, terminal_view::TerminalBuffer, terminal_area_entity::TerminalAreaEntity, notification_panel_entity::NotificationPanelEntity, new_branch_dialog_entity::NewBranchDialogEntity, close_tab_dialog_ui::CloseTabDialogUi, delete_worktree_dialog_ui::DeleteWorktreeDialogUi, diff_view::DiffViewOverlay, status_bar::StatusBar, models::{StatusCountsModel, NotificationPanelModel, NewBranchDialogModel, PaneSummaryModel}, topbar_entity::TopBarEntity, task_dialog::TaskDialog};
 use crate::scheduler::SchedulerManager;
 use crate::split_tree::SplitNode;
 use crate::workspace_manager::WorkspaceManager;
-use crate::input::{key_to_xterm_escape, KeyModifiers};
 use futures_util::future::{select, Either};
 use futures_util::pin_mut;
 use crate::window_state::PersistentAppState;
@@ -26,7 +24,7 @@ use crate::new_branch_orchestrator::{NewBranchOrchestrator, CreationResult, Noti
 use crate::notification::Notification;
 use gpui::prelude::FluentBuilder;
 use gpui::prelude::*;
-use gpui::{actions, AnyElement, App, AsyncApp, ClipboardEntry, ClipboardItem, Div, Entity, FocusHandle, Image, ImageFormat, KeyDownEvent, MouseButton, SharedString, Stateful, StyleRefinement, Window, div, px, rgb, rgba, svg};
+use gpui::{actions, AnyElement, App, AsyncApp, ClipboardEntry, ClipboardItem, Div, Entity, FocusHandle, Image, ImageFormat, KeyDownEvent, MouseButton, Stateful, Window, div, px, rgb};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -393,6 +391,7 @@ pub struct AppRoot {
     /// Which agent is being edited in the Agent Detect settings (index into agent_detect.agents)
     pub(crate) settings_editing_agent: Option<usize>,
     /// Active settings tab: "channels" or "agent_detect"
+    #[allow(dead_code)]
     pub(crate) settings_tab: String,
     /// Focus handle for the settings modal (steals focus from terminal when open)
     pub(crate) settings_focus: Option<FocusHandle>,
@@ -445,6 +444,8 @@ pub struct AppRoot {
     pub pane_index: Option<std::sync::Arc<std::sync::RwLock<crate::hooks::handler::PaneIndex>>>,
     /// Webhook hook event handler (processes HookEvents from WebhookServer)
     pub hook_handler: Option<std::sync::Arc<crate::hooks::handler::HookEventHandler>>,
+    /// Task dialog entity (Some when open)
+    pub(crate) task_dialog: Option<Entity<TaskDialog>>,
 }
 
 const RUNNING_ANIMATION_INTERVAL_MS: u64 = 250;
@@ -648,6 +649,7 @@ impl AppRoot {
             update_downloading: false,
             pane_index: None,
             hook_handler: None,
+            task_dialog: None,
         }
     }
 
@@ -1986,33 +1988,12 @@ impl AppRoot {
     }
 
     /// Switch to a specific worktree (spawn new shell for worktree).
-    /// Reuses existing -CC connection when switching within the same tmux session.
     fn switch_to_worktree(&mut self, worktree_path: &Path, branch_name: &str, cx: &mut Context<Self>) {
         let workspace_path = self
             .workspace_manager
             .active_tab()
             .map(|t| t.path.clone())
             .unwrap_or_else(|| worktree_path.to_path_buf());
-
-        // Reuse existing runtime if same tmux session
-        if self.current_runtime_matches_session(&workspace_path) {
-            let runtime = self.runtime.as_ref().unwrap().clone();
-            let window_name = window_name_for_worktree(worktree_path, branch_name);
-            let legacy_name = legacy_window_name_for_worktree(branch_name);
-            let session_name = session_name_for_workspace(&workspace_path);
-            migrate_tmux_window_name(&session_name, &legacy_name, &window_name);
-            self.detach_ui_from_runtime();
-            if let Err(e) = runtime.switch_window(&window_name, Some(worktree_path)) {
-                self.runtime = None;
-                self.state.error_message = Some(format!("Window switch error: {}", e));
-                return;
-            }
-            let pane_target = runtime
-                .primary_pane_id()
-                .unwrap_or_else(|| format!("local:{}", worktree_path.display()));
-            self.attach_runtime(runtime, pane_target, worktree_path, branch_name, cx, None);
-            return;
-        }
 
         self.stop_current_session();
 
@@ -2048,18 +2029,7 @@ impl AppRoot {
         self.attach_runtime(runtime, pane_target, worktree_path, branch_name, cx, None);
     }
 
-    /// Check if the current runtime is a tmux session for the given workspace.
-    fn current_runtime_matches_session(&self, workspace_path: &std::path::Path) -> bool {
-        if let Some(ref rt) = self.runtime {
-            if let Some((session, _)) = rt.session_info() {
-                return session == session_name_for_workspace(workspace_path);
-            }
-        }
-        false
-    }
-
     /// Process pending worktree selection (called from render context).
-    /// Reuses the existing -CC connection when switching worktrees within the same session.
     pub(crate) fn process_pending_worktree_selection(&mut self, cx: &mut Context<Self>) {
         let idx = match self.pending_worktree_selection.take() {
             Some(i) => i,
@@ -2092,60 +2062,6 @@ impl AppRoot {
             .active_tab()
             .map(|t| t.path.clone())
             .unwrap_or_else(|| repo_path.clone());
-
-        // Reuse existing runtime if switching worktrees within the same tmux session.
-        // Keep current terminal visible (no loading screen); detach+attach only when switch completes.
-        if self.current_runtime_matches_session(&workspace_path) {
-            self.save_current_worktree_runtime_state();
-            self.active_worktree_index = Some(idx);
-
-            let runtime = self.runtime.as_ref().unwrap().clone();
-            let window_name = window_name_for_worktree(&path, &branch);
-            let legacy_name = legacy_window_name_for_worktree(&branch);
-            let session_name = session_name_for_workspace(&workspace_path);
-            migrate_tmux_window_name(&session_name, &legacy_name, &window_name);
-            let path_clone = path.clone();
-            let branch_clone = branch.clone();
-            cx.spawn(async move |entity, cx| {
-                let wn = window_name.clone();
-                let pc = path_clone.clone();
-                let switch_result = blocking::unblock(move || {
-                    runtime.switch_window(&wn, Some(&pc))
-                }).await;
-
-                let _ = entity.update(cx, |this: &mut AppRoot, cx| {
-                    match switch_result {
-                        Ok(()) => {
-                            let rt = this.runtime.as_ref().unwrap().clone();
-                            let pane_target = rt
-                                .primary_pane_id()
-                                .unwrap_or_else(|| format!("local:{}", path.display()));
-                            // Restore saved split tree for this worktree
-                            let saved_split_tree = RuntimeState::load()
-                                .ok()
-                                .and_then(|state| {
-                                    let ws_path = this.workspace_manager.active_tab()
-                                        .map(|t| t.path.clone())?;
-                                    state.workspaces.iter()
-                                        .find(|ws| ws.path == ws_path)?
-                                        .worktrees.iter()
-                                        .find(|w| w.path == path)
-                                        .and_then(|w| w.split_tree_json.as_deref()
-                                            .and_then(|s| serde_json::from_str::<SplitNode>(s).ok()))
-                                });
-                            this.detach_ui_from_runtime();
-                            this.attach_runtime(rt, pane_target, &path, &branch_clone, cx, saved_split_tree);
-                            this.save_config();
-                        }
-                        Err(e) => {
-                            this.state.error_message = Some(format!("Window switch error: {}", e));
-                        }
-                    }
-                    cx.notify();
-                });
-            }).detach();
-            return;
-        }
 
         self.save_current_worktree_runtime_state();
         self.active_worktree_index = Some(idx);
@@ -2202,7 +2118,6 @@ impl AppRoot {
     }
 
     /// Schedule async switch to worktree (avoids blocking main thread on create_runtime).
-    /// Reuses existing -CC connection when switching within the same tmux session.
     fn schedule_switch_to_worktree_async(
         &mut self,
         workspace_path: &Path,
@@ -2211,43 +2126,6 @@ impl AppRoot {
         worktree_idx: usize,
         cx: &mut Context<Self>,
     ) {
-        // Reuse existing runtime if same tmux session: no loading screen, keep current terminal until switch completes.
-        if self.current_runtime_matches_session(workspace_path) {
-            let runtime = self.runtime.as_ref().unwrap().clone();
-            let window_name = window_name_for_worktree(worktree_path, branch_name);
-            let legacy_name = legacy_window_name_for_worktree(branch_name);
-            let session_name = session_name_for_workspace(workspace_path);
-            migrate_tmux_window_name(&session_name, &legacy_name, &window_name);
-            let worktree_path = worktree_path.to_path_buf();
-            let branch_name = branch_name.to_string();
-            cx.spawn(async move |entity, cx| {
-                let wn = window_name.clone();
-                let pc = worktree_path.clone();
-                let switch_result = blocking::unblock(move || {
-                    runtime.switch_window(&wn, Some(&pc))
-                }).await;
-
-                let _ = entity.update(cx, |this: &mut AppRoot, cx| {
-                    match switch_result {
-                        Ok(()) => {
-                            let rt = this.runtime.as_ref().unwrap().clone();
-                            let pane_target = rt
-                                .primary_pane_id()
-                                .unwrap_or_else(|| format!("local:{}", worktree_path.display()));
-                            this.detach_ui_from_runtime();
-                            this.attach_runtime(rt, pane_target, &worktree_path, &branch_name, cx, None);
-                            this.save_config();
-                        }
-                        Err(e) => {
-                            this.state.error_message = Some(format!("Window switch error: {}", e));
-                        }
-                    }
-                    cx.notify();
-                });
-            }).detach();
-            return;
-        }
-
         self.worktree_switch_loading = Some(worktree_idx);
         cx.notify();
 
@@ -2910,6 +2788,36 @@ impl AppRoot {
     }
 
     /// Opens the new branch dialog
+    pub(crate) fn open_task_dialog(&mut self, cx: &mut Context<Self>) {
+        let app_root_entity = cx.entity();
+        let app_root_entity_cancel = app_root_entity.clone();
+        let entity = cx.new(|cx| {
+            let mut dialog = TaskDialog::new(cx);
+            dialog.set_on_save(move |task, _window, cx| {
+                let _ = cx.update_entity(&app_root_entity, |this: &mut AppRoot, cx| {
+                    if let Some(ref manager) = this.scheduler_manager {
+                        manager.update(cx, |m, cx| {
+                            let _ = m.add_task(task, cx);
+                        });
+                    }
+                    this.task_dialog = None;
+                    this.terminal_needs_focus = true;
+                    cx.notify();
+                });
+            });
+            dialog.set_on_cancel(move |_window, cx| {
+                let _ = cx.update_entity(&app_root_entity_cancel, |this: &mut AppRoot, cx| {
+                    this.task_dialog = None;
+                    this.terminal_needs_focus = true;
+                    cx.notify();
+                });
+            });
+            dialog
+        });
+        self.task_dialog = Some(entity);
+        cx.notify();
+    }
+
     pub(crate) fn open_new_branch_dialog(&mut self, cx: &mut Context<Self>) {
         self.ensure_entities(cx);
         self.modal_overlay_open.store(true, Ordering::Relaxed);
@@ -3167,7 +3075,7 @@ impl AppRoot {
 
         // Entity clones for context menus
         let app_root_entity_for_clear_menu = app_root_entity.clone();
-        let cached_worktrees = self.cached_worktrees.clone();
+        let _cached_worktrees = self.cached_worktrees.clone();
 
         let delete_dialog = self.build_delete_dialog(cx);
         let close_tab_dialog = self.build_close_tab_dialog(cx);
@@ -3507,7 +3415,8 @@ impl Render for AppRoot {
         let settings_open = self.show_settings;
         // Sync modal_overlay_open with any modal (settings or new branch dialog) so terminal
         // input callbacks are suppressed while a modal is visible.
-        let any_modal_open = settings_open || new_branch_dialog_open;
+        let task_dialog_open = self.task_dialog.is_some();
+        let any_modal_open = settings_open || new_branch_dialog_open || task_dialog_open;
         self.modal_overlay_open.store(any_modal_open, Ordering::Relaxed);
         let settings_modal_el = if settings_open { self.render_settings_modal_via_dialog_mgr(cx) } else { None };
 
@@ -3520,7 +3429,7 @@ impl Render for AppRoot {
             .font_family(".SystemUIFont")
             .focusable()
             .track_focus(&terminal_focus)
-            .when(!new_branch_dialog_open && !settings_open, |el| {
+            .when(!new_branch_dialog_open && !settings_open && !task_dialog_open, |el| {
                 el.on_action(cx.listener(Self::handle_paste))
                     .on_action(cx.listener(Self::handle_copy))
                     .on_key_down(cx.listener(|this, event, window, cx| {
@@ -3537,6 +3446,9 @@ impl Render for AppRoot {
                 },
             )
             .children(settings_modal_el)
+            .when(task_dialog_open, |el| {
+                el.child(self.task_dialog.as_ref().unwrap().clone())
+            })
     }
 }
 

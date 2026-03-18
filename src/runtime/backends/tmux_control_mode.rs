@@ -375,7 +375,6 @@ impl ControlModeParser {
 
 pub struct TmuxControlModeRuntime {
     session_name: String,
-    /// Interior mutability: updated by switch_window() when changing worktrees
     window_name: Mutex<String>,
     /// PTY master writer — send tmux commands here (used for non-input commands: resize, split, etc.)
     pty_writer: Arc<Mutex<std::fs::File>>,
@@ -679,10 +678,12 @@ impl TmuxControlModeRuntime {
             let shell = crate::shell_integration_inject::detect_shell();
             if let Some(src_cmd) = crate::shell_integration_inject::source_command(&shell) {
                 let target = format!("{}:{}", session_name, window_name);
-                // Wait briefly for shell to initialize, then source integration + clear screen
+                // Wait for shell to initialize before sending keys.
                 std::thread::sleep(std::time::Duration::from_millis(200));
+                // Space prefix: prevents command from entering shell history (HIST_IGNORE_SPACE).
+                // `clear` hides the source command from the screen.
                 let _ = Command::new("tmux")
-                    .args(["send-keys", "-t", &target, &format!("{} && clear", src_cmd), "Enter"])
+                    .args(["send-keys", "-t", &target, &format!(" {} && clear", src_cmd), "Enter"])
                     .output();
             }
         }
@@ -825,6 +826,13 @@ impl TmuxControlModeRuntime {
             pty_master_fd: pty_master_fd_dup,
             skip_next_capture: std::sync::atomic::AtomicBool::new(false),
         };
+
+        // Skip initial capture for newly created panes: the shell integration
+        // source command (+ clear) hasn't finished yet, so capture-pane would
+        // grab the raw command text. Real content arrives via %output events.
+        if !skip_create_and_send_keys {
+            rt.skip_next_capture.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
 
         // Set client size so tmux generates output for panes at the correct dimensions
         let _ = rt.send_command(&format!("refresh-client -C {},{}", initial_cols, initial_rows));
@@ -1132,16 +1140,38 @@ impl AgentRuntime for TmuxControlModeRuntime {
         // the sequence into our terminal so that alacritty_terminal mirrors
         // the pane's alt screen state. Without this, TUI apps (like Claude
         // Code) draw on the main buffer, mixing with old content.
-        let alternate_on = Command::new("tmux")
-            .args(["display-message", "-t", pane_id, "-p", "#{alternate_on}"])
+        // Query pane state: alternate screen, mouse mode, SGR mouse encoding.
+        // tmux control mode processes these sequences internally and does NOT
+        // pass them through to pipe-pane / %output, so we must query and inject.
+        let pane_flags = Command::new("tmux")
+            .args([
+                "display-message",
+                "-t",
+                pane_id,
+                "-p",
+                "#{alternate_on},#{mouse_any_flag},#{mouse_sgr_flag}",
+            ])
             .output()
             .ok()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string() == "1")
-            .unwrap_or(false);
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
+
+        let mut flags_iter = pane_flags.splitn(3, ',');
+        let alternate_on = flags_iter.next().unwrap_or("0") == "1";
+        let mouse_any = flags_iter.next().unwrap_or("0") == "1";
+        let mouse_sgr = flags_iter.next().unwrap_or("0") == "1";
 
         let mut result = Vec::new();
         if alternate_on {
             result.extend_from_slice(b"\x1b[?1049h"); // Enter alt screen
+        }
+        // Restore mouse mode: without this, mouse events are handled locally
+        // (selection/scrollback) instead of forwarded as SGR/legacy to the TUI app.
+        if mouse_any {
+            result.extend_from_slice(b"\x1b[?1002h"); // Enable mouse drag reporting
+        }
+        if mouse_sgr {
+            result.extend_from_slice(b"\x1b[?1006h"); // Enable SGR mouse encoding
         }
         result.extend_from_slice(b"\x1b[H\x1b[2J"); // CSI H = home, CSI 2J = clear
         // capture-pane uses \n (LF) between lines, but VTE interprets LF as
@@ -1303,80 +1333,11 @@ impl AgentRuntime for TmuxControlModeRuntime {
         self.send_command(&format!("kill-window -t {}", window_target))
     }
 
-    fn set_skip_initial_capture(&self) {
-        self.skip_next_capture.store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-
-
     fn session_info(&self) -> Option<(String, String)> {
         let wn = self.window_name.lock().map(|w| w.clone()).unwrap_or_default();
         Some((self.session_name.clone(), wn))
     }
 
-    fn switch_window(&self, window_name: &str, start_dir: Option<&Path>) -> Result<(), RuntimeError> {
-        // Check if window already exists — reuse it to preserve content
-        let win_check = Command::new("tmux")
-            .args(["list-windows", "-t", &self.session_name, "-F", "#{window_name}"])
-            .output();
-        let window_exists = win_check
-            .as_ref()
-            .map(|o| {
-                String::from_utf8_lossy(&o.stdout)
-                    .lines()
-                    .any(|l| l.trim() == window_name)
-            })
-            .unwrap_or(false);
-
-        // #region agent log
-        crate::debug_log::dbg_session_log(
-            "tmux_cc.rs:switch_window",
-            "switch_window called",
-            &serde_json::json!({
-                "window_name": window_name,
-                "window_exists": window_exists,
-                "session_name": &self.session_name,
-                "all_windows": win_check.as_ref().map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default()
-            }),
-            "H5",
-        );
-        // #endregion
-
-        if !window_exists {
-            // Create via synchronous CLI so the window is ready immediately.
-            let mut win_args = vec![
-                "new-window".to_string(),
-                "-d".to_string(),
-                "-t".to_string(),
-                self.session_name.clone(),
-                "-n".to_string(),
-                window_name.to_string(),
-            ];
-            if let Some(dir) = start_dir.and_then(|p| p.to_str()) {
-                win_args.extend(["-c".to_string(), dir.to_string()]);
-            }
-            if Self::is_default_shell_zsh() {
-                win_args.extend(["zsh".to_string(), "-o".to_string(), "nopromptsp".to_string()]);
-            }
-            let args_ref: Vec<&str> = win_args.iter().map(|s| s.as_str()).collect();
-            let _ = Command::new("tmux").args(&args_ref).output();
-        }
-
-        // Update window_name BEFORE any pane queries so list_panes targets the
-        // correct window.
-        if let Ok(mut wn) = self.window_name.lock() {
-            *wn = window_name.to_string();
-        }
-
-        if let Ok(mut map) = self.pane_outputs.lock() {
-            map.clear();
-        }
-
-        if let Ok(mut cache) = self.pane_tty_writers.lock() {
-            cache.clear();
-        }
-
-        Ok(())
-    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
