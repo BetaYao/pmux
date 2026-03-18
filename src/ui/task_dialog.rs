@@ -234,6 +234,7 @@ impl Render for TaskDialog {
         // Modal overlay
         div()
             .id("task-dialog-overlay")
+            .debug_selector(|| "task-dialog".to_string())
             .absolute()
             .inset_0()
             .size_full()

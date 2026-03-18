@@ -442,7 +442,9 @@ impl Sidebar {
         let on_toggle = self.on_toggle_task.clone();
         let on_run = self.on_run_task.clone();
 
+        let task_selector = format!("task-item-{}", index);
         let mut item = div()
+            .debug_selector(move || task_selector)
             .flex()
             .items_center()
             .justify_between()
@@ -501,9 +503,16 @@ impl Sidebar {
             );
         }
 
+        if is_selected {
+            let sel = format!("task-selected-{}", index);
+            item = item.child(div().debug_selector(move || sel));
+        }
+
         if is_pending_delete {
+            let del = format!("task-pending-delete-{}", index);
             item = item.child(
                 div()
+                    .debug_selector(move || del)
                     .text_color(rgb(0xf87171))
                     .text_xs()
                     .child("Delete? Enter/Esc"),
@@ -519,6 +528,7 @@ impl Sidebar {
         let on_add = self.on_add_task.clone();
 
         let mut header = div()
+            .debug_selector(|| "tasks-section-header".to_string())
             .flex()
             .items_center()
             .justify_between()

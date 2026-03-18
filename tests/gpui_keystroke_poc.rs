@@ -127,7 +127,7 @@ fn test_create_and_delete_scheduled_task_via_keyboard(cx: &mut TestAppContext) {
 
     let target_index = window.update(cx, |app, _w, cx| {
         let idx = app.task_count(cx) - 1;
-        app.set_task_list_focused_for_test(true, idx);
+        app.set_task_list_focused_for_test(true, idx, cx);
         idx
     }).unwrap();
     cx.run_until_parked();

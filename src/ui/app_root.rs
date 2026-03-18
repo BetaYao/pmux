@@ -550,9 +550,10 @@ impl AppRoot {
             .unwrap_or(0)
     }
     /// Set task list focused state and selected index for tests.
-    pub fn set_task_list_focused_for_test(&mut self, focused: bool, index: usize) {
+    pub fn set_task_list_focused_for_test(&mut self, focused: bool, index: usize, cx: &mut Context<Self>) {
         self.task_list_focused = focused;
         self.selected_task_index = Some(index);
+        cx.notify();
     }
     /// Initialize entities needed for rendering in test environments.
     pub fn ensure_entities_for_test(&mut self, cx: &mut Context<Self>) {
