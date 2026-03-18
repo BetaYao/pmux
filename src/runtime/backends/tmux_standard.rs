@@ -78,14 +78,30 @@ pub struct TmuxStandardBackend {
 }
 
 impl TmuxStandardBackend {
-    /// Create or attach to a tmux session, then create the primary window.
+    /// Create or attach to a tmux session.
+    /// If session already exists with windows, recovers them instead of creating new ones.
     pub fn new(
         session_name: &str,
         worktree_path: &Path,
         cols: u16,
         rows: u16,
     ) -> Result<Self, RuntimeError> {
-        // Ensure tmux session exists (create if needed)
+        // Check if session already exists with windows
+        let session_exists = Command::new("tmux")
+            .args(["has-session", "-t", session_name])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+
+        if session_exists {
+            // Session exists — recover existing windows instead of creating new ones
+            let existing = Self::discover_windows(session_name)?;
+            if !existing.is_empty() {
+                return Self::recover(session_name, worktree_path, cols, rows);
+            }
+        }
+
+        // No existing session or no windows — create fresh
         ensure_tmux_session(session_name, worktree_path)?;
 
         let backend = Self {
@@ -721,6 +737,54 @@ mod tests {
         let _ = Command::new("tmux")
             .args(["kill-session", "-t", session])
             .output();
+    }
+
+    /// Test that new() recovers existing sessions instead of creating new windows
+    #[test]
+    fn test_new_recovers_existing_session() {
+        if !super::super::tmux_available() {
+            eprintln!("skipping: tmux not available");
+            return;
+        }
+
+        let session = "pmux-test-new-recover";
+        let dir = tempfile::tempdir().unwrap();
+
+        // Clean up
+        let _ = Command::new("tmux").args(["kill-session", "-t", session]).output();
+
+        // First new() — creates session + window
+        let backend1 = TmuxStandardBackend::new(session, dir.path(), 80, 24).unwrap();
+        let pane1 = backend1.primary_pane_id().unwrap();
+        drop(backend1);
+
+        // Verify session still exists (tmux session persists after drop)
+        let check = Command::new("tmux")
+            .args(["has-session", "-t", session])
+            .output()
+            .unwrap();
+        assert!(check.status.success(), "session should persist after drop");
+
+        // Count windows before second new()
+        let windows_before = TmuxStandardBackend::discover_windows(session).unwrap();
+        let count_before = windows_before.len();
+
+        // Second new() — should RECOVER, not create a new window
+        let backend2 = TmuxStandardBackend::new(session, dir.path(), 80, 24).unwrap();
+        let pane2 = backend2.primary_pane_id().unwrap();
+
+        // Should NOT have created additional windows
+        let windows_after = TmuxStandardBackend::discover_windows(session).unwrap();
+        assert_eq!(
+            windows_after.len(),
+            count_before,
+            "new() should recover existing windows, not create new ones. Before: {}, After: {}",
+            count_before,
+            windows_after.len()
+        );
+
+        drop(backend2);
+        let _ = Command::new("tmux").args(["kill-session", "-t", session]).output();
     }
 
     /// Integration test: create a tmux session, verify it exists, clean up.
