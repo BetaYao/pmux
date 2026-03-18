@@ -12,6 +12,8 @@ mod shpool;
 #[cfg(unix)]
 mod tmux;
 pub mod tmux_control_mode;
+#[cfg(unix)]
+pub mod tmux_standard;
 
 pub use dtach::DtachRuntime;
 pub use local_pty::LocalPtyRuntime;
@@ -263,6 +265,42 @@ pub fn create_runtime_from_env(
     rows: u16,
     config: Option<&Config>,
 ) -> Result<RuntimeCreationResult, RuntimeError> {
+    // Check for tmux-standard backend (env var or config)
+    #[cfg(unix)]
+    {
+        let is_tmux_standard = std::env::var(PMUX_BACKEND_ENV)
+            .map(|v| v == "tmux-standard")
+            .unwrap_or(false)
+            || config.map(|c| c.backend == "tmux-standard").unwrap_or(false);
+
+        if is_tmux_standard {
+            if !tmux_available() {
+                let rt = create_runtime(worktree_path, cols, rows)?;
+                return Ok(RuntimeCreationResult {
+                    runtime: rt,
+                    fallback_message: Some(
+                        "tmux not installed — using local PTY (no session persistence). \
+                         Install tmux for persistent agent sessions."
+                            .to_string(),
+                    ),
+                });
+            }
+            let sess_name =
+                tmux_standard::session_name(workspace_path, branch_name);
+            let rt = tmux_standard::TmuxStandardBackend::new(
+                &sess_name,
+                worktree_path,
+                cols,
+                rows,
+            )
+            .map_err(|e| RuntimeError::Backend(format!("tmux-standard: {}", e)))?;
+            return Ok(RuntimeCreationResult {
+                runtime: Arc::new(rt),
+                fallback_message: None,
+            });
+        }
+    }
+
     let session_backend = effective_session_backend(config);
     let resolved = session_backend.resolve();
 
@@ -590,8 +628,10 @@ mod tests {
             split_tree_json: None,
         };
         let result = recover_runtime("local", &state, None, 80, 24);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("does not support"));
+        match result {
+            Err(e) => assert!(e.to_string().contains("does not support")),
+            Ok(_) => panic!("expected error for local pty recovery"),
+        }
     }
 
     #[test]
