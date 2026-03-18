@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -51,12 +52,17 @@ pub fn window_target(session: &str, window_index: u32) -> String {
 struct WindowState {
     window_index: u32,
     pane_id: PaneId,
-    master: Mutex<Box<dyn portable_pty::MasterPty + Send>>,
+    /// PTY master - None for recovered windows (tmux send-keys used instead)
+    master: Mutex<Option<Box<dyn portable_pty::MasterPty + Send>>>,
     input_tx: flume::Sender<Vec<u8>>,
     output_rx: Mutex<Option<flume::Receiver<Vec<u8>>>>,
     cols: AtomicU16,
     rows: AtomicU16,
     _child: Mutex<Option<Box<dyn portable_pty::Child + Send + Sync>>>,
+    /// Session name, needed for send-keys in recovered mode
+    session_name: String,
+    /// Whether this window was recovered (no PTY master)
+    recovered: bool,
 }
 
 /// Tmux Standard Mode backend.
@@ -179,12 +185,14 @@ impl TmuxStandardBackend {
         let state = Arc::new(WindowState {
             window_index: window_idx,
             pane_id: pane_id.clone(),
-            master: Mutex::new(master),
+            master: Mutex::new(Some(master)),
             input_tx,
             output_rx: Mutex::new(Some(output_rx)),
             cols: AtomicU16::new(self.default_cols),
             rows: AtomicU16::new(self.default_rows),
             _child: Mutex::new(Some(child)),
+            session_name: self.session_name.clone(),
+            recovered: false,
         });
 
         if let Ok(mut windows) = self.windows.lock() {
@@ -206,6 +214,182 @@ impl TmuxStandardBackend {
             .ok()
             .map(|w| w.keys().cloned().collect())
             .unwrap_or_default()
+    }
+
+    /// Discover all pmux tmux sessions.
+    pub fn discover_sessions() -> Vec<String> {
+        let output = match Command::new("tmux")
+            .args(["list-sessions", "-F", "#{session_name}"])
+            .output()
+        {
+            Ok(o) => o,
+            Err(_) => return Vec::new(),
+        };
+
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter(|s| s.starts_with("pmux-"))
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    /// Discover windows in an existing session.
+    /// Returns a vec of (window_index, window_name, pane_current_path).
+    pub fn discover_windows(session: &str) -> Result<Vec<(u32, String, String)>, RuntimeError> {
+        let output = Command::new("tmux")
+            .args([
+                "list-windows",
+                "-t",
+                session,
+                "-F",
+                "#{window_index}:#{window_name}:#{pane_current_path}",
+            ])
+            .output()
+            .map_err(|e| RuntimeError::Backend(format!("list-windows failed: {e}")))?;
+
+        let windows = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| {
+                let parts: Vec<&str> = line.splitn(3, ':').collect();
+                if parts.len() == 3 {
+                    Some((
+                        parts[0].parse().unwrap_or(0),
+                        parts[1].to_string(),
+                        parts[2].to_string(),
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Ok(windows)
+    }
+
+    /// Recover a backend by attaching to an existing tmux session.
+    ///
+    /// Discovered windows are tracked without PTY masters. Input uses `tmux send-keys`,
+    /// output uses `tmux pipe-pane` to stream data back.
+    pub fn recover(
+        session_name: &str,
+        worktree_path: &Path,
+        cols: u16,
+        rows: u16,
+    ) -> Result<Self, RuntimeError> {
+        // Verify the session exists
+        let check = Command::new("tmux")
+            .args(["has-session", "-t", session_name])
+            .output()
+            .map_err(|e| RuntimeError::Backend(format!("tmux has-session: {e}")))?;
+
+        if !check.status.success() {
+            return Err(RuntimeError::Backend(format!(
+                "tmux session '{}' does not exist",
+                session_name
+            )));
+        }
+
+        let discovered = Self::discover_windows(session_name)?;
+
+        let backend = Self {
+            session_name: session_name.to_string(),
+            worktree_path: worktree_path.to_path_buf(),
+            windows: Mutex::new(HashMap::new()),
+            window_counter: AtomicUsize::new(0),
+            default_cols: cols,
+            default_rows: rows,
+        };
+
+        for (window_index, window_name, _path) in &discovered {
+            let pane_id = format!(
+                "tmux-std:{}:{}:{}",
+                session_name, window_index, window_name
+            );
+
+            // Set up pipe-pane for output streaming
+            let (output_tx, output_rx) = flume::unbounded::<Vec<u8>>();
+            let target = window_target(session_name, *window_index);
+
+            // Use pipe-pane to capture output from the existing tmux window.
+            // We spawn a background thread that reads from a pipe-pane subprocess.
+            let target_clone = target.clone();
+            thread::spawn(move || {
+                // Use tmux capture-pane in a loop as a simple polling mechanism
+                // for recovered windows. pipe-pane requires a file target, so we
+                // use periodic capture-pane -p instead.
+                let mut last_content = String::new();
+                loop {
+                    thread::sleep(std::time::Duration::from_millis(100));
+                    let result = Command::new("tmux")
+                        .args(["capture-pane", "-t", &target_clone, "-p"])
+                        .output();
+                    match result {
+                        Ok(output) if output.status.success() => {
+                            let content = String::from_utf8_lossy(&output.stdout).to_string();
+                            if content != last_content {
+                                let diff_bytes = content.as_bytes().to_vec();
+                                if output_tx.send(diff_bytes).is_err() {
+                                    break;
+                                }
+                                last_content = content;
+                            }
+                        }
+                        _ => break,
+                    }
+                }
+            });
+
+            // Set up input via tmux send-keys
+            let (input_tx, input_rx) = flume::unbounded::<Vec<u8>>();
+            let target_for_input = target.clone();
+            thread::spawn(move || {
+                loop {
+                    match input_rx.recv() {
+                        Ok(bytes) => {
+                            // Collect any additional pending bytes
+                            let mut all_bytes = bytes;
+                            while let Ok(more) = input_rx.try_recv() {
+                                all_bytes.extend_from_slice(&more);
+                            }
+                            // Send via tmux send-keys with literal flag
+                            let text = String::from_utf8_lossy(&all_bytes).to_string();
+                            let _ = Command::new("tmux")
+                                .args(["send-keys", "-t", &target_for_input, "-l", &text])
+                                .output();
+                        }
+                        Err(_) => break,
+                    }
+                }
+            });
+
+            let idx = backend.window_counter.fetch_add(1, Ordering::SeqCst) as u32;
+            let _ = idx; // We use the discovered window_index instead
+
+            let state = Arc::new(WindowState {
+                window_index: *window_index,
+                pane_id: pane_id.clone(),
+                master: Mutex::new(None),
+                input_tx,
+                output_rx: Mutex::new(Some(output_rx)),
+                cols: AtomicU16::new(cols),
+                rows: AtomicU16::new(rows),
+                _child: Mutex::new(None),
+                session_name: session_name.to_string(),
+                recovered: true,
+            });
+
+            if let Ok(mut windows) = backend.windows.lock() {
+                windows.insert(pane_id, state);
+            }
+        }
+
+        // Update window_counter to be past the highest discovered index
+        let max_idx = discovered.iter().map(|(idx, _, _)| *idx).max().unwrap_or(0);
+        backend
+            .window_counter
+            .store((max_idx + 1) as usize, Ordering::SeqCst);
+
+        Ok(backend)
     }
 }
 
@@ -247,14 +431,31 @@ impl AgentRuntime for TmuxStandardBackend {
             .master
             .lock()
             .map_err(|e| RuntimeError::Backend(e.to_string()))?;
-        guard
-            .resize(PtySize {
-                rows,
-                cols,
-                pixel_width: cols.saturating_mul(8),
-                pixel_height: rows.saturating_mul(17),
-            })
-            .map_err(|e| RuntimeError::Backend(e.to_string()))
+        if let Some(ref master) = *guard {
+            master
+                .resize(PtySize {
+                    rows,
+                    cols,
+                    pixel_width: cols.saturating_mul(8),
+                    pixel_height: rows.saturating_mul(17),
+                })
+                .map_err(|e| RuntimeError::Backend(e.to_string()))
+        } else {
+            // Recovered window: resize via tmux
+            let target = window_target(&window.session_name, window.window_index);
+            let _ = Command::new("tmux")
+                .args([
+                    "resize-window",
+                    "-t",
+                    &target,
+                    "-x",
+                    &cols.to_string(),
+                    "-y",
+                    &rows.to_string(),
+                ])
+                .output();
+            Ok(())
+        }
     }
 
     fn subscribe_output(&self, pane_id: &PaneId) -> Option<flume::Receiver<Vec<u8>>> {
@@ -454,6 +655,51 @@ mod tests {
     #[test]
     fn test_sanitize_tmux_name_spaces() {
         assert_eq!(sanitize_tmux_name("my project"), "my-project");
+    }
+
+    #[test]
+    fn test_discover_sessions() {
+        // Skip if tmux not available
+        if !super::super::tmux_available() {
+            eprintln!("skipping test_discover_sessions: tmux not available");
+            return;
+        }
+
+        // Result is a Vec<String>, all starting with "pmux-"
+        let sessions = TmuxStandardBackend::discover_sessions();
+        for s in &sessions {
+            assert!(s.starts_with("pmux-"), "session '{}' should start with pmux-", s);
+        }
+    }
+
+    #[test]
+    fn test_discover_existing_sessions() {
+        // Skip if tmux not available
+        if !super::super::tmux_available() {
+            eprintln!("skipping test_discover_existing_sessions: tmux not available");
+            return;
+        }
+
+        let session = "pmux-test-recovery";
+        let _ = Command::new("tmux")
+            .args(["kill-session", "-t", session])
+            .output();
+
+        Command::new("tmux")
+            .args(["new-session", "-d", "-s", session, "-x", "120", "-y", "36"])
+            .output()
+            .unwrap();
+        Command::new("tmux")
+            .args(["new-window", "-t", session])
+            .output()
+            .unwrap();
+
+        let windows = TmuxStandardBackend::discover_windows(session).unwrap();
+        assert_eq!(windows.len(), 2);
+
+        let _ = Command::new("tmux")
+            .args(["kill-session", "-t", session])
+            .output();
     }
 
     /// Integration test: create a tmux session, verify it exists, clean up.

@@ -10,17 +10,12 @@ mod local_pty;
 mod screen;
 mod shpool;
 #[cfg(unix)]
-mod tmux;
-pub mod tmux_control_mode;
-#[cfg(unix)]
 pub mod tmux_standard;
 
 pub use dtach::DtachRuntime;
 pub use local_pty::LocalPtyRuntime;
 pub use screen::ScreenRuntime;
 pub use shpool::ShpoolRuntime;
-#[cfg(unix)]
-pub use tmux::TmuxRuntime;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -42,7 +37,7 @@ fn effective_session_backend(config: Option<&Config>) -> SessionBackend {
     if let Ok(env_val) = std::env::var(PMUX_BACKEND_ENV) {
         return match env_val.as_str() {
             "dtach" => SessionBackend::Dtach,
-            "tmux" | "tmux-cc" => SessionBackend::Tmux,
+            "tmux" | "tmux-cc" | "tmux-standard" => SessionBackend::Tmux,
             "screen" => SessionBackend::Screen,
             "shpool" => SessionBackend::Shpool,
             "local" => SessionBackend::Local,
@@ -54,7 +49,7 @@ fn effective_session_backend(config: Option<&Config>) -> SessionBackend {
         if let Some(c) = config {
             return match c.backend.as_str() {
                 "dtach" => SessionBackend::Dtach,
-                "tmux" | "tmux-cc" => SessionBackend::Tmux,
+                "tmux" | "tmux-cc" | "tmux-standard" => SessionBackend::Tmux,
                 "screen" => SessionBackend::Screen,
                 "shpool" => SessionBackend::Shpool,
                 "local" => SessionBackend::Local,
@@ -265,42 +260,6 @@ pub fn create_runtime_from_env(
     rows: u16,
     config: Option<&Config>,
 ) -> Result<RuntimeCreationResult, RuntimeError> {
-    // Check for tmux-standard backend (env var or config)
-    #[cfg(unix)]
-    {
-        let is_tmux_standard = std::env::var(PMUX_BACKEND_ENV)
-            .map(|v| v == "tmux-standard")
-            .unwrap_or(false)
-            || config.map(|c| c.backend == "tmux-standard").unwrap_or(false);
-
-        if is_tmux_standard {
-            if !tmux_available() {
-                let rt = create_runtime(worktree_path, cols, rows)?;
-                return Ok(RuntimeCreationResult {
-                    runtime: rt,
-                    fallback_message: Some(
-                        "tmux not installed — using local PTY (no session persistence). \
-                         Install tmux for persistent agent sessions."
-                            .to_string(),
-                    ),
-                });
-            }
-            let sess_name =
-                tmux_standard::session_name(workspace_path, branch_name);
-            let rt = tmux_standard::TmuxStandardBackend::new(
-                &sess_name,
-                worktree_path,
-                cols,
-                rows,
-            )
-            .map_err(|e| RuntimeError::Backend(format!("tmux-standard: {}", e)))?;
-            return Ok(RuntimeCreationResult {
-                runtime: Arc::new(rt),
-                fallback_message: None,
-            });
-        }
-    }
-
     let session_backend = effective_session_backend(config);
     let resolved = session_backend.resolve();
 
@@ -356,22 +315,17 @@ pub fn create_runtime_from_env(
                         ),
                     });
                 }
-                let session_name = session_name_for_workspace(workspace_path);
-                let window_name = window_name_for_worktree(worktree_path, branch_name);
-                let legacy_name = legacy_window_name_for_worktree(branch_name);
-                migrate_tmux_window_name(&session_name, &legacy_name, &window_name);
-                let tmux_result = tmux_control_mode::TmuxControlModeRuntime::new(
-                    &session_name,
-                    Some(&window_name),
-                    Some(worktree_path),
+                let sess_name =
+                    tmux_standard::session_name(workspace_path, branch_name);
+                let rt = tmux_standard::TmuxStandardBackend::new(
+                    &sess_name,
+                    worktree_path,
                     cols,
                     rows,
-                );
-                let runtime = Arc::new(
-                    tmux_result.map_err(|e| RuntimeError::Backend(format!("tmux: {}", e)))?,
-                );
+                )
+                .map_err(|e| RuntimeError::Backend(format!("tmux: {}", e)))?;
                 Ok(RuntimeCreationResult {
-                    runtime,
+                    runtime: Arc::new(rt),
                     fallback_message: None,
                 })
             }
@@ -416,28 +370,6 @@ pub fn create_runtime(
     )?))
 }
 
-/// Create a TmuxRuntime for the given session and window.
-/// Session persistence allows agents to continue running after pmux closes.
-#[cfg(unix)]
-pub fn create_tmux_runtime(
-    session_name: impl Into<String>,
-    window_name: impl Into<String>,
-    worktree_path: &Path,
-) -> Arc<dyn AgentRuntime> {
-    let rt = TmuxRuntime::new(session_name, window_name, Some(worktree_path));
-    Arc::new(rt)
-}
-
-/// Non-Unix fallback: create_local_runtime
-#[cfg(not(unix))]
-pub fn create_tmux_runtime(
-    _session_name: impl Into<String>,
-    _window_name: impl Into<String>,
-    _worktree_path: &Path,
-) -> Arc<dyn AgentRuntime> {
-    panic!("tmux backend not supported on non-Unix platforms")
-}
-
 /// Recover an AgentRuntime from persisted state.
 /// Used when pmux restarts and needs to attach to existing sessions.
 #[cfg(unix)]
@@ -461,16 +393,14 @@ pub fn recover_runtime(
         "screen" => Err(RuntimeError::Backend(
             "screen does not support session recovery".into(),
         )),
-        "tmux" | "tmux-cc" => {
-            // Attach to session only; current window comes from tmux (match by name, no persist)
-            let runtime = tmux_control_mode::TmuxControlModeRuntime::new(
+        "tmux" | "tmux-cc" | "tmux-standard" => {
+            let runtime = tmux_standard::TmuxStandardBackend::recover(
                 &state.backend_session_id,
-                None,
-                None,
+                &state.path,
                 cols,
                 rows,
             )
-            .map_err(|e| RuntimeError::Backend(format!("tmux recover: {}", e)))?;
+            .map_err(|e| RuntimeError::Backend(format!("tmux-standard recover: {}", e)))?;
             Ok(Arc::new(runtime))
         }
         _ => Err(RuntimeError::Backend(format!(
@@ -504,6 +434,9 @@ pub fn recover_runtime(
         )),
         "tmux" | "tmux-cc" => Err(RuntimeError::Backend(
             "tmux not supported on non-Unix platforms".into(),
+        )),
+        "tmux-standard" => Err(RuntimeError::Backend(
+            "tmux-standard not supported on non-Unix platforms".into(),
         )),
         _ => Err(RuntimeError::Backend(format!(
             "unknown backend: {}",
@@ -634,11 +567,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_create_tmux_runtime_unix() {
-        let rt = create_tmux_runtime("pmux-test-session", "test-window", Path::new("."));
-        // Just verify it creates without panicking
-        // The actual tmux operations require tmux binary
-        let _ = rt.primary_pane_id();
-    }
 }

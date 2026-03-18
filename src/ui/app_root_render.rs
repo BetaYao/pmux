@@ -3,27 +3,23 @@
 //! Extracted from app_root.rs to reduce file size.
 //! These are `impl AppRoot` methods that build UI sub-components.
 
-use crate::agent_status::AgentStatus;
 use crate::config::Config;
 use crate::input::{key_to_xterm_escape, KeyModifiers};
 use crate::remotes::secrets::Secrets;
-use crate::runtime::backends::{kill_tmux_window, resolve_backend, session_name_for_workspace};
+use crate::runtime::backends::kill_tmux_window;
 use crate::split_tree::SplitNode;
 use crate::ui::app_root::{build_paste_text_from_clipboard, AppRoot};
 use crate::ui::close_tab_dialog_ui::CloseTabDialogUi;
 use crate::ui::delete_worktree_dialog_ui::DeleteWorktreeDialogUi;
-use crate::ui::models::NotificationPanelModel;
 use crate::ui::sidebar::Sidebar;
 use crate::ui::split_pane_container::SplitPaneContainer;
-use crate::ui::status_bar::StatusBar;
 use crate::ui::terminal_area_entity::TerminalAreaEntity;
 use crate::ui::terminal_view::TerminalBuffer;
 use crate::ui::topbar_entity::TopBarEntity;
-use crate::ui::workspace_tabbar::WorkspaceTabBar;
 use crate::deps;
 use gpui::prelude::FluentBuilder;
 use gpui::prelude::*;
-use gpui::{AnyElement, App, ClickEvent, ClipboardItem, Div, Entity, FocusHandle, FontWeight, KeyDownEvent, SharedString, Stateful, StyleRefinement, Window, div, px, rgb, rgba, svg, uniform_list, ScrollStrategy, UniformListScrollHandle, font};
+use gpui::{AnyElement, App, ClickEvent, Div, FocusHandle, FontWeight, KeyDownEvent, SharedString, Stateful, StyleRefinement, Window, div, px, rgb, svg};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::Ordering;
@@ -46,21 +42,8 @@ impl AppRoot {
             "enter" | "g" if event.keystroke.modifiers.platform || event.keystroke.key == "enter" => {
                 if let Ok(buffers) = self.terminal_buffers.lock() {
                     if let Some(target) = self.active_pane_target.as_ref() {
-                        if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
-                            let matches = terminal.search(&self.search_query);
-                            if !matches.is_empty() {
-                                self.search_current_match =
-                                    (self.search_current_match + 1) % matches.len();
-                                if let Some(ref e) = self.terminal_area_entity {
-                                    let _ = cx.update_entity(e, |ent: &mut TerminalAreaEntity, cx| {
-                                        ent.set_search(
-                                            Some(self.search_query.clone()),
-                                            self.search_current_match,
-                                        );
-                                        cx.notify();
-                                    });
-                                }
-                            }
+                        if let Some(TerminalBuffer::GhosttyTerminal { .. }) = buffers.get(target) {
+                            // search not available externally for GhosttyTerminal
                         }
                     }
                 }
@@ -212,8 +195,8 @@ impl AppRoot {
                 }
 
                 let bytes_opt = if let Ok(buffers) = self.terminal_buffers.lock() {
-                    if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
-                        crate::terminal::key_to_bytes(event, terminal.mode())
+                    if let Some(TerminalBuffer::GhosttyTerminal { .. }) = buffers.get(target) {
+                        None // entity handles key input internally when focused
                     } else {
                         None
                     }
@@ -230,10 +213,8 @@ impl AppRoot {
 
                 if let Some(bytes) = bytes_opt {
                     if let Ok(buffers) = self.terminal_buffers.lock() {
-                        if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
-                            if terminal.display_offset() > 0 {
-                                terminal.scroll_to_bottom();
-                            }
+                        if let Some(TerminalBuffer::GhosttyTerminal { .. }) = buffers.get(target) {
+                            // entity handles scroll internally
                         }
                     }
                     let send_result = runtime.send_input(target, &bytes);
@@ -580,7 +561,7 @@ impl AppRoot {
                                 }
                                 this.terminal_needs_focus = false;
                                 if let Ok(buffers) = this.terminal_buffers.lock() {
-                                    if let Some(TerminalBuffer::Terminal { focus_handle, .. }) = buffers.get(&target) {
+                                    if let Some(TerminalBuffer::GhosttyTerminal { focus_handle, .. }) = buffers.get(&target) {
                                         window.focus(focus_handle, cx);
                                     } else {
                                         drop(buffers);
@@ -714,12 +695,8 @@ impl AppRoot {
                         let _ = cx.update_entity(&app_root_for_copy, |this: &mut AppRoot, cx| {
                             if let Some(ref target) = this.active_pane_target {
                                 if let Ok(buffers) = this.terminal_buffers.lock() {
-                                    if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
-                                        if let Some(text) = terminal.selection_text() {
-                                            if !text.is_empty() {
-                                                cx.write_to_clipboard(ClipboardItem::new_string(text));
-                                            }
-                                        }
+                                    if let Some(TerminalBuffer::GhosttyTerminal { .. }) = buffers.get(target) {
+                                        // entity handles copy via Cmd+C
                                     }
                                 }
                             }
@@ -762,11 +739,8 @@ impl AppRoot {
                             if !text.is_empty() {
                                 if let (Some(runtime), Some(target)) = (&this.runtime, this.active_pane_target.as_ref()) {
                                     let bracketed = if let Ok(buffers) = this.terminal_buffers.lock() {
-                                        if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
-                                            if terminal.display_offset() > 0 {
-                                                terminal.scroll_to_bottom();
-                                            }
-                                            terminal.mode().contains(alacritty_terminal::term::TermMode::BRACKETED_PASTE)
+                                        if let Some(TerminalBuffer::GhosttyTerminal { .. }) = buffers.get(target) {
+                                            false // entity handles paste internally
                                         } else { false }
                                     } else { false };
                                     let mut bytes = Vec::with_capacity(text.len() + 12);
@@ -803,8 +777,8 @@ impl AppRoot {
                     let _ = cx.update_entity(&app_root_for_select_all, |this: &mut AppRoot, cx| {
                         if let Some(ref target) = this.active_pane_target {
                             if let Ok(buffers) = this.terminal_buffers.lock() {
-                                if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
-                                    terminal.select_all();
+                                if let Some(TerminalBuffer::GhosttyTerminal { .. }) = buffers.get(target) {
+                                    // entity handles select_all internally
                                 }
                             }
                         }
@@ -1063,10 +1037,10 @@ impl AppRoot {
         let repo_path_for_close_orphan = repo_path.clone();
         let repo_path_for_view_diff = repo_path.clone();
         // Extra clones for the root-level context menu overlay
-        let app_root_entity_for_menu_delete = app_root_entity.clone();
-        let app_root_entity_for_menu_diff = app_root_entity.clone();
-        let repo_path_for_menu_delete = repo_path.clone();
-        let repo_path_for_menu_diff = repo_path.clone();
+        let _app_root_entity_for_menu_delete = app_root_entity.clone();
+        let _app_root_entity_for_menu_diff = app_root_entity.clone();
+        let _repo_path_for_menu_delete = repo_path.clone();
+        let _repo_path_for_menu_diff = repo_path.clone();
         sidebar.on_delete(move |idx, _window, cx| {
             let _ = cx.update_entity(&app_root_entity_for_delete, |this: &mut AppRoot, cx| {
                 this.sidebar_context_menu = None;
@@ -1132,10 +1106,10 @@ impl AppRoot {
 
         // Task callbacks
         let app_root_entity_for_toggle_task = app_root_entity.clone();
-        let app_root_entity_for_run_task = app_root_entity.clone();
+        let _app_root_entity_for_run_task = app_root_entity.clone();
         let app_root_entity_for_add_task = app_root_entity.clone();
         sidebar = sidebar
-            .on_toggle_task(move |id, _window, cx| {
+            .on_toggle_task(move |_id, _window, cx| {
                 let _ = cx.update_entity(&app_root_entity_for_toggle_task, |_this: &mut AppRoot, _cx| {
                     // TODO: Toggle task enabled state
                 });
@@ -1143,8 +1117,10 @@ impl AppRoot {
             .on_run_task(move |_id, _window, _cx| {
                 // TODO: Run task immediately
             })
-            .on_add_task(move |_window, _cx| {
-                // TODO: Open add task dialog
+            .on_add_task(move |_window, cx| {
+                let _ = cx.update_entity(&app_root_entity_for_add_task, |this: &mut AppRoot, cx| {
+                    this.open_task_dialog(cx);
+                });
             });
 
         sidebar

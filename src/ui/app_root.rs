@@ -9,7 +9,6 @@ use crate::git_utils::{is_git_repository, get_git_error_message, GitError};
 use crate::notification::NotificationType;
 use crate::notification_manager::NotificationManager;
 use crate::system_notifier;
-use crate::terminal::ContentExtractor;
 use crate::runtime::{AgentRuntime, EventBus, RuntimeEvent, StatusPublisher};
 use crate::runtime::backends::{create_runtime_from_env, legacy_window_name_for_worktree, list_tmux_windows, recover_runtime, resolve_backend, window_name_for_worktree, window_target};
 use crate::runtime::{RuntimeState, WorktreeState};
@@ -17,14 +16,12 @@ use crate::ui::{AppState, workspace_tabbar::WorkspaceTabBar, terminal_controller
 use crate::scheduler::SchedulerManager;
 use crate::split_tree::SplitNode;
 use crate::workspace_manager::WorkspaceManager;
-use futures_util::future::{select, Either};
-use futures_util::pin_mut;
 use crate::window_state::PersistentAppState;
 use crate::new_branch_orchestrator::{NewBranchOrchestrator, CreationResult, NotificationSender};
 use crate::notification::Notification;
 use gpui::prelude::FluentBuilder;
 use gpui::prelude::*;
-use gpui::{actions, AnyElement, App, AsyncApp, ClipboardEntry, ClipboardItem, Div, Entity, FocusHandle, Image, ImageFormat, KeyDownEvent, MouseButton, Stateful, Window, div, px, rgb};
+use gpui::{actions, AnyElement, App, ClipboardEntry, ClipboardItem, Div, Entity, FocusHandle, Image, ImageFormat, KeyDownEvent, MouseButton, Stateful, Window, div, px, rgb};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -38,9 +35,6 @@ actions!(pmux_terminal, [TerminalPaste, TerminalCopy]);
 /// Used by menu action (open_settings) to open Settings from main.rs without window access.
 pub static OPEN_SETTINGS_REQUESTED: AtomicBool = AtomicBool::new(false);
 
-/// Max terminal content length (chars) passed to status detection. Capping avoids O(n) regex
-/// work on huge buffers in large/active panes (e.g. big monorepos), keeping input responsive.
-pub(crate) const MAX_STATUS_CONTENT_LEN: usize = 32_768;
 
 // ---------------------------------------------------------------------------
 // Clipboard paste helpers (image / file / text)
@@ -145,74 +139,6 @@ pub(crate) fn build_paste_text_from_clipboard(clipboard: &ClipboardItem) -> Stri
     result
 }
 
-/// Detect which agent is running in a tmux pane.
-///
-/// First checks `pane_current_command` (fast). If that doesn't match a known agent,
-/// falls back to checking child processes of the pane shell. This handles cases where
-/// tmux reports the binary filename instead of the symlink name (e.g. Claude CLI's
-/// binary is `2.1.72` but the symlink is `claude`).
-pub(crate) fn detect_agent_in_pane(
-    pane_target: &str,
-    agent_detect: &crate::config::AgentDetectConfig,
-) -> Option<crate::config::AgentDef> {
-    // Fast path: check pane_current_command directly
-    if let Ok(out) = std::process::Command::new("tmux")
-        .args(["display-message", "-t", pane_target, "-p", "#{pane_current_command}"])
-        .output()
-    {
-        let cmd = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if let Some(agent) = agent_detect.find_agent(&cmd) {
-            return Some(agent.clone());
-        }
-    }
-
-    // Slow path: check child processes of the pane's shell.
-    // tmux may report a version-named binary (e.g. "2.1.72" for Claude CLI)
-    // instead of the symlink name ("claude"). Walk the process tree to find
-    // the real command.
-    if let Ok(out) = std::process::Command::new("tmux")
-        .args(["display-message", "-t", pane_target, "-p", "#{pane_pid}"])
-        .output()
-    {
-        let pane_pid = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if let Ok(pid) = pane_pid.parse::<u32>() {
-            // pgrep -P <pid> lists direct children
-            if let Ok(children) = std::process::Command::new("pgrep")
-                .args(["-P", &pid.to_string()])
-                .output()
-            {
-                let child_pids = String::from_utf8_lossy(&children.stdout);
-                for child_pid in child_pids.lines().map(str::trim).filter(|s| !s.is_empty()) {
-                    // Get the command name of each child process
-                    if let Ok(ps_out) = std::process::Command::new("ps")
-                        .args(["-o", "comm=", "-p", child_pid])
-                        .output()
-                    {
-                        let child_cmd = String::from_utf8_lossy(&ps_out.stdout).trim().to_string();
-                        if let Some(agent) = agent_detect.find_agent(&child_cmd) {
-                            return Some(agent.clone());
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    None
-}
-
-/// Check if the tmux pane's foreground process is a shell (zsh, bash, fish, etc.)
-pub(crate) fn is_pane_shell(pane_target: &str) -> bool {
-    if let Ok(out) = std::process::Command::new("tmux")
-        .args(["display-message", "-t", pane_target, "-p", "#{pane_current_command}"])
-        .output()
-    {
-        let cmd = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        matches!(cmd.as_str(), "zsh" | "bash" | "fish" | "sh" | "dash" | "ksh" | "tcsh" | "csh" | "nu" | "elvish" | "pwsh")
-    } else {
-        false
-    }
-}
 
 
 /// Notification sender that forwards to AppRoot's NotificationManager
@@ -228,63 +154,6 @@ impl NotificationSender for AppNotificationSender {
     }
 }
 
-/// Coalesce terminal output chunks into a single buffer and process once.
-/// Returns `Ok(true)` if output data was received, `Ok(false)` for idle timeout.
-/// Returns `Err` if the channel is closed.
-pub(crate) async fn coalesce_and_process_output(
-    rx: &flume::Receiver<Vec<u8>>,
-    terminal: &crate::terminal::Terminal,
-    ext: &mut ContentExtractor,
-    idle_timeout: std::time::Duration,
-    cx: &AsyncApp,
-) -> Result<bool, flume::RecvError> {
-    use std::time::Duration;
-
-    // Step 1: Wait for first chunk OR idle timeout.
-    let first_chunk: Vec<u8>;
-    {
-        let timer = cx.background_executor().timer(idle_timeout);
-        let recv = rx.recv_async();
-        pin_mut!(timer);
-        pin_mut!(recv);
-        match select(recv, timer).await {
-            Either::Left((Ok(chunk), _)) => {
-                first_chunk = chunk;
-            }
-            Either::Left((Err(e), _)) => return Err(e),
-            Either::Right((_, _)) => return Ok(false),
-        }
-    }
-
-    // Step 2: Adaptive coalescing window.
-    // Alt-screen (TUI programs): use 50ms to capture more of the TUI frame in
-    // one batch. tmux strips CSI 2026, so we can't detect frame boundaries;
-    // a wider window reduces mid-frame renders that cause ghosting.
-    // Normal shell: 4ms for responsive keystroke echo.
-    let coalesce_ms: u64 = if terminal.is_alt_screen() { 50 } else { 4 };
-
-    let mut coalesce_buf = first_chunk;
-
-    // Wait the FULL coalescing window, then drain everything that arrived.
-    // This ensures all %output events for a single TUI frame are collected
-    // before processing. In tmux mode, CSI 2026 is consumed by tmux so
-    // this coalescing window is the primary defense against ghosting.
-    cx.background_executor()
-        .timer(Duration::from_millis(coalesce_ms))
-        .await;
-
-    // Drain all chunks that arrived during the coalescing window.
-    while let Ok(next) = rx.try_recv() {
-        coalesce_buf.extend_from_slice(&next);
-    }
-
-    // Step 3: Single-shot processing of the entire coalesced buffer.
-    terminal.process_output(&coalesce_buf);
-    ext.feed(&coalesce_buf);
-
-    // Step 4: Signal that output was received.
-    Ok(true)
-}
 
 /// Main application root component
 pub struct AppRoot {
@@ -1271,19 +1140,8 @@ impl AppRoot {
                 this.split_divider_drag = None;
                 // Force resize all terminals: during drag, runtime.resize() was suppressed
                 // so the terminal process doesn't know about the new dimensions.
-                // The VTE grid was already resized locally — now sync to runtime.
-                if let Some(ref rt) = this.runtime {
-                    if let Ok(buffers) = this.terminal_buffers.lock() {
-                        for (pane_id, buf) in buffers.iter() {
-                            if let TerminalBuffer::Terminal { terminal, .. } = buf {
-                                let sz = terminal.size();
-                                if sz.cols > 0 && sz.rows > 0 {
-                                    let _ = rt.resize(pane_id, sz.cols, sz.rows);
-                                }
-                            }
-                        }
-                    }
-                }
+                // Ghostty views handle their own resize via GPUI layout;
+                // runtime resize is synced through TerminalManager.
                 if let Ok(guard) = term_entity_holder_for_drag_end.lock() {
                     if let Some(ref e) = *guard {
                         let _ = cx.update_entity(e, |ent: &mut TerminalAreaEntity, cx| {
@@ -1309,7 +1167,7 @@ impl AppRoot {
                     }
                     this.terminal_needs_focus = false;
                     if let Ok(buffers) = this.terminal_buffers.lock() {
-                        if let Some(TerminalBuffer::Terminal { focus_handle, .. }) = buffers.get(&target) {
+                        if let Some(TerminalBuffer::GhosttyTerminal { focus_handle, .. }) = buffers.get(&target) {
                             window.focus(focus_handle, cx);
                         } else {
                             drop(buffers);
@@ -1372,7 +1230,6 @@ impl AppRoot {
         }
         self.terminal_area_entity = Some(term_entity);
 
-        let term_entity_for_setup = self.terminal_area_entity.clone();
         if let Some(ref tm) = self.terminal_mgr {
             // Sync shared state to TerminalManager before setup.
             // CRITICAL: tm.focus must use AppRoot's terminal_focus, NOT its own.
@@ -1390,21 +1247,24 @@ impl AppRoot {
             if pane_targets.len() == 1 {
                 let rt = runtime.clone();
                 let pt = pane_targets[0].clone();
-                let sk = status_key_base.clone();
                 tm.update(cx, |tm, cx| {
-                    tm.setup_local_terminal(rt, &pt, &sk, term_entity_for_setup, cx);
+                    let (cols, rows) = tm.resolve_terminal_dims();
+                    if let Err(e) = tm.setup_ghostty_terminal_pane(&rt, &pt, cols, rows, cx) {
+                        log::error!("setup_ghostty_terminal_pane failed: {}", e);
+                    }
                 });
             } else {
                 if let Ok(mut buffers) = self.terminal_buffers.lock() {
                     buffers.clear();
                 }
-                for (i, pt) in pane_targets.iter().enumerate() {
-                    let sk = if i == 0 { status_key_base.clone() } else { format!("{}:{}", status_key_base, i) };
+                for (_i, pt) in pane_targets.iter().enumerate() {
                     let rt = runtime.clone();
                     let pt = pt.clone();
-                    let te = self.terminal_area_entity.clone();
                     tm.update(cx, |tm, cx| {
-                        tm.setup_pane_terminal_output(rt, &pt, &sk, te, cx);
+                        let (cols, rows) = tm.resolve_terminal_dims();
+                        if let Err(e) = tm.setup_ghostty_terminal_pane(&rt, &pt, cols, rows, cx) {
+                            log::error!("setup_ghostty_terminal_pane failed for pane {}: {}", pt, e);
+                        }
                     });
                 }
             }
@@ -2421,11 +2281,8 @@ impl AppRoot {
 
         if let (Some(runtime), Some(target)) = (&self.runtime, self.active_pane_target.as_ref()) {
             let bracketed = if let Ok(buffers) = self.terminal_buffers.lock() {
-                if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
-                    if terminal.display_offset() > 0 {
-                        terminal.scroll_to_bottom();
-                    }
-                    terminal.mode().contains(alacritty_terminal::term::TermMode::BRACKETED_PASTE)
+                if let Some(TerminalBuffer::GhosttyTerminal { .. }) = buffers.get(target) {
+                    false
                 } else { false }
             } else { false };
 
@@ -2450,9 +2307,9 @@ impl AppRoot {
             return;
         }
         if let Some(target) = self.active_pane_target.as_ref() {
-            let selected_text = if let Ok(buffers) = self.terminal_buffers.lock() {
-                if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
-                    terminal.selection_text()
+            let selected_text: Option<String> = if let Ok(buffers) = self.terminal_buffers.lock() {
+                if let Some(TerminalBuffer::GhosttyTerminal { .. }) = buffers.get(target) {
+                    None
                 } else { None }
             } else { None };
 
@@ -2598,21 +2455,9 @@ impl AppRoot {
                 "pageup" | "pagedown" | "home" | "end" => {
                     if let Ok(buffers) = self.terminal_buffers.lock() {
                         if let Some(target) = self.active_pane_target.as_ref() {
-                            if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
-                                match event.keystroke.key.as_str() {
-                                    "pageup" => {
-                                        let rows = terminal.size().rows;
-                                        terminal.scroll_display((rows as i32).saturating_sub(2));
-                                    }
-                                    "pagedown" => {
-                                        let rows = terminal.size().rows;
-                                        terminal.scroll_display(-((rows as i32).saturating_sub(2)));
-                                    }
-                                    "home" => terminal.scroll_display(i32::MAX / 2),
-                                    "end" => terminal.scroll_to_bottom(),
-                                    _ => {}
-                                }
-                                true
+                            if let Some(TerminalBuffer::GhosttyTerminal { .. }) = buffers.get(target) {
+                                // Ghostty entity handles scroll internally
+                                false
                             } else { false }
                         } else { false }
                     } else { false }
@@ -2670,7 +2515,10 @@ impl AppRoot {
                     if let Some(f) = app_focus { tm.focus = Some(f); }
                     tm.status_publisher = sp;
                     tm.area_entity = te.clone();
-                    tm.setup_pane_terminal_output(rt, &new_target, &new_status_key, te, cx);
+                    let (cols, rows) = tm.resolve_terminal_dims();
+                    if let Err(e) = tm.setup_ghostty_terminal_pane(&rt, &new_target, cols, rows, cx) {
+                        log::error!("setup_ghostty_terminal_pane failed for split pane {}: {}", new_target, e);
+                    }
                 });
             }
             if let Ok(mut guard) = self.pane_targets_shared.lock() {
@@ -3091,8 +2939,8 @@ impl AppRoot {
         let has_selection = terminal_context_menu.is_some() && {
             if let Some(ref target) = self.active_pane_target {
                 if let Ok(buffers) = self.terminal_buffers.lock() {
-                    if let Some(TerminalBuffer::Terminal { terminal, .. }) = buffers.get(target) {
-                        terminal.selection_text().map(|t| !t.is_empty()).unwrap_or(false)
+                    if let Some(TerminalBuffer::GhosttyTerminal { .. }) = buffers.get(target) {
+                        false
                     } else { false }
                 } else { false }
             } else { false }
@@ -3396,7 +3244,7 @@ impl Render for AppRoot {
                     let buf = target.as_ref().and_then(|t| {
                         buffers.lock().ok().and_then(|g| g.get(t).cloned())
                     });
-                    if let Some(TerminalBuffer::Terminal { focus_handle, .. }) = buf {
+                    if let Some(TerminalBuffer::GhosttyTerminal { focus_handle, .. }) = buf {
                         window.focus(&focus_handle, cx);
                         return;
                     }
