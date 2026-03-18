@@ -1158,6 +1158,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "croner"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c344b0690c1ad1c7176fe18eb173e0c927008fdaaa256e40dfd43ddd149c0843"
+dependencies = [
+ "chrono",
+]
+
+[[package]]
 name = "crossbeam-deque"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2018,6 +2027,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghostty_vt"
+version = "0.1.0"
+dependencies = [
+ "ghostty_vt_sys",
+]
+
+[[package]]
+name = "ghostty_vt_sys"
+version = "0.1.0"
+
+[[package]]
 name = "gif"
 version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2207,6 +2227,17 @@ dependencies = [
  "windows 0.61.3",
  "zed-font-kit",
  "zed-scap",
+]
+
+[[package]]
+name = "gpui_ghostty_terminal"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "ghostty_vt",
+ "gpui",
+ "smallvec",
+ "unicode-width 0.2.2",
 ]
 
 [[package]]
@@ -4004,11 +4035,14 @@ dependencies = [
  "alacritty_terminal",
  "anyhow",
  "blocking",
+ "chrono",
  "dirs 5.0.1",
  "downcast-rs",
  "flume",
  "futures-util",
+ "ghostty_vt",
  "gpui",
+ "gpui_ghostty_terminal",
  "gpui_platform",
  "libc",
  "log",
@@ -4028,6 +4062,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tiny_http",
  "tokio",
+ "tokio-cron-scheduler",
  "tokio-tungstenite",
  "unicode-width 0.1.14",
  "uuid",
@@ -5839,6 +5874,21 @@ dependencies = [
  "pin-project-lite",
  "socket2",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "tokio-cron-scheduler"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a5597b569b4712cf78aa0c9ae29742461b7bda1e49c2a5fdad1d79bf022f8f0"
+dependencies = [
+ "chrono",
+ "croner",
+ "num-derive",
+ "num-traits",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

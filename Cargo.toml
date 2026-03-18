@@ -1,3 +1,16 @@
+[workspace]
+resolver = "2"
+members = [
+    ".",
+    "crates/ghostty_vt_sys",
+    "crates/ghostty_vt",
+    "crates/gpui_ghostty_terminal",
+]
+
+[workspace.dependencies]
+gpui = { git = "https://github.com/zed-industries/zed" }
+smallvec = { version = "1.15", features = ["const_new"] }
+
 [package]
 name = "pmux"
 version = "0.1.4"
@@ -38,6 +51,8 @@ tiny_http = "0.12"
 which = "6"
 tokio-cron-scheduler = "0.13"
 chrono = { version = "0.4", features = ["serde"] }
+gpui_ghostty_terminal = { path = "crates/gpui_ghostty_terminal" }
+ghostty_vt = { path = "crates/ghostty_vt" }
 
 [dev-dependencies]
 tempfile = "3.8"
