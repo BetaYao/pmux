@@ -1,7 +1,7 @@
 import Foundation
 
 protocol StatusPublisherDelegate: AnyObject {
-    func statusDidChange(worktreePath: String, oldStatus: AgentStatus, newStatus: AgentStatus)
+    func statusDidChange(worktreePath: String, oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String)
 }
 
 /// Periodically polls terminal surfaces and detects agent status changes.
@@ -14,6 +14,8 @@ class StatusPublisher {
     private var timer: Timer?
     private var surfaces: [String: TerminalSurface] = [:]
     private var agentConfig: AgentDetectConfig
+    private var lastMessages: [String: String] = [:]
+    private(set) var webhookProvider = WebhookStatusProvider()
 
     private let pollInterval: TimeInterval = 2.0
 
@@ -31,6 +33,8 @@ class StatusPublisher {
                 trackers[path] = DebouncedStatusTracker()
             }
         }
+
+        webhookProvider.updateWorktrees(Array(surfaces.keys))
 
         timer = Timer.scheduledTimer(withTimeInterval: pollInterval, repeats: true) { [weak self] _ in
             self?.pollAll()
@@ -52,6 +56,7 @@ class StatusPublisher {
                 trackers[path] = DebouncedStatusTracker()
             }
         }
+        webhookProvider.updateWorktrees(Array(surfaces.keys))
     }
 
     private func pollAll() {
@@ -68,17 +73,23 @@ class StatusPublisher {
             // Try to find matching agent def from content
             let agentDef = findAgentDef(in: content)
 
-            let detected = detector.detect(
+            let textStatus = detector.detect(
                 processStatus: processStatus,
                 shellInfo: nil,  // OSC 133 requires stream interception; future enhancement
                 content: content,
                 agentDef: agentDef
             )
+            let hookStatus = webhookProvider.status(for: path)
+            let detected = AgentStatus.highestPriority([textStatus, hookStatus])
+
+            let lastMessage = agentDef?.extractLastMessage(from: content, maxLen: 80) ?? ""
 
             let oldStatus = tracker.currentStatus
             if tracker.update(status: detected) {
-                delegate?.statusDidChange(worktreePath: path, oldStatus: oldStatus, newStatus: detected)
+                delegate?.statusDidChange(worktreePath: path, oldStatus: oldStatus, newStatus: detected, lastMessage: lastMessage)
             }
+            // Always update last message even if status didn't change
+            lastMessages[path] = lastMessage
         }
     }
 
@@ -95,6 +106,10 @@ class StatusPublisher {
 
     func status(for path: String) -> AgentStatus {
         trackers[path]?.currentStatus ?? .unknown
+    }
+
+    func lastMessage(for path: String) -> String {
+        lastMessages[path] ?? ""
     }
 
     deinit {

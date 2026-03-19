@@ -15,12 +15,19 @@ class MainWindowController: NSWindowController {
     private var repoVCs: [String: RepoViewController] = [:]
     private var activeTabIndex: Int = 0  // 0 = Dashboard
 
+    // Auto-update
+    private let updateChecker = UpdateChecker()
+    private let updateManager = UpdateManager()
+    private let updateBanner = UpdateBanner()
+    private var pendingRelease: ReleaseInfo?
+
     // Status detection
     private lazy var statusPublisher: StatusPublisher = {
         let pub = StatusPublisher(agentConfig: config.agentDetect)
         pub.delegate = self
         return pub
     }()
+    private var webhookServer: WebhookServer?
 
     convenience init() {
         let window = PmuxWindow(
@@ -43,6 +50,7 @@ class MainWindowController: NSWindowController {
 
         setupMenuShortcuts()
         setupLayout()
+        setupAutoUpdate()
         loadWorkspaces()
 
         NotificationCenter.default.addObserver(
@@ -62,6 +70,10 @@ class MainWindowController: NSWindowController {
         let settingsItem = NSMenuItem(title: "Settings...", action: #selector(showSettings), keyEquivalent: ",")
         settingsItem.keyEquivalentModifierMask = .command
         appMenu.addItem(settingsItem)
+        appMenu.addItem(NSMenuItem.separator())
+        let checkUpdateItem = NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates), keyEquivalent: "u")
+        checkUpdateItem.keyEquivalentModifierMask = .command
+        appMenu.addItem(checkUpdateItem)
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Quit pmux", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenuItem.submenu = appMenu
@@ -134,6 +146,16 @@ class MainWindowController: NSWindowController {
         let zoomOutItem = NSMenuItem(title: "Zoom Out (Larger Cards)", action: #selector(dashboardZoomOut), keyEquivalent: "=")
         zoomOutItem.keyEquivalentModifierMask = .command
         viewMenu.addItem(zoomOutItem)
+
+        viewMenu.addItem(NSMenuItem.separator())
+
+        let findItem = NSMenuItem(title: "Find...", action: #selector(showTerminalSearch), keyEquivalent: "f")
+        findItem.keyEquivalentModifierMask = .command
+        viewMenu.addItem(findItem)
+
+        let notifHistoryItem = NSMenuItem(title: "Notification History", action: #selector(showNotificationHistory), keyEquivalent: "n")
+        notifHistoryItem.keyEquivalentModifierMask = [.command, .shift]
+        viewMenu.addItem(notifHistoryItem)
 
         viewMenuItem.submenu = viewMenu
         mainMenu.addItem(viewMenuItem)
@@ -249,6 +271,25 @@ class MainWindowController: NSWindowController {
         }
     }
 
+    @objc private func showNotificationHistory() {
+        let historyVC = NotificationHistoryViewController()
+        historyVC.historyDelegate = self
+        window?.contentViewController?.presentAsSheet(historyVC)
+    }
+
+    @objc private func showTerminalSearch() {
+        guard activeTabIndex > 0 else { return }
+        let repoIndex = activeTabIndex - 1
+        if let tab = workspaceManager.tab(at: repoIndex),
+           let repoVC = repoVCs[tab.repoPath] {
+            if repoVC.isSearchVisible {
+                repoVC.hideSearch()
+            } else {
+                repoVC.showSearch()
+            }
+        }
+    }
+
     @objc private func dashboardZoomIn() {
         dashboardVC?.zoomIn()
         config.zoomIndex = dashboardVC?.zoomIndex ?? GridLayout.defaultZoomIndex
@@ -305,6 +346,12 @@ class MainWindowController: NSWindowController {
     private func setupLayout() {
         guard let contentView = window?.contentView else { return }
 
+        // Update banner (above tab bar, hidden by default)
+        updateBanner.translatesAutoresizingMaskIntoConstraints = false
+        updateBanner.isHidden = true
+        updateBanner.delegate = self
+        contentView.addSubview(updateBanner)
+
         tabBar.translatesAutoresizingMaskIntoConstraints = false
         tabBar.delegate = self
         contentView.addSubview(tabBar)
@@ -314,7 +361,11 @@ class MainWindowController: NSWindowController {
         contentView.addSubview(contentContainer)
 
         NSLayoutConstraint.activate([
-            tabBar.topAnchor.constraint(equalTo: contentView.topAnchor),
+            updateBanner.topAnchor.constraint(equalTo: contentView.topAnchor),
+            updateBanner.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            updateBanner.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+
+            tabBar.topAnchor.constraint(equalTo: updateBanner.bottomAnchor),
             tabBar.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             tabBar.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             tabBar.heightAnchor.constraint(equalToConstant: Theme.tabBarHeight),
@@ -545,6 +596,15 @@ class MainWindowController: NSWindowController {
 
         // Start polling for agent status
         statusPublisher.start(surfaces: surfaces)
+
+        // Start webhook server for agent hook events
+        if config.webhook.enabled {
+            let server = WebhookServer(port: config.webhook.port) { [weak self] event in
+                self?.statusPublisher.webhookProvider.handleEvent(event)
+            }
+            server.start()
+            webhookServer = server
+        }
     }
 
     private func createSurface(for info: WorktreeInfo) -> TerminalSurface {
@@ -711,6 +771,8 @@ extension MainWindowController: NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         statusPublisher.stop()
+        webhookServer?.stop()
+        webhookServer = nil
         for (_, surface) in surfaces {
             surface.destroy()
         }
@@ -875,12 +937,13 @@ extension MainWindowController: StatusPublisherDelegate {
         // Find branch name for notification
         let branch = allWorktrees.first(where: { $0.info.path == worktreePath })?.info.branch ?? ""
 
-        // Send macOS notification
+        // Send macOS notification (with lastMessage for richer content)
         NotificationManager.shared.notify(
             worktreePath: worktreePath,
             branch: branch,
             oldStatus: oldStatus,
-            newStatus: newStatus
+            newStatus: newStatus,
+            lastMessage: lastMessage
         )
 
         DispatchQueue.main.async { [weak self] in
@@ -954,5 +1017,93 @@ extension MainWindowController: QuickSwitcherDelegate {
             }
             dashboardVC?.enterSpotlight(focusedIndex: index)
         }
+    }
+}
+
+// MARK: - Auto-Update
+
+extension MainWindowController {
+    func setupAutoUpdate() {
+        guard config.autoUpdate.enabled else { return }
+        updateChecker.delegate = self
+        updateChecker.skippedVersion = config.autoUpdate.skippedVersion
+        updateManager.delegate = self
+        updateChecker.startPolling(intervalHours: config.autoUpdate.checkIntervalHours)
+    }
+
+    @objc func checkForUpdates() {
+        Task {
+            do {
+                if let release = try await updateChecker.checkNow() {
+                    pendingRelease = release
+                    updateBanner.showNewVersion(release.version)
+                } else {
+                    // Already up to date — show brief notification
+                    let alert = NSAlert()
+                    alert.messageText = "已是最新版本"
+                    alert.informativeText = "当前版本 v\(updateChecker.currentVersion) 已是最新。"
+                    alert.alertStyle = .informational
+                    alert.runModal()
+                }
+            } catch {
+                NSLog("Update check failed: \(error)")
+            }
+        }
+    }
+}
+
+// MARK: - UpdateCheckerDelegate
+
+extension MainWindowController: UpdateCheckerDelegate {
+    func updateChecker(_ checker: UpdateChecker, didFindRelease release: ReleaseInfo) {
+        pendingRelease = release
+        updateBanner.showNewVersion(release.version)
+    }
+}
+
+// MARK: - UpdateManagerDelegate
+
+extension MainWindowController: UpdateManagerDelegate {
+    func updateManager(_ manager: UpdateManager, didChangeState state: UpdateManager.State) {
+        updateBanner.update(state: state)
+    }
+}
+
+// MARK: - NotificationHistoryDelegate
+
+extension MainWindowController: NotificationHistoryDelegate {
+    func notificationHistory(_ vc: NotificationHistoryViewController, didSelectWorktreePath path: String) {
+        // Navigate to the worktree
+        NotificationCenter.default.post(
+            name: .navigateToWorktree,
+            object: nil,
+            userInfo: ["worktreePath": path]
+        )
+    }
+}
+
+// MARK: - UpdateBannerDelegate
+
+extension MainWindowController: UpdateBannerDelegate {
+    func updateBannerDidClickInstall(_ banner: UpdateBanner) {
+        guard let release = pendingRelease else { return }
+        updateManager.download(release: release)
+    }
+
+    func updateBannerDidClickSkip(_ banner: UpdateBanner) {
+        config.autoUpdate.skippedVersion = banner.version
+        config.save()
+        updateChecker.skippedVersion = banner.version
+        updateBanner.isHidden = true
+        pendingRelease = nil
+    }
+
+    func updateBannerDidClickRestart(_ banner: UpdateBanner) {
+        updateManager.installAndRestart()
+    }
+
+    func updateBannerDidClickRetry(_ banner: UpdateBanner) {
+        guard let release = pendingRelease else { return }
+        updateManager.download(release: release)
     }
 }
