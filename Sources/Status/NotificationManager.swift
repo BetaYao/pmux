@@ -1,6 +1,10 @@
 import AppKit
 import UserNotifications
 
+extension Notification.Name {
+    static let navigateToWorktree = Notification.Name("pmux.navigateToWorktree")
+}
+
 /// Sends macOS system notifications when agent status changes to actionable states.
 class NotificationManager: NSObject {
     static let shared = NotificationManager()
@@ -84,11 +88,26 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
         completionHandler([.banner, .sound])
     }
 
-    /// Handle notification click — bring app to front
+    /// Handle notification click — bring app to front and navigate to worktree
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
-        NSApp.activate(ignoringOtherApps: true)
+        let userInfo = response.notification.request.content.userInfo
+
+        // didReceive may be called off main thread; UI ops must be on main
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.mainWindow?.deminiaturize(nil)
+
+            if let path = userInfo["worktreePath"] as? String {
+                NotificationCenter.default.post(
+                    name: .navigateToWorktree,
+                    object: nil,
+                    userInfo: ["worktreePath": path]
+                )
+            }
+        }
+
         completionHandler()
     }
 }
