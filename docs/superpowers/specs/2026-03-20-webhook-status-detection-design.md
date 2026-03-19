@@ -15,7 +15,7 @@ Claude Code (and potentially other agents) provide hook/webhook mechanisms that 
 2. **Text matching as parallel fallback** — continues running alongside hooks; final status is the higher-priority of the two signals
 3. **Generic webhook protocol** — not tied to Claude Code; any agent can emit events in the same format
 4. **Claude Code first** — implement Claude Code adapter as the first integration
-5. **cwd-based worktree matching** — use the working directory from hook payloads to associate events with worktrees
+5. **cwd + session_id worktree matching** — use cwd to associate events with worktrees, session_id to track multiple concurrent sessions per worktree
 
 ## Non-Goals
 
@@ -33,6 +33,7 @@ pmux runs an HTTP server on `localhost:<port>` (default 7070, configurable via `
 ```json
 {
   "source": "claude-code",
+  "session_id": "abc123",
   "event": "tool_use_start",
   "cwd": "/Users/matt/workspace/myproject",
   "timestamp": "2026-03-20T12:34:56Z",
@@ -45,6 +46,7 @@ pmux runs an HTTP server on `localhost:<port>` (default 7070, configurable via `
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `source` | string | yes | Agent identifier (e.g., `"claude-code"`, `"opencode"`) |
+| `session_id` | string | yes | Unique session identifier; distinguishes multiple agent instances in the same worktree |
 | `event` | string | yes | Standardized event type (see below) |
 | `cwd` | string | yes | Working directory of the agent session |
 | `timestamp` | string | no | ISO 8601 timestamp |
@@ -86,19 +88,53 @@ Claude Code hooks are configured in `~/.claude/settings.json` to POST to `http:/
 
 The adapter is a thin translation layer. Claude Code sends its native hook format; the adapter normalizes it to the generic protocol before processing.
 
-**Claude Code native hook payload example** (HTTP hook sends JSON body):
+**Claude Code native hook payload examples** (HTTP hook sends JSON body):
 
+`PreToolUse`:
 ```json
 {
-  "hook_type": "PreToolUse",
-  "session_id": "abc123",
+  "hook_event_name": "PreToolUse",
+  "session_id": "sess_abc123",
   "cwd": "/Users/matt/workspace/myproject",
+  "transcript_path": "/Users/matt/.claude/projects/.../transcript.jsonl",
+  "permission_mode": "default",
   "tool_name": "Bash",
   "tool_input": { "command": "npm test" }
 }
 ```
 
-The adapter normalizes this to the generic protocol format, extracting `cwd` directly and mapping `hook_type` to the standard event type. Fields vary by hook type — `Stop` includes `stop_reason`, `Notification` includes `title` and `message`.
+`Stop`:
+```json
+{
+  "hook_event_name": "Stop",
+  "session_id": "sess_abc123",
+  "cwd": "/Users/matt/workspace/myproject",
+  "transcript_path": "...",
+  "stop_reason": "end_turn"
+}
+```
+
+`Notification`:
+```json
+{
+  "hook_event_name": "Notification",
+  "session_id": "sess_abc123",
+  "cwd": "/Users/matt/workspace/myproject",
+  "title": "Task complete",
+  "message": "All tests pass",
+  "level": "info"
+}
+```
+
+**Adapter normalization:** The adapter maps Claude Code's native fields to the generic protocol:
+
+| Claude Code field | → Generic field |
+|---|---|
+| `hook_event_name` | `event` (mapped via table in section 2) |
+| `session_id` | `session_id` (passed through) |
+| `cwd` | `cwd` (passed through) |
+| hardcoded `"claude-code"` | `source` |
+| remaining fields | `data` (tool_name, tool_input, stop_reason, etc.) |
 
 ### 3. Component Architecture
 
@@ -119,8 +155,9 @@ The adapter normalizes this to the generic protocol format, extracting `cwd` dir
     ┌──────────────┴──────────────┐
     │    WebhookStatusProvider     │
     │                             │
-    │  - statuses: [path: Status] │
+    │  - sessions: [sid: State]   │
     │  - status(for:) → Status    │
+    │    (aggregates per worktree) │
     │  - handleEvent(event)       │
     └──────────────┬──────────────┘
                    │ receives parsed events
@@ -156,8 +193,15 @@ Maintains per-worktree hook status.
 ```swift
 class WebhookStatusProvider {
     private let queue = DispatchQueue(label: "pmux.webhook-status")
-    private var statuses: [String: AgentStatus] = [:]  // keyed by worktree path
+    private var sessions: [String: SessionState] = [:]     // keyed by session_id
     private var knownWorktrees: [String] = []
+
+    struct SessionState {
+        let sessionId: String
+        let worktreePath: String
+        var status: AgentStatus
+        var lastEvent: Date
+    }
 
     func updateWorktrees(_ paths: [String])
     func handleEvent(_ event: WebhookEvent)   // called from NWListener queue
@@ -165,7 +209,26 @@ class WebhookStatusProvider {
 }
 ```
 
-**Thread safety:** `handleEvent` is called from the NWListener dispatch queue; `status(for:)` is called from the main thread during `pollAll()`. All access to `statuses` is synchronized through a serial dispatch queue.
+**Thread safety:** `handleEvent` is called from the NWListener dispatch queue; `status(for:)` is called from the main thread during `pollAll()`. All access to `sessions` is synchronized through a serial dispatch queue.
+
+**Session tracking:**
+
+Events are tracked per `session_id`. On `session_start`, a new `SessionState` is created mapping `session_id → worktreePath`. Subsequent events from the same `session_id` update that session's status. On `agent_stop`, the session status is set to `.idle` (session entry retained for future events from the same session).
+
+**Multi-session aggregation:**
+
+A single worktree may have multiple concurrent agent sessions (e.g., two Claude Code instances). `status(for:)` aggregates all sessions for that worktree using `highestPriority`:
+
+```swift
+func status(for worktreePath: String) -> AgentStatus {
+    let sessionStatuses = sessions.values
+        .filter { $0.worktreePath == worktreePath }
+        .map { $0.status }
+    return AgentStatus.highestPriority(sessionStatuses)  // returns .unknown if empty
+}
+```
+
+This means: if one session is Running and another is Idle, the worktree shows Running.
 
 **cwd → worktree matching:**
 
@@ -177,9 +240,9 @@ All paths are resolved to canonical form (`URL.resolvingSymlinksInPath()`) befor
 
 **Worktree list sync:** `StatusPublisher` calls `webhookProvider.updateWorktrees()` from its `updateSurfaces()` method, passing the current surface keys. This keeps the worktree list in sync without requiring separate management from `MainWindowController`.
 
-**Status retention:** Hook status is retained indefinitely until a new event arrives. No timeout. This avoids false status changes during long agent thinking periods.
+**Status retention:** Session status is retained indefinitely until a new event arrives for that session. No timeout. This avoids false status changes during long agent thinking periods.
 
-**Reset:** When a worktree is removed from pmux, its hook status entry is cleaned up.
+**Cleanup:** When a worktree is removed from pmux, all sessions associated with that worktree are cleaned up. Stale sessions (no events for >1 hour) are pruned during `updateWorktrees()` to prevent unbounded memory growth.
 
 ### 6. Status Merge in StatusPublisher
 
@@ -214,18 +277,25 @@ This means:
 
 ```
 1. User runs Claude Code in worktree /Users/matt/project/feature-branch
-2. Claude starts using the Bash tool
-3. Claude Code fires PreToolUse hook → POST to localhost:7070/webhook:
-   {"source": "claude-code", "event": "tool_use_start", "cwd": "/Users/matt/project/feature-branch", ...}
-4. WebhookServer receives, parses → WebhookEvent
-5. WebhookStatusProvider matches cwd to worktree path → sets hookStatus = .running
+2. Claude Code fires SessionStart hook → POST to localhost:7070/webhook:
+   {"hook_event_name": "SessionStart", "session_id": "sess_abc", "cwd": "/Users/matt/project/feature-branch", ...}
+3. WebhookServer parses → adapter normalizes → WebhookEvent(source: "claude-code", session_id: "sess_abc", event: "session_start", ...)
+4. WebhookStatusProvider creates SessionState(sessionId: "sess_abc", worktreePath: matched, status: .running)
+5. Claude starts using the Bash tool → PreToolUse hook arrives → session status stays .running
 6. Next pollAll() cycle (within 2s):
    - textStatus from viewport = .idle (Claude UI shows prompt)
-   - hookStatus = .running (from webhook)
+   - hookStatus = .running (aggregated from session "sess_abc")
    - merged = .running (priority 3 > priority 2)
    - Status updates to Running
-7. Claude finishes, fires Stop hook → agent_stop → hookStatus = .idle
+7. Claude finishes, fires Stop hook → agent_stop → session status = .idle
 8. Next pollAll(): merged = .idle
+
+Multi-session example:
+9. User starts a second Claude Code session in the same worktree (session_id: "sess_xyz")
+10. WebhookStatusProvider now has two sessions for this worktree:
+    - sess_abc: .idle
+    - sess_xyz: .running
+11. status(for: worktreePath) = highestPriority([.idle, .running]) = .running
 ```
 
 ### 8. Configuration
