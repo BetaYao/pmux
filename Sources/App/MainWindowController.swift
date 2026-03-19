@@ -58,6 +58,15 @@ class MainWindowController: NSWindowController {
         appMenuItem.submenu = appMenu
         mainMenu.addItem(appMenuItem)
 
+        // File menu
+        let fileMenuItem = NSMenuItem()
+        let fileMenu = NSMenu(title: "File")
+        let newBranchItem = NSMenuItem(title: "New Branch...", action: #selector(showNewBranchDialog), keyEquivalent: "n")
+        newBranchItem.keyEquivalentModifierMask = .command
+        fileMenu.addItem(newBranchItem)
+        fileMenuItem.submenu = fileMenu
+        mainMenu.addItem(fileMenuItem)
+
         // View menu
         let viewMenuItem = NSMenuItem()
         let viewMenu = NSMenu(title: "View")
@@ -101,6 +110,23 @@ class MainWindowController: NSWindowController {
 
     @objc private func switchToDashboard() {
         switchToTab(0)
+    }
+
+    @objc private func showNewBranchDialog() {
+        let dialog = NewBranchDialog(repoPaths: config.workspacePaths)
+        dialog.dialogDelegate = self
+        // Present as sheet on the currently visible view controller
+        if activeTabIndex == 0 {
+            dashboardVC?.presentAsSheet(dialog)
+        } else {
+            let repoIndex = activeTabIndex - 1
+            if let tab = workspaceManager.tab(at: repoIndex),
+               let repoVC = repoVCs[tab.repoPath] {
+                repoVC.presentAsSheet(dialog)
+            } else {
+                dashboardVC?.presentAsSheet(dialog)
+            }
+        }
     }
 
     @objc private func closeCurrentTab() {
@@ -409,6 +435,27 @@ extension MainWindowController: DashboardDelegate {
 // MARK: - PmuxWindowKeyHandler
 
 extension MainWindowController: PmuxWindowKeyHandler {}
+
+// MARK: - NewBranchDialogDelegate
+
+extension MainWindowController: NewBranchDialogDelegate {
+    func newBranchDialog(_ dialog: NewBranchDialog, didCreateWorktree info: WorktreeInfo, inRepo repoPath: String) {
+        // Create a terminal surface for the new worktree
+        let surface = createSurface(for: info)
+        allWorktrees.append((info: info, surface: surface))
+
+        // Update dashboard
+        dashboardVC?.setWorktrees(allWorktrees)
+
+        // Update status publisher
+        statusPublisher.updateSurfaces(surfaces)
+
+        // Switch to dashboard to see the new card
+        if activeTabIndex != 0 {
+            switchToTab(0)
+        }
+    }
+}
 
 // MARK: - StatusPublisherDelegate
 
