@@ -15,6 +15,13 @@ class MainWindowController: NSWindowController {
     private var repoVCs: [String: RepoViewController] = [:]
     private var activeTabIndex: Int = 0  // 0 = Dashboard
 
+    // Status detection
+    private lazy var statusPublisher: StatusPublisher = {
+        let pub = StatusPublisher(agentConfig: config.agentDetect)
+        pub.delegate = self
+        return pub
+    }()
+
     convenience init() {
         let window = PmuxWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
@@ -274,6 +281,9 @@ class MainWindowController: NSWindowController {
         if allWorktreeInfos.isEmpty {
             NSLog("No workspaces configured. Add paths to ~/.config/pmux/config.json")
         }
+
+        // Start polling for agent status
+        statusPublisher.start(surfaces: surfaces)
     }
 
     private func createSurface(for info: WorktreeInfo) -> TerminalSurface {
@@ -318,6 +328,7 @@ extension MainWindowController: NSWindowDelegate {
     func windowDidResize(_ notification: Notification) {}
 
     func windowWillClose(_ notification: Notification) {
+        statusPublisher.stop()
         for (_, surface) in surfaces {
             surface.destroy()
         }
@@ -351,11 +362,31 @@ extension MainWindowController: TabBarDelegate {
 
 extension MainWindowController: DashboardDelegate {
     func dashboard(_ dashboard: DashboardViewController, didSelectWorktree info: WorktreeInfo, surface: TerminalSurface) {
-        // Double-click on Spotlight main terminal → open as repo tab
-        openRepoTab(repoPath: info.path)
+        // Find the repo root from the worktree path
+        let repoPath = WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
+        openRepoTab(repoPath: repoPath)
     }
 }
 
 // MARK: - PmuxWindowKeyHandler
 
 extension MainWindowController: PmuxWindowKeyHandler {}
+
+// MARK: - StatusPublisherDelegate
+
+extension MainWindowController: StatusPublisherDelegate {
+    func statusDidChange(worktreePath: String, newStatus: AgentStatus) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.dashboardVC?.updateStatus(for: worktreePath, status: newStatus)
+            // Update sidebar in active repo view
+            if self.activeTabIndex > 0 {
+                let repoIndex = self.activeTabIndex - 1
+                if let tab = self.workspaceManager.tab(at: repoIndex),
+                   let repoVC = self.repoVCs[tab.repoPath] {
+                    repoVC.updateStatus(for: worktreePath, status: newStatus)
+                }
+            }
+        }
+    }
+}

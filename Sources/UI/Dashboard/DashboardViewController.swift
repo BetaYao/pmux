@@ -139,6 +139,12 @@ class DashboardViewController: NSViewController {
         return worktrees[index]
     }
 
+    func updateStatus(for path: String, status: AgentStatus) {
+        for card in cards where card.worktreeInfo.path == path {
+            card.status = status
+        }
+    }
+
     func setWorktrees(_ worktrees: [(info: WorktreeInfo, surface: TerminalSurface)]) {
         self.worktrees = worktrees
         rebuildCards()
@@ -317,5 +323,11 @@ extension DashboardViewController: TerminalCardDelegate {
             // Clicked a sidebar card — swap it to spotlight
             enterSpotlight(focusedIndex: index)
         }
+    }
+
+    func terminalCardDoubleClicked(_ card: TerminalCardView) {
+        guard let index = cards.firstIndex(where: { $0 === card }) else { return }
+        let worktree = worktrees[index]
+        dashboardDelegate?.dashboard(self, didSelectWorktree: worktree.info, surface: worktree.surface)
     }
 }

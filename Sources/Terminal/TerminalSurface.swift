@@ -104,6 +104,48 @@ class TerminalSurface {
         return ghostty_surface_process_exited(surface)
     }
 
+    /// Read visible terminal text from the viewport
+    func readViewportText() -> String? {
+        guard let surface else { return nil }
+
+        let size = ghostty_surface_size(surface)
+        guard size.rows > 0, size.columns > 0 else { return nil }
+
+        var selection = ghostty_selection_s()
+        selection.top_left = ghostty_point_s(
+            tag: GHOSTTY_POINT_VIEWPORT,
+            coord: GHOSTTY_POINT_COORD_TOP_LEFT,
+            x: 0,
+            y: 0
+        )
+        selection.bottom_right = ghostty_point_s(
+            tag: GHOSTTY_POINT_VIEWPORT,
+            coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT,
+            x: UInt32(size.columns - 1),
+            y: UInt32(size.rows - 1)
+        )
+        selection.rectangle = false
+
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_text(surface, selection, &text) else {
+            return nil
+        }
+        defer { ghostty_surface_free_text(surface, &text) }
+
+        guard let ptr = text.text, text.text_len > 0 else { return nil }
+        return String(cString: ptr)
+    }
+
+    /// Get the process status for status detection
+    var processStatus: ProcessStatus {
+        guard let surface else { return .unknown }
+        if ghostty_surface_process_exited(surface) {
+            // We don't have the exit code from ghostty, so assume exited
+            return .exited
+        }
+        return .running
+    }
+
     /// Destroy the surface and clean up
     func destroy() {
         if let surface {

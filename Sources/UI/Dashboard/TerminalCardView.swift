@@ -2,6 +2,7 @@ import AppKit
 
 protocol TerminalCardDelegate: AnyObject {
     func terminalCardClicked(_ card: TerminalCardView)
+    func terminalCardDoubleClicked(_ card: TerminalCardView)
 }
 
 /// A dashboard card showing a mini terminal preview + status + branch name.
@@ -105,9 +106,17 @@ class TerminalCardView: NSView {
             branchLabel.leadingAnchor.constraint(greaterThanOrEqualTo: statusLabel.trailingAnchor, constant: 8),
         ])
 
-        // Click handler
+        // Click handlers
         let click = NSClickGestureRecognizer(target: self, action: #selector(cardClicked))
+        click.numberOfClicksRequired = 1
         addGestureRecognizer(click)
+
+        let doubleClick = NSClickGestureRecognizer(target: self, action: #selector(cardDoubleClicked))
+        doubleClick.numberOfClicksRequired = 2
+        addGestureRecognizer(doubleClick)
+
+        // Single click should wait to confirm it's not a double click
+        click.shouldRequireFailure(of: doubleClick)
 
         // Hover tracking
         let trackingArea = NSTrackingArea(
@@ -132,6 +141,10 @@ class TerminalCardView: NSView {
 
     @objc private func cardClicked() {
         delegate?.terminalCardClicked(self)
+    }
+
+    @objc private func cardDoubleClicked() {
+        delegate?.terminalCardDoubleClicked(self)
     }
 
     override func mouseEntered(with event: NSEvent) {
