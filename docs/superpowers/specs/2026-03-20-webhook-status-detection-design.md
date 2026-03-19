@@ -86,7 +86,19 @@ Claude Code hooks are configured in `~/.claude/settings.json` to POST to `http:/
 
 The adapter is a thin translation layer. Claude Code sends its native hook format; the adapter normalizes it to the generic protocol before processing.
 
-**Note:** Claude Code hooks support `"type": "http"` which sends HTTP POST requests directly. The hook payload includes session context and the event type. pmux needs to handle the Claude Code native format and normalize it.
+**Claude Code native hook payload example** (HTTP hook sends JSON body):
+
+```json
+{
+  "hook_type": "PreToolUse",
+  "session_id": "abc123",
+  "cwd": "/Users/matt/workspace/myproject",
+  "tool_name": "Bash",
+  "tool_input": { "command": "npm test" }
+}
+```
+
+The adapter normalizes this to the generic protocol format, extracting `cwd` directly and mapping `hook_type` to the standard event type. Fields vary by hook type — `Stop` includes `stop_reason`, `Notification` includes `title` and `message`.
 
 ### 3. Component Architecture
 
@@ -96,16 +108,11 @@ The adapter is a thin translation layer. Claude Code sends its native hook forma
 │                                                  │
 │  pollAll() {                                     │
 │    for each worktree:                            │
-│      processStatus = surface.processStatus       │
-│      textStatus = detector.detect(text matching) │
+│      textStatus = detector.detect(process+text)  │
 │      hookStatus = webhookProvider.status(for:)    │
-│                                                  │
-│      if processStatus == .exited/.error:         │
-│        final = processStatus mapping             │
-│      else:                                       │
-│        final = highestPriority(textStatus,        │
-│                                hookStatus)        │
-│      update tracker with final                   │
+│      final = highestPriority(textStatus,          │
+│                              hookStatus)          │
+│      tracker.update(final)                       │
 │  }                                               │
 └──────────────────┬───────────────────────────────┘
                    │ queries
@@ -138,7 +145,9 @@ Lightweight HTTP server using `Network.framework` (`NWListener`).
 - Starts when `WebhookConfig.enabled == true`, stops when disabled
 - Lifecycle managed by `MainWindowController` (start on launch, stop on quit)
 
-**Why Network.framework over a full HTTP framework:** No external dependencies needed. The endpoint is simple (single route, JSON body). NWListener provides sufficient HTTP parsing for this use case.
+**Why Network.framework over a full HTTP framework:** No external dependencies needed. The endpoint is simple (single route, JSON body).
+
+**HTTP parsing strategy:** `NWListener` provides TCP connection handling, not HTTP parsing. The server uses `CFHTTPMessage` (from CFNetwork) to parse raw HTTP request bytes — this handles request line parsing, header extraction, and content-length-based body reading. This avoids writing a manual HTTP parser while staying within system frameworks.
 
 ### 5. WebhookStatusProvider
 
@@ -146,19 +155,27 @@ Maintains per-worktree hook status.
 
 ```swift
 class WebhookStatusProvider {
-    private var statuses: [String: AgentStatus] = []  // keyed by worktree path
+    private let queue = DispatchQueue(label: "pmux.webhook-status")
+    private var statuses: [String: AgentStatus] = [:]  // keyed by worktree path
     private var knownWorktrees: [String] = []
 
     func updateWorktrees(_ paths: [String])
-    func handleEvent(_ event: WebhookEvent)
-    func status(for worktreePath: String) -> AgentStatus
+    func handleEvent(_ event: WebhookEvent)   // called from NWListener queue
+    func status(for worktreePath: String) -> AgentStatus  // called from main thread
 }
 ```
 
+**Thread safety:** `handleEvent` is called from the NWListener dispatch queue; `status(for:)` is called from the main thread during `pollAll()`. All access to `statuses` is synchronized through a serial dispatch queue.
+
 **cwd → worktree matching:**
-1. Exact match: `event.cwd == worktreePath`
-2. Prefix match: `event.cwd.hasPrefix(worktreePath)` (agent running in a subdirectory)
+
+All paths are resolved to canonical form (`URL.resolvingSymlinksInPath()`) before comparison to handle symlinks and trailing slashes.
+
+1. Exact match: `canonicalize(event.cwd) == canonicalize(worktreePath)`
+2. Prefix match: `canonicalize(event.cwd).hasPrefix(canonicalize(worktreePath))` (agent running in a subdirectory)
 3. No match: log warning, discard event
+
+**Worktree list sync:** `StatusPublisher` calls `webhookProvider.updateWorktrees()` from its `updateSurfaces()` method, passing the current surface keys. This keeps the worktree list in sync without requiring separate management from `MainWindowController`.
 
 **Status retention:** Hook status is retained indefinitely until a new event arrives. No timeout. This avoids false status changes during long agent thinking periods.
 
@@ -177,23 +194,21 @@ Priority 3: Unknown (no signals)
 In `pollAll()`:
 
 ```swift
-// Priority 1: Process lifecycle
-switch processStatus {
-case .exited: finalStatus = .exited
-case .error:  finalStatus = .error
-default:
-    // Priority 2: Merge hook + text
-    let textStatus = detector.detect(processStatus:, shellInfo: nil, content:, agentDef:)
-    let hookStatus = webhookProvider.status(for: path)
-    finalStatus = AgentStatus.highestPriority([textStatus, hookStatus])
-}
+// StatusDetector.detect() already handles processStatus as Priority 1
+// (returns .exited/.error immediately, skipping text matching)
+let textStatus = detector.detect(processStatus: processStatus, shellInfo: nil, content: content, agentDef: agentDef)
+let hookStatus = webhookProvider.status(for: path)
+let finalStatus = AgentStatus.highestPriority([textStatus, hookStatus])
 ```
+
+No separate process status switch needed — `StatusDetector.detect()` already returns `.exited`/`.error` for those cases, and their high priority values (5/6) will naturally win in `highestPriority`.
 
 This means:
 - If hook says Running and text says Idle → Running (hook wins, higher priority)
 - If hook says Idle and text says Error → Error (text wins, higher priority)
 - If hook says Running and text says Unknown → Running (hook wins)
 - If no hook events received → `.unknown` from hook, text matching alone determines status
+- If both hook and text return `.unknown` → `.unknown`, and `DebouncedStatusTracker` preserves the previous status (existing behavior, prevents flicker)
 
 ### 7. Data Flow Example
 
