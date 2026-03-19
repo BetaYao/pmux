@@ -1,0 +1,65 @@
+name: pmux
+options:
+  bundleIdPrefix: com.pmux
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "16.1"
+  minimumXcodeGenVersion: "2.40"
+  defaultConfig: Debug
+
+targets:
+  pmux:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+        type: group
+      - path: ghostty.h
+        type: file
+        buildPhase: none
+      - path: pmux-Bridging-Header.h
+        type: file
+        buildPhase: none
+    settings:
+      base:
+        SWIFT_VERSION: "5.10"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        PRODUCT_BUNDLE_IDENTIFIER: com.pmux.app
+        PRODUCT_NAME: pmux
+        INFOPLIST_FILE: ""
+        GENERATE_INFOPLIST_FILE: YES
+        MARKETING_VERSION: "2.0.0"
+        CURRENT_PROJECT_VERSION: 1
+        CODE_SIGN_STYLE: Automatic
+        COMBINE_HIDPI_IMAGES: YES
+        SWIFT_OBJC_BRIDGING_HEADER: "$(PROJECT_DIR)/pmux-Bridging-Header.h"
+        HEADER_SEARCH_PATHS:
+          - "$(PROJECT_DIR)"
+        LIBRARY_SEARCH_PATHS:
+          - "$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64"
+        OTHER_LDFLAGS:
+          - "-lghostty"
+          - "-lc++"
+          - "-framework"
+          - Metal
+          - "-framework"
+          - QuartzCore
+          - "-framework"
+          - IOSurface
+          - "-framework"
+          - UniformTypeIdentifiers
+          - "-framework"
+          - Carbon
+
+  pmuxTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests
+        type: group
+    dependencies:
+      - target: pmux
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.pmux.tests
+        GENERATE_INFOPLIST_FILE: YES
