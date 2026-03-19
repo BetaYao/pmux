@@ -44,6 +44,11 @@ class MainWindowController: NSWindowController {
         setupMenuShortcuts()
         setupLayout()
         loadWorkspaces()
+
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handleNavigateToWorktree(_:)),
+            name: .navigateToWorktree, object: nil
+        )
     }
 
     // MARK: - Menu Shortcuts
@@ -54,6 +59,10 @@ class MainWindowController: NSWindowController {
         // App menu
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu()
+        let settingsItem = NSMenuItem(title: "Settings...", action: #selector(showSettings), keyEquivalent: ",")
+        settingsItem.keyEquivalentModifierMask = .command
+        appMenu.addItem(settingsItem)
+        appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Quit pmux", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenuItem.submenu = appMenu
         mainMenu.addItem(appMenuItem)
@@ -66,6 +75,10 @@ class MainWindowController: NSWindowController {
         fileMenu.addItem(newBranchItem)
         fileMenuItem.submenu = fileMenu
         mainMenu.addItem(fileMenuItem)
+
+        let quickSwitchItem = NSMenuItem(title: "Quick Switch...", action: #selector(showQuickSwitcher), keyEquivalent: "p")
+        quickSwitchItem.keyEquivalentModifierMask = .command
+        fileMenu.addItem(quickSwitchItem)
 
         // View menu
         let viewMenuItem = NSMenuItem()
@@ -94,6 +107,34 @@ class MainWindowController: NSWindowController {
         openTabItem.keyEquivalentModifierMask = .command
         viewMenu.addItem(openTabItem)
 
+        let diffItem = NSMenuItem(title: "Show Diff...", action: #selector(showDiffOverlay), keyEquivalent: "d")
+        diffItem.keyEquivalentModifierMask = .command
+        viewMenu.addItem(diffItem)
+
+        viewMenu.addItem(NSMenuItem.separator())
+
+        let splitVItem = NSMenuItem(title: "Split Vertically", action: #selector(splitPaneVertical), keyEquivalent: "d")
+        splitVItem.keyEquivalentModifierMask = [.command, .shift]
+        viewMenu.addItem(splitVItem)
+
+        let splitHItem = NSMenuItem(title: "Split Horizontally", action: #selector(splitPaneHorizontal), keyEquivalent: "e")
+        splitHItem.keyEquivalentModifierMask = [.command, .shift]
+        viewMenu.addItem(splitHItem)
+
+        let closePaneItem = NSMenuItem(title: "Close Pane", action: #selector(closePane), keyEquivalent: "w")
+        closePaneItem.keyEquivalentModifierMask = [.command, .shift]
+        viewMenu.addItem(closePaneItem)
+
+        viewMenu.addItem(NSMenuItem.separator())
+
+        let zoomInItem = NSMenuItem(title: "Zoom In (Smaller Cards)", action: #selector(dashboardZoomIn), keyEquivalent: "-")
+        zoomInItem.keyEquivalentModifierMask = .command
+        viewMenu.addItem(zoomInItem)
+
+        let zoomOutItem = NSMenuItem(title: "Zoom Out (Larger Cards)", action: #selector(dashboardZoomOut), keyEquivalent: "=")
+        zoomOutItem.keyEquivalentModifierMask = .command
+        viewMenu.addItem(zoomOutItem)
+
         viewMenuItem.submenu = viewMenu
         mainMenu.addItem(viewMenuItem)
 
@@ -110,6 +151,43 @@ class MainWindowController: NSWindowController {
 
     @objc private func switchToDashboard() {
         switchToTab(0)
+    }
+
+    @objc private func showQuickSwitcher() {
+        let worktreeInfos = allWorktrees.map { $0.info }
+        var statuses: [String: AgentStatus] = [:]
+        for (path, _) in surfaces {
+            statuses[path] = statusPublisher.status(for: path)
+        }
+        let switcher = QuickSwitcherViewController(worktrees: worktreeInfos, statuses: statuses)
+        switcher.quickSwitcherDelegate = self
+        if activeTabIndex == 0 {
+            dashboardVC?.presentAsSheet(switcher)
+        } else {
+            let repoIndex = activeTabIndex - 1
+            if let tab = workspaceManager.tab(at: repoIndex),
+               let repoVC = repoVCs[tab.repoPath] {
+                repoVC.presentAsSheet(switcher)
+            } else {
+                dashboardVC?.presentAsSheet(switcher)
+            }
+        }
+    }
+
+    @objc private func showSettings() {
+        let settingsVC = SettingsViewController(config: config)
+        settingsVC.settingsDelegate = self
+        if activeTabIndex == 0 {
+            dashboardVC?.presentAsSheet(settingsVC)
+        } else {
+            let repoIndex = activeTabIndex - 1
+            if let tab = workspaceManager.tab(at: repoIndex),
+               let repoVC = repoVCs[tab.repoPath] {
+                repoVC.presentAsSheet(settingsVC)
+            } else {
+                dashboardVC?.presentAsSheet(settingsVC)
+            }
+        }
     }
 
     @objc private func showNewBranchDialog() {
@@ -137,9 +215,79 @@ class MainWindowController: NSWindowController {
     @objc private func openSpotlightAsTab() {
         guard activeTabIndex == 0, let dashboard = dashboardVC else { return }
         if case .spotlight(let index) = dashboard.mode {
-            let worktree = dashboard.worktreeAt(index: index)
-            if let (info, _) = worktree {
-                openRepoTab(repoPath: info.path)
+            if let (info, _) = dashboard.worktreeAt(index: index) {
+                let repoPath = WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
+                openRepoTab(repoPath: repoPath)
+            }
+        }
+    }
+
+    @objc private func splitPaneVertical() {
+        guard activeTabIndex > 0 else { return }
+        let repoIndex = activeTabIndex - 1
+        if let tab = workspaceManager.tab(at: repoIndex),
+           let repoVC = repoVCs[tab.repoPath] {
+            repoVC.splitVertical()
+        }
+    }
+
+    @objc private func splitPaneHorizontal() {
+        guard activeTabIndex > 0 else { return }
+        let repoIndex = activeTabIndex - 1
+        if let tab = workspaceManager.tab(at: repoIndex),
+           let repoVC = repoVCs[tab.repoPath] {
+            repoVC.splitHorizontal()
+        }
+    }
+
+    @objc private func closePane() {
+        guard activeTabIndex > 0 else { return }
+        let repoIndex = activeTabIndex - 1
+        if let tab = workspaceManager.tab(at: repoIndex),
+           let repoVC = repoVCs[tab.repoPath] {
+            repoVC.closePane()
+        }
+    }
+
+    @objc private func dashboardZoomIn() {
+        dashboardVC?.zoomIn()
+        config.zoomIndex = dashboardVC?.zoomIndex ?? GridLayout.defaultZoomIndex
+        config.save()
+    }
+
+    @objc private func dashboardZoomOut() {
+        dashboardVC?.zoomOut()
+        config.zoomIndex = dashboardVC?.zoomIndex ?? GridLayout.defaultZoomIndex
+        config.save()
+    }
+
+    @objc private func showDiffOverlay() {
+        // Determine current worktree path
+        var worktreePath: String?
+        if activeTabIndex > 0 {
+            let repoIndex = activeTabIndex - 1
+            if let tab = workspaceManager.tab(at: repoIndex) {
+                worktreePath = tab.repoPath
+            }
+        } else if let dashboard = dashboardVC {
+            if case .spotlight(let index) = dashboard.mode,
+               let (info, _) = dashboard.worktreeAt(index: index) {
+                worktreePath = info.path
+            }
+        }
+
+        guard let path = worktreePath else { return }
+
+        let diffVC = DiffOverlayViewController(worktreePath: path)
+        if activeTabIndex == 0 {
+            dashboardVC?.presentAsSheet(diffVC)
+        } else {
+            let repoIndex = activeTabIndex - 1
+            if let tab = workspaceManager.tab(at: repoIndex),
+               let repoVC = repoVCs[tab.repoPath] {
+                repoVC.presentAsSheet(diffVC)
+            } else {
+                dashboardVC?.presentAsSheet(diffVC)
             }
         }
     }
@@ -179,6 +327,7 @@ class MainWindowController: NSWindowController {
 
         let dashboard = DashboardViewController()
         dashboard.dashboardDelegate = self
+        dashboard.setZoomIndex(config.zoomIndex)
         dashboardVC = dashboard
 
         embedViewController(dashboard)
@@ -209,6 +358,58 @@ class MainWindowController: NSWindowController {
         tabBar.setTabs(tabs, selected: activeTabIndex)
     }
 
+    /// Add a new repo via folder picker
+    private func addRepoViaOpenPanel() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Select a git repository to add"
+        panel.prompt = "Add Repo"
+
+        guard let window else { return }
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            self?.addRepo(at: url.path)
+        }
+    }
+
+    private func addRepo(at path: String) {
+        // Don't add duplicates
+        guard !config.workspacePaths.contains(path) else {
+            // Already exists — just switch to its tab
+            if let tabIndex = workspaceManager.tabs.firstIndex(where: { $0.repoPath == path }) {
+                switchToTab(tabIndex + 1)
+            }
+            return
+        }
+
+        config.workspacePaths.append(path)
+        config.save()
+
+        // Create surfaces for the new repo's worktrees
+        let worktrees = WorktreeDiscovery.discover(repoPath: path)
+        if worktrees.isEmpty {
+            let info = WorktreeInfo(path: path, branch: "main", commitHash: "", isMainWorktree: true)
+            let surface = createSurface(for: info)
+            allWorktrees.append((info: info, surface: surface))
+        } else {
+            for info in worktrees {
+                let surface = createSurface(for: info)
+                allWorktrees.append((info: info, surface: surface))
+            }
+        }
+
+        // Add tab for the new repo
+        let tabIndex = workspaceManager.addTab(repoPath: path, worktrees: worktrees.isEmpty ? [] : worktrees)
+
+        // Update dashboard and tab bar
+        dashboardVC?.setWorktrees(allWorktrees)
+        statusPublisher.updateSurfaces(surfaces)
+        updateTabBar()
+        switchToTab(tabIndex + 1)
+    }
+
     private func updateStatusCounts() {
         var running = 0, waiting = 0, error = 0
         for path in surfaces.keys {
@@ -227,13 +428,13 @@ class MainWindowController: NSWindowController {
     private func switchToTab(_ index: Int) {
         guard index != activeTabIndex else { return }
 
-        // Detach terminal from current repo view
+        // Detach terminals from current repo view (not dashboard — dashboard
+        // terminals are reparented directly by the next view controller)
         if activeTabIndex > 0 {
             let repoIndex = activeTabIndex - 1
             if let tab = workspaceManager.tab(at: repoIndex),
                let repoVC = repoVCs[tab.repoPath] {
                 repoVC.detachActiveTerminal()
-                repoVC.view.removeFromSuperview()
             }
         }
 
@@ -241,19 +442,14 @@ class MainWindowController: NSWindowController {
         tabBar.selectTab(at: index)
 
         if index == 0 {
-            // Dashboard
             if let dashboard = dashboardVC {
                 embedViewController(dashboard)
-                // Re-embed terminals in their cards
                 dashboard.refreshAfterReturn()
             }
         } else {
-            // Repo tab
             let repoIndex = index - 1
             guard let tab = workspaceManager.tab(at: repoIndex) else { return }
-
             let repoVC = getOrCreateRepoVC(for: tab)
-            dashboardVC?.view.removeFromSuperview()
             embedViewController(repoVC)
         }
     }
@@ -266,6 +462,7 @@ class MainWindowController: NSWindowController {
         }
 
         let repoVC = RepoViewController()
+        repoVC.repoDelegate = self
         repoVC.configure(worktrees: tab.worktrees, surfaces: surfaces)
         repoVCs[tab.repoPath] = repoVC
         return repoVC
@@ -323,8 +520,24 @@ class MainWindowController: NSWindowController {
             }
         }
 
+        // Apply saved card order
+        if !config.cardOrder.isEmpty {
+            allWorktreeInfos.sort { a, b in
+                let ai = config.cardOrder.firstIndex(of: a.info.path) ?? Int.max
+                let bi = config.cardOrder.firstIndex(of: b.info.path) ?? Int.max
+                return ai < bi
+            }
+        }
+
         self.allWorktrees = allWorktreeInfos
         dashboardVC?.setWorktrees(allWorktreeInfos)
+
+        // Auto-create tabs for all configured repos
+        for repoPath in config.workspacePaths {
+            let worktrees = WorktreeDiscovery.discover(repoPath: repoPath)
+            _ = workspaceManager.addTab(repoPath: repoPath, worktrees: worktrees)
+        }
+        updateTabBar()
 
         if allWorktreeInfos.isEmpty {
             NSLog("No workspaces configured. Add paths to ~/.config/pmux/config.json")
@@ -344,6 +557,111 @@ class MainWindowController: NSWindowController {
         }
         surfaces[info.path] = surface
         return surface
+    }
+
+    // MARK: - Worktree Deletion
+
+    private func confirmAndDeleteWorktree(_ info: WorktreeInfo) {
+        guard !info.isMainWorktree else { return }
+
+        let hasChanges = WorktreeDeleter.hasUncommittedChanges(worktreePath: info.path)
+        let repoPath = WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
+
+        let alert = NSAlert()
+        alert.alertStyle = hasChanges ? .critical : .warning
+        alert.messageText = "Delete worktree \"\(info.branch)\"?"
+        if hasChanges {
+            alert.informativeText = "This worktree has uncommitted changes that will be lost."
+        } else {
+            alert.informativeText = "The worktree directory will be removed."
+        }
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Delete + Branch")
+        alert.addButton(withTitle: "Cancel")
+
+        // Make delete button destructive
+        alert.buttons[0].hasDestructiveAction = true
+        alert.buttons[1].hasDestructiveAction = true
+
+        guard let window else { return }
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self else { return }
+            switch response {
+            case .alertFirstButtonReturn:
+                self.performDeleteWorktree(info, repoPath: repoPath, deleteBranch: false, force: hasChanges)
+            case .alertSecondButtonReturn:
+                self.performDeleteWorktree(info, repoPath: repoPath, deleteBranch: true, force: hasChanges)
+            default:
+                break
+            }
+        }
+    }
+
+    private func performDeleteWorktree(_ info: WorktreeInfo, repoPath: String, deleteBranch: Bool, force: Bool) {
+        // Destroy terminal surface first
+        if let surface = surfaces[info.path] {
+            surface.destroy()
+            surfaces.removeValue(forKey: info.path)
+        }
+
+        DispatchQueue.global().async { [weak self] in
+            do {
+                try WorktreeDeleter.deleteWorktree(
+                    worktreePath: info.path,
+                    repoPath: repoPath,
+                    branchName: info.branch,
+                    deleteBranch: deleteBranch,
+                    force: force
+                )
+                DispatchQueue.main.async {
+                    self?.worktreeDidDelete(info)
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    let errAlert = NSAlert()
+                    errAlert.alertStyle = .critical
+                    errAlert.messageText = "Failed to delete worktree"
+                    errAlert.informativeText = error.localizedDescription
+                    if let window = self?.window {
+                        errAlert.beginSheetModal(for: window)
+                    }
+                }
+            }
+        }
+    }
+
+    private func worktreeDidDelete(_ info: WorktreeInfo) {
+        // Remove from allWorktrees
+        allWorktrees.removeAll { $0.info.path == info.path }
+
+        // Update dashboard
+        dashboardVC?.setWorktrees(allWorktrees)
+
+        // Update status publisher
+        statusPublisher.updateSurfaces(surfaces)
+
+        // If we're in a repo tab, reconfigure the repo VC
+        if activeTabIndex > 0 {
+            let repoIndex = activeTabIndex - 1
+            if let tab = workspaceManager.tab(at: repoIndex) {
+                // Refresh worktrees for this repo
+                let updatedWorktrees = WorktreeDiscovery.discover(repoPath: tab.repoPath)
+                workspaceManager.updateWorktrees(at: repoIndex, worktrees: updatedWorktrees)
+                if let repoVC = repoVCs[tab.repoPath] {
+                    repoVC.configure(worktrees: updatedWorktrees, surfaces: surfaces)
+                }
+                // If no worktrees left, close the tab
+                if updatedWorktrees.isEmpty {
+                    tabBar(tabBar, didCloseTabAt: activeTabIndex)
+                }
+            }
+        }
+
+        updateStatusCounts()
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self, name: .navigateToWorktree, object: nil)
     }
 
     /// Generate a stable tmux session name from a worktree path
@@ -410,15 +728,78 @@ extension MainWindowController: TabBarDelegate {
     func tabBar(_ tabBar: TabBarView, didCloseTabAt index: Int) {
         guard index > 0 else { return }  // Can't close Dashboard
         let repoIndex = index - 1
-        if let tab = workspaceManager.tab(at: repoIndex) {
-            repoVCs.removeValue(forKey: tab.repoPath)
+        guard let tab = workspaceManager.tab(at: repoIndex) else { return }
+
+        // Show confirmation dialog
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Close \"\(tab.displayName)\"?"
+        alert.informativeText = "This will close all terminals and kill tmux sessions for this repository."
+        alert.addButton(withTitle: "Close")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons[0].hasDestructiveAction = true
+
+        guard let window else { return }
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            self?.performCloseRepo(at: index)
         }
+    }
+
+    func tabBarDidClickAdd(_ tabBar: TabBarView) {
+        addRepoViaOpenPanel()
+    }
+
+    private func performCloseRepo(at index: Int) {
+        guard index > 0 else { return }
+        let repoIndex = index - 1
+        guard let tab = workspaceManager.tab(at: repoIndex) else { return }
+
+        // Kill tmux sessions and destroy surfaces for this repo's worktrees
+        for worktree in tab.worktrees {
+            if let surface = surfaces[worktree.path] {
+                surface.destroy()
+                surfaces.removeValue(forKey: worktree.path)
+            }
+            // Kill tmux session
+            if config.backend == "tmux" {
+                let sessionName = Self.tmuxSessionName(for: worktree.path)
+                killTmuxSession(sessionName)
+            }
+        }
+
+        // Remove worktrees from allWorktrees
+        allWorktrees.removeAll { item in
+            tab.worktrees.contains(where: { $0.path == item.info.path })
+        }
+
+        // Remove from config
+        config.workspacePaths.removeAll { $0 == tab.repoPath }
+        config.save()
+
+        // Clean up
+        repoVCs.removeValue(forKey: tab.repoPath)
         workspaceManager.removeTab(at: repoIndex)
+
         if activeTabIndex >= index {
             activeTabIndex = max(0, activeTabIndex - 1)
         }
+
+        // Update UI
+        dashboardVC?.setWorktrees(allWorktrees)
+        statusPublisher.updateSurfaces(surfaces)
         updateTabBar()
         switchToTab(activeTabIndex)
+        updateStatusCounts()
+    }
+
+    private func killTmuxSession(_ name: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["tmux", "kill-session", "-t", name]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        try? process.run()
     }
 }
 
@@ -426,9 +807,39 @@ extension MainWindowController: TabBarDelegate {
 
 extension MainWindowController: DashboardDelegate {
     func dashboard(_ dashboard: DashboardViewController, didSelectWorktree info: WorktreeInfo, surface: TerminalSurface) {
-        // Find the repo root from the worktree path
         let repoPath = WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
         openRepoTab(repoPath: repoPath)
+    }
+
+    func dashboard(_ dashboard: DashboardViewController, didRequestDeleteWorktree info: WorktreeInfo) {
+        confirmAndDeleteWorktree(info)
+    }
+
+    func dashboard(_ dashboard: DashboardViewController, didReorderWorktrees paths: [String]) {
+        // Reorder allWorktrees to match the new order
+        var reordered: [(info: WorktreeInfo, surface: TerminalSurface)] = []
+        for path in paths {
+            if let item = allWorktrees.first(where: { $0.info.path == path }) {
+                reordered.append(item)
+            }
+        }
+        // Append any items not in paths (shouldn't happen, but safety)
+        for item in allWorktrees where !paths.contains(item.info.path) {
+            reordered.append(item)
+        }
+        allWorktrees = reordered
+
+        // Persist order in config
+        config.cardOrder = paths
+        config.save()
+    }
+}
+
+// MARK: - RepoViewDelegate
+
+extension MainWindowController: RepoViewDelegate {
+    func repoView(_ repoVC: RepoViewController, didRequestDeleteWorktree info: WorktreeInfo) {
+        confirmAndDeleteWorktree(info)
     }
 }
 
@@ -460,7 +871,7 @@ extension MainWindowController: NewBranchDialogDelegate {
 // MARK: - StatusPublisherDelegate
 
 extension MainWindowController: StatusPublisherDelegate {
-    func statusDidChange(worktreePath: String, oldStatus: AgentStatus, newStatus: AgentStatus) {
+    func statusDidChange(worktreePath: String, oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String) {
         // Find branch name for notification
         let branch = allWorktrees.first(where: { $0.info.path == worktreePath })?.info.branch ?? ""
 
@@ -474,15 +885,74 @@ extension MainWindowController: StatusPublisherDelegate {
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.dashboardVC?.updateStatus(for: worktreePath, status: newStatus)
+            self.dashboardVC?.updateStatus(for: worktreePath, status: newStatus, lastMessage: lastMessage)
             if self.activeTabIndex > 0 {
                 let repoIndex = self.activeTabIndex - 1
                 if let tab = self.workspaceManager.tab(at: repoIndex),
                    let repoVC = self.repoVCs[tab.repoPath] {
-                    repoVC.updateStatus(for: worktreePath, status: newStatus)
+                    repoVC.updateStatus(for: worktreePath, status: newStatus, lastMessage: lastMessage)
                 }
             }
             self.updateStatusCounts()
+        }
+    }
+}
+
+// MARK: - Notification Navigation
+
+extension MainWindowController {
+    @objc private func handleNavigateToWorktree(_ notification: Notification) {
+        guard let worktreePath = notification.userInfo?["worktreePath"] as? String else { return }
+
+        // 1. Find existing tab containing this worktree
+        var repoPath: String?
+        if let tabIndex = workspaceManager.tabs.firstIndex(where: { tab in
+            tab.worktrees.contains(where: { $0.path == worktreePath })
+        }) {
+            repoPath = workspaceManager.tabs[tabIndex].repoPath
+            switchToTab(tabIndex + 1)  // +1 because Dashboard is index 0
+        } else {
+            // Tab not open — find repo from config and open it
+            guard let foundRepoPath = config.workspacePaths.first(where: { wsPath in
+                WorktreeDiscovery.discover(repoPath: wsPath).contains(where: { $0.path == worktreePath })
+            }) else { return }
+            repoPath = foundRepoPath
+            openRepoTab(repoPath: foundRepoPath)
+        }
+
+        // 2. Select the worktree in the repo view
+        if let rp = repoPath, let repoVC = repoVCs[rp] {
+            repoVC.selectWorktree(byPath: worktreePath)
+        }
+    }
+}
+
+// MARK: - SettingsDelegate
+
+extension MainWindowController: SettingsDelegate {
+    func settingsDidUpdateConfig(_ settings: SettingsViewController, config: Config) {
+        let oldPaths = Set(self.config.workspacePaths)
+        self.config = config
+
+        let newPaths = Set(config.workspacePaths)
+        if oldPaths != newPaths {
+            // Reload workspaces with updated paths
+            loadWorkspaces()
+        }
+    }
+}
+
+// MARK: - QuickSwitcherDelegate
+
+extension MainWindowController: QuickSwitcherDelegate {
+    func quickSwitcher(_ vc: QuickSwitcherViewController, didSelect worktree: WorktreeInfo) {
+        // Find the index in allWorktrees
+        if let index = allWorktrees.firstIndex(where: { $0.info.path == worktree.path }) {
+            // Switch to dashboard and spotlight the selected worktree
+            if activeTabIndex != 0 {
+                switchToTab(0)
+            }
+            dashboardVC?.enterSpotlight(focusedIndex: index)
         }
     }
 }
