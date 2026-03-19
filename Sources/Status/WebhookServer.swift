@@ -15,6 +15,7 @@ class WebhookServer {
     func start() {
         do {
             let params = NWParameters.tcp
+            params.requiredLocalEndpoint = NWEndpoint.hostPort(host: .ipv4(.loopback), port: NWEndpoint.Port(rawValue: port)!)
             listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
         } catch {
             NSLog("[WebhookServer] Failed to create listener: \(error)")
