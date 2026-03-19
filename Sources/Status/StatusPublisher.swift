@@ -1,7 +1,7 @@
 import Foundation
 
 protocol StatusPublisherDelegate: AnyObject {
-    func statusDidChange(worktreePath: String, newStatus: AgentStatus)
+    func statusDidChange(worktreePath: String, oldStatus: AgentStatus, newStatus: AgentStatus)
 }
 
 /// Periodically polls terminal surfaces and detects agent status changes.
@@ -75,8 +75,9 @@ class StatusPublisher {
                 agentDef: agentDef
             )
 
+            let oldStatus = tracker.currentStatus
             if tracker.update(status: detected) {
-                delegate?.statusDidChange(worktreePath: path, newStatus: detected)
+                delegate?.statusDidChange(worktreePath: path, oldStatus: oldStatus, newStatus: detected)
             }
         }
     }

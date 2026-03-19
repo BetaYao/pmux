@@ -30,7 +30,6 @@ class MainWindowController: NSWindowController {
             defer: false
         )
         window.title = "pmux"
-        window.center()
         window.minSize = NSSize(width: 600, height: 400)
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
@@ -38,6 +37,7 @@ class MainWindowController: NSWindowController {
         window.backgroundColor = Theme.background
 
         self.init(window: window)
+        window.setFrameAutosaveName("PmuxMainWindow")
         window.delegate = self
         window.keyHandler = self
 
@@ -181,6 +181,19 @@ class MainWindowController: NSWindowController {
             tabs.append(TabItem(title: tab.displayName, isClosable: true))
         }
         tabBar.setTabs(tabs, selected: activeTabIndex)
+    }
+
+    private func updateStatusCounts() {
+        var running = 0, waiting = 0, error = 0
+        for path in surfaces.keys {
+            switch statusPublisher.status(for: path) {
+            case .running: running += 1
+            case .waiting: waiting += 1
+            case .error:   error += 1
+            default: break
+            }
+        }
+        tabBar.updateStatusCounts(running: running, waiting: waiting, error: error)
     }
 
     // MARK: - Tab Switching
@@ -400,11 +413,21 @@ extension MainWindowController: PmuxWindowKeyHandler {}
 // MARK: - StatusPublisherDelegate
 
 extension MainWindowController: StatusPublisherDelegate {
-    func statusDidChange(worktreePath: String, newStatus: AgentStatus) {
+    func statusDidChange(worktreePath: String, oldStatus: AgentStatus, newStatus: AgentStatus) {
+        // Find branch name for notification
+        let branch = allWorktrees.first(where: { $0.info.path == worktreePath })?.info.branch ?? ""
+
+        // Send macOS notification
+        NotificationManager.shared.notify(
+            worktreePath: worktreePath,
+            branch: branch,
+            oldStatus: oldStatus,
+            newStatus: newStatus
+        )
+
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.dashboardVC?.updateStatus(for: worktreePath, status: newStatus)
-            // Update sidebar in active repo view
             if self.activeTabIndex > 0 {
                 let repoIndex = self.activeTabIndex - 1
                 if let tab = self.workspaceManager.tab(at: repoIndex),
@@ -412,6 +435,7 @@ extension MainWindowController: StatusPublisherDelegate {
                     repoVC.updateStatus(for: worktreePath, status: newStatus)
                 }
             }
+            self.updateStatusCounts()
         }
     }
 }

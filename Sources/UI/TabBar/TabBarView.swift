@@ -17,6 +17,7 @@ class TabBarView: NSView {
     private var selectedIndex: Int = 0
     private var tabViews: [TabButtonView] = []
     private let stackView = NSStackView()
+    private let statusLabel = NSTextField(labelWithString: "")
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -38,10 +39,19 @@ class TabBarView: NSView {
         stackView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stackView)
 
+        // Status counts (right side)
+        statusLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
+        statusLabel.textColor = Theme.textSecondary
+        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(statusLabel)
+
         NSLayoutConstraint.activate([
             stackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 78),
             stackView.topAnchor.constraint(equalTo: topAnchor),
             stackView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            statusLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            statusLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
     }
 
@@ -85,6 +95,25 @@ class TabBarView: NSView {
     private func updateAppearance() {
         for (index, tabView) in tabViews.enumerated() {
             tabView.setSelected(index == selectedIndex)
+        }
+    }
+
+    func updateStatusCounts(running: Int, waiting: Int, error: Int) {
+        var parts: [String] = []
+        if running > 0 { parts.append("● \(running)") }
+        if waiting > 0 { parts.append("◐ \(waiting)") }
+        if error > 0   { parts.append("✕ \(error)") }
+        statusLabel.stringValue = parts.joined(separator: "  ")
+
+        // Color the label based on most urgent status
+        if error > 0 {
+            statusLabel.textColor = AgentStatus.error.color
+        } else if waiting > 0 {
+            statusLabel.textColor = AgentStatus.waiting.color
+        } else if running > 0 {
+            statusLabel.textColor = AgentStatus.running.color
+        } else {
+            statusLabel.textColor = Theme.textSecondary
         }
     }
 
