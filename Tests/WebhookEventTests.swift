@@ -108,6 +108,15 @@ final class WebhookEventTests: XCTestCase {
         XCTAssertEqual(WebhookEventType.notification.agentStatus(data: nil), .idle)
     }
 
+    func testParseClaudeCodeSubagentStop() throws {
+        let json = """
+        {"hook_event_name":"SubagentStop","session_id":"sess_abc","cwd":"/tmp/project"}
+        """.data(using: .utf8)!
+        let event = try WebhookEvent.parse(from: json)
+        XCTAssertEqual(event.event, .agentStop)
+        XCTAssertEqual(event.source, "claude-code")
+    }
+
     // MARK: - Invalid JSON
 
     func testParseInvalidJSON() {
