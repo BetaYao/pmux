@@ -132,7 +132,7 @@ class TerminalCardView: NSView {
     func embedTerminal() {
         if surface.surface == nil {
             // First time — create the surface in this container
-            _ = surface.create(in: terminalContainer, workingDirectory: worktreeInfo.path)
+            _ = surface.create(in: terminalContainer, workingDirectory: worktreeInfo.path, sessionName: surface.sessionName)
         } else {
             // Already created — reparent to this container
             surface.reparent(to: terminalContainer)

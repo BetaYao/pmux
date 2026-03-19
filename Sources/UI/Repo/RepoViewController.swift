@@ -91,7 +91,7 @@ class RepoViewController: NSViewController {
         }
 
         if surface.surface == nil {
-            _ = surface.create(in: terminalContainer, workingDirectory: info.path)
+            _ = surface.create(in: terminalContainer, workingDirectory: info.path, sessionName: surface.sessionName)
         } else {
             surface.reparent(to: terminalContainer)
         }

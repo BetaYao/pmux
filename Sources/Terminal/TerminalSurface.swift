@@ -8,31 +8,61 @@ class TerminalSurface {
     private(set) var surface: ghostty_surface_t?
     private weak var containerView: NSView?
 
-    /// Create the terminal surface and add it to the given container view
-    func create(in container: NSView, workingDirectory: String? = nil) -> Bool {
+    /// tmux session name (nil = no tmux, direct shell)
+    var sessionName: String?
+
+    /// Create the terminal surface and add it to the given container view.
+    /// If useTmux is true, the surface runs inside a tmux session for persistence.
+    func create(in container: NSView, workingDirectory: String? = nil, sessionName: String? = nil) -> Bool {
         guard let app = GhosttyBridge.shared.app else {
             NSLog("GhosttyBridge not initialized")
             return false
         }
 
-        // Create the NSView for Ghostty to render into
         let termView = GhosttyNSView(frame: container.bounds)
         termView.autoresizingMask = [.width, .height]
         termView.wantsLayer = true
 
-        // Configure surface
         var config = ghostty_surface_config_new()
         config.platform_tag = GHOSTTY_PLATFORM_MACOS
         config.platform.macos.nsview = Unmanaged.passUnretained(termView).toOpaque()
         config.scale_factor = Double(container.window?.backingScaleFactor ?? 2.0)
 
-        if let workingDirectory {
-            workingDirectory.withCString { cStr in
-                config.working_directory = cStr
-                self._createSurface(app: app, config: &config, view: termView, container: container)
+        // Build tmux command if session name provided
+        let tmuxCommand: String? = sessionName.map { name in
+            // Check if session exists; attach if so, create if not
+            if Self.tmuxSessionExists(name) {
+                return "tmux attach-session -t \(name)"
+            } else {
+                return "tmux new-session -s \(name)"
+            }
+        }
+
+        // Use withCString closures to keep C strings alive during surface creation
+        let createBlock: () -> Void = {
+            self._createSurface(app: app, config: &config, view: termView, container: container)
+        }
+
+        if let workingDirectory, let tmuxCommand {
+            workingDirectory.withCString { wdPtr in
+                tmuxCommand.withCString { cmdPtr in
+                    config.working_directory = wdPtr
+                    config.command = cmdPtr
+                    createBlock()
+                }
+            }
+        } else if let workingDirectory {
+            workingDirectory.withCString { wdPtr in
+                config.working_directory = wdPtr
+                createBlock()
+            }
+        } else if let tmuxCommand {
+            tmuxCommand.withCString { cmdPtr in
+                config.command = cmdPtr
+                createBlock()
             }
         } else {
-            _createSurface(app: app, config: &config, view: termView, container: container)
+            createBlock()
         }
 
         return surface != nil
@@ -56,6 +86,22 @@ class TerminalSurface {
         ghostty_surface_set_content_scale(s, scale, scale)
         ghostty_surface_set_size(s, UInt32(size.width), UInt32(size.height))
         ghostty_surface_set_focus(s, true)
+    }
+
+    /// Check if a tmux session with given name exists
+    private static func tmuxSessionExists(_ name: String) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["tmux", "has-session", "-t", name]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
+        }
     }
 
     /// Reparent this terminal's view to a different container

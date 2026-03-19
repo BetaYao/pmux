@@ -77,6 +77,10 @@ class MainWindowController: NSWindowController {
             viewMenu.addItem(item)
         }
 
+        let closeTabItem = NSMenuItem(title: "Close Tab", action: #selector(closeCurrentTab), keyEquivalent: "w")
+        closeTabItem.keyEquivalentModifierMask = .command
+        viewMenu.addItem(closeTabItem)
+
         let openTabItem = NSMenuItem(title: "Open in Tab", action: #selector(openSpotlightAsTab), keyEquivalent: "\r")
         openTabItem.keyEquivalentModifierMask = .command
         viewMenu.addItem(openTabItem)
@@ -97,6 +101,11 @@ class MainWindowController: NSWindowController {
 
     @objc private func switchToDashboard() {
         switchToTab(0)
+    }
+
+    @objc private func closeCurrentTab() {
+        guard activeTabIndex > 0 else { return }  // Can't close Dashboard
+        tabBar(tabBar, didCloseTabAt: activeTabIndex)
     }
 
     @objc private func openSpotlightAsTab() {
@@ -291,8 +300,24 @@ class MainWindowController: NSWindowController {
             return existing
         }
         let surface = TerminalSurface()
+        if config.backend == "tmux" {
+            surface.sessionName = Self.tmuxSessionName(for: info.path)
+        }
         surfaces[info.path] = surface
         return surface
+    }
+
+    /// Generate a stable tmux session name from a worktree path
+    private static func tmuxSessionName(for path: String) -> String {
+        // "pmux-<last-two-path-components>" e.g. "pmux-workspace-pmux" or "pmux-worktrees-feature-x"
+        let url = URL(fileURLWithPath: path)
+        let parent = url.deletingLastPathComponent().lastPathComponent
+        let name = url.lastPathComponent
+        // tmux session names can't contain dots or colons
+        let sessionName = "pmux-\(parent)-\(name)"
+            .replacingOccurrences(of: ".", with: "_")
+            .replacingOccurrences(of: ":", with: "_")
+        return sessionName
     }
 }
 
