@@ -29,6 +29,7 @@ class DashboardViewController: NSViewController {
     private let spotlightMainContainer = NSView()
     private let spotlightSidebar = NSScrollView()
     private let spotlightSidebarStack = NSStackView()
+    private let openTabButton = NSButton()
 
     private let minCardWidth: CGFloat = 300
     private let minCardHeight: CGFloat = 200
@@ -112,9 +113,31 @@ class DashboardViewController: NSViewController {
             spotlightSidebar.bottomAnchor.constraint(equalTo: spotlightContainer.bottomAnchor),
             spotlightSidebar.widthAnchor.constraint(equalToConstant: sidebarWidth),
         ])
+
+        // "Open in Tab" button (top-right of spotlight main area)
+        openTabButton.title = "Open in Tab ⌘↵"
+        openTabButton.bezelStyle = .recessed
+        openTabButton.isBordered = false
+        openTabButton.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        openTabButton.contentTintColor = Theme.accent
+        openTabButton.target = self
+        openTabButton.action = #selector(openTabButtonClicked)
+        openTabButton.translatesAutoresizingMaskIntoConstraints = false
+        openTabButton.isHidden = true
+        spotlightContainer.addSubview(openTabButton)
+
+        NSLayoutConstraint.activate([
+            openTabButton.topAnchor.constraint(equalTo: spotlightMainContainer.topAnchor, constant: 4),
+            openTabButton.trailingAnchor.constraint(equalTo: spotlightMainContainer.trailingAnchor, constant: -8),
+        ])
     }
 
     // MARK: - Data
+
+    func worktreeAt(index: Int) -> (info: WorktreeInfo, surface: TerminalSurface)? {
+        guard index >= 0, index < worktrees.count else { return nil }
+        return worktrees[index]
+    }
 
     func setWorktrees(_ worktrees: [(info: WorktreeInfo, surface: TerminalSurface)]) {
         self.worktrees = worktrees
@@ -146,6 +169,7 @@ class DashboardViewController: NSViewController {
         mode = .grid
         scrollView.isHidden = false
         spotlightContainer.isHidden = true
+        openTabButton.isHidden = true
         layoutGrid()
     }
 
@@ -183,11 +207,18 @@ class DashboardViewController: NSViewController {
 
     // MARK: - Spotlight Layout
 
+    @objc private func openTabButtonClicked() {
+        if case .spotlight(let index) = mode, let worktree = worktreeAt(index: index) {
+            dashboardDelegate?.dashboard(self, didSelectWorktree: worktree.info, surface: worktree.surface)
+        }
+    }
+
     func enterSpotlight(focusedIndex: Int) {
         guard focusedIndex >= 0, focusedIndex < cards.count else { return }
         mode = .spotlight(focusedIndex: focusedIndex)
         scrollView.isHidden = true
         spotlightContainer.isHidden = false
+        openTabButton.isHidden = false
         layoutSpotlight(focusedIndex: focusedIndex)
     }
 
@@ -224,6 +255,16 @@ class DashboardViewController: NSViewController {
 
     func exitSpotlight() {
         showGrid()
+    }
+
+    /// Re-embed terminals in their grid cards after returning from a repo tab
+    func refreshAfterReturn() {
+        switch mode {
+        case .grid:
+            layoutGrid()
+        case .spotlight(let index):
+            layoutSpotlight(focusedIndex: index)
+        }
     }
 
     // MARK: - Resize
