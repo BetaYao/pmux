@@ -17,6 +17,7 @@ class UpdateBanner: NSView {
     private let skipButton = NSButton()
 
     private(set) var version: String = ""
+    private var bannerHeightConstraint: NSLayoutConstraint!
 
     override func isAccessibilityElement() -> Bool { true }
     override func accessibilityRole() -> NSAccessibility.Role? { .group }
@@ -73,8 +74,9 @@ class UpdateBanner: NSView {
         skipButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(skipButton)
 
+        bannerHeightConstraint = heightAnchor.constraint(equalToConstant: 0)
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 32),
+            bannerHeightConstraint,
 
             statusLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
             statusLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -101,13 +103,22 @@ class UpdateBanner: NSView {
         actionButton.isHidden = false
         skipButton.isHidden = false
         progressBar.isHidden = true
-        isHidden = false
+        setBannerVisible(true)
+    }
+
+    func dismiss() {
+        setBannerVisible(false)
+    }
+
+    private func setBannerVisible(_ visible: Bool) {
+        isHidden = !visible
+        bannerHeightConstraint.constant = visible ? 32 : 0
     }
 
     func update(state: UpdateManager.State) {
         switch state {
         case .idle:
-            isHidden = true
+            setBannerVisible(false)
 
         case .downloading(let progress):
             statusLabel.stringValue = "下载中... \(Int(progress * 100))%"
@@ -115,7 +126,7 @@ class UpdateBanner: NSView {
             progressBar.isHidden = false
             actionButton.isHidden = true
             skipButton.isHidden = true
-            isHidden = false
+            setBannerVisible(true)
 
         case .extracting:
             statusLabel.stringValue = "正在解压..."

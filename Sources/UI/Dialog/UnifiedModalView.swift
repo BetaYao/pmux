@@ -49,6 +49,7 @@ final class UnifiedModalView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
 
     private func setupView() {
         wantsLayer = true
+        translatesAutoresizingMaskIntoConstraints = false
         setAccessibilityIdentifier("modal.overlay")
         isHidden = true
 

@@ -1218,7 +1218,7 @@ extension MainWindowController: UpdateBannerDelegate {
         config.autoUpdate.skippedVersion = banner.version
         config.save()
         updateChecker.skippedVersion = banner.version
-        updateBanner.isHidden = true
+        updateBanner.dismiss()
         pendingRelease = nil
     }
 
