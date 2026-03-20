@@ -183,6 +183,12 @@ final class NotificationPanelView: NSView {
         layer?.shadowOffset = CGSize(width: -8, height: 0)
         layer?.shadowRadius = 16
         layer?.shadowOpacity = 1.0
+        layer?.shadowPath = CGPath(rect: bounds, transform: nil)
+    }
+
+    override func layout() {
+        super.layout()
+        layer?.shadowPath = CGPath(rect: bounds, transform: nil)
     }
 
     private func makeItemView(index: Int, title: String, meta: String) -> NSView {
