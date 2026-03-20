@@ -30,7 +30,7 @@ class QuickSwitcherViewController: NSViewController {
     override func loadView() {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 450, height: 340))
         container.wantsLayer = true
-        container.layer?.backgroundColor = Theme.surface.cgColor
+        container.layer?.backgroundColor = SemanticColors.panel.cgColor
         container.layer?.cornerRadius = 10
         container.setAccessibilityIdentifier("dialog.quickSwitcher")
         container.setAccessibilityElement(true)
@@ -73,7 +73,7 @@ class QuickSwitcherViewController: NSViewController {
         // Hint label
         let hintLabel = NSTextField(labelWithString: "↑↓ navigate  ↵ select  ⎋ cancel")
         hintLabel.font = NSFont.systemFont(ofSize: 10)
-        hintLabel.textColor = Theme.textSecondary
+        hintLabel.textColor = SemanticColors.muted
         hintLabel.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(hintLabel)
 
@@ -202,7 +202,7 @@ extension QuickSwitcherViewController: NSTableViewDelegate {
         // Branch name
         let branchLabel = NSTextField(labelWithString: info.displayName)
         branchLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
-        branchLabel.textColor = Theme.textPrimary
+        branchLabel.textColor = SemanticColors.text
         branchLabel.frame = NSRect(x: 30, y: 10, width: 250, height: 18)
         branchLabel.lineBreakMode = .byTruncatingTail
         cell.addSubview(branchLabel)
@@ -210,7 +210,7 @@ extension QuickSwitcherViewController: NSTableViewDelegate {
         // Path (secondary)
         let pathLabel = NSTextField(labelWithString: shortenPath(info.path))
         pathLabel.font = NSFont.systemFont(ofSize: 10)
-        pathLabel.textColor = Theme.textSecondary
+        pathLabel.textColor = SemanticColors.muted
         pathLabel.frame = NSRect(x: 290, y: 12, width: 150, height: 14)
         pathLabel.lineBreakMode = .byTruncatingHead
         pathLabel.alignment = .right

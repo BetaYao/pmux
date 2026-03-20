@@ -128,12 +128,12 @@ final class UnifiedModalView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
     }
 
     private func applyTheme() {
-        layer?.backgroundColor = NSColor(srgbRed: 7.0/255, green: 10.0/255, blue: 20.0/255, alpha: 0.72).cgColor
+        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.6).cgColor
 
         cardView.layer?.backgroundColor = SemanticColors.panel.cgColor
         cardView.layer?.cornerRadius = 10
         cardView.layer?.borderWidth = 1
-        cardView.layer?.borderColor = SemanticColors.line.cgColor
+        cardView.layer?.borderColor = NSColor(hex: 0x333333).cgColor
 
         titleLabel.textColor = SemanticColors.text
         subtitleLabel.textColor = SemanticColors.muted
@@ -149,25 +149,25 @@ final class UnifiedModalView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
     }
 
     private func styleSingleLineInput(_ field: NSTextField) {
-        field.backgroundColor = SemanticColors.panel2
+        field.backgroundColor = SemanticColors.tileBg
         field.textColor = SemanticColors.text
         field.focusRingType = .none
         field.isBordered = false
         field.wantsLayer = true
-        field.layer?.cornerRadius = 8
+        field.layer?.cornerRadius = 6
         field.layer?.borderWidth = 1
         field.layer?.borderColor = SemanticColors.line.cgColor
     }
 
     private func styleMultilineInput(scrollView: NSScrollView, textView: NSTextView) {
         scrollView.wantsLayer = true
-        scrollView.layer?.cornerRadius = 8
+        scrollView.layer?.cornerRadius = 6
         scrollView.layer?.borderWidth = 1
         scrollView.layer?.borderColor = SemanticColors.line.cgColor
-        scrollView.backgroundColor = SemanticColors.panel2
+        scrollView.backgroundColor = SemanticColors.tileBg
         scrollView.drawsBackground = true
 
-        textView.backgroundColor = SemanticColors.panel2
+        textView.backgroundColor = SemanticColors.tileBg
         textView.textColor = SemanticColors.text
         textView.insertionPointColor = SemanticColors.text
     }
@@ -192,11 +192,12 @@ final class UnifiedModalView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
         cancelButton.wantsLayer = true
         cancelButton.isBordered = false
         cancelButton.layer?.cornerRadius = 6
-        cancelButton.layer?.backgroundColor = SemanticColors.panel2.cgColor
-        cancelButton.contentTintColor = SemanticColors.text
+        cancelButton.layer?.backgroundColor = NSColor(white: 1, alpha: 0.03).cgColor
+        cancelButton.contentTintColor = NSColor(hex: 0xaaaaaa)
     }
 
-    override func updateLayer() {
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
         applyTheme()
     }
 

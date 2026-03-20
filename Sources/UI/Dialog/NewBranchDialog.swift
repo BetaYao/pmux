@@ -1,146 +1,329 @@
 import AppKit
 
+// MARK: - Zoom Colors
+/// Zoom 风格的颜色系统，支持深色/浅色模式
+enum ZoomColors {
+    // 背景色
+    static let dialogBackground = NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor(hex: 0x1A1A1A) : NSColor(hex: 0xFFFFFF)
+    }
+    
+    static let inputBackground = NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor(hex: 0x2D2D2D) : NSColor(hex: 0xF5F5F5)
+    }
+    
+    // 文字颜色
+    static let titleText = NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor(hex: 0xFFFFFF) : NSColor(hex: 0x1A1A1A)
+    }
+    
+    static let bodyText = NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor(hex: 0xCCCCCC) : NSColor(hex: 0x333333)
+    }
+    
+    static let secondaryText = NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor(hex: 0x999999) : NSColor(hex: 0x666666)
+    }
+    
+    static let placeholderText = NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor(hex: 0x666666) : NSColor(hex: 0x999999)
+    }
+    
+    // Zoom 蓝色（强调色）
+    static let zoomBlue = NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor(hex: 0x0E72ED) : NSColor(hex: 0x0E72ED)
+    }
+    
+    static let zoomBlueHover = NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor(hex: 0x2B8CF7) : NSColor(hex: 0x2B8CF7)
+    }
+    
+    static let zoomBluePressed = NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor(hex: 0x0959C9) : NSColor(hex: 0x0959C9)
+    }
+    
+    // 边框颜色
+    static let borderDefault = NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor(hex: 0x3D3D3D) : NSColor(hex: 0xE0E0E0)
+    }
+    
+    static let borderFocus = NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor(hex: 0x0E72ED) : NSColor(hex: 0x0E72ED)
+    }
+    
+    // 按钮颜色
+    static let secondaryButtonBg = NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor(hex: 0x3D3D3D) : NSColor(hex: 0xF0F0F0)
+    }
+    
+    static let secondaryButtonHover = NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor(hex: 0x4D4D4D) : NSColor(hex: 0xE0E0E0)
+    }
+    
+    // 错误颜色
+    static let errorText = NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor(hex: 0xFF6B6B) : NSColor(hex: 0xDC2626)
+    }
+    
+    // 阴影
+    static let shadowColor = NSColor.black.withAlphaComponent(0.4)
+}
+
+// MARK: - Typography
+enum ZoomTypography {
+    static let title = NSFont.systemFont(ofSize: 18, weight: .semibold)
+    static let body = NSFont.systemFont(ofSize: 13, weight: .regular)
+    static let label = NSFont.systemFont(ofSize: 12, weight: .medium)
+    static let button = NSFont.systemFont(ofSize: 13, weight: .medium)
+    static let caption = NSFont.systemFont(ofSize: 11, weight: .regular)
+}
+
 protocol NewBranchDialogDelegate: AnyObject {
     func newBranchDialog(_ dialog: NewBranchDialog, didCreateWorktree info: WorktreeInfo, inRepo repoPath: String)
 }
 
-/// Modal sheet for creating a new git worktree/branch.
+/// Zoom 风格的新分支弹窗
 class NewBranchDialog: NSViewController {
     weak var dialogDelegate: NewBranchDialogDelegate?
-
+    
     private let repoPopup = NSPopUpButton()
     private let branchField = NSTextField()
     private let baseBranchPopup = NSPopUpButton()
-    private let createButton = NSButton()
-    private let cancelButton = NSButton()
+    private let createButton = ZoomButton(style: .primary)
+    private let cancelButton = ZoomButton(style: .secondary)
     private let errorLabel = NSTextField(labelWithString: "")
-
+    
     private var repoPaths: [String] = []
-
+    
     init(repoPaths: [String]) {
         self.repoPaths = repoPaths
         super.init(nibName: nil, bundle: nil)
     }
-
+    
     required init?(coder: NSCoder) {
         fatalError("init(coder:) not supported")
     }
-
+    
     override func loadView() {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 220))
+        // 创建圆角卡片容器
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 440, height: 280))
         container.wantsLayer = true
+        container.layer?.backgroundColor = SemanticColors.panel.cgColor
+        container.layer?.cornerRadius = 12
+        container.layer?.masksToBounds = false
+        
+        // 添加阴影
+        container.layer?.shadowColor = NSColor.black.withAlphaComponent(0.4).cgColor
+        container.layer?.shadowOpacity = 0.5
+        container.layer?.shadowRadius = 20
+        container.layer?.shadowOffset = CGSize(width: 0, height: 8)
+        
         container.setAccessibilityIdentifier("dialog.newBranch")
         container.setAccessibilityElement(true)
         container.setAccessibilityRole(.group)
         self.view = container
-
-        let titleLabel = NSTextField(labelWithString: "New Branch")
-        titleLabel.font = NSFont.systemFont(ofSize: 16, weight: .semibold)
-        titleLabel.textColor = Theme.textPrimary
-
-        // Repo selector
-        let repoLabel = NSTextField(labelWithString: "Repository:")
-        repoLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        repoLabel.textColor = Theme.textSecondary
-
+        
+        // 标题
+        let titleLabel = NSTextField(labelWithString: "New Thread")
+        titleLabel.font = ZoomTypography.title
+        titleLabel.textColor = SemanticColors.text
+        titleLabel.alignment = .center
+        
+        // Repository 选择
+        let repoLabel = createLabel("Repository")
+        setupRepoPopup()
+        
+        // Branch name 输入
+        let branchLabel = createLabel("Thread name")
+        setupBranchField()
+        
+        // Base branch 选择
+        let baseLabel = createLabel("Based on")
+        setupBaseBranchPopup()
+        
+        // 错误提示
+        errorLabel.textColor = SemanticColors.danger
+        errorLabel.font = ZoomTypography.caption
+        errorLabel.isHidden = true
+        errorLabel.maximumNumberOfLines = 2
+        
+        // 按钮
+        setupButtons()
+        
+        // 布局
+        let formStack = NSStackView(views: [
+            createFormRow(repoLabel, repoPopup),
+            createFormRow(branchLabel, branchField),
+            createFormRow(baseLabel, baseBranchPopup),
+        ])
+        formStack.orientation = .vertical
+        formStack.spacing = 16
+        formStack.alignment = .leading
+        
+        let buttonStack = NSStackView(views: [cancelButton, createButton])
+        buttonStack.orientation = .horizontal
+        buttonStack.spacing = 12
+        buttonStack.alignment = .centerY
+        
+        let mainStack = NSStackView(views: [
+            titleLabel,
+            formStack,
+            errorLabel,
+            buttonStack
+        ])
+        mainStack.orientation = .vertical
+        mainStack.spacing = 20
+        mainStack.alignment = .centerX
+        mainStack.translatesAutoresizingMaskIntoConstraints = false
+        mainStack.edgeInsets = NSEdgeInsets(top: 28, left: 32, bottom: 28, right: 32)
+        container.addSubview(mainStack)
+        
+        NSLayoutConstraint.activate([
+            mainStack.topAnchor.constraint(equalTo: container.topAnchor),
+            mainStack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            mainStack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            mainStack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            
+            titleLabel.widthAnchor.constraint(equalTo: mainStack.widthAnchor, constant: -64),
+            
+            repoPopup.widthAnchor.constraint(equalToConstant: 280),
+            branchField.widthAnchor.constraint(equalToConstant: 280),
+            baseBranchPopup.widthAnchor.constraint(equalToConstant: 280),
+            
+            createButton.widthAnchor.constraint(equalToConstant: 100),
+            createButton.heightAnchor.constraint(equalToConstant: 36),
+            cancelButton.widthAnchor.constraint(equalToConstant: 100),
+            cancelButton.heightAnchor.constraint(equalToConstant: 36),
+        ])
+        
+        // 加载第一个 repo 的分支
+        if !repoPaths.isEmpty {
+            loadBranches(for: repoPaths[0])
+        }
+    }
+    
+    private func createLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = ZoomTypography.label
+        label.textColor = SemanticColors.text
+        return label
+    }
+    
+    private func createFormRow(_ label: NSTextField, _ control: NSView) -> NSStackView {
+        let row = NSStackView(views: [label, control])
+        row.orientation = .vertical
+        row.spacing = 6
+        row.alignment = .leading
+        return row
+    }
+    
+    private func setupRepoPopup() {
         repoPopup.removeAllItems()
         for path in repoPaths {
             repoPopup.addItem(withTitle: URL(fileURLWithPath: path).lastPathComponent)
         }
         repoPopup.target = self
         repoPopup.action = #selector(repoChanged)
-
-        // Branch name
-        let branchLabel = NSTextField(labelWithString: "Branch name:")
-        branchLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        branchLabel.textColor = Theme.textSecondary
-
-        branchField.placeholderString = "feature/my-feature"
+        stylePopup(repoPopup)
+    }
+    
+    private func setupBranchField() {
+        branchField.placeholderString = "e.g., feature/new-thread"
         branchField.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         branchField.setAccessibilityIdentifier("dialog.newBranch.nameField")
-
-        // Base branch
-        let baseLabel = NSTextField(labelWithString: "Based on:")
-        baseLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        baseLabel.textColor = Theme.textSecondary
-
+        styleTextField(branchField)
+    }
+    
+    private func setupBaseBranchPopup() {
         baseBranchPopup.removeAllItems()
-
-        // Error label
-        errorLabel.textColor = NSColor.systemRed
-        errorLabel.font = NSFont.systemFont(ofSize: 11)
-        errorLabel.isHidden = true
-
-        // Buttons
+        stylePopup(baseBranchPopup)
+    }
+    
+    private func styleTextField(_ textField: NSTextField) {
+        textField.wantsLayer = true
+        textField.layer?.backgroundColor = SemanticColors.tileBg.cgColor
+        textField.layer?.cornerRadius = 8
+        textField.layer?.borderWidth = 1
+        textField.layer?.borderColor = SemanticColors.line.cgColor
+        textField.textColor = SemanticColors.text
+        textField.placeholderAttributedString = NSAttributedString(
+            string: textField.placeholderString ?? "",
+            attributes: [
+                .foregroundColor: SemanticColors.muted,
+                .font: NSFont.systemFont(ofSize: 13)
+            ]
+        )
+        
+        // 添加内边距
+        textField.cell?.focusRingType = .none
+        
+        // 监听聚焦状态改变边框颜色
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(textFieldDidBeginEditing),
+            name: NSControl.textDidBeginEditingNotification,
+            object: textField
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(textFieldDidEndEditing),
+            name: NSControl.textDidEndEditingNotification,
+            object: textField
+        )
+    }
+    
+    private func stylePopup(_ popup: NSPopUpButton) {
+        popup.wantsLayer = true
+        popup.layer?.backgroundColor = SemanticColors.tileBg.cgColor
+        popup.layer?.cornerRadius = 8
+        popup.layer?.borderWidth = 1
+        popup.layer?.borderColor = SemanticColors.line.cgColor
+        
+        // 设置文字颜色通过 attributedTitle
+        for item in popup.itemArray {
+            let attributedTitle = NSAttributedString(
+                string: item.title,
+                attributes: [
+                    .foregroundColor: SemanticColors.text,
+                    .font: NSFont.systemFont(ofSize: 13)
+                ]
+            )
+            item.attributedTitle = attributedTitle
+        }
+    }
+    
+    @objc private func textFieldDidBeginEditing(_ notification: Notification) {
+        if let textField = notification.object as? NSTextField {
+            textField.layer?.borderColor = SemanticColors.accent.cgColor
+            textField.layer?.borderWidth = 2
+        }
+    }
+    
+    @objc private func textFieldDidEndEditing(_ notification: Notification) {
+        if let textField = notification.object as? NSTextField {
+            textField.layer?.borderColor = SemanticColors.line.cgColor
+            textField.layer?.borderWidth = 1
+        }
+    }
+    
+    private func setupButtons() {
         createButton.title = "Create"
-        createButton.bezelStyle = .rounded
-        createButton.keyEquivalent = "\r"
         createButton.target = self
         createButton.action = #selector(createClicked)
         createButton.setAccessibilityIdentifier("dialog.newBranch.createButton")
-
+        
         cancelButton.title = "Cancel"
-        cancelButton.bezelStyle = .rounded
-        cancelButton.keyEquivalent = "\u{1b}"
         cancelButton.target = self
         cancelButton.action = #selector(cancelClicked)
-
-        // Layout with stack views
-        let formStack = NSStackView(views: [
-            titleLabel,
-            makeLabeledRow(repoLabel, repoPopup),
-            makeLabeledRow(branchLabel, branchField),
-            makeLabeledRow(baseLabel, baseBranchPopup),
-            errorLabel,
-        ])
-        formStack.orientation = .vertical
-        formStack.alignment = .leading
-        formStack.spacing = 10
-
-        let buttonStack = NSStackView(views: [cancelButton, createButton])
-        buttonStack.orientation = .horizontal
-        buttonStack.spacing = 8
-
-        let mainStack = NSStackView(views: [formStack, buttonStack])
-        mainStack.orientation = .vertical
-        mainStack.alignment = .trailing
-        mainStack.spacing = 16
-        mainStack.translatesAutoresizingMaskIntoConstraints = false
-        mainStack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
-        container.addSubview(mainStack)
-
-        NSLayoutConstraint.activate([
-            mainStack.topAnchor.constraint(equalTo: container.topAnchor),
-            mainStack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            mainStack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            mainStack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-
-            repoPopup.widthAnchor.constraint(equalToConstant: 250),
-            branchField.widthAnchor.constraint(equalToConstant: 250),
-            baseBranchPopup.widthAnchor.constraint(equalToConstant: 250),
-        ])
-
-        // Load branches for first repo
-        if !repoPaths.isEmpty {
-            loadBranches(for: repoPaths[0])
-        }
+        cancelButton.keyEquivalent = "\u{1b}" // Escape key
     }
-
-    private func makeLabeledRow(_ label: NSTextField, _ control: NSView) -> NSStackView {
-        let row = NSStackView(views: [label, control])
-        row.orientation = .horizontal
-        row.spacing = 8
-        label.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-        label.widthAnchor.constraint(equalToConstant: 100).isActive = true
-        return row
-    }
-
+    
     @objc private func repoChanged() {
         let index = repoPopup.indexOfSelectedItem
         guard index >= 0, index < repoPaths.count else { return }
         loadBranches(for: repoPaths[index])
     }
-
+    
     private func loadBranches(for repoPath: String) {
         let branches = WorktreeCreator.listBranches(repoPath: repoPath)
         baseBranchPopup.removeAllItems()
@@ -148,28 +331,31 @@ class NewBranchDialog: NSViewController {
         // Select "main" if available
         if let mainIndex = branches.firstIndex(of: "main") {
             baseBranchPopup.selectItem(at: mainIndex)
+        } else if let masterIndex = branches.firstIndex(of: "master") {
+            baseBranchPopup.selectItem(at: masterIndex)
         }
     }
-
+    
     @objc private func createClicked() {
         let branchName = branchField.stringValue.trimmingCharacters(in: .whitespaces)
         guard !branchName.isEmpty else {
-            showError("Branch name cannot be empty")
+            showError("Thread name cannot be empty")
             return
         }
         // Validate branch name (no spaces, basic check)
         if branchName.contains(" ") {
-            showError("Branch name cannot contain spaces")
+            showError("Thread name cannot contain spaces")
             return
         }
-
+        
         let repoIndex = repoPopup.indexOfSelectedItem
         guard repoIndex >= 0, repoIndex < repoPaths.count else { return }
         let repoPath = repoPaths[repoIndex]
         let baseBranch = baseBranchPopup.titleOfSelectedItem ?? "main"
-
+        
         createButton.isEnabled = false
-
+        createButton.showLoading()
+        
         DispatchQueue.global().async { [weak self] in
             do {
                 let info = try WorktreeCreator.createWorktree(
@@ -185,17 +371,165 @@ class NewBranchDialog: NSViewController {
                 DispatchQueue.main.async {
                     self?.showError(error.localizedDescription)
                     self?.createButton.isEnabled = true
+                    self?.createButton.hideLoading()
                 }
             }
         }
     }
-
+    
     @objc private func cancelClicked() {
         dismiss(nil)
     }
-
+    
     private func showError(_ message: String) {
         errorLabel.stringValue = message
         errorLabel.isHidden = false
+        
+        // 震动动画
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.1
+            self.view.animator().layer?.transform = CATransform3DMakeTranslation(-5, 0, 0)
+        } completionHandler: {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.1
+                self.view.animator().layer?.transform = CATransform3DMakeTranslation(5, 0, 0)
+            } completionHandler: {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.1
+                    self.view.animator().layer?.transform = CATransform3DIdentity
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Zoom Style Button
+class ZoomButton: NSButton {
+    enum Style {
+        case primary    // Zoom 蓝色
+        case secondary  // 灰色
+    }
+    
+    private let style: Style
+    private var trackingArea: NSTrackingArea?
+    private var isLoading = false
+    private let loadingIndicator = NSProgressIndicator()
+    
+    init(style: Style) {
+        self.style = style
+        super.init(frame: .zero)
+        setup()
+    }
+    
+    required init?(coder: NSCoder) {
+        self.style = .primary
+        super.init(coder: coder)
+        setup()
+    }
+    
+    private func setup() {
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        bezelStyle = .recessed
+        setButtonType(.momentaryPushIn)
+        
+        // 设置文字样式
+        font = ZoomTypography.button
+        
+        // 配置颜色
+        updateAppearance()
+        
+        // 添加 loading indicator
+        loadingIndicator.style = .spinning
+        loadingIndicator.isDisplayedWhenStopped = false
+        loadingIndicator.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(loadingIndicator)
+        NSLayoutConstraint.activate([
+            loadingIndicator.centerXAnchor.constraint(equalTo: centerXAnchor),
+            loadingIndicator.centerYAnchor.constraint(equalTo: centerYAnchor),
+            loadingIndicator.widthAnchor.constraint(equalToConstant: 16),
+            loadingIndicator.heightAnchor.constraint(equalToConstant: 16)
+        ])
+    }
+    
+    private func updateAppearance() {
+        switch style {
+        case .primary:
+            layer?.backgroundColor = SemanticColors.accent.cgColor
+            contentTintColor = .white
+        case .secondary:
+            layer?.backgroundColor = NSColor(white: 1, alpha: 0.03).cgColor
+            contentTintColor = NSColor(hex: 0xaaaaaa)
+        }
+    }
+    
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea = trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        trackingArea = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea!)
+    }
+    
+    override func mouseEntered(with event: NSEvent) {
+        guard !isLoading else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.15
+            switch style {
+            case .primary:
+                layer?.backgroundColor = SemanticColors.accent.blended(withFraction: 0.15, of: .white)?.cgColor
+            case .secondary:
+                layer?.backgroundColor = NSColor(white: 1, alpha: 0.06).cgColor
+            }
+        }
+    }
+    
+    override func mouseExited(with event: NSEvent) {
+        guard !isLoading else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.15
+            updateAppearance()
+        }
+    }
+    
+    override func mouseDown(with event: NSEvent) {
+        guard !isLoading else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.1
+            layer?.transform = CATransform3DMakeScale(0.97, 0.97, 1)
+            if style == .primary {
+                layer?.backgroundColor = SemanticColors.accent.blended(withFraction: 0.15, of: .black)?.cgColor
+            }
+        }
+        super.mouseDown(with: event)
+    }
+    
+    override func mouseUp(with event: NSEvent) {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.1
+            layer?.transform = CATransform3DIdentity
+            updateAppearance()
+        }
+        super.mouseUp(with: event)
+    }
+    
+    func showLoading() {
+        isLoading = true
+        title = ""
+        loadingIndicator.startAnimation(nil)
+        isEnabled = false
+    }
+    
+    func hideLoading() {
+        isLoading = false
+        title = style == .primary ? "Create" : "Cancel"
+        loadingIndicator.stopAnimation(nil)
+        isEnabled = true
     }
 }
