@@ -96,11 +96,11 @@ class TerminalSurface {
             view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
 
-        // Set initial size
+        // Set initial size — Ghostty expects pixel (framebuffer) dimensions, not points
         let size = container.bounds.size
-        let scale = Double(container.window?.backingScaleFactor ?? 2.0)
-        ghostty_surface_set_content_scale(s, scale, scale)
-        ghostty_surface_set_size(s, UInt32(size.width), UInt32(size.height))
+        let scale = container.window?.backingScaleFactor ?? 2.0
+        ghostty_surface_set_content_scale(s, Double(scale), Double(scale))
+        ghostty_surface_set_size(s, UInt32(size.width * scale), UInt32(size.height * scale))
         ghostty_surface_set_focus(s, true)
     }
 
@@ -215,7 +215,8 @@ class TerminalSurface {
         guard let surface, let view else { return }
         let size = view.bounds.size
         guard size.width > 0, size.height > 0 else { return }
-        ghostty_surface_set_size(surface, UInt32(size.width), UInt32(size.height))
+        let scale = view.window?.backingScaleFactor ?? 2.0
+        ghostty_surface_set_size(surface, UInt32(size.width * scale), UInt32(size.height * scale))
         ghostty_surface_refresh(surface)
     }
 
@@ -390,7 +391,8 @@ class GhosttyNSView: NSView {
             ghostty_surface_set_content_scale(surface, scale, scale)
         }
 
-        ghostty_surface_set_size(surface, UInt32(size.width), UInt32(size.height))
+        let scale = window?.backingScaleFactor ?? 2.0
+        ghostty_surface_set_size(surface, UInt32(size.width * scale), UInt32(size.height * scale))
         ghostty_surface_refresh(surface)
         needsDisplay = true
 
