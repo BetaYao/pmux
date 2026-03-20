@@ -37,6 +37,11 @@ class WorkspaceManager {
         return tabs[index]
     }
 
+    func updateWorktrees(at index: Int, worktrees: [WorktreeInfo]) {
+        guard index >= 0, index < tabs.count else { return }
+        tabs[index].worktrees = worktrees
+    }
+
     /// Add parent dir to display name when multiple tabs have the same name
     private func disambiguateNames() {
         var nameCounts: [String: Int] = [:]

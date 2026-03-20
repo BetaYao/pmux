@@ -17,6 +17,9 @@ class NotificationManager: NSObject {
         requestPermission()
     }
 
+    private static let categoryIdentifier = "pmux.agentStatus"
+    private static let openTerminalAction = "open_terminal"
+
     private func requestPermission() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
             if let error {
@@ -24,10 +27,23 @@ class NotificationManager: NSObject {
             }
         }
         UNUserNotificationCenter.current().delegate = self
+
+        // Register notification category with action buttons
+        let openAction = UNNotificationAction(
+            identifier: Self.openTerminalAction,
+            title: "Open Terminal",
+            options: [.foreground]
+        )
+        let category = UNNotificationCategory(
+            identifier: Self.categoryIdentifier,
+            actions: [openAction],
+            intentIdentifiers: []
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([category])
     }
 
     /// Notify when agent transitions to a notable state
-    func notify(worktreePath: String, branch: String, oldStatus: AgentStatus, newStatus: AgentStatus) {
+    func notify(worktreePath: String, branch: String, oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String = "") {
         // Only notify for transitions TO these states
         guard newStatus == .waiting || newStatus == .error || newStatus == .idle else { return }
 
@@ -40,29 +56,47 @@ class NotificationManager: NSObject {
         }
         lastNotified[worktreePath] = Date()
 
-        // Don't notify if app is frontmost
-        if NSApp.isActive { return }
-
+        // Always add to in-app history
+        let historyMessage: String
         let content = UNMutableNotificationContent()
 
         switch newStatus {
         case .waiting:
-            content.title = "Agent needs input"
-            content.body = "\(branch) is waiting for your response"
+            content.title = "Agent needs input — \(branch)"
+            let fallback = "\(branch) is waiting for your response"
+            content.body = lastMessage.isEmpty ? fallback : lastMessage
             content.sound = .default
+            historyMessage = content.body
         case .error:
-            content.title = "Agent error"
-            content.body = "\(branch) encountered an error"
+            content.title = "Agent error — \(branch)"
+            let fallback = "\(branch) encountered an error"
+            content.body = lastMessage.isEmpty ? fallback : lastMessage
             content.sound = .defaultCritical
+            historyMessage = content.body
         case .idle:
-            content.title = "Agent finished"
-            content.body = "\(branch) completed its task"
+            content.title = "Agent finished — \(branch)"
+            let fallback = "\(branch) completed its task"
+            content.body = lastMessage.isEmpty ? fallback : lastMessage
             content.sound = .default
+            historyMessage = content.body
         default:
             return
         }
 
+        // Add to in-app history
+        let entry = NotificationEntry(
+            branch: branch,
+            worktreePath: worktreePath,
+            status: newStatus,
+            message: historyMessage
+        )
+        NotificationHistory.shared.add(entry)
+
+        // Don't send system notification if app is frontmost
+        if NSApp.isActive { return }
+
         content.userInfo = ["worktreePath": worktreePath]
+        content.categoryIdentifier = Self.categoryIdentifier
 
         let request = UNNotificationRequest(
             identifier: "pmux-\(worktreePath.hashValue)",
@@ -88,23 +122,28 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
         completionHandler([.banner, .sound])
     }
 
-    /// Handle notification click — bring app to front and navigate to worktree
+    /// Handle notification click or action button
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         let userInfo = response.notification.request.content.userInfo
 
-        // didReceive may be called off main thread; UI ops must be on main
-        DispatchQueue.main.async {
-            NSApp.activate(ignoringOtherApps: true)
-            NSApp.mainWindow?.deminiaturize(nil)
+        // Both default tap and "Open Terminal" action navigate to worktree
+        let shouldNavigate = response.actionIdentifier == UNNotificationDefaultActionIdentifier
+            || response.actionIdentifier == Self.openTerminalAction
 
-            if let path = userInfo["worktreePath"] as? String {
-                NotificationCenter.default.post(
-                    name: .navigateToWorktree,
-                    object: nil,
-                    userInfo: ["worktreePath": path]
-                )
+        if shouldNavigate {
+            DispatchQueue.main.async {
+                NSApp.activate(ignoringOtherApps: true)
+                NSApp.mainWindow?.deminiaturize(nil)
+
+                if let path = userInfo["worktreePath"] as? String {
+                    NotificationCenter.default.post(
+                        name: .navigateToWorktree,
+                        object: nil,
+                        userInfo: ["worktreePath": path]
+                    )
+                }
             }
         }
 

@@ -63,3 +63,17 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.pmux.tests
         GENERATE_INFOPLIST_FILE: YES
+
+  pmuxUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: UITests
+        type: group
+    dependencies:
+      - target: pmux
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.pmux.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: pmux

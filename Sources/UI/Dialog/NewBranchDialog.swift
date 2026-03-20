@@ -29,6 +29,9 @@ class NewBranchDialog: NSViewController {
     override func loadView() {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 220))
         container.wantsLayer = true
+        container.setAccessibilityIdentifier("dialog.newBranch")
+        container.setAccessibilityElement(true)
+        container.setAccessibilityRole(.group)
         self.view = container
 
         let titleLabel = NSTextField(labelWithString: "New Branch")
@@ -54,6 +57,7 @@ class NewBranchDialog: NSViewController {
 
         branchField.placeholderString = "feature/my-feature"
         branchField.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        branchField.setAccessibilityIdentifier("dialog.newBranch.nameField")
 
         // Base branch
         let baseLabel = NSTextField(labelWithString: "Based on:")
@@ -73,6 +77,7 @@ class NewBranchDialog: NSViewController {
         createButton.keyEquivalent = "\r"
         createButton.target = self
         createButton.action = #selector(createClicked)
+        createButton.setAccessibilityIdentifier("dialog.newBranch.createButton")
 
         cancelButton.title = "Cancel"
         cancelButton.bezelStyle = .rounded

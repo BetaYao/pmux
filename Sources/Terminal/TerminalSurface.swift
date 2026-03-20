@@ -20,7 +20,6 @@ class TerminalSurface {
         }
 
         let termView = GhosttyNSView(frame: container.bounds)
-        termView.autoresizingMask = [.width, .height]
         termView.wantsLayer = true
 
         var config = ghostty_surface_config_new()
@@ -32,9 +31,9 @@ class TerminalSurface {
         let tmuxCommand: String? = sessionName.map { name in
             // Check if session exists; attach if so, create if not
             if Self.tmuxSessionExists(name) {
-                return "tmux attach-session -t \(name)"
+                return "tmux attach-session -t \(name) \\; set-option status off"
             } else {
-                return "tmux new-session -s \(name)"
+                return "tmux new-session -s \(name) \\; set-option status off"
             }
         }
 
@@ -77,8 +76,16 @@ class TerminalSurface {
         self.view = view
         self.containerView = container
         view.surface = s
+        view.terminalSurface = self
 
+        view.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.topAnchor.constraint(equalTo: container.topAnchor),
+            view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
 
         // Set initial size
         let size = container.bounds.size
@@ -112,21 +119,87 @@ class TerminalSurface {
         CATransaction.setDisableActions(true)
 
         view.removeFromSuperview()
-        view.frame = container.bounds
-        view.autoresizingMask = [.width, .height]
+        view.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.topAnchor.constraint(equalTo: container.topAnchor),
+            view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
 
         CATransaction.commit()
 
         self.containerView = container
-        syncSize()
-        syncContentScale()
+
+        // Force size sync after constraints resolve — need TWO deferred
+        // passes because the first run loop resolves constraints (setting frame)
+        // and the second one is needed for Ghostty to recalculate the grid
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let view = self.view, let surface = self.surface else { return }
+            self.syncContentScale()
+            self.syncSize()
+            ghostty_surface_set_focus(surface, true)
+            view.needsDisplay = true
+            // Third pass: read the grid size AFTER Ghostty has processed the resize
+            DispatchQueue.main.async { [weak self] in
+                self?.refreshTmuxLayout()
+            }
+        }
+    }
+
+    /// Tell tmux to resize its window to match the terminal's actual grid size
+    func refreshTmuxLayout() {
+        guard let sessionName, let surface else { return }
+        let gridSize = ghostty_surface_size(surface)
+        guard gridSize.columns > 0, gridSize.rows > 0 else { return }
+        let cols = Int(gridSize.columns)
+        let rows = Int(gridSize.rows)
+        DispatchQueue.global().async {
+            // Explicitly resize tmux window to match the Ghostty grid
+            let resize = Process()
+            resize.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            resize.arguments = ["tmux", "resize-window", "-t", sessionName, "-x", "\(cols)", "-y", "\(rows)"]
+            resize.standardOutput = Pipe()
+            resize.standardError = Pipe()
+            try? resize.run()
+            resize.waitUntilExit()
+
+            // Refresh client display
+            let refresh = Process()
+            refresh.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            refresh.arguments = ["tmux", "refresh-client", "-t", sessionName, "-S"]
+            refresh.standardOutput = Pipe()
+            refresh.standardError = Pipe()
+            try? refresh.run()
+        }
+    }
+
+    /// Static version for when we don't have the surface (fallback)
+    static func refreshTmuxClient(_ sessionName: String) {
+        DispatchQueue.global().async {
+            let resize = Process()
+            resize.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            resize.arguments = ["tmux", "resize-window", "-t", sessionName, "-A"]
+            resize.standardOutput = Pipe()
+            resize.standardError = Pipe()
+            try? resize.run()
+            resize.waitUntilExit()
+
+            let refresh = Process()
+            refresh.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            refresh.arguments = ["tmux", "refresh-client", "-t", sessionName, "-S"]
+            refresh.standardOutput = Pipe()
+            refresh.standardError = Pipe()
+            try? refresh.run()
+        }
     }
 
     /// Sync the surface size with the current container bounds
     func syncSize() {
         guard let surface, let view else { return }
         let size = view.bounds.size
+        guard size.width > 0, size.height > 0 else { return }
         ghostty_surface_set_size(surface, UInt32(size.width), UInt32(size.height))
         ghostty_surface_refresh(surface)
     }
@@ -192,6 +265,45 @@ class TerminalSurface {
         return .running
     }
 
+    // MARK: - Search
+
+    /// Start a search in the terminal scrollback using Ghostty's binding action system.
+    func startSearch(_ query: String) {
+        guard let surface else { return }
+        // Trigger Ghostty's built-in search with the query as parameter
+        let action = "search:\(query)"
+        action.withCString { cstr in
+            _ = ghostty_surface_binding_action(surface, cstr, UInt(strlen(cstr)))
+        }
+    }
+
+    /// End the current search.
+    func endSearch() {
+        guard let surface else { return }
+        let action = "close_surface_overlay"
+        action.withCString { cstr in
+            _ = ghostty_surface_binding_action(surface, cstr, UInt(strlen(cstr)))
+        }
+    }
+
+    /// Navigate to the next search match.
+    func searchNext() {
+        guard let surface else { return }
+        let action = "search_forward"
+        action.withCString { cstr in
+            _ = ghostty_surface_binding_action(surface, cstr, UInt(strlen(cstr)))
+        }
+    }
+
+    /// Navigate to the previous search match.
+    func searchPrev() {
+        guard let surface else { return }
+        let action = "search_backward"
+        action.withCString { cstr in
+            _ = ghostty_surface_binding_action(surface, cstr, UInt(strlen(cstr)))
+        }
+    }
+
     /// Destroy the surface and clean up
     func destroy() {
         if let surface {
@@ -214,10 +326,62 @@ class TerminalSurface {
 /// Forwards keyboard and mouse events to the Ghostty C API.
 class GhosttyNSView: NSView {
     var surface: ghostty_surface_t?
+    weak var terminalSurface: TerminalSurface?
 
     override var acceptsFirstResponder: Bool { true }
 
     override var canBecomeKeyView: Bool { true }
+
+    private(set) var lastSyncedSize: NSSize = .zero
+
+    /// Test accessor for lastSyncedSize
+    var lastSyncedSizeForTesting: NSSize { lastSyncedSize }
+
+    /// Test helper: set lastSyncedSize to simulate a previous sync
+    func resetLastSyncedSizeForTesting(to size: NSSize) {
+        lastSyncedSize = size
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        syncSurfaceSize()
+    }
+
+    override func removeFromSuperview() {
+        super.removeFromSuperview()
+        // Reset debounce so the next container gets a fresh sync
+        lastSyncedSize = .zero
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let surface, let window else { return }
+        let scale = Double(window.backingScaleFactor)
+        ghostty_surface_set_content_scale(surface, scale, scale)
+        syncSurfaceSize()
+    }
+
+    private func syncSurfaceSize() {
+        let size = bounds.size
+        guard size.width > 0, size.height > 0 else { return }
+        guard size != lastSyncedSize else { return }
+        lastSyncedSize = size
+
+        guard let surface else { return }
+
+        // Update content scale in case we moved to a different window/screen
+        if let window {
+            let scale = Double(window.backingScaleFactor)
+            ghostty_surface_set_content_scale(surface, scale, scale)
+        }
+
+        ghostty_surface_set_size(surface, UInt32(size.width), UInt32(size.height))
+        ghostty_surface_refresh(surface)
+        needsDisplay = true
+
+        // Resize tmux to match the new terminal grid dimensions
+        terminalSurface?.refreshTmuxLayout()
+    }
 
     override func becomeFirstResponder() -> Bool {
         if let surface {
@@ -301,12 +465,17 @@ class GhosttyNSView: NSView {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        guard let surface else { return }
-        // ghostty_input_scroll_mods_t is just an Int32 bitfield
+        guard let surface else {
+            super.scrollWheel(with: event)
+            return
+        }
         var scrollMods: ghostty_input_scroll_mods_t = 0
         if event.hasPreciseScrollingDeltas {
             scrollMods |= 1  // precision bit
         }
+        // Send mouse position before scroll so Ghostty knows where the cursor is
+        let pos = convert(event.locationInWindow, from: nil)
+        ghostty_surface_mouse_pos(surface, pos.x, Double(bounds.height) - pos.y, modsFromEvent(event))
         ghostty_surface_mouse_scroll(surface, event.scrollingDeltaX, event.scrollingDeltaY, scrollMods)
     }
 

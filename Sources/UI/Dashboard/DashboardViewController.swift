@@ -79,7 +79,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     override func loadView() {
         let root = NSView()
         root.wantsLayer = true
-        root.layer?.backgroundColor = SemanticColors.panel1.cgColor
+        root.layer?.backgroundColor = SemanticColors.panel.cgColor
         root.setAccessibilityIdentifier("dashboard.view")
         self.view = root
 
@@ -178,7 +178,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
 
     // MARK: - Zoom
 
-    private func setZoomIndex(_ index: Int) {
+    func setZoomIndex(_ index: Int) {
         zoomIndex = GridLayout.clampZoomIndex(index)
         if case .grid = currentLayout {
             rebuildGrid()
