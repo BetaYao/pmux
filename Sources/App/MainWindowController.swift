@@ -1057,6 +1057,10 @@ extension MainWindowController: TitleBarDelegate {
         case .system:
             window?.appearance = nil
         }
+        // Update NSAppearance.current so .cgColor resolves correctly outside drawing cycles
+        if let appearance = window?.appearance {
+            NSAppearance.current = appearance
+        }
         window?.backgroundColor = Theme.background
     }
     

@@ -15,6 +15,18 @@ extension NSAppearance {
     }
 }
 
+extension NSView {
+    /// Resolve a dynamic NSColor to CGColor using this view's effective appearance.
+    /// Use instead of `someColor.cgColor` to avoid NSAppearance.current mismatches.
+    func resolvedCGColor(_ color: NSColor) -> CGColor {
+        let saved = NSAppearance.current
+        NSAppearance.current = effectiveAppearance
+        let cg = color.cgColor
+        NSAppearance.current = saved
+        return cg
+    }
+}
+
 enum SemanticColors {
     // Use `static let` so each dynamic NSColor is created once and cached.
     // The NSColor(name:) block still resolves per-appearance at draw time,

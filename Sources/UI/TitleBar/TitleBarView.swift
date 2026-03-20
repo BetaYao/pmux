@@ -472,11 +472,15 @@ final class TitleBarView: NSView, LayoutPopoverDelegate {
     }
 
     private func updateArcBlockColors() {
+        // Caller (applyColors/setWindowHovered) must set NSAppearance.current first
+        let saved = NSAppearance.current
+        NSAppearance.current = window?.effectiveAppearance ?? NSApp.effectiveAppearance
         let bg = isWindowHovered
             ? SemanticColors.arcBlockHover
             : SemanticColors.arcBlockInactive
         leftArcBlock.layer?.backgroundColor = bg.cgColor
         rightArcBlock.layer?.backgroundColor = bg.cgColor
+        NSAppearance.current = saved
     }
 
     // MARK: - Theme
@@ -487,12 +491,15 @@ final class TitleBarView: NSView, LayoutPopoverDelegate {
     }
 
     private func applyColors() {
+        let saved = NSAppearance.current
+        NSAppearance.current = window?.effectiveAppearance ?? NSApp.effectiveAppearance
         updateArcBlockColors()
         leftSeparator1.layer?.backgroundColor = NSColor(hex: 0x3a3a3a).cgColor
         leftSeparator2.layer?.backgroundColor = NSColor(hex: 0x3a3a3a).cgColor
         addButton.contentTintColor = SemanticColors.muted
         updateDashboardTabAppearance()
         notifBadge.layer?.backgroundColor = SemanticColors.danger.cgColor
+        NSAppearance.current = saved
     }
 }
 

@@ -221,7 +221,7 @@ final class MiniCardView: NSView {
             branchLabel.textColor = NSColor.white
             messageLabel.textColor = NSColor(hex: 0x888888)
         } else {
-            layer.backgroundColor = SemanticColors.tileBarBg.cgColor
+            layer.backgroundColor = resolvedCGColor(SemanticColors.tileBarBg)
             layer.borderColor = NSColor.clear.cgColor
             layer.borderWidth = 0
             layer.shadowOpacity = 0

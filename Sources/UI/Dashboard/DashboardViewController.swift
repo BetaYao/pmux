@@ -707,7 +707,7 @@ private extension NSView {
 private class DashboardRootView: NSView {
     override var wantsUpdateLayer: Bool { true }
     override func updateLayer() {
-        layer?.backgroundColor = SemanticColors.bg.cgColor
+        layer?.backgroundColor = resolvedCGColor(SemanticColors.bg)
     }
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()

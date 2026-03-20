@@ -165,10 +165,10 @@ final class AgentCardView: NSView {
     }
 
     private func applyColors() {
-        layer?.backgroundColor = SemanticColors.tileBg.cgColor
-        bottomBar.layer?.backgroundColor = SemanticColors.tileBarBg.cgColor
-        separatorLine.layer?.backgroundColor = SemanticColors.line.cgColor
-        statusDot.layer?.backgroundColor = AgentDisplayHelpers.statusColor(currentStatus).cgColor
+        layer?.backgroundColor = resolvedCGColor(SemanticColors.tileBg)
+        bottomBar.layer?.backgroundColor = resolvedCGColor(SemanticColors.tileBarBg)
+        separatorLine.layer?.backgroundColor = resolvedCGColor(SemanticColors.line)
+        statusDot.layer?.backgroundColor = resolvedCGColor(AgentDisplayHelpers.statusColor(currentStatus))
         branchLabel.textColor = SemanticColors.text
         statusLabel.textColor = SemanticColors.muted
         updateBorder()
@@ -177,10 +177,10 @@ final class AgentCardView: NSView {
     private func updateBorder() {
         guard let layer = layer else { return }
         if isHovered || isSelected {
-            layer.borderColor = SemanticColors.accent.cgColor
+            layer.borderColor = resolvedCGColor(SemanticColors.accent)
             layer.borderWidth = 1.5
         } else {
-            layer.borderColor = SemanticColors.line.cgColor
+            layer.borderColor = resolvedCGColor(SemanticColors.line)
             layer.borderWidth = 1
         }
     }
