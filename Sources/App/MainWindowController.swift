@@ -55,10 +55,8 @@ class MainWindowController: NSWindowController {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
 
-        // Force dark appearance on window BEFORE any views are created
-        // This ensures all NSColor(name:) dynamic colors resolve as dark mode
-        window.appearance = NSAppearance(named: .darkAqua)
-        window.backgroundColor = NSColor(srgbRed: 0x0b/255.0, green: 0x0b/255.0, blue: 0x0b/255.0, alpha: 1.0)
+        // Set window appearance from config (already applied globally in main.swift)
+        window.appearance = NSApp.appearance
 
         self.init(window: window)
 
