@@ -499,7 +499,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         }
 
         // Build sidebar mini cards for non-selected agents
-        let sidebarWidth = leftRightSidebarScroll.bounds.width > 0 ? leftRightSidebarScroll.bounds.width : 200
+        let sidebarWidth = leftRightSidebarScroll.bounds.width > 0 ? leftRightSidebarScroll.bounds.width : 240
         for agent in sorted {
             let card = MiniCardView()
             card.delegate = self
