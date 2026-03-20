@@ -3,7 +3,9 @@ import AppKit
 /// Small status indicator dot with color
 class StatusBadge: NSView {
     var status: AgentStatus = .unknown {
-        didSet { needsDisplay = true }
+        didSet {
+            if status != oldValue { needsDisplay = true }
+        }
     }
 
     override init(frame frameRect: NSRect) {
@@ -16,20 +18,17 @@ class StatusBadge: NSView {
         wantsLayer = true
     }
 
-    override func draw(_ dirtyRect: NSRect) {
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
         let size = min(bounds.width, bounds.height)
-        let rect = NSRect(
-            x: (bounds.width - size) / 2,
-            y: (bounds.height - size) / 2,
-            width: size,
-            height: size
-        )
-        let path = NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1))
-        status.color.setFill()
-        path.fill()
+        layer?.cornerRadius = size / 2
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = status.color.cgColor
+        }
     }
 
     override var intrinsicContentSize: NSSize {
-        return NSSize(width: Theme.statusBadgeSize, height: Theme.statusBadgeSize)
+        NSSize(width: Theme.statusBadgeSize, height: Theme.statusBadgeSize)
     }
 }
