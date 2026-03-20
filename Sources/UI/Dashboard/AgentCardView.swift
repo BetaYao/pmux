@@ -7,13 +7,20 @@ protocol AgentCardDelegate: AnyObject {
 final class AgentCardView: NSView {
     weak var delegate: AgentCardDelegate?
     private(set) var agentId: String = ""
-    var isSelected: Bool = false { didSet { updateAppearance() } }
+    var isSelected: Bool = false { didSet { updateBorder() } }
 
+    /// Container where the Ghostty terminal surface will be embedded.
+    let terminalContainer = NSView()
+
+    /// Fixed-height bottom bar showing status dot, branch name, and status text.
+    let bottomBar = NSView()
+
+    private let separatorLine = NSView()
     private let statusDot = NSView()
-    private let titleLabel = NSTextField(labelWithString: "")
-    private let messageLabel = NSTextField(labelWithString: "")
-    private let timeLabel = NSTextField(labelWithString: "")
+    private let branchLabel = NSTextField(labelWithString: "")
+    private let statusLabel = NSTextField(labelWithString: "")
     private var isHovered = false
+    private var currentStatus: String = ""
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -26,84 +33,96 @@ final class AgentCardView: NSView {
 
     func configure(id: String, project: String, thread: String, status: String, lastMessage: String, totalDuration: String, roundDuration: String) {
         agentId = id
+        currentStatus = status
         setAccessibilityIdentifier("dashboard.card.\(id)")
 
-        titleLabel.stringValue = "\(project) - \(thread)"
-        messageLabel.stringValue = lastMessage
+        branchLabel.stringValue = thread
+        statusLabel.stringValue = status.capitalized
         statusDot.layer?.backgroundColor = AgentDisplayHelpers.statusColor(status).cgColor
 
-        let compactTotal = AgentDisplayHelpers.compactDuration(totalDuration)
-        let compactRound = AgentDisplayHelpers.compactDuration(roundDuration)
-        timeLabel.stringValue = "\u{03A3} \(compactTotal) \u{00B7} \u{27F3} \(compactRound)"
-
-        updateAppearance()
+        updateBorder()
     }
 
     private func setup() {
         wantsLayer = true
-        layer?.cornerRadius = 10
-        layer?.borderWidth = 1
+        layer?.cornerRadius = 4
+        layer?.masksToBounds = true
+        layer?.backgroundColor = SemanticColors.tileBg.cgColor
 
-        // Status dot
+        // Terminal container — fills top area
+        terminalContainer.wantsLayer = true
+        terminalContainer.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(terminalContainer)
+
+        // Separator line
+        separatorLine.wantsLayer = true
+        separatorLine.layer?.backgroundColor = SemanticColors.line.cgColor
+        separatorLine.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(separatorLine)
+
+        // Bottom bar
+        bottomBar.wantsLayer = true
+        bottomBar.layer?.backgroundColor = SemanticColors.tileBarBg.cgColor
+        bottomBar.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(bottomBar)
+
+        // Status dot (6px circle)
         statusDot.wantsLayer = true
-        statusDot.layer?.cornerRadius = 4
+        statusDot.layer?.cornerRadius = 3
         statusDot.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(statusDot)
+        bottomBar.addSubview(statusDot)
 
-        // Title
-        titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .bold)
-        titleLabel.textColor = SemanticColors.text
-        titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.maximumNumberOfLines = 1
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(titleLabel)
+        // Branch label
+        branchLabel.font = NSFont.systemFont(ofSize: 9, weight: .medium)
+        branchLabel.textColor = .white
+        branchLabel.lineBreakMode = .byTruncatingTail
+        branchLabel.maximumNumberOfLines = 1
+        branchLabel.translatesAutoresizingMaskIntoConstraints = false
+        bottomBar.addSubview(branchLabel)
 
-        // Message
-        messageLabel.font = NSFont.systemFont(ofSize: 12)
-        messageLabel.textColor = SemanticColors.muted
-        messageLabel.lineBreakMode = .byTruncatingTail
-        messageLabel.maximumNumberOfLines = 3
-        messageLabel.cell?.wraps = true
-        messageLabel.cell?.truncatesLastVisibleLine = true
-        messageLabel.translatesAutoresizingMaskIntoConstraints = false
-        messageLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        addSubview(messageLabel)
-
-        // Time
-        timeLabel.font = NSFont.systemFont(ofSize: 12)
-        timeLabel.textColor = SemanticColors.muted
-        timeLabel.lineBreakMode = .byTruncatingTail
-        timeLabel.maximumNumberOfLines = 1
-        timeLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(timeLabel)
-
-        // Approximate 3-line min height for message: 12pt font * 1.2 leading * 3 lines ~ 43
-        let messageMinHeight = messageLabel.heightAnchor.constraint(greaterThanOrEqualToConstant: 43)
-        messageMinHeight.priority = .defaultHigh
+        // Status text label (right-aligned, dim)
+        statusLabel.font = NSFont.systemFont(ofSize: 8, weight: .regular)
+        statusLabel.textColor = NSColor(calibratedRed: 0.333, green: 0.333, blue: 0.333, alpha: 1.0) // #555
+        statusLabel.lineBreakMode = .byTruncatingTail
+        statusLabel.maximumNumberOfLines = 1
+        statusLabel.alignment = .right
+        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+        statusLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        bottomBar.addSubview(statusLabel)
 
         NSLayoutConstraint.activate([
-            // Status dot in row 1
-            statusDot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            statusDot.topAnchor.constraint(equalTo: topAnchor, constant: 11),
-            statusDot.widthAnchor.constraint(equalToConstant: 8),
-            statusDot.heightAnchor.constraint(equalToConstant: 8),
+            // Terminal container fills top
+            terminalContainer.topAnchor.constraint(equalTo: topAnchor),
+            terminalContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            terminalContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
+            terminalContainer.bottomAnchor.constraint(equalTo: separatorLine.topAnchor),
 
-            // Title in row 1
-            titleLabel.leadingAnchor.constraint(equalTo: statusDot.trailingAnchor, constant: 6),
-            titleLabel.centerYAnchor.constraint(equalTo: statusDot.centerYAnchor),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
+            // Separator line
+            separatorLine.leadingAnchor.constraint(equalTo: leadingAnchor),
+            separatorLine.trailingAnchor.constraint(equalTo: trailingAnchor),
+            separatorLine.heightAnchor.constraint(equalToConstant: 1),
+            separatorLine.bottomAnchor.constraint(equalTo: bottomBar.topAnchor),
 
-            // Message in row 2
-            messageLabel.topAnchor.constraint(equalTo: statusDot.bottomAnchor, constant: 8),
-            messageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-            messageMinHeight,
+            // Bottom bar — fixed 24px height
+            bottomBar.leadingAnchor.constraint(equalTo: leadingAnchor),
+            bottomBar.trailingAnchor.constraint(equalTo: trailingAnchor),
+            bottomBar.bottomAnchor.constraint(equalTo: bottomAnchor),
+            bottomBar.heightAnchor.constraint(equalToConstant: 24),
 
-            // Time in row 3
-            timeLabel.topAnchor.constraint(equalTo: messageLabel.bottomAnchor, constant: 8),
-            timeLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            timeLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
-            timeLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -11),
+            // Status dot inside bottom bar
+            statusDot.leadingAnchor.constraint(equalTo: bottomBar.leadingAnchor, constant: 8),
+            statusDot.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
+            statusDot.widthAnchor.constraint(equalToConstant: 6),
+            statusDot.heightAnchor.constraint(equalToConstant: 6),
+
+            // Branch label
+            branchLabel.leadingAnchor.constraint(equalTo: statusDot.trailingAnchor, constant: 5),
+            branchLabel.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
+            branchLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusLabel.leadingAnchor, constant: -6),
+
+            // Status text label (right-aligned)
+            statusLabel.trailingAnchor.constraint(equalTo: bottomBar.trailingAnchor, constant: -8),
+            statusLabel.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
         ])
 
         // Click handler
@@ -119,7 +138,7 @@ final class AgentCardView: NSView {
         )
         addTrackingArea(trackingArea)
 
-        updateAppearance()
+        updateBorder()
     }
 
     @objc private func handleClick() {
@@ -128,41 +147,30 @@ final class AgentCardView: NSView {
 
     override func mouseEntered(with event: NSEvent) {
         isHovered = true
-        updateAppearance()
+        updateBorder()
     }
 
     override func mouseExited(with event: NSEvent) {
         isHovered = false
-        updateAppearance()
+        updateBorder()
     }
 
-    override var wantsUpdateLayer: Bool { true }
-
-    override func updateLayer() {
-        updateAppearance()
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        layer?.backgroundColor = SemanticColors.tileBg.cgColor
+        bottomBar.layer?.backgroundColor = SemanticColors.tileBarBg.cgColor
+        separatorLine.layer?.backgroundColor = SemanticColors.line.cgColor
+        statusDot.layer?.backgroundColor = AgentDisplayHelpers.statusColor(currentStatus).cgColor
+        updateBorder()
     }
 
-    private func updateAppearance() {
+    private func updateBorder() {
         guard let layer = layer else { return }
-        let accent = SemanticColors.accent
-
-        if isSelected {
-            layer.backgroundColor = accent.withAlphaComponent(0.12)
-                .blended(withFraction: 0.88, of: SemanticColors.panel2)?.cgColor
-                ?? SemanticColors.panel2.cgColor
-            layer.borderColor = accent.withAlphaComponent(0.55)
-                .blended(withFraction: 0.45, of: SemanticColors.line)?.cgColor
-                ?? SemanticColors.line.cgColor
-        } else if isHovered {
-            layer.backgroundColor = accent.withAlphaComponent(0.06)
-                .blended(withFraction: 0.94, of: SemanticColors.panel2)?.cgColor
-                ?? SemanticColors.panel2.cgColor
-            layer.borderColor = accent.withAlphaComponent(0.35).cgColor
+        if isHovered || isSelected {
+            layer.borderColor = SemanticColors.accent.cgColor
+            layer.borderWidth = 1.5
         } else {
-            layer.backgroundColor = SemanticColors.panel2.cgColor
-            layer.borderColor = SemanticColors.line.withAlphaComponent(0.78).cgColor
+            layer.borderWidth = 0
         }
-
-        layer.borderWidth = 1
     }
 }

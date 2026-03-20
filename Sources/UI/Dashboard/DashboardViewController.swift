@@ -46,8 +46,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     private let gridContainer = DraggableGridView()
     private var gridCards: [AgentCardView] = []
 
-    private let gridSpacing: CGFloat = 12
-    private let aspectRatio: CGFloat = 0.6
+    private let gridSpacing: CGFloat = 3
+    private let aspectRatio: CGFloat = 0.5625
 
     // Left-Right layout
     private let leftRightContainer = NSView()
@@ -638,10 +638,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     func agentCardClicked(agentId: String) {
         switch currentLayout {
         case .grid:
-            // In grid mode, clicking enters the project
-            if let agent = agents.first(where: { $0.id == agentId }) {
-                dashboardDelegate?.dashboardDidSelectProject(agent.project, thread: agent.thread)
-            }
+            // Single click → enter Speaker View with clicked agent focused
+            detachTerminals()
+            selectedAgentId = agentId
+            setLayout(.leftRight)
         default:
             // In other layouts, change selection and refresh focus panel
             detachTerminals()
