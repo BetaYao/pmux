@@ -38,7 +38,7 @@ struct Config: Codable {
         cardOrder = []
         zoomIndex = 3
         dashboardLayout = "left-right"
-        themeMode = "system"
+        themeMode = "dark"
     }
 
     init(from decoder: Decoder) throws {
@@ -53,7 +53,7 @@ struct Config: Codable {
         cardOrder = try container.decodeIfPresent([String].self, forKey: .cardOrder) ?? []
         zoomIndex = try container.decodeIfPresent(Int.self, forKey: .zoomIndex) ?? 3
         dashboardLayout = try container.decodeIfPresent(String.self, forKey: .dashboardLayout) ?? "left-right"
-        themeMode = try container.decodeIfPresent(String.self, forKey: .themeMode) ?? "system"
+        themeMode = try container.decodeIfPresent(String.self, forKey: .themeMode) ?? "dark"
     }
 
     static let configDir = FileManager.default.homeDirectoryForCurrentUser

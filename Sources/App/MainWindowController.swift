@@ -54,20 +54,22 @@ class MainWindowController: NSWindowController {
         window.minSize = NSSize(width: 600, height: 400)
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        window.backgroundColor = Theme.background
+
+        // Force dark appearance on window BEFORE any views are created
+        // This ensures all NSColor(name:) dynamic colors resolve as dark mode
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.backgroundColor = NSColor(srgbRed: 0x0b/255.0, green: 0x0b/255.0, blue: 0x0b/255.0, alpha: 1.0)
+
+        self.init(window: window)
 
         // Hide real traffic lights
         window.standardWindowButton(.closeButton)?.isHidden = true
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
         window.standardWindowButton(.zoomButton)?.isHidden = true
 
-        self.init(window: window)
         window.setFrameAutosaveName("PmuxMainWindow")
         window.delegate = self
         window.keyHandler = self
-
-        // Apply theme from config
-        ThemeMode.applyAppearance(ThemeMode(rawValue: config.themeMode) ?? .system)
 
         setupMenuShortcuts()
         setupLayout()

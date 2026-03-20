@@ -4,6 +4,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var mainWindowController: MainWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Force dark appearance globally BEFORE any views are created
+        // This ensures all NSColor(name:) dynamic colors resolve as dark mode
+        let themeMode = Config.load().themeMode
+        ThemeMode.applyAppearance(ThemeMode(rawValue: themeMode) ?? .dark)
+
         // Initialize GhosttyApp singleton
         GhosttyBridge.shared.initialize()
 
