@@ -178,13 +178,16 @@ final class TitleBarView: NSView, LayoutPopoverDelegate {
         trafficStack.translatesAutoresizingMaskIntoConstraints = false
         leftArcBlock.addSubview(trafficStack)
 
-        // Traffic light click actions
+        // Traffic light click actions + accessibility
         trafficRed.target = self
         trafficRed.action = #selector(trafficRedClicked)
+        trafficRed.setAccessibilityLabel("Close")
         trafficYellow.target = self
         trafficYellow.action = #selector(trafficYellowClicked)
+        trafficYellow.setAccessibilityLabel("Minimize")
         trafficGreen.target = self
         trafficGreen.action = #selector(trafficGreenClicked)
+        trafficGreen.setAccessibilityLabel("Zoom")
 
         // Separator 1 (after traffic lights)
         leftSeparator1.wantsLayer = true
@@ -302,12 +305,14 @@ final class TitleBarView: NSView, LayoutPopoverDelegate {
 
         // View switcher
         configureArcIconButton(viewSwitcherButton, symbol: "square.grid.2x2",
-                               identifier: "titlebar.viewMenu", action: #selector(viewMenuClicked))
+                               identifier: "titlebar.viewMenu", label: "Layout",
+                               action: #selector(viewMenuClicked))
         rightStack.addArrangedSubview(viewSwitcherButton)
 
         // Notification button (with badge)
         configureArcIconButton(notifButton, symbol: "bell",
-                               identifier: "titlebar.notifButton", action: #selector(notifClicked))
+                               identifier: "titlebar.notifButton", label: "Notifications",
+                               action: #selector(notifClicked))
         // Badge dot
         notifBadge.wantsLayer = true
         notifBadge.layer?.backgroundColor = SemanticColors.danger.cgColor
@@ -325,12 +330,14 @@ final class TitleBarView: NSView, LayoutPopoverDelegate {
 
         // AI button
         configureArcIconButton(aiButton, symbol: "sparkles",
-                               identifier: "titlebar.aiButton", action: #selector(aiClicked))
+                               identifier: "titlebar.aiButton", label: "AI Assistant",
+                               action: #selector(aiClicked))
         rightStack.addArrangedSubview(aiButton)
 
         // Theme button
         configureArcIconButton(themeButton, symbol: "circle.lefthalf.filled",
-                               identifier: "titlebar.themeToggle", action: #selector(themeClicked))
+                               identifier: "titlebar.themeToggle", label: "Toggle Theme",
+                               action: #selector(themeClicked))
         rightStack.addArrangedSubview(themeButton)
 
         NSLayoutConstraint.activate([
@@ -358,9 +365,10 @@ final class TitleBarView: NSView, LayoutPopoverDelegate {
     // MARK: - Arc Icon Button Helper
 
     private func configureArcIconButton(_ button: NSButton, symbol: String,
-                                         identifier: String, action: Selector) {
+                                         identifier: String, label: String? = nil, action: Selector) {
+        let desc = label ?? identifier
         let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
-        if let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) {
+        if let image = NSImage(systemSymbolName: symbol, accessibilityDescription: desc) {
             button.image = image.withSymbolConfiguration(config)
         }
         button.bezelStyle = .recessed
@@ -371,6 +379,7 @@ final class TitleBarView: NSView, LayoutPopoverDelegate {
         button.action = action
         button.translatesAutoresizingMaskIntoConstraints = false
         button.setAccessibilityIdentifier(identifier)
+        button.setAccessibilityLabel(desc)
         button.wantsLayer = true
         button.layer?.cornerRadius = 7
         NSLayoutConstraint.activate([
@@ -497,6 +506,13 @@ private final class TrafficDot: NSView {
     private let inactiveColor = NSColor(hex: 0x555555)
     private var isWindowHovered = false
 
+    override var acceptsFirstResponder: Bool { true }
+    override var canBecomeKeyView: Bool { true }
+    override var focusRingType: NSFocusRingType {
+        get { .exterior }
+        set { /* always exterior */ }
+    }
+
     init(activeColor: NSColor) {
         self.activeColor = activeColor
         super.init(frame: .zero)
@@ -508,10 +524,15 @@ private final class TrafficDot: NSView {
             widthAnchor.constraint(equalToConstant: 12),
             heightAnchor.constraint(equalToConstant: 12),
         ])
+        setAccessibilityRole(.button)
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) not supported")
+    }
+
+    func setAccessibilityName(_ name: String) {
+        setAccessibilityLabel(name)
     }
 
     func setWindowHovered(_ hovered: Bool) {
@@ -522,6 +543,17 @@ private final class TrafficDot: NSView {
     override func mouseDown(with event: NSEvent) {
         if let target = target, let action = action {
             NSApp.sendAction(action, to: target, from: self)
+        }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        // Space or Return activates the button (standard keyboard activation)
+        if event.keyCode == 49 || event.keyCode == 36 {
+            if let target = target, let action = action {
+                NSApp.sendAction(action, to: target, from: self)
+            }
+        } else {
+            super.keyDown(with: event)
         }
     }
 }

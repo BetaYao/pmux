@@ -356,7 +356,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
 
         let spacing: CGFloat = 8
         // Mini card height in top-small: derive from clamped width range 180-260 at 16:9
-        let miniCardHeight: CGFloat = 120
+        let miniCardHeight: CGFloat = 150
 
         NSLayoutConstraint.activate([
             topSmallContainer.topAnchor.constraint(equalTo: view.topAnchor, constant: spacing),
@@ -407,7 +407,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         topLargeContainer.addSubview(topLargeBottomScroll)
 
         let spacing: CGFloat = 8
-        let miniCardHeight: CGFloat = 120
+        let miniCardHeight: CGFloat = 150
 
         NSLayoutConstraint.activate([
             topLargeContainer.topAnchor.constraint(equalTo: view.topAnchor, constant: spacing),

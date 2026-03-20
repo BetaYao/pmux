@@ -181,6 +181,9 @@ class MainWindowController: NSWindowController {
         let helpMenu = NSMenu(title: "Help")
         let keyboardShortcutsItem = NSMenuItem(title: "Keyboard Shortcuts", action: #selector(showKeyboardShortcuts), keyEquivalent: "")
         helpMenu.addItem(keyboardShortcutsItem)
+        helpMenu.addItem(NSMenuItem.separator())
+        let docsItem = NSMenuItem(title: "pmux Documentation", action: #selector(openDocumentation), keyEquivalent: "")
+        helpMenu.addItem(docsItem)
         helpMenuItem.submenu = helpMenu
         mainMenu.addItem(helpMenuItem)
         NSApp.helpMenu = helpMenu
@@ -283,6 +286,12 @@ class MainWindowController: NSWindowController {
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()
+    }
+
+    @objc private func openDocumentation() {
+        if let url = URL(string: "https://github.com/nicematt/pmux") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     @objc private func dashboardZoomIn() {
