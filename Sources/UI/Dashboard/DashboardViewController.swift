@@ -31,7 +31,7 @@ extension NSPasteboard.PasteboardType {
 
 // MARK: - DashboardViewController
 
-class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDelegate, NSCollectionViewDataSource, NSCollectionViewDelegateFlowLayout {
+class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDelegate, DraggableGridDelegate {
     weak var dashboardDelegate: DashboardDelegate?
 
     var currentLayout: DashboardLayout = .leftRight
@@ -43,8 +43,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
 
     // Grid layout
     private let gridScrollView = NSScrollView()
-    private let gridCollectionView = NSCollectionView()
-    private let gridFlowLayout = NSCollectionViewFlowLayout()
+    private let gridContainer = DraggableGridView()
+    private var gridCards: [AgentCardView] = []
 
     private let gridSpacing: CGFloat = 12
     private let aspectRatio: CGFloat = 0.6
@@ -70,13 +70,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     private let topLargeBottomStack = NSStackView()
     private var topLargeMiniCards: [MiniCardView] = []
 
-    // Card lookup for in-place updates
-    private var leftRightCardsByID: [String: MiniCardView] = [:]
-    private var topSmallCardsByID: [String: MiniCardView] = [:]
-    private var topLargeCardsByID: [String: MiniCardView] = [:]
-
-    private var instantiatedLayouts: Set<DashboardLayout> = []
-
     private var currentMinCardWidth: CGFloat {
         GridLayout.zoomLevels[zoomIndex]
     }
@@ -90,15 +83,17 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         root.setAccessibilityIdentifier("dashboard.view")
         self.view = root
 
-        ensureLayoutInstantiated(currentLayout)
+        setupGridLayout()
+        setupLeftRightLayout()
+        setupTopSmallLayout()
+        setupTopLargeLayout()
+
         showLayout(currentLayout)
     }
 
     // MARK: - Public API
 
     func updateAgents(_ newAgents: [AgentDisplayInfo]) {
-        let oldIDs = Set(agents.map { $0.id })
-        let newIDs = Set(newAgents.map { $0.id })
         agents = newAgents
 
         // Validate selectedAgentId
@@ -106,65 +101,15 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
             selectedAgentId = sortedAgents().first?.id ?? ""
         }
 
-        // If the set of agents changed (added/removed), do a full rebuild
-        if oldIDs != newIDs {
-            rebuildCurrentLayout()
-            return
-        }
-
-        // Otherwise, update existing cards in-place
-        updateCardsInPlace()
-    }
-
-    private func updateCardsInPlace() {
-        let sorted = sortedAgents()
-
-        switch currentLayout {
-        case .grid:
-            rebuildGrid()
-        case .leftRight:
-            updateFocusModeInPlace(focusPanel: leftRightFocusPanel, cardsByID: leftRightCardsByID, sorted: sorted)
-        case .topSmall:
-            updateFocusModeInPlace(focusPanel: topSmallFocusPanel, cardsByID: topSmallCardsByID, sorted: sorted)
-        case .topLarge:
-            updateFocusModeInPlace(focusPanel: topLargeFocusPanel, cardsByID: topLargeCardsByID, sorted: sorted)
-        }
-    }
-
-    private func updateFocusModeInPlace(focusPanel: FocusPanelView, cardsByID: [String: MiniCardView], sorted: [AgentDisplayInfo]) {
-        if let selected = sorted.first(where: { $0.id == selectedAgentId }) {
-            configureFocusPanel(focusPanel, with: selected)
-        }
-        for agent in sorted {
-            if let card = cardsByID[agent.id] {
-                card.configure(
-                    id: agent.id, project: agent.project, thread: agent.thread,
-                    status: agent.status, lastMessage: agent.lastMessage,
-                    totalDuration: agent.totalDuration, roundDuration: agent.roundDuration
-                )
-                card.isSelected = (agent.id == selectedAgentId)
-            }
-        }
+        rebuildCurrentLayout()
     }
 
     func setLayout(_ layout: DashboardLayout) {
         guard layout != currentLayout else { return }
         detachTerminals()
-        ensureLayoutInstantiated(layout)
         currentLayout = layout
         showLayout(layout)
         rebuildCurrentLayout()
-    }
-
-    private func ensureLayoutInstantiated(_ layout: DashboardLayout) {
-        guard !instantiatedLayouts.contains(layout) else { return }
-        switch layout {
-        case .grid: setupGridLayout()
-        case .leftRight: setupLeftRightLayout()
-        case .topSmall: setupTopSmallLayout()
-        case .topLarge: setupTopLargeLayout()
-        }
-        instantiatedLayouts.insert(layout)
     }
 
     func zoomIn() {
@@ -176,15 +121,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     }
 
     func detachTerminals() {
-        if instantiatedLayouts.contains(.leftRight) {
-            leftRightFocusPanel.terminalContainer.subviews.forEach { $0.removeFromSuperview() }
-        }
-        if instantiatedLayouts.contains(.topSmall) {
-            topSmallFocusPanel.terminalContainer.subviews.forEach { $0.removeFromSuperview() }
-        }
-        if instantiatedLayouts.contains(.topLarge) {
-            topLargeFocusPanel.terminalContainer.subviews.forEach { $0.removeFromSuperview() }
-        }
+        // Detach all terminal surfaces from focus panels
+        leftRightFocusPanel.terminalContainer.subviews.forEach { $0.removeFromSuperview() }
+        topSmallFocusPanel.terminalContainer.subviews.forEach { $0.removeFromSuperview() }
+        topLargeFocusPanel.terminalContainer.subviews.forEach { $0.removeFromSuperview() }
     }
 
     // MARK: - Sorting
@@ -206,16 +146,20 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     // MARK: - Layout visibility
 
     private func showLayout(_ layout: DashboardLayout) {
-        if instantiatedLayouts.contains(.grid) { gridScrollView.isHidden = true }
-        if instantiatedLayouts.contains(.leftRight) { leftRightContainer.isHidden = true }
-        if instantiatedLayouts.contains(.topSmall) { topSmallContainer.isHidden = true }
-        if instantiatedLayouts.contains(.topLarge) { topLargeContainer.isHidden = true }
+        gridScrollView.isHidden = true
+        leftRightContainer.isHidden = true
+        topSmallContainer.isHidden = true
+        topLargeContainer.isHidden = true
 
         switch layout {
-        case .grid: gridScrollView.isHidden = false
-        case .leftRight: leftRightContainer.isHidden = false
-        case .topSmall: topSmallContainer.isHidden = false
-        case .topLarge: topLargeContainer.isHidden = false
+        case .grid:
+            gridScrollView.isHidden = false
+        case .leftRight:
+            leftRightContainer.isHidden = false
+        case .topSmall:
+            topSmallContainer.isHidden = false
+        case .topLarge:
+            topLargeContainer.isHidden = false
         }
     }
 
@@ -250,18 +194,11 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         gridScrollView.drawsBackground = false
         gridScrollView.borderType = .noBorder
 
-        gridFlowLayout.minimumInteritemSpacing = gridSpacing
-        gridFlowLayout.minimumLineSpacing = gridSpacing
-
-        gridCollectionView.collectionViewLayout = gridFlowLayout
-        gridCollectionView.backgroundColors = [.clear]
-        gridCollectionView.isSelectable = true
-        gridCollectionView.dataSource = self
-        gridCollectionView.delegate = self
-        gridCollectionView.register(AgentCardItem.self, forItemWithIdentifier: AgentCardItem.identifier)
-        gridCollectionView.setAccessibilityIdentifier("dashboard.layout.grid")
-
-        gridScrollView.documentView = gridCollectionView
+        gridContainer.wantsLayer = true
+        gridContainer.translatesAutoresizingMaskIntoConstraints = false
+        gridContainer.setAccessibilityIdentifier("dashboard.layout.grid")
+        gridContainer.dragDelegate = self
+        gridScrollView.documentView = gridContainer
 
         view.addSubview(gridScrollView)
 
@@ -428,7 +365,54 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     // MARK: - Rebuild: Grid
 
     private func rebuildGrid() {
-        gridCollectionView.reloadData()
+        gridCards.forEach { $0.removeFromSuperview() }
+        gridCards.removeAll()
+
+        let sorted = sortedAgents()
+        guard !sorted.isEmpty else { return }
+
+        for agent in sorted {
+            let card = AgentCardView()
+            card.delegate = self
+            card.configure(
+                id: agent.id,
+                project: agent.project,
+                thread: agent.thread,
+                status: agent.status,
+                lastMessage: agent.lastMessage,
+                totalDuration: agent.totalDuration,
+                roundDuration: agent.roundDuration
+            )
+            card.translatesAutoresizingMaskIntoConstraints = true
+            gridCards.append(card)
+            gridContainer.addSubview(card)
+        }
+
+        layoutGridFrames()
+    }
+
+    private var currentGridLayout: GridLayout {
+        let availableWidth = gridScrollView.contentView.bounds.width
+        let availableHeight = gridScrollView.contentView.bounds.height
+        return GridLayout(
+            availableWidth: availableWidth,
+            availableHeight: availableHeight,
+            cardCount: gridCards.count,
+            minCardWidth: currentMinCardWidth,
+            spacing: gridSpacing,
+            aspectRatio: aspectRatio
+        )
+    }
+
+    private func layoutGridFrames() {
+        guard !gridCards.isEmpty else { return }
+        let layout = currentGridLayout
+        let availableWidth = gridScrollView.contentView.bounds.width
+        gridContainer.frame = NSRect(x: 0, y: 0, width: availableWidth, height: layout.scrollContentHeight)
+
+        for (index, card) in gridCards.enumerated() {
+            card.frame = layout.cardFrame(at: index)
+        }
     }
 
     // MARK: - Rebuild: Left-Right
@@ -437,7 +421,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         // Clear old mini cards
         leftRightMiniCards.forEach { $0.removeFromSuperview() }
         leftRightMiniCards.removeAll()
-        leftRightCardsByID.removeAll()
         leftRightSidebarStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
         let sorted = sortedAgents()
@@ -467,7 +450,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
             card.isSelected = (agent.id == selectedAgentId)
             card.translatesAutoresizingMaskIntoConstraints = false
             leftRightMiniCards.append(card)
-            leftRightCardsByID[agent.id] = card
             leftRightSidebarStack.addArrangedSubview(card)
 
             NSLayoutConstraint.activate([
@@ -481,7 +463,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     private func rebuildTopSmall() {
         topSmallMiniCards.forEach { $0.removeFromSuperview() }
         topSmallMiniCards.removeAll()
-        topSmallCardsByID.removeAll()
         topSmallTopStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
         let sorted = sortedAgents()
@@ -510,7 +491,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
             card.isSelected = (agent.id == selectedAgentId)
             card.translatesAutoresizingMaskIntoConstraints = false
             topSmallMiniCards.append(card)
-            topSmallCardsByID[agent.id] = card
             topSmallTopStack.addArrangedSubview(card)
 
             // Clamp width 180-260
@@ -527,7 +507,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     private func rebuildTopLarge() {
         topLargeMiniCards.forEach { $0.removeFromSuperview() }
         topLargeMiniCards.removeAll()
-        topLargeCardsByID.removeAll()
         topLargeBottomStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
         let sorted = sortedAgents()
@@ -556,7 +535,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
             card.isSelected = (agent.id == selectedAgentId)
             card.translatesAutoresizingMaskIntoConstraints = false
             topLargeMiniCards.append(card)
-            topLargeCardsByID[agent.id] = card
             topLargeBottomStack.addArrangedSubview(card)
 
             // Clamp width 180-260
@@ -586,7 +564,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     override func viewDidLayout() {
         super.viewDidLayout()
         if case .grid = currentLayout {
-            gridCollectionView.collectionViewLayout?.invalidateLayout()
+            layoutGridFrames()
         }
     }
 
@@ -613,43 +591,31 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         dashboardDelegate?.dashboardDidRequestEnterProject(projectName)
     }
 
-    // MARK: - NSCollectionViewDataSource
+    // MARK: - DraggableGridDelegate
 
-    func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
-        return sortedAgents().count
+    func draggableGrid(_ grid: DraggableGridView, dropIndexFor point: NSPoint) -> Int {
+        currentGridLayout.gridIndex(for: point)
     }
 
-    func collectionView(_ collectionView: NSCollectionView, itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
-        let item = collectionView.makeItem(withIdentifier: AgentCardItem.identifier, for: indexPath) as! AgentCardItem
-        let sorted = sortedAgents()
-        let agent = sorted[indexPath.item]
-        item.cardView.delegate = self
-        item.cardView.configure(
-            id: agent.id, project: agent.project, thread: agent.thread,
-            status: agent.status, lastMessage: agent.lastMessage,
-            totalDuration: agent.totalDuration, roundDuration: agent.roundDuration
-        )
-        return item
+    func draggableGrid(_ grid: DraggableGridView, dropIndicatorFrameAt index: Int) -> NSRect {
+        guard !gridCards.isEmpty else { return .zero }
+        return currentGridLayout.dropIndicatorFrame(at: index)
     }
 
-    // MARK: - NSCollectionViewDelegateFlowLayout
+    func draggableGrid(_ grid: DraggableGridView, didDropItemWithPath path: String, atIndex toIndex: Int) {
+        guard let fromIndex = agents.firstIndex(where: { $0.id == path }) else { return }
+        guard fromIndex != toIndex, toIndex >= 0, toIndex <= agents.count else { return }
 
-    func collectionView(_ collectionView: NSCollectionView, layout collectionViewLayout: NSCollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> NSSize {
-        let availableWidth = collectionView.bounds.width
-        let cols = max(1, Int(availableWidth / currentMinCardWidth))
-        let totalSpacing = gridSpacing * CGFloat(cols - 1)
-        let cardWidth = (availableWidth - totalSpacing) / CGFloat(cols)
-        let cardHeight = cardWidth * aspectRatio
-        return NSSize(width: cardWidth, height: cardHeight)
+        var mutableAgents = agents
+        let item = mutableAgents.remove(at: fromIndex)
+        let adjustedIndex = toIndex > fromIndex ? toIndex - 1 : toIndex
+        mutableAgents.insert(item, at: min(adjustedIndex, mutableAgents.count))
+        agents = mutableAgents
+
+        rebuildGrid()
+
+        dashboardDelegate?.dashboardDidReorderCards(order: agents.map { $0.id })
     }
-}
-
-// MARK: - Grid Collection View Item
-
-private final class AgentCardItem: NSCollectionViewItem {
-    static let identifier = NSUserInterfaceItemIdentifier("AgentCardItem")
-    let cardView = AgentCardView()
-    override func loadView() { self.view = cardView }
 }
 
 // MARK: - NSView helper

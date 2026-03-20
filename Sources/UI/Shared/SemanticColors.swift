@@ -16,56 +16,69 @@ extension NSAppearance {
 }
 
 enum SemanticColors {
-    // MARK: - Backgrounds
+    static var bg: NSColor {
+        NSColor(name: nil) { appearance in
+            appearance.isDark ? NSColor(hex: 0x0f1115) : NSColor(hex: 0xf3f4f7)
+        }
+    }
 
-    static let bg: NSColor =
-        NSColor(name: nil) { $0.isDark ? NSColor(hex: 0x1a1a1a) : NSColor(hex: 0xf3f4f7) }
+    static var panel: NSColor {
+        NSColor(name: nil) { appearance in
+            appearance.isDark ? NSColor(hex: 0x15171c) : NSColor(hex: 0xffffff)
+        }
+    }
 
-    static let panel: NSColor =
-        NSColor(name: nil) { $0.isDark ? NSColor(hex: 0x202020) : NSColor(hex: 0xffffff) }
+    static var panel2: NSColor {
+        NSColor(name: nil) { appearance in
+            appearance.isDark ? NSColor(hex: 0x1b1e25) : NSColor(hex: 0xf7f8fb)
+        }
+    }
 
-    static let panel2: NSColor =
-        NSColor(name: nil) { $0.isDark ? NSColor(hex: 0x282828) : NSColor(hex: 0xf7f8fb) }
+    static var text: NSColor {
+        NSColor(name: nil) { appearance in
+            appearance.isDark ? NSColor(hex: 0xf3f5f8) : NSColor(hex: 0x1f232b)
+        }
+    }
 
-    // MARK: - Text
+    static var muted: NSColor {
+        NSColor(name: nil) { appearance in
+            appearance.isDark ? NSColor(hex: 0xa8afbc) : NSColor(hex: 0x636b78)
+        }
+    }
 
-    static let text: NSColor =
-        NSColor(name: nil) { $0.isDark ? NSColor(hex: 0xe8e8e8) : NSColor(hex: 0x1f232b) }
+    static var line: NSColor {
+        NSColor(name: nil) { appearance in
+            appearance.isDark ? NSColor(hex: 0x262a33) : NSColor(hex: 0xd7dbe3)
+        }
+    }
 
-    static let muted: NSColor =
-        NSColor(name: nil) { $0.isDark ? NSColor(hex: 0x999999) : NSColor(hex: 0x636b78) }
+    static var running: NSColor {
+        NSColor(name: nil) { appearance in
+            appearance.isDark ? NSColor(hex: 0x33c17b) : NSColor(hex: 0x1f9d63)
+        }
+    }
 
-    // MARK: - Borders
+    static var waiting: NSColor {
+        NSColor(name: nil) { appearance in
+            appearance.isDark ? NSColor(hex: 0x3b82f6) : NSColor(hex: 0x2563eb)
+        }
+    }
 
-    static let line: NSColor =
-        NSColor(name: nil) { $0.isDark ? NSColor(hex: 0x3a3a3a) : NSColor(hex: 0xd7dbe3) }
+    static var idle: NSColor {
+        NSColor(name: nil) { appearance in
+            appearance.isDark ? NSColor(hex: 0x9ca3af) : NSColor(hex: 0x8a93a1)
+        }
+    }
 
-    /// Default card border — very subtle
-    static let cardBorder: NSColor =
-        NSColor(name: nil) { $0.isDark ? NSColor(hex: 0x363636) : NSColor(hex: 0xe2e5eb) }
+    static var accent: NSColor {
+        NSColor(name: nil) { appearance in
+            appearance.isDark ? NSColor(hex: 0x4f8cff) : NSColor(hex: 0x2563eb)
+        }
+    }
 
-    /// Hovered card border — slightly brighter than default, subtle
-    static let cardBorderHover: NSColor =
-        NSColor(name: nil) { $0.isDark ? NSColor(hex: 0x505050) : NSColor(hex: 0xbcc2cc) }
-
-    /// Selected card border — accent blue
-    static let cardBorderSelected: NSColor =
-        NSColor(name: nil) { $0.isDark ? NSColor(hex: 0x2d8cf0) : NSColor(hex: 0x2563eb) }
-
-    // MARK: - Status
-
-    static let running: NSColor =
-        NSColor(name: nil) { $0.isDark ? NSColor(hex: 0x33c17b) : NSColor(hex: 0x1f9d63) }
-
-    static let waiting: NSColor =
-        NSColor(name: nil) { $0.isDark ? NSColor(hex: 0x3b82f6) : NSColor(hex: 0x2563eb) }
-
-    static let idle: NSColor =
-        NSColor(name: nil) { $0.isDark ? NSColor(hex: 0x9ca3af) : NSColor(hex: 0x8a93a1) }
-
-    static let accent: NSColor =
-        NSColor(name: nil) { $0.isDark ? NSColor(hex: 0x0e72ed) : NSColor(hex: 0x2563eb) }
-
-    static let danger: NSColor =
-        NSColor(name: nil) { $0.isDark ? NSColor(hex: 0xff453a) : NSColor(hex: 0xdc2626) }
+    static var danger: NSColor {
+        NSColor(name: nil) { appearance in
+            appearance.isDark ? NSColor(hex: 0xff453a) : NSColor(hex: 0xdc2626)
+        }
+    }
 }

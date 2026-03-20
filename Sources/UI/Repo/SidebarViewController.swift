@@ -92,10 +92,7 @@ class SidebarViewController: NSViewController {
         if !lastMessage.isEmpty {
             lastMessages[path] = lastMessage
         }
-        if let rowIndex = worktrees.firstIndex(where: { $0.path == path }) {
-            tableView.reloadData(forRowIndexes: IndexSet(integer: rowIndex),
-                                 columnIndexes: IndexSet(integer: 0))
-        }
+        tableView.reloadData()
     }
 
     func selectWorktree(at index: Int) {
@@ -133,15 +130,62 @@ extension SidebarViewController: NSTableViewDelegate {
         let message = lastMessages[info.path] ?? ""
         let isSelected = (row == selectedIndex)
 
-        let cell: SidebarCellView
-        if let reused = tableView.makeView(withIdentifier: SidebarCellView.identifier, owner: nil) as? SidebarCellView {
-            cell = reused
-        } else {
-            cell = SidebarCellView()
-            cell.identifier = SidebarCellView.identifier
-        }
+        let cell = NSView()
+        cell.setAccessibilityIdentifier("sidebar.row.\(info.branch.isEmpty ? info.displayName : info.branch)")
+        cell.setAccessibilityElement(true)
+        cell.setAccessibilityRole(.cell)
 
-        cell.configure(info: info, status: status, message: message, isSelected: isSelected)
+        // ── Row 1: Thread name + status dot ──
+        let nameLabel = NSTextField(labelWithString: info.displayName)
+        nameLabel.font = NSFont.systemFont(ofSize: 12, weight: .bold)
+        nameLabel.textColor = SemanticColors.text
+        nameLabel.lineBreakMode = .byTruncatingTail
+        nameLabel.translatesAutoresizingMaskIntoConstraints = false
+        nameLabel.drawsBackground = false
+        nameLabel.isBezeled = false
+        nameLabel.isEditable = false
+        cell.addSubview(nameLabel)
+
+        // Status dot (8px circle)
+        let dotView = NSView()
+        dotView.wantsLayer = true
+        dotView.layer?.backgroundColor = status.color.cgColor
+        dotView.layer?.cornerRadius = 4
+        dotView.translatesAutoresizingMaskIntoConstraints = false
+        cell.addSubview(dotView)
+
+        // ── Row 2: Last message (2-line clamp) ──
+        let messageLabel = NSTextField(labelWithString: message.isEmpty ? status.rawValue : message)
+        messageLabel.font = NSFont.systemFont(ofSize: 12)
+        messageLabel.textColor = SemanticColors.muted
+        messageLabel.lineBreakMode = .byTruncatingTail
+        messageLabel.maximumNumberOfLines = 2
+        messageLabel.translatesAutoresizingMaskIntoConstraints = false
+        messageLabel.drawsBackground = false
+        messageLabel.isBezeled = false
+        messageLabel.isEditable = false
+        messageLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        cell.addSubview(messageLabel)
+
+        NSLayoutConstraint.activate([
+            // Name label
+            nameLabel.topAnchor.constraint(equalTo: cell.topAnchor, constant: 9),
+            nameLabel.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
+            nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: dotView.leadingAnchor, constant: -6),
+
+            // Status dot
+            dotView.widthAnchor.constraint(equalToConstant: 8),
+            dotView.heightAnchor.constraint(equalToConstant: 8),
+            dotView.centerYAnchor.constraint(equalTo: nameLabel.centerYAnchor),
+            dotView.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
+
+            // Message label
+            messageLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 2),
+            messageLabel.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
+            messageLabel.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
+            messageLabel.bottomAnchor.constraint(lessThanOrEqualTo: cell.bottomAnchor, constant: -9),
+        ])
+
         return cell
     }
 
@@ -155,83 +199,16 @@ extension SidebarViewController: NSTableViewDelegate {
     }
 }
 
-// MARK: - Reusable Cell View
-
-private class SidebarCellView: NSTableCellView {
-    static let identifier = NSUserInterfaceItemIdentifier("SidebarCell")
-
-    let nameLabel = NSTextField(labelWithString: "")
-    let dotView = NSView()
-    let messageLabel = NSTextField(labelWithString: "")
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        setup()
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) not supported")
-    }
-
-    private func setup() {
-        nameLabel.font = NSFont.systemFont(ofSize: 12, weight: .bold)
-        nameLabel.lineBreakMode = .byTruncatingTail
-        nameLabel.translatesAutoresizingMaskIntoConstraints = false
-        nameLabel.drawsBackground = false
-        nameLabel.isBezeled = false
-        nameLabel.isEditable = false
-        addSubview(nameLabel)
-
-        dotView.wantsLayer = true
-        dotView.layer?.cornerRadius = 4
-        dotView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(dotView)
-
-        messageLabel.font = NSFont.systemFont(ofSize: 12)
-        messageLabel.lineBreakMode = .byTruncatingTail
-        messageLabel.maximumNumberOfLines = 2
-        messageLabel.translatesAutoresizingMaskIntoConstraints = false
-        messageLabel.drawsBackground = false
-        messageLabel.isBezeled = false
-        messageLabel.isEditable = false
-        messageLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        addSubview(messageLabel)
-
-        NSLayoutConstraint.activate([
-            nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 9),
-            nameLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: dotView.leadingAnchor, constant: -6),
-
-            dotView.widthAnchor.constraint(equalToConstant: 8),
-            dotView.heightAnchor.constraint(equalToConstant: 8),
-            dotView.centerYAnchor.constraint(equalTo: nameLabel.centerYAnchor),
-            dotView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-
-            messageLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 2),
-            messageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            messageLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -9),
-        ])
-    }
-
-    func configure(info: WorktreeInfo, status: AgentStatus, message: String, isSelected: Bool) {
-        nameLabel.stringValue = info.displayName
-        nameLabel.textColor = SemanticColors.text
-        dotView.layer?.backgroundColor = status.color.cgColor
-        messageLabel.stringValue = message.isEmpty ? status.rawValue : message
-        messageLabel.textColor = SemanticColors.muted
-        setAccessibilityIdentifier("sidebar.row.\(info.branch.isEmpty ? info.displayName : info.branch)")
-    }
-}
-
 // MARK: - Custom Row View
 
 /// Thread row with accent-tinted selection style.
 private class ThreadRowView: NSTableRowView {
     private let isActive: Bool
+    private let status: AgentStatus
 
     init(isActive: Bool, status: AgentStatus) {
         self.isActive = isActive
+        self.status = status
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = 6
@@ -241,21 +218,26 @@ private class ThreadRowView: NSTableRowView {
         fatalError("init(coder:) not supported")
     }
 
-    override func drawSelection(in dirtyRect: NSRect) {}
+    override func drawSelection(in dirtyRect: NSRect) {
+        // Selection handled in draw(dirtyRect:)
+    }
 
-    override var wantsUpdateLayer: Bool { true }
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
 
-    override func updateLayer() {
         if isActive {
-            effectiveAppearance.performAsCurrentDrawingAppearance {
-                layer?.backgroundColor = SemanticColors.accent.withAlphaComponent(0.07).cgColor
-                layer?.borderColor = SemanticColors.accent.withAlphaComponent(0.38).cgColor
-                layer?.borderWidth = 1
-            }
-        } else {
-            layer?.backgroundColor = nil
-            layer?.borderColor = nil
-            layer?.borderWidth = 0
+            // Background: accent at 7% blended with panel
+            let accentBg = SemanticColors.accent.withAlphaComponent(0.07)
+            accentBg.setFill()
+            let bgPath = NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6)
+            bgPath.fill()
+
+            // Border: accent at 38% blended with line
+            let borderColor = SemanticColors.accent.blended(withFraction: 0.62, of: SemanticColors.line) ?? SemanticColors.accent.withAlphaComponent(0.38)
+            borderColor.setStroke()
+            let borderPath = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
+            borderPath.lineWidth = 1
+            borderPath.stroke()
         }
     }
 

@@ -266,12 +266,6 @@ final class AIPanelView: NSView, NSTextViewDelegate {
         layer?.shadowOffset = CGSize(width: -8, height: 0)
         layer?.shadowRadius = 16
         layer?.shadowOpacity = 1.0
-        layer?.shadowPath = CGPath(rect: bounds, transform: nil)
-    }
-
-    override func layout() {
-        super.layout()
-        layer?.shadowPath = CGPath(rect: bounds, transform: nil)
     }
 
     private func makeBubble(role: BubbleRole, text: String) -> NSView {

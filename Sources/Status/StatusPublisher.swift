@@ -18,7 +18,6 @@ class StatusPublisher {
     private(set) var webhookProvider = WebhookStatusProvider()
 
     private let pollInterval: TimeInterval = 2.0
-    private let pollQueue = DispatchQueue(label: "com.pmux.statusPoll", qos: .utility)
 
     init(agentConfig: AgentDetectConfig = .default) {
         self.agentConfig = agentConfig
@@ -61,59 +60,36 @@ class StatusPublisher {
     }
 
     private func pollAll() {
-        // Capture snapshot on main thread
-        let surfacesSnapshot = surfaces
+        for (path, surface) in surfaces {
+            let tracker = trackers[path] ?? {
+                let t = DebouncedStatusTracker()
+                trackers[path] = t
+                return t
+            }()
 
-        pollQueue.async { [weak self] in
-            guard let self = self else { return }
+            let processStatus = surface.processStatus
+            let content = surface.readViewportText() ?? ""
 
-            var updates: [(path: String, oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String)] = []
+            // Try to find matching agent def from content
+            let agentDef = findAgentDef(in: content)
 
-            for (path, surface) in surfacesSnapshot {
-                let processStatus = surface.processStatus
-                let content = surface.readViewportText() ?? ""
+            let textStatus = detector.detect(
+                processStatus: processStatus,
+                shellInfo: nil,  // OSC 133 requires stream interception; future enhancement
+                content: content,
+                agentDef: agentDef
+            )
+            let hookStatus = webhookProvider.status(for: path)
+            let detected = AgentStatus.highestPriority([textStatus, hookStatus])
 
-                // Try to find matching agent def from content
-                let agentDef = self.findAgentDef(in: content)
+            let lastMessage = agentDef?.extractLastMessage(from: content, maxLen: 80) ?? ""
 
-                let textStatus = self.detector.detect(
-                    processStatus: processStatus,
-                    shellInfo: nil,  // OSC 133 requires stream interception; future enhancement
-                    content: content,
-                    agentDef: agentDef
-                )
-                let hookStatus = self.webhookProvider.status(for: path)
-                let detected = AgentStatus.highestPriority([textStatus, hookStatus])
-
-                let lastMessage = agentDef?.extractLastMessage(from: content, maxLen: 80) ?? ""
-
-                let tracker = self.trackers[path] ?? {
-                    let t = DebouncedStatusTracker()
-                    self.trackers[path] = t
-                    return t
-                }()
-
-                let oldStatus = tracker.currentStatus
-                let statusChanged = tracker.update(status: detected)
-                let messageChanged = (self.lastMessages[path] != lastMessage)
-                self.lastMessages[path] = lastMessage
-
-                if statusChanged || messageChanged {
-                    updates.append((path: path, oldStatus: oldStatus, newStatus: detected, lastMessage: lastMessage))
-                }
+            let oldStatus = tracker.currentStatus
+            if tracker.update(status: detected) {
+                delegate?.statusDidChange(worktreePath: path, oldStatus: oldStatus, newStatus: detected, lastMessage: lastMessage)
             }
-
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                for update in updates {
-                    self.delegate?.statusDidChange(
-                        worktreePath: update.path,
-                        oldStatus: update.oldStatus,
-                        newStatus: update.newStatus,
-                        lastMessage: update.lastMessage
-                    )
-                }
-            }
+            // Always update last message even if status didn't change
+            lastMessages[path] = lastMessage
         }
     }
 
@@ -129,11 +105,11 @@ class StatusPublisher {
     }
 
     func status(for path: String) -> AgentStatus {
-        pollQueue.sync { trackers[path]?.currentStatus ?? .unknown }
+        trackers[path]?.currentStatus ?? .unknown
     }
 
     func lastMessage(for path: String) -> String {
-        pollQueue.sync { lastMessages[path] ?? "" }
+        lastMessages[path] ?? ""
     }
 
     deinit {
