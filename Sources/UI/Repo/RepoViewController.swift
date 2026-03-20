@@ -4,74 +4,136 @@ protocol RepoViewDelegate: AnyObject {
     func repoView(_ repoVC: RepoViewController, didRequestDeleteWorktree info: WorktreeInfo)
 }
 
-/// Full repo view: sidebar (worktree list) + terminal area with split panes
+/// Full repo view: sidebar (thread list) + single immersive terminal
 class RepoViewController: NSViewController {
     weak var repoDelegate: RepoViewDelegate?
-    private let splitView = NSSplitView()
     private let sidebarVC = SidebarViewController()
-    private let terminalSplitView = TerminalSplitView()
+
+    // Two-column layout views
+    private let sidebarContainer = NSView()
+    private let terminalContainer = NSView()
+    private var sidebarWidthConstraint: NSLayoutConstraint!
+    private var stackConstraints: [NSLayoutConstraint] = []
+    private var isStacked = false
 
     private var worktrees: [WorktreeInfo] = []
     private var surfaces: [String: TerminalSurface] = [:]
     private var activeWorktreeIndex: Int = 0
+    private var activeSurface: TerminalSurface?
     private var needsTerminalOnLayout = false
-    private var isInLayout = false
-    private var didSetInitialDivider = false
-
-    /// Extra surfaces created by splits (not in the main surfaces dict)
-    private var splitSurfaces: [TerminalSurface] = []
 
     override func loadView() {
         self.view = NSView()
         view.wantsLayer = true
-        view.layer?.backgroundColor = Theme.background.cgColor
+        view.layer?.backgroundColor = SemanticColors.bg.cgColor
 
-        // Split view: sidebar | terminal area
-        splitView.isVertical = true
-        splitView.dividerStyle = .thin
-        splitView.delegate = self
-        splitView.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(splitView)
+        // Sidebar container (left column)
+        sidebarContainer.translatesAutoresizingMaskIntoConstraints = false
+        sidebarContainer.wantsLayer = true
+        view.addSubview(sidebarContainer)
 
-        // Sidebar
+        // Embed sidebar VC
         sidebarVC.sidebarDelegate = self
+        addChild(sidebarVC)
         let sidebarView = sidebarVC.view
-        sidebarView.translatesAutoresizingMaskIntoConstraints = true
-
-        // Terminal split area
-        terminalSplitView.translatesAutoresizingMaskIntoConstraints = true
-
-        splitView.addSubview(sidebarView)
-        splitView.addSubview(terminalSplitView)
-        splitView.adjustSubviews()
-
+        sidebarView.translatesAutoresizingMaskIntoConstraints = false
+        sidebarContainer.addSubview(sidebarView)
         NSLayoutConstraint.activate([
-            splitView.topAnchor.constraint(equalTo: view.topAnchor),
-            splitView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            splitView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            splitView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            sidebarView.topAnchor.constraint(equalTo: sidebarContainer.topAnchor),
+            sidebarView.leadingAnchor.constraint(equalTo: sidebarContainer.leadingAnchor),
+            sidebarView.trailingAnchor.constraint(equalTo: sidebarContainer.trailingAnchor),
+            sidebarView.bottomAnchor.constraint(equalTo: sidebarContainer.bottomAnchor),
         ])
+
+        // Terminal container (right column) with panel styling
+        terminalContainer.translatesAutoresizingMaskIntoConstraints = false
+        terminalContainer.wantsLayer = true
+        terminalContainer.layer?.backgroundColor = SemanticColors.panel2.cgColor
+        terminalContainer.layer?.borderWidth = 1
+        terminalContainer.layer?.borderColor = SemanticColors.line.withAlphaComponent(0.38).cgColor
+        terminalContainer.layer?.cornerRadius = 8
+        terminalContainer.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+        terminalContainer.setAccessibilityIdentifier("project.terminal")
+        terminalContainer.setAccessibilityElement(true)
+        terminalContainer.setAccessibilityRole(.group)
+        view.addSubview(terminalContainer)
+
+        sidebarWidthConstraint = sidebarContainer.widthAnchor.constraint(equalToConstant: 300)
+
+        applyLayout()
     }
 
     override func viewDidLayout() {
         super.viewDidLayout()
-        guard !isInLayout else { return }
-        isInLayout = true
-        defer { isInLayout = false }
 
-        let totalWidth = splitView.bounds.width
-        if totalWidth > 0 && !didSetInitialDivider {
-            didSetInitialDivider = true
-            splitView.setPosition(200, ofDividerAt: 0)
+        // Check for responsive stacking
+        let shouldStack = view.bounds.width <= 900
+        if shouldStack != isStacked {
+            isStacked = shouldStack
+            applyLayout()
         }
 
-        if needsTerminalOnLayout && terminalSplitView.bounds.width > 0 {
+        // Update dynamic border color (appearance changes)
+        terminalContainer.layer?.borderColor = SemanticColors.line.withAlphaComponent(0.38).cgColor
+        terminalContainer.layer?.backgroundColor = SemanticColors.panel2.cgColor
+
+        if needsTerminalOnLayout && terminalContainer.bounds.width > 0 {
             needsTerminalOnLayout = false
             showTerminal(at: activeWorktreeIndex)
         } else {
-            terminalSplitView.syncAllSurfaceSizes()
+            activeSurface?.syncSize()
         }
     }
+
+    private func applyLayout() {
+        NSLayoutConstraint.deactivate(stackConstraints)
+        stackConstraints.removeAll()
+
+        let gap: CGFloat = 12
+
+        if isStacked {
+            // Vertical stack: 220px sidebar on top, terminal below
+            sidebarWidthConstraint.isActive = false
+            let sidebarHeight = sidebarContainer.heightAnchor.constraint(equalToConstant: 220)
+
+            stackConstraints = [
+                sidebarHeight,
+                sidebarContainer.topAnchor.constraint(equalTo: view.topAnchor),
+                sidebarContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                sidebarContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+
+                terminalContainer.topAnchor.constraint(equalTo: sidebarContainer.bottomAnchor, constant: gap),
+                terminalContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                terminalContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                terminalContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            ]
+
+            // Full rounded corners when stacked
+            terminalContainer.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner, .layerMaxXMinYCorner, .layerMaxXMaxYCorner]
+        } else {
+            // Side-by-side: 300px sidebar | 1fr terminal
+            sidebarWidthConstraint.constant = 300
+            sidebarWidthConstraint.isActive = true
+
+            stackConstraints = [
+                sidebarContainer.topAnchor.constraint(equalTo: view.topAnchor),
+                sidebarContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                sidebarContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+                terminalContainer.topAnchor.constraint(equalTo: view.topAnchor),
+                terminalContainer.leadingAnchor.constraint(equalTo: sidebarContainer.trailingAnchor, constant: gap),
+                terminalContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                terminalContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            ]
+
+            // No rounded corners on right edge (full height)
+            terminalContainer.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+        }
+
+        NSLayoutConstraint.activate(stackConstraints)
+    }
+
+    // MARK: - Configuration
 
     func configure(worktrees: [WorktreeInfo], surfaces: [String: TerminalSurface]) {
         self.worktrees = worktrees
@@ -79,7 +141,7 @@ class RepoViewController: NSViewController {
         sidebarVC.setWorktrees(worktrees)
 
         if !worktrees.isEmpty {
-            if terminalSplitView.bounds.width > 0 {
+            if terminalContainer.bounds.width > 0 {
                 showTerminal(at: 0)
             } else {
                 activeWorktreeIndex = 0
@@ -88,21 +150,37 @@ class RepoViewController: NSViewController {
         }
     }
 
-    private func showTerminal(at index: Int) {
+    func reconfigure() {
+        sidebarVC.setWorktrees(worktrees)
+        if !worktrees.isEmpty {
+            showTerminal(at: activeWorktreeIndex)
+        }
+    }
+
+    // MARK: - Terminal Display
+
+    func showTerminal(at index: Int) {
         guard index >= 0, index < worktrees.count else { return }
         activeWorktreeIndex = index
 
         let info = worktrees[index]
         guard let surface = surfaces[info.path] else { return }
 
-        // Clean up split surfaces from previous worktree
-        for s in splitSurfaces {
-            s.destroy()
-        }
-        splitSurfaces.removeAll()
+        // Detach previous surface
+        activeSurface?.view?.removeFromSuperview()
 
-        terminalSplitView.setSingleTerminal(surface: surface, workingDirectory: info.path)
+        if surface.surface == nil {
+            _ = surface.create(in: terminalContainer, workingDirectory: info.path, sessionName: surface.sessionName)
+        } else {
+            surface.reparent(to: terminalContainer)
+        }
+
+        activeSurface = surface
         sidebarVC.selectWorktree(at: index)
+
+        DispatchQueue.main.async { [weak self] in
+            self?.view.window?.makeFirstResponder(surface.view)
+        }
     }
 
     func selectWorktree(byPath path: String) {
@@ -110,42 +188,18 @@ class RepoViewController: NSViewController {
         showTerminal(at: index)
     }
 
-    // MARK: - Split Pane Operations
-
-    func splitVertical() {
-        guard let info = worktrees[safe: activeWorktreeIndex] else { return }
-        if let newSurface = terminalSplitView.splitFocused(
-            orientation: .vertical,
-            worktreePath: info.path,
-            sessionName: nil  // Split panes don't need tmux sessions
-        ) {
-            splitSurfaces.append(newSurface)
-        }
-    }
-
-    func splitHorizontal() {
-        guard let info = worktrees[safe: activeWorktreeIndex] else { return }
-        if let newSurface = terminalSplitView.splitFocused(
-            orientation: .horizontal,
-            worktreePath: info.path,
-            sessionName: nil
-        ) {
-            splitSurfaces.append(newSurface)
-        }
-    }
-
-    func closePane() {
-        guard terminalSplitView.paneCount > 1 else { return }
-        _ = terminalSplitView.closeFocused()
+    func selectWorktree(branch: String) {
+        guard let index = worktrees.firstIndex(where: { $0.branch == branch }) else { return }
+        showTerminal(at: index)
     }
 
     func updateStatus(for path: String, status: AgentStatus, lastMessage: String = "") {
         sidebarVC.updateStatus(for: path, status: status, lastMessage: lastMessage)
     }
 
-    /// Detach all terminals so they can be reparented elsewhere
+    /// Detach the active terminal so it can be reparented elsewhere
     func detachActiveTerminal() {
-        terminalSplitView.detachAll()
+        activeSurface?.view?.removeFromSuperview()
     }
 }
 
@@ -159,26 +213,6 @@ extension RepoViewController: SidebarDelegate {
     func sidebar(_ sidebar: SidebarViewController, didRequestDeleteWorktreeAt index: Int) {
         guard index >= 0, index < worktrees.count else { return }
         repoDelegate?.repoView(self, didRequestDeleteWorktree: worktrees[index])
-    }
-}
-
-// MARK: - NSSplitViewDelegate
-
-extension RepoViewController: NSSplitViewDelegate {
-    func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
-        return 140
-    }
-
-    func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
-        return 350
-    }
-
-    func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool {
-        return subview === sidebarVC.view
-    }
-
-    func splitViewDidResizeSubviews(_ notification: Notification) {
-        terminalSplitView.syncAllSurfaceSizes()
     }
 }
 

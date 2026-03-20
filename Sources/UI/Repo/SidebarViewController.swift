@@ -2,35 +2,40 @@ import AppKit
 
 protocol SidebarDelegate: AnyObject {
     func sidebar(_ sidebar: SidebarViewController, didSelectWorktreeAt index: Int)
+    func sidebar(_ sidebar: SidebarViewController, didRequestDeleteWorktreeAt index: Int)
 }
 
-/// Left sidebar showing worktree list with status indicators
+/// Left sidebar showing thread list with status dots
 class SidebarViewController: NSViewController {
     weak var sidebarDelegate: SidebarDelegate?
 
     private let scrollView = NSScrollView()
     private let tableView = NSTableView()
+    private let emptyStateLabel = NSTextField(labelWithString: "No thread yet. Click New Thread in titlebar.")
     private var worktrees: [WorktreeInfo] = []
-    private var statuses: [String: AgentStatus] = [:]  // keyed by worktree path
+    private var statuses: [String: AgentStatus] = [:]
+    private var lastMessages: [String: String] = [:]
     private var selectedIndex: Int = 0
+    private var suppressSelectionNotification = false
 
     override func loadView() {
         self.view = NSView()
         view.wantsLayer = true
-        view.layer?.backgroundColor = Theme.surface.cgColor
+        view.layer?.backgroundColor = SemanticColors.panel.cgColor
 
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.hasVerticalScroller = true
         scrollView.scrollerStyle = .overlay
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
+        scrollView.contentInsets = NSEdgeInsets(top: 6, left: 6, bottom: 6, right: 6)
         view.addSubview(scrollView)
 
         tableView.backgroundColor = .clear
         tableView.headerView = nil
-        tableView.selectionHighlightStyle = .regular
-        tableView.rowHeight = 36
-        tableView.intercellSpacing = NSSize(width: 0, height: 2)
+        tableView.selectionHighlightStyle = .none
+        tableView.rowHeight = 60
+        tableView.intercellSpacing = NSSize(width: 0, height: 4)
         tableView.delegate = self
         tableView.dataSource = self
 
@@ -38,33 +43,64 @@ class SidebarViewController: NSViewController {
         column.resizingMask = .autoresizingMask
         tableView.addTableColumn(column)
 
+        tableView.setAccessibilityIdentifier("sidebar.worktreeList")
+        let contextMenu = NSMenu()
+        contextMenu.delegate = self
+        tableView.menu = contextMenu
+
         scrollView.documentView = tableView
 
+        // Empty state label
+        emptyStateLabel.translatesAutoresizingMaskIntoConstraints = false
+        emptyStateLabel.font = NSFont.systemFont(ofSize: 12)
+        emptyStateLabel.textColor = SemanticColors.muted
+        emptyStateLabel.alignment = .center
+        emptyStateLabel.lineBreakMode = .byWordWrapping
+        emptyStateLabel.maximumNumberOfLines = 3
+        emptyStateLabel.preferredMaxLayoutWidth = 240
+        emptyStateLabel.isHidden = true
+        emptyStateLabel.setAccessibilityIdentifier("project.emptyState")
+        view.addSubview(emptyStateLabel)
+
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: view.topAnchor, constant: 8),
+            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+            emptyStateLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            emptyStateLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            emptyStateLabel.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 16),
+            emptyStateLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -16),
         ])
     }
 
     func setWorktrees(_ worktrees: [WorktreeInfo]) {
         self.worktrees = worktrees
+        emptyStateLabel.isHidden = !worktrees.isEmpty
+        scrollView.isHidden = worktrees.isEmpty
         tableView.reloadData()
         if !worktrees.isEmpty {
+            suppressSelectionNotification = true
             tableView.selectRowIndexes(IndexSet(integer: selectedIndex), byExtendingSelection: false)
+            suppressSelectionNotification = false
         }
     }
 
-    func updateStatus(for path: String, status: AgentStatus) {
+    func updateStatus(for path: String, status: AgentStatus, lastMessage: String = "") {
         statuses[path] = status
+        if !lastMessage.isEmpty {
+            lastMessages[path] = lastMessage
+        }
         tableView.reloadData()
     }
 
     func selectWorktree(at index: Int) {
         guard index >= 0, index < worktrees.count else { return }
         selectedIndex = index
+        suppressSelectionNotification = true
         tableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
+        suppressSelectionNotification = false
     }
 }
 
@@ -79,35 +115,152 @@ extension SidebarViewController: NSTableViewDataSource {
 // MARK: - NSTableViewDelegate
 
 extension SidebarViewController: NSTableViewDelegate {
+
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        let info = worktrees[row]
+        let isSelected = (row == selectedIndex)
+        let status = statuses[info.path] ?? .unknown
+        let rowView = ThreadRowView(isActive: isSelected, status: status)
+        return rowView
+    }
+
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let info = worktrees[row]
         let status = statuses[info.path] ?? .unknown
+        let message = lastMessages[info.path] ?? ""
+        let isSelected = (row == selectedIndex)
 
-        let cellView = NSView()
-        cellView.wantsLayer = true
+        let cell = NSView()
+        cell.setAccessibilityIdentifier("sidebar.row.\(info.branch.isEmpty ? info.displayName : info.branch)")
+        cell.setAccessibilityElement(true)
+        cell.setAccessibilityRole(.cell)
 
-        // Status dot
-        let dot = NSView(frame: NSRect(x: 12, y: 12, width: 10, height: 10))
-        dot.wantsLayer = true
-        dot.layer?.cornerRadius = 5
-        dot.layer?.backgroundColor = status.color.cgColor
-        cellView.addSubview(dot)
+        // ── Row 1: Thread name + status dot ──
+        let nameLabel = NSTextField(labelWithString: info.displayName)
+        nameLabel.font = NSFont.systemFont(ofSize: 12, weight: .bold)
+        nameLabel.textColor = SemanticColors.text
+        nameLabel.lineBreakMode = .byTruncatingTail
+        nameLabel.translatesAutoresizingMaskIntoConstraints = false
+        nameLabel.drawsBackground = false
+        nameLabel.isBezeled = false
+        nameLabel.isEditable = false
+        cell.addSubview(nameLabel)
 
-        // Branch name
-        let label = NSTextField(labelWithString: info.displayName)
-        label.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        label.textColor = Theme.textPrimary
-        label.frame = NSRect(x: 30, y: 8, width: 200, height: 20)
-        label.lineBreakMode = .byTruncatingTail
-        cellView.addSubview(label)
+        // Status dot (8px circle)
+        let dotView = NSView()
+        dotView.wantsLayer = true
+        dotView.layer?.backgroundColor = status.color.cgColor
+        dotView.layer?.cornerRadius = 4
+        dotView.translatesAutoresizingMaskIntoConstraints = false
+        cell.addSubview(dotView)
 
-        return cellView
+        // ── Row 2: Last message (2-line clamp) ──
+        let messageLabel = NSTextField(labelWithString: message.isEmpty ? status.rawValue : message)
+        messageLabel.font = NSFont.systemFont(ofSize: 12)
+        messageLabel.textColor = SemanticColors.muted
+        messageLabel.lineBreakMode = .byTruncatingTail
+        messageLabel.maximumNumberOfLines = 2
+        messageLabel.translatesAutoresizingMaskIntoConstraints = false
+        messageLabel.drawsBackground = false
+        messageLabel.isBezeled = false
+        messageLabel.isEditable = false
+        messageLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        cell.addSubview(messageLabel)
+
+        NSLayoutConstraint.activate([
+            // Name label
+            nameLabel.topAnchor.constraint(equalTo: cell.topAnchor, constant: 9),
+            nameLabel.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
+            nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: dotView.leadingAnchor, constant: -6),
+
+            // Status dot
+            dotView.widthAnchor.constraint(equalToConstant: 8),
+            dotView.heightAnchor.constraint(equalToConstant: 8),
+            dotView.centerYAnchor.constraint(equalTo: nameLabel.centerYAnchor),
+            dotView.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
+
+            // Message label
+            messageLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 2),
+            messageLabel.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
+            messageLabel.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
+            messageLabel.bottomAnchor.constraint(lessThanOrEqualTo: cell.bottomAnchor, constant: -9),
+        ])
+
+        return cell
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
+        guard !suppressSelectionNotification else { return }
         let row = tableView.selectedRow
         guard row >= 0 else { return }
         selectedIndex = row
+        tableView.reloadData()  // refresh row styles
         sidebarDelegate?.sidebar(self, didSelectWorktreeAt: row)
+    }
+}
+
+// MARK: - Custom Row View
+
+/// Thread row with accent-tinted selection style.
+private class ThreadRowView: NSTableRowView {
+    private let isActive: Bool
+    private let status: AgentStatus
+
+    init(isActive: Bool, status: AgentStatus) {
+        self.isActive = isActive
+        self.status = status
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 6
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) not supported")
+    }
+
+    override func drawSelection(in dirtyRect: NSRect) {
+        // Selection handled in draw(dirtyRect:)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        if isActive {
+            // Background: accent at 7% blended with panel
+            let accentBg = SemanticColors.accent.withAlphaComponent(0.07)
+            accentBg.setFill()
+            let bgPath = NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6)
+            bgPath.fill()
+
+            // Border: accent at 38% blended with line
+            let borderColor = SemanticColors.accent.blended(withFraction: 0.62, of: SemanticColors.line) ?? SemanticColors.accent.withAlphaComponent(0.38)
+            borderColor.setStroke()
+            let borderPath = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
+            borderPath.lineWidth = 1
+            borderPath.stroke()
+        }
+    }
+
+    override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
+}
+
+// MARK: - NSMenuDelegate
+
+extension SidebarViewController: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let clickedRow = tableView.clickedRow
+        guard clickedRow >= 0, clickedRow < worktrees.count else { return }
+        let info = worktrees[clickedRow]
+        guard !info.isMainWorktree else { return }
+
+        let deleteItem = NSMenuItem(title: "Delete Worktree...", action: #selector(deleteClicked(_:)), keyEquivalent: "")
+        deleteItem.target = self
+        deleteItem.tag = clickedRow
+        menu.addItem(deleteItem)
+    }
+
+    @objc private func deleteClicked(_ sender: NSMenuItem) {
+        sidebarDelegate?.sidebar(self, didRequestDeleteWorktreeAt: sender.tag)
     }
 }
