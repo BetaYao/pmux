@@ -8,6 +8,10 @@ struct Config: Codable {
     var agentDetect: AgentDetectConfig
     var webhook: WebhookConfig
     var autoUpdate: UpdateConfig
+    var cardOrder: [String]
+    var zoomIndex: Int
+    var dashboardLayout: String
+    var themeMode: String
 
     enum CodingKeys: String, CodingKey {
         case workspacePaths = "workspace_paths"
@@ -17,6 +21,10 @@ struct Config: Codable {
         case agentDetect = "agent_detect"
         case webhook
         case autoUpdate = "auto_update"
+        case cardOrder = "card_order"
+        case zoomIndex = "zoom_index"
+        case dashboardLayout = "dashboard_layout"
+        case themeMode = "theme_mode"
     }
 
     init() {
@@ -27,6 +35,10 @@ struct Config: Codable {
         agentDetect = AgentDetectConfig.default
         webhook = WebhookConfig()
         autoUpdate = UpdateConfig()
+        cardOrder = []
+        zoomIndex = 3
+        dashboardLayout = "left-right"
+        themeMode = "system"
     }
 
     init(from decoder: Decoder) throws {
@@ -38,6 +50,10 @@ struct Config: Codable {
         agentDetect = try container.decodeIfPresent(AgentDetectConfig.self, forKey: .agentDetect) ?? .default
         webhook = try container.decodeIfPresent(WebhookConfig.self, forKey: .webhook) ?? WebhookConfig()
         autoUpdate = try container.decodeIfPresent(UpdateConfig.self, forKey: .autoUpdate) ?? UpdateConfig()
+        cardOrder = try container.decodeIfPresent([String].self, forKey: .cardOrder) ?? []
+        zoomIndex = try container.decodeIfPresent(Int.self, forKey: .zoomIndex) ?? 3
+        dashboardLayout = try container.decodeIfPresent(String.self, forKey: .dashboardLayout) ?? "left-right"
+        themeMode = try container.decodeIfPresent(String.self, forKey: .themeMode) ?? "system"
     }
 
     static let configDir = FileManager.default.homeDirectoryForCurrentUser
@@ -45,6 +61,15 @@ struct Config: Codable {
     static let configPath = configDir.appendingPathComponent("config.json")
 
     static func load() -> Config {
+        // Support UI test config override via launch argument
+        if let idx = CommandLine.arguments.firstIndex(of: "-UITestConfig"),
+           idx + 1 < CommandLine.arguments.count {
+            let testPath = CommandLine.arguments[idx + 1]
+            if let data = FileManager.default.contents(atPath: testPath) {
+                return (try? JSONDecoder().decode(Config.self, from: data)) ?? Config()
+            }
+        }
+
         guard FileManager.default.fileExists(atPath: configPath.path) else {
             return Config()
         }
@@ -113,9 +138,20 @@ struct WebhookConfig: Codable {
 struct UpdateConfig: Codable {
     var enabled: Bool = true
     var checkIntervalHours: Int = 6
+    var skippedVersion: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case enabled
         case checkIntervalHours = "check_interval_hours"
+        case skippedVersion = "skipped_version"
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        checkIntervalHours = try container.decodeIfPresent(Int.self, forKey: .checkIntervalHours) ?? 6
+        skippedVersion = try container.decodeIfPresent(String.self, forKey: .skippedVersion)
     }
 }

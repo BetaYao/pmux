@@ -1,14 +1,31 @@
 import AppKit
 
+enum ThemeMode: String {
+    case dark
+    case light
+    case system
+
+    static func applyAppearance(_ mode: ThemeMode) {
+        switch mode {
+        case .dark:
+            NSApp.appearance = NSAppearance(named: .darkAqua)
+        case .light:
+            NSApp.appearance = NSAppearance(named: .aqua)
+        case .system:
+            NSApp.appearance = nil
+        }
+    }
+}
+
 enum Theme {
-    static let background = NSColor(red: 0x1e/255, green: 0x1e/255, blue: 0x1e/255, alpha: 1.0)
-    static let surface = NSColor(red: 0x28/255, green: 0x28/255, blue: 0x28/255, alpha: 1.0)
-    static let surfaceHover = NSColor(red: 0x33/255, green: 0x33/255, blue: 0x33/255, alpha: 1.0)
-    static let border = NSColor(red: 0x3e/255, green: 0x3e/255, blue: 0x3e/255, alpha: 1.0)
-    static let textPrimary = NSColor(white: 0.9, alpha: 1.0)
-    static let textSecondary = NSColor(white: 0.6, alpha: 1.0)
-    static let textDim = NSColor(white: 0.4, alpha: 1.0)
-    static let accent = NSColor.systemBlue
+    static var background: NSColor { SemanticColors.bg }
+    static var surface: NSColor { SemanticColors.panel }
+    static var surfaceHover: NSColor { SemanticColors.panel2 }
+    static var border: NSColor { SemanticColors.line }
+    static var textPrimary: NSColor { SemanticColors.text }
+    static var textSecondary: NSColor { SemanticColors.muted }
+    static var textDim: NSColor { SemanticColors.muted }
+    static var accent: NSColor { SemanticColors.accent }
 
     static let tabBarHeight: CGFloat = 36
     static let cardCornerRadius: CGFloat = 8
