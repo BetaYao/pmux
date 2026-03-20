@@ -27,8 +27,8 @@ enum Theme {
     static var textDim: NSColor { SemanticColors.muted }
     static var accent: NSColor { SemanticColors.accent }
 
-    static let tabBarHeight: CGFloat = 36
-    static let cardCornerRadius: CGFloat = 8
-    static let cardPadding: CGFloat = 12
+    static let tabBarHeight: CGFloat = 48
+    static let cardCornerRadius: CGFloat = 4
+    static let cardPadding: CGFloat = 3
     static let statusBadgeSize: CGFloat = 8
 }
