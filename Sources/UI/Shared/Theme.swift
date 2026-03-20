@@ -6,15 +6,34 @@ enum ThemeMode: String {
     case system
 
     static func applyAppearance(_ mode: ThemeMode) {
+        let appearance: NSAppearance?
         switch mode {
         case .dark:
-            NSApp.appearance = NSAppearance(named: .darkAqua)
+            appearance = NSAppearance(named: .darkAqua)
         case .light:
-            NSApp.appearance = NSAppearance(named: .aqua)
+            appearance = NSAppearance(named: .aqua)
         case .system:
-            NSApp.appearance = nil
+            appearance = nil
+        }
+
+        // Set on app AND each window so the change is immediate
+        NSApp.appearance = appearance
+        for window in NSApp.windows {
+            window.appearance = appearance
+            window.invalidateShadow()
+            window.displayIfNeeded()
+        }
+
+        // Post notification AFTER appearance is applied so views
+        // resolve dynamic colors under the new appearance
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .themeDidChange, object: nil)
         }
     }
+}
+
+extension Notification.Name {
+    static let themeDidChange = Notification.Name("pmux.themeDidChange")
 }
 
 enum Theme {
