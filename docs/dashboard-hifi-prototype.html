@@ -1,0 +1,1853 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Multi-Agent Dashboard Prototype</title>
+    <style>
+      :root {
+        --bg: #0f1115;
+        --panel: #15171c;
+        --panel-2: #1b1e25;
+        --text: #f3f5f8;
+        --muted: #a8afbc;
+        --line: #262a33;
+        --running: #33c17b;
+        --waiting: #3b82f6;
+        --idle: #9ca3af;
+        --accent: #4f8cff;
+        --danger: #ff453a;
+        --error: #ff453a;
+      }
+
+      :root[data-theme="light"] {
+        --bg: #f3f4f7;
+        --panel: #ffffff;
+        --panel-2: #f7f8fb;
+        --text: #1f232b;
+        --muted: #636b78;
+        --line: #d7dbe3;
+        --running: #1f9d63;
+        --waiting: #2563eb;
+        --idle: #8a93a1;
+        --accent: #2563eb;
+        --danger: #dc2626;
+        --error: #dc2626;
+      }
+
+      @media (prefers-color-scheme: light) {
+        :root:not([data-theme]) {
+          --bg: #f3f4f7;
+          --panel: #ffffff;
+          --panel-2: #f6f7fa;
+          --text: #1f232b;
+          --muted: #636b78;
+          --line: #d7dbe3;
+          --running: #1f9d63;
+          --waiting: #2563eb;
+          --idle: #8a93a1;
+          --accent: #2563eb;
+          --danger: #dc2626;
+          --error: #dc2626;
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", sans-serif;
+        color: var(--text);
+        background: var(--bg);
+        min-height: 100vh;
+      }
+
+      .app {
+        display: grid;
+        grid-template-rows: 40px 1fr 32px;
+        height: 100vh;
+      }
+
+      .titlebar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 0 10px;
+        border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+        background: color-mix(in srgb, var(--panel) 88%, transparent);
+        backdrop-filter: blur(14px);
+      }
+
+      .tb-left {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+      }
+
+      .tb-right {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .traffic {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .dot {
+        width: 11px;
+        height: 11px;
+        border-radius: 99px;
+      }
+
+      .dot.red {
+        background: #ff5f57;
+      }
+
+      .dot.yellow {
+        background: #febb2e;
+      }
+
+      .dot.green {
+        background: #28c840;
+      }
+
+      .tabs {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        overflow: auto;
+      }
+
+      .tab {
+        border: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
+        background: var(--panel-2);
+        color: var(--text);
+        border-radius: 7px;
+        padding: 5px 10px;
+        font-size: 11px;
+        white-space: nowrap;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .tab.active {
+        background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+        border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+      }
+
+      .tab.add {
+        padding: 4px 10px;
+        font-size: 16px;
+        line-height: 1;
+      }
+
+      /* 常驻 dashboard：与可关闭的 project tab 区分 */
+      .tab-dashboard {
+        border-radius: 999px;
+        padding: 5px 12px 5px 9px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        border: 1px solid color-mix(in srgb, var(--line) 50%, transparent);
+        background: color-mix(in srgb, var(--panel) 92%, transparent);
+      }
+
+      .tab-dashboard .tab-dashboard-icon {
+        display: inline-flex;
+        opacity: 0.85;
+      }
+
+      .tab.tab-dashboard.active {
+        background: color-mix(in srgb, var(--accent) 16%, var(--panel));
+        border-color: color-mix(in srgb, var(--accent) 38%, var(--line));
+        color: var(--text);
+      }
+
+      .tab-dashboard:not(.active):hover {
+        background: color-mix(in srgb, var(--panel-2) 100%, transparent);
+        border-color: color-mix(in srgb, var(--line) 70%, transparent);
+      }
+
+      .tab-separator {
+        width: 1px;
+        height: 18px;
+        flex-shrink: 0;
+        background: color-mix(in srgb, var(--line) 75%, transparent);
+        margin: 0 2px 0 4px;
+        align-self: center;
+      }
+
+      .tab-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex: 0 0 auto;
+      }
+
+      .tab-dot.running {
+        background: #20d18f;
+      }
+
+      .tab-dot.waiting {
+        background: #4f8fff;
+      }
+
+      .tab-dot.error {
+        background: var(--error);
+      }
+
+      .tab-dot.idle {
+        background: #9aa7d0;
+      }
+
+      .tab-close {
+        margin-left: 2px;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1;
+        cursor: pointer;
+        padding: 0;
+      }
+
+      .tab-close:hover {
+        color: var(--text);
+      }
+
+      .layout-switch {
+        display: flex;
+        gap: 8px;
+        position: relative;
+      }
+
+      .titlebar-project-actions {
+        display: none;
+        gap: 8px;
+      }
+
+      .theme-toggle {
+        border: none;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--text);
+        height: 32px;
+        min-width: 32px;
+        cursor: pointer;
+      }
+
+      .theme-toggle:hover {
+        background: color-mix(in srgb, var(--line) 22%, transparent);
+      }
+
+      .layout-btn {
+        border: 1px solid var(--line);
+        color: var(--muted);
+        background: var(--panel-2);
+        border-radius: 6px;
+        padding: 5px 10px;
+        font-size: 11px;
+        cursor: pointer;
+      }
+
+      .layout-btn.active {
+        color: var(--text);
+        border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+        background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+      }
+
+      .icon-btn {
+        width: 32px;
+        height: 32px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: none;
+        border-radius: 10px;
+        background: transparent;
+        color: var(--text);
+        cursor: pointer;
+      }
+
+      .icon-btn:hover {
+        background: color-mix(in srgb, var(--line) 22%, transparent);
+      }
+
+      .icon-btn svg {
+        width: 18px;
+        height: 18px;
+      }
+
+      .layout-popover {
+        position: absolute;
+        top: calc(100% + 4px);
+        right: 0;
+        width: 200px;
+        border: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: 4px;
+        display: none;
+        z-index: 30;
+        box-shadow:
+          0 0 0 0.5px color-mix(in srgb, var(--line) 25%, transparent),
+          0 12px 28px rgba(0, 0, 0, 0.18),
+          0 4px 10px rgba(0, 0, 0, 0.08);
+      }
+
+      .layout-popover.open {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+
+      .layout-item {
+        width: 100%;
+        text-align: left;
+        border: none;
+        color: var(--text);
+        background: transparent;
+        border-radius: 5px;
+        padding: 6px 10px;
+        font-size: 12px;
+        line-height: 1.25;
+        cursor: pointer;
+      }
+
+      .layout-item:hover {
+        background: color-mix(in srgb, var(--line) 18%, transparent);
+      }
+
+      .layout-item.active {
+        background: color-mix(in srgb, var(--accent) 12%, transparent);
+        font-weight: 600;
+      }
+
+      .layout-item:focus-visible {
+        outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+        outline-offset: 1px;
+      }
+
+      .icon-btn-wrap {
+        position: relative;
+        display: inline-flex;
+      }
+
+      .icon-badge {
+        position: absolute;
+        top: 2px;
+        right: 2px;
+        min-width: 14px;
+        height: 14px;
+        padding: 0 4px;
+        border-radius: 999px;
+        background: var(--danger);
+        color: #fff;
+        font-size: 9px;
+        font-weight: 700;
+        line-height: 14px;
+        text-align: center;
+        pointer-events: none;
+      }
+
+      .notif-backdrop {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.2);
+        z-index: 38;
+      }
+
+      .notif-backdrop.open {
+        display: block;
+      }
+
+      .notif-panel,
+      .ai-panel {
+        position: fixed;
+        top: 40px;
+        right: 0;
+        width: min(360px, 100vw);
+        height: calc(100vh - 40px - 32px);
+        background: var(--panel);
+        border-left: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+        box-shadow: -8px 0 32px rgba(0, 0, 0, 0.12);
+        z-index: 40;
+        display: flex;
+        flex-direction: column;
+        transform: translateX(100%);
+        transition: transform 0.22s ease;
+      }
+
+      .notif-panel.open,
+      .ai-panel.open {
+        transform: translateX(0);
+      }
+
+      .notif-panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 12px;
+        border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .notif-panel-close {
+        border: none;
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 18px;
+        line-height: 1;
+        padding: 4px 8px;
+        border-radius: 6px;
+      }
+
+      .notif-panel-close:hover {
+        background: color-mix(in srgb, var(--line) 20%, transparent);
+        color: var(--text);
+      }
+
+      .notif-list {
+        flex: 1;
+        overflow: auto;
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .notif-item {
+        padding: 10px 12px;
+        border-radius: 8px;
+        background: var(--panel-2);
+        border: none;
+        text-align: left;
+        cursor: pointer;
+        color: var(--text);
+      }
+
+      .notif-item:hover {
+        background: color-mix(in srgb, var(--line) 15%, var(--panel-2));
+      }
+
+      .notif-item-title {
+        font-size: 12px;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+
+      .notif-item-meta {
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .ai-panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 12px;
+        border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .ai-panel-messages {
+        flex: 1;
+        overflow: auto;
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        font-size: 12px;
+      }
+
+      .ai-bubble {
+        max-width: 92%;
+        padding: 8px 10px;
+        border-radius: 10px;
+        line-height: 1.45;
+      }
+
+      .ai-bubble.user {
+        align-self: flex-end;
+        background: color-mix(in srgb, var(--accent) 18%, var(--panel-2));
+      }
+
+      .ai-bubble.assistant {
+        align-self: flex-start;
+        background: var(--panel-2);
+        color: var(--text);
+      }
+
+      .ai-panel-input {
+        display: flex;
+        gap: 6px;
+        padding: 8px;
+        border-top: 1px solid color-mix(in srgb, var(--line) 50%, transparent);
+        align-items: flex-end;
+      }
+
+      .ai-panel-input textarea {
+        flex: 1;
+        min-height: 36px;
+        max-height: 96px;
+        resize: none;
+        border: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+        border-radius: 6px;
+        padding: 8px 10px;
+        font-size: 12px;
+        font-family: inherit;
+        background: var(--panel-2);
+        color: var(--text);
+      }
+
+      .ai-send {
+        border: none;
+        background: color-mix(in srgb, var(--accent) 22%, var(--panel));
+        color: var(--text);
+        border-radius: 6px;
+        padding: 8px 12px;
+        font-size: 11px;
+        font-weight: 600;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+
+      .ai-send:hover {
+        background: color-mix(in srgb, var(--accent) 32%, var(--panel));
+      }
+
+      .main {
+        padding: 10px;
+        overflow: hidden;
+      }
+
+      .view {
+        display: none;
+        height: 100%;
+      }
+
+      .view.active {
+        display: block;
+      }
+
+      .layout {
+        display: none;
+        height: 100%;
+        gap: 10px;
+      }
+
+      .layout.active {
+        display: grid;
+      }
+
+      .panel {
+        background: var(--panel-2);
+        border: 1px solid color-mix(in srgb, var(--line) 38%, transparent);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .project-panel {
+        background: var(--panel-2);
+        border: 1px solid color-mix(in srgb, var(--line) 38%, transparent);
+      }
+
+      .card {
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        padding: 10px 8px;
+        display: grid;
+        gap: 6px;
+        cursor: pointer;
+        transition: 140ms ease;
+      }
+
+      .card:hover {
+        background: color-mix(in srgb, var(--panel-2) 75%, transparent);
+        border-color: color-mix(in srgb, var(--line) 55%, transparent);
+        transform: none;
+      }
+
+      .card.selected {
+        background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+        border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+        box-shadow: none;
+      }
+
+      /* Grid layout cards stay more explicit for scanability */
+      .layout-grid .card {
+        background: var(--panel-2);
+        border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+        border-radius: 10px;
+        padding: 11px 10px;
+        gap: 8px;
+      }
+
+      .layout-grid .card:hover {
+        background: color-mix(in srgb, var(--panel-2) 92%, var(--accent));
+        border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+      }
+
+      .layout-grid .card.selected {
+        background: color-mix(in srgb, var(--accent) 12%, var(--panel-2));
+        border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+      }
+
+      .status {
+        width: 8px;
+        height: 8px;
+        border-radius: 99px;
+      }
+
+      .status.running {
+        background: var(--running);
+      }
+
+      .status.waiting {
+        background: var(--waiting);
+      }
+
+      .status.idle {
+        background: var(--idle);
+      }
+
+      .status.error {
+        background: var(--error);
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .title {
+        font-weight: 700;
+        font-size: 12px;
+      }
+
+      .meta,
+      .msg,
+      .time {
+        font-size: 12px;
+        color: var(--muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .meta.two-lines {
+        white-space: normal;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+
+      .card-msg {
+        white-space: normal;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        min-height: 3.4em;
+      }
+
+      .card-time {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .actions {
+        display: none;
+      }
+
+      .btn {
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        color: var(--text);
+        font-size: 11px;
+        border-radius: 8px;
+        padding: 6px 8px;
+      }
+
+      .btn.primary {
+        background: color-mix(in srgb, var(--accent) 20%, var(--panel));
+        border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+      }
+
+      .btn.warn {
+        background: color-mix(in srgb, var(--danger) 20%, var(--panel));
+        border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+      }
+
+      .focus {
+        display: grid;
+        grid-template-rows: 42px 1fr;
+      }
+
+      .focus-header {
+        padding: 0 10px;
+        display: flex;
+        align-items: center;
+        border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+      }
+
+      .focus-header {
+        justify-content: space-between;
+      }
+
+      .focus-header-main {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .enter-project-icon {
+        width: 28px;
+        height: 28px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: none;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--text);
+        cursor: pointer;
+        flex: 0 0 auto;
+      }
+
+      .enter-project-icon:hover {
+        background: color-mix(in srgb, var(--line) 22%, transparent);
+      }
+
+      .enter-project-icon svg {
+        width: 14px;
+        height: 14px;
+      }
+
+      .terminal {
+        font-family: ui-monospace, "SF Mono", Menlo, Monaco, "JetBrains Mono", monospace;
+        padding: 10px;
+        font-size: 12px;
+        line-height: 1.5;
+        overflow: auto;
+        background: color-mix(in srgb, var(--panel) 86%, #000000);
+      }
+
+      .terminal .line {
+        color: color-mix(in srgb, var(--text) 90%, #88a3d6);
+      }
+
+      .terminal .prompt {
+        color: color-mix(in srgb, var(--accent) 70%, var(--text));
+      }
+
+      .stack {
+        display: grid;
+        gap: 4px;
+        padding: 4px;
+        overflow: auto;
+      }
+
+      #list-left-right .mini-card {
+        width: 100%;
+      }
+
+      .layout-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        align-content: start;
+        overflow: auto;
+      }
+
+      .layout-left-right {
+        grid-template-columns: 78% 22%;
+      }
+
+      .layout-top-small {
+        grid-template-rows: auto 1fr;
+      }
+
+      .layout-top-large {
+        grid-template-rows: 1fr auto;
+      }
+
+      .small-row {
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: clamp(180px, 18vw, 260px);
+        gap: 6px;
+        overflow-x: auto;
+        padding: 0;
+      }
+
+      .mini-card {
+        aspect-ratio: 16 / 9;
+        border: 1px solid color-mix(in srgb, var(--line) 58%, transparent);
+        border-radius: 9px;
+        background: var(--panel-2);
+        padding: 8px;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        gap: 6px;
+        cursor: pointer;
+      }
+
+      .mini-card:hover {
+        border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+      }
+
+      .mini-card.selected {
+        border-color: color-mix(in srgb, var(--accent) 65%, var(--line));
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent) inset;
+      }
+
+      .mini-title {
+        font-size: 11px;
+        font-weight: 700;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .mini-msg {
+        font-size: 11px;
+        color: var(--muted);
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+      }
+
+      .mini-time {
+        font-size: 10px;
+        color: color-mix(in srgb, var(--muted) 90%, var(--text));
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .bottom {
+        border-top: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 0 10px;
+        color: color-mix(in srgb, var(--muted) 88%, var(--text));
+        font-size: 11px;
+        background: var(--panel);
+      }
+
+      .bottom-group {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .hint {
+        border: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+        border-radius: 6px;
+        padding: 3px 7px;
+        color: var(--text);
+      }
+
+      .kbd {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 17px;
+        height: 17px;
+        padding: 0 5px;
+        border-radius: 4px;
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        color: var(--text);
+        font-size: 10px;
+      }
+
+      .modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(7, 10, 20, 0.72);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 50;
+      }
+
+      .modal.open {
+        display: flex;
+      }
+
+      .modal-card {
+        width: min(560px, calc(100vw - 32px));
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        padding: 16px;
+        display: grid;
+        gap: 12px;
+      }
+
+      .modal-title {
+        font-size: 16px;
+        font-weight: 700;
+      }
+
+      .modal-sub {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .modal-input {
+        width: 100%;
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        color: var(--text);
+        border-radius: 8px;
+        padding: 10px;
+        font-size: 13px;
+      }
+
+      .modal-input.multiline {
+        min-height: 108px;
+        resize: vertical;
+        font-family: "JetBrains Mono", monospace;
+        line-height: 1.5;
+      }
+
+      .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      @media (max-width: 1150px) {
+        .layout-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .layout-left-right {
+          grid-template-columns: 1fr;
+          grid-template-rows: 1fr 280px;
+        }
+      }
+
+      .project-shell {
+        height: 100%;
+        display: grid;
+        grid-template-columns: 300px 1fr;
+        gap: 12px;
+      }
+
+      .thread-list {
+        padding: 6px;
+        display: grid;
+        gap: 4px;
+        overflow: auto;
+      }
+
+      .thread-item {
+        border: 1px solid transparent;
+        background: transparent;
+        border-radius: 8px;
+        padding: 9px 8px;
+        cursor: pointer;
+        display: grid;
+        gap: 5px;
+      }
+
+      .thread-item.active {
+        border-color: color-mix(in srgb, var(--accent) 38%, var(--line));
+        background: color-mix(in srgb, var(--accent) 7%, var(--panel));
+        box-shadow: none;
+      }
+
+      .thread-name {
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .terminal-immersive {
+        height: 100%;
+        display: block;
+      }
+
+      .terminal-immersive .terminal {
+        height: 100%;
+      }
+
+      .cursor {
+        display: inline-block;
+        width: 8px;
+        height: 15px;
+        background: color-mix(in srgb, var(--text) 85%, var(--accent));
+        margin-left: 4px;
+        transform: translateY(2px);
+        animation: blink 1s steps(1, end) infinite;
+      }
+
+      @keyframes blink {
+        50% {
+          opacity: 0;
+        }
+      }
+
+      @media (max-width: 900px) {
+        .project-shell {
+          grid-template-columns: 1fr;
+          grid-template-rows: 220px 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="titlebar">
+        <div class="tb-left">
+          <div class="traffic">
+            <span class="dot red"></span>
+            <span class="dot yellow"></span>
+            <span class="dot green"></span>
+          </div>
+          <div class="tabs">
+            <div id="tabs-host" class="row"></div>
+          </div>
+        </div>
+        <div class="tb-right">
+          <div class="titlebar-project-actions" id="project-actions">
+            <button class="layout-btn" id="new-thread-btn">New Thread</button>
+          </div>
+          <div class="layout-switch" id="layout-switch">
+            <button class="icon-btn" id="view-menu-btn" title="布局视图">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="3" y="4" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.6"></rect>
+                <rect x="14" y="4" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.6"></rect>
+                <rect x="3" y="13" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.6"></rect>
+                <rect x="14" y="13" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.6"></rect>
+              </svg>
+            </button>
+            <div class="layout-popover" id="layout-popover">
+              <button class="layout-item" data-layout="grid">1 Grid</button>
+              <button class="layout-item active" data-layout="left-right">2 左大右列</button>
+              <button class="layout-item" data-layout="top-small">3 上小下大</button>
+              <button class="layout-item" data-layout="top-large">4 上大下小</button>
+            </div>
+          </div>
+          <div class="icon-btn-wrap" id="notif-btn-wrap">
+            <button type="button" class="icon-btn" id="notif-btn" title="通知" aria-expanded="false" aria-controls="notif-panel">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 7-3 7h18s-3 0-3-7"></path>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+              </svg>
+            </button>
+            <span class="icon-badge" id="notif-badge" aria-hidden="true">2</span>
+          </div>
+          <div class="icon-btn-wrap" id="ai-btn-wrap">
+            <button type="button" class="icon-btn" id="ai-btn" title="AI 助手" aria-expanded="false" aria-controls="ai-panel">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"></path>
+                <path d="M5 19.5l.8-2.4 2.4-.8-2.4-.8-.8-2.4z"></path>
+                <path d="M18 14l1 3-3-1 2-2z"></path>
+              </svg>
+            </button>
+          </div>
+          <button class="theme-toggle" id="theme-toggle" title="切换深浅色">◐</button>
+        </div>
+      </div>
+
+      <main class="main">
+        <section class="view active" id="view-dashboard">
+          <section id="layout-grid" class="layout layout-grid active"></section>
+
+          <section id="layout-left-right" class="layout layout-left-right">
+            <div id="focus-left-right" class="panel focus"></div>
+            <div id="list-left-right" class="stack"></div>
+          </section>
+
+          <section id="layout-top-small" class="layout layout-top-small">
+            <div id="small-top" class="small-row"></div>
+            <div id="focus-top-small" class="panel focus"></div>
+          </section>
+
+          <section id="layout-top-large" class="layout layout-top-large">
+            <div id="focus-top-large" class="panel focus"></div>
+            <div id="small-bottom" class="small-row"></div>
+          </section>
+        </section>
+
+        <section class="view" id="view-project">
+          <div class="project-shell">
+            <div class="panel project-panel">
+              <div class="thread-list" id="thread-list"></div>
+            </div>
+            <div class="panel project-panel terminal-immersive">
+              <div class="terminal" id="project-terminal-body"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="bottom">
+        <div class="bottom-group">
+          <span id="status-summary">Status: Dashboard ready · Focus Agent-Alpha</span>
+        </div>
+        <div class="bottom-group">
+          <span class="hint">切换布局 <span class="kbd">V</span></span>
+          <span class="hint">新建 Thread <span class="kbd">N</span></span>
+          <span class="hint">提交弹窗 <span class="kbd">⌘</span>+<span class="kbd">Enter</span></span>
+        </div>
+      </footer>
+    </div>
+
+    <div class="notif-backdrop" id="notif-backdrop" aria-hidden="true"></div>
+    <aside class="notif-panel" id="notif-panel" aria-label="通知面板" aria-hidden="true">
+      <div class="notif-panel-header">
+        <span>通知</span>
+        <button type="button" class="notif-panel-close" id="notif-close" title="关闭">×</button>
+      </div>
+      <div class="notif-list">
+        <button type="button" class="notif-item">
+          <div class="notif-item-title">Agent 等待你的回复</div>
+          <div class="notif-item-meta">project 1 · feature/142-dashboard-ui · 刚刚</div>
+        </button>
+        <button type="button" class="notif-item">
+          <div class="notif-item-title">构建完成</div>
+          <div class="notif-item-meta">project 2 · feature/77-runner-panel · 5 分钟前</div>
+        </button>
+        <button type="button" class="notif-item">
+          <div class="notif-item-title">新 thread 已创建</div>
+          <div class="notif-item-meta">project 3 · feature/93-worktree-list · 1 小时前</div>
+        </button>
+      </div>
+    </aside>
+
+    <aside class="ai-panel" id="ai-panel" role="dialog" aria-label="AI 助手" aria-hidden="true">
+      <div class="ai-panel-header">
+        <span>AI 助手</span>
+        <button type="button" class="notif-panel-close" id="ai-panel-close" title="关闭">×</button>
+      </div>
+      <div class="ai-panel-messages" id="ai-messages">
+        <div class="ai-bubble assistant">你好，我是工作区助手。可以问我关于当前 project、thread 或命令的问题。（原型演示）</div>
+      </div>
+      <div class="ai-panel-input">
+        <textarea id="ai-input" rows="1" placeholder="输入消息… Shift+Enter 换行"></textarea>
+        <button type="button" class="ai-send" id="ai-send">发送</button>
+      </div>
+    </aside>
+
+    <div class="modal" id="input-modal">
+      <div class="modal-card">
+        <div class="modal-title" id="modal-title"></div>
+        <div class="modal-sub" id="modal-sub"></div>
+        <input class="modal-input" id="modal-input" />
+        <div class="modal-actions">
+          <button class="btn" id="modal-cancel">取消</button>
+          <button class="btn primary" id="modal-confirm">确认</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const agents = [
+        {
+          id: "a1",
+          name: "Agent-Alpha",
+          project: "project 1",
+          thread: "feature/142-dashboard-ui",
+          status: "waiting",
+          lastMessage: "Need decision: keep shell session on thread switch?",
+          total: "02:13:20",
+          round: "00:08:43"
+        },
+        {
+          id: "a2",
+          name: "Agent-Beta",
+          project: "project 1",
+          thread: "feature/155-terminal-bind",
+          status: "running",
+          lastMessage: "Executing tests: workspace terminal routing...",
+          total: "01:05:11",
+          round: "00:17:50"
+        },
+        {
+          id: "a3",
+          name: "Agent-Gamma",
+          project: "project 2",
+          thread: "fix/221-path-resolve",
+          status: "idle",
+          lastMessage: "No active task.",
+          total: "00:42:03",
+          round: "00:00:00"
+        },
+        {
+          id: "a4",
+          name: "Agent-Delta",
+          project: "project 2",
+          thread: "feature/77-runner-panel",
+          status: "running",
+          lastMessage: "Refactoring panel state machine...",
+          total: "03:44:33",
+          round: "00:25:09"
+        },
+        {
+          id: "a5",
+          name: "Agent-Echo",
+          project: "project 3",
+          thread: "feature/93-worktree-list",
+          status: "waiting",
+          lastMessage: "Awaiting reply before resume command.",
+          total: "00:31:22",
+          round: "00:04:18"
+        },
+        {
+          id: "a6",
+          name: "Agent-Foxtrot",
+          project: "project 3",
+          thread: "feature/spec-update",
+          status: "idle",
+          lastMessage: "Spec updated. Waiting new instruction.",
+          total: "01:02:10",
+          round: "00:00:00"
+        },
+        {
+          id: "a7",
+          name: "Agent-Helix",
+          project: "project 4",
+          thread: "feature/ops-observer",
+          status: "running",
+          lastMessage: "Monitoring task runner health...",
+          total: "00:55:40",
+          round: "00:11:14"
+        },
+        {
+          id: "a8",
+          name: "Agent-Iota",
+          project: "project 5",
+          thread: "feature/ui-polish",
+          status: "waiting",
+          lastMessage: "Need confirmation on tab status colors.",
+          total: "00:28:19",
+          round: "00:03:51"
+        }
+      ];
+
+      let selectedAgentId = "a1";
+      let currentLayout = "left-right";
+      let currentView = "dashboard";
+      let currentProject = "project 1";
+      let projects = ["project 1", "project 2", "project 3", "project 4", "project 5"];
+      let selectedThreadByProject = {
+        "project 1": "feature/142-dashboard-ui",
+        "project 2": "fix/221-path-resolve",
+        "project 3": "feature/93-worktree-list",
+        "project 4": "feature/ops-observer",
+        "project 5": "feature/ui-polish"
+      };
+      let threadStore = {
+        "project 1": [
+          {
+            thread: "feature/142-dashboard-ui",
+            status: "waiting",
+            lastMessage: "Need decision: keep shell session on thread switch?"
+          },
+          {
+            thread: "feature/155-terminal-bind",
+            status: "running",
+            lastMessage: "Executing tests: workspace terminal routing..."
+          }
+        ],
+        "project 2": [
+          { thread: "fix/221-path-resolve", status: "idle", lastMessage: "No active task." },
+          {
+            thread: "feature/77-runner-panel",
+            status: "running",
+            lastMessage: "Refactoring panel state machine..."
+          }
+        ],
+        "project 3": [
+          {
+            thread: "feature/93-worktree-list",
+            status: "waiting",
+            lastMessage: "Need confirmation on worktree list behavior."
+          },
+          {
+            thread: "feature/spec-update",
+            status: "idle",
+            lastMessage: "Spec updated. Waiting new instruction."
+          }
+        ],
+        "project 4": [
+          {
+            thread: "feature/ops-observer",
+            status: "running",
+            lastMessage: "Monitoring task runner health..."
+          },
+          {
+            thread: "fix/terminal-overflow",
+            status: "idle",
+            lastMessage: "Overflow issue reproduced."
+          }
+        ],
+        "project 5": [
+          {
+            thread: "feature/ui-polish",
+            status: "waiting",
+            lastMessage: "Need confirmation on tab status colors."
+          },
+          {
+            thread: "fix/tab-interactions",
+            status: "error",
+            lastMessage: "Unhandled click event on close icon."
+          }
+        ]
+      };
+      const layoutBtns = [...document.querySelectorAll(".layout-item")];
+      const viewMenuBtn = document.getElementById("view-menu-btn");
+      const layoutPopover = document.getElementById("layout-popover");
+      const tabsHost = document.getElementById("tabs-host");
+      const modal = document.getElementById("input-modal");
+      const modalTitle = document.getElementById("modal-title");
+      const modalSub = document.getElementById("modal-sub");
+      let modalInput = document.getElementById("modal-input");
+      const modalCancel = document.getElementById("modal-cancel");
+      const modalConfirm = document.getElementById("modal-confirm");
+      const themeToggle = document.getElementById("theme-toggle");
+      const notifBtn = document.getElementById("notif-btn");
+      const notifBtnWrap = document.getElementById("notif-btn-wrap");
+      const notifPanel = document.getElementById("notif-panel");
+      const notifBackdrop = document.getElementById("notif-backdrop");
+      const notifClose = document.getElementById("notif-close");
+      const aiBtn = document.getElementById("ai-btn");
+      const aiBtnWrap = document.getElementById("ai-btn-wrap");
+      const aiPanel = document.getElementById("ai-panel");
+      const aiPanelClose = document.getElementById("ai-panel-close");
+      const aiMessages = document.getElementById("ai-messages");
+      const aiInput = document.getElementById("ai-input");
+      const aiSend = document.getElementById("ai-send");
+      let onModalConfirm = null;
+
+      function updateSideBackdrop() {
+        const any =
+          notifPanel.classList.contains("open") ||
+          aiPanel.classList.contains("open");
+        notifBackdrop.classList.toggle("open", any);
+        notifBackdrop.setAttribute("aria-hidden", any ? "false" : "true");
+      }
+
+      function setNotifOpen(open) {
+        notifPanel.classList.toggle("open", open);
+        if (open) {
+          aiPanel.classList.remove("open");
+          aiBtn.setAttribute("aria-expanded", "false");
+          aiPanel.setAttribute("aria-hidden", "true");
+        }
+        updateSideBackdrop();
+        notifBtn.setAttribute("aria-expanded", open ? "true" : "false");
+        notifPanel.setAttribute("aria-hidden", open ? "false" : "true");
+      }
+
+      function setAiOpen(open) {
+        aiPanel.classList.toggle("open", open);
+        if (open) {
+          notifPanel.classList.remove("open");
+          notifBtn.setAttribute("aria-expanded", "false");
+          notifPanel.setAttribute("aria-hidden", "true");
+        }
+        updateSideBackdrop();
+        aiBtn.setAttribute("aria-expanded", open ? "true" : "false");
+        aiPanel.setAttribute("aria-hidden", open ? "false" : "true");
+        if (open) setTimeout(() => aiInput.focus(), 0);
+      }
+
+      notifBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const next = !notifPanel.classList.contains("open");
+        setAiOpen(false);
+        layoutPopover.classList.remove("open");
+        setNotifOpen(next);
+      });
+
+      notifClose.addEventListener("click", () => setNotifOpen(false));
+      notifBackdrop.addEventListener("click", () => {
+        setNotifOpen(false);
+        setAiOpen(false);
+      });
+
+      aiBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const next = !aiPanel.classList.contains("open");
+        setNotifOpen(false);
+        layoutPopover.classList.remove("open");
+        setAiOpen(next);
+      });
+
+      aiPanelClose.addEventListener("click", (e) => {
+        e.stopPropagation();
+        setAiOpen(false);
+      });
+
+      function appendAiBubble(role, text) {
+        const el = document.createElement("div");
+        el.className = `ai-bubble ${role}`;
+        el.textContent = text;
+        aiMessages.appendChild(el);
+        aiMessages.scrollTop = aiMessages.scrollHeight;
+      }
+
+      function sendAiMessage() {
+        const text = aiInput.value.trim();
+        if (!text) return;
+        appendAiBubble("user", text);
+        aiInput.value = "";
+        window.setTimeout(() => {
+          appendAiBubble(
+            "assistant",
+            `（原型）已收到。实际产品里这里会接模型回复。你刚才说：「${text.slice(0, 120)}${text.length > 120 ? "…" : ""}」`
+          );
+        }, 450);
+      }
+
+      aiSend.addEventListener("click", (e) => {
+        e.stopPropagation();
+        sendAiMessage();
+      });
+
+      aiInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          sendAiMessage();
+        }
+      });
+
+      layoutBtns.forEach((btn) => {
+        btn.addEventListener("click", () => {
+          currentLayout = btn.dataset.layout;
+          layoutBtns.forEach((x) => x.classList.toggle("active", x === btn));
+          layoutPopover.classList.remove("open");
+          updateLayouts();
+        });
+      });
+
+      viewMenuBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        setNotifOpen(false);
+        setAiOpen(false);
+        layoutPopover.classList.toggle("open");
+      });
+
+      document.addEventListener("click", (e) => {
+        if (!layoutPopover.contains(e.target) && e.target !== viewMenuBtn) {
+          layoutPopover.classList.remove("open");
+        }
+        if (
+          !notifPanel.contains(e.target) &&
+          !notifBtnWrap.contains(e.target)
+        ) {
+          setNotifOpen(false);
+        }
+        if (!aiPanel.contains(e.target) && !aiBtnWrap.contains(e.target)) {
+          setAiOpen(false);
+        }
+      });
+
+      themeToggle.addEventListener("click", () => {
+        const current = document.documentElement.getAttribute("data-theme");
+        if (current === "light") {
+          document.documentElement.setAttribute("data-theme", "dark");
+          updateBottomStatus("Status: Theme switched to dark");
+          return;
+        }
+        if (current === "dark") {
+          document.documentElement.removeAttribute("data-theme");
+          updateBottomStatus("Status: Theme switched to system");
+          return;
+        }
+        document.documentElement.setAttribute("data-theme", "light");
+        updateBottomStatus("Status: Theme switched to light");
+      });
+
+      function openModal({
+        title,
+        sub,
+        placeholder,
+        initialValue,
+        confirmText,
+        onConfirm,
+        multiline
+      }) {
+        modalTitle.textContent = title;
+        modalSub.textContent = sub;
+        const newField = document.createElement(multiline ? "textarea" : "input");
+        newField.id = "modal-input";
+        newField.className = `modal-input${multiline ? " multiline" : ""}`;
+        newField.placeholder = placeholder || "";
+        newField.value = initialValue || "";
+        modalInput.replaceWith(newField);
+        modalInput = newField;
+        modalConfirm.textContent = confirmText || "确认";
+        onModalConfirm = onConfirm;
+        layoutPopover.classList.remove("open");
+        setNotifOpen(false);
+        setAiOpen(false);
+        modal.classList.add("open");
+        setTimeout(() => modalInput.focus(), 0);
+        modalInput.addEventListener("keydown", (e) => {
+          if (!multiline && e.key === "Enter") modalConfirm.click();
+          if (multiline && (e.metaKey || e.ctrlKey) && e.key === "Enter") modalConfirm.click();
+          if (e.key === "Escape") closeModal();
+        });
+      }
+
+      function closeModal() {
+        modal.classList.remove("open");
+        onModalConfirm = null;
+      }
+
+      modalCancel.addEventListener("click", closeModal);
+      modalConfirm.addEventListener("click", () => {
+        if (onModalConfirm) onModalConfirm(modalInput.value.trim());
+      });
+      function projectStatus(projectName) {
+        const rows = threadStore[projectName] || [];
+        const statuses = rows.map((x) => x.status);
+        if (statuses.includes("error")) return "error";
+        if (statuses.includes("waiting")) return "waiting";
+        if (statuses.includes("running")) return "running";
+        return "idle";
+      }
+
+      function renderTabs() {
+        tabsHost.innerHTML = `
+          <button type="button" class="tab tab-dashboard ${currentView === "dashboard" ? "active" : ""}" data-view="dashboard" data-project="" aria-current="${currentView === "dashboard" ? "page" : "false"}">
+            <span class="tab-dashboard-icon" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                <rect x="3" y="3" width="7" height="7" rx="1.2"></rect>
+                <rect x="14" y="3" width="7" height="7" rx="1.2"></rect>
+                <rect x="3" y="14" width="7" height="7" rx="1.2"></rect>
+                <rect x="14" y="14" width="7" height="7" rx="1.2"></rect>
+              </svg>
+            </span>
+            <span>Dashboard</span>
+          </button>
+          <span class="tab-separator" role="separator" aria-hidden="true"></span>
+          ${projects
+            .map(
+              (p) => `<button class="tab ${
+                currentView === "project" && currentProject === p ? "active" : ""
+              }" data-view="project" data-project="${p}">
+                <span class="tab-dot ${projectStatus(p)}"></span>
+                <span>${p}</span>
+                <span class="tab-close" data-close-project="${p}" title="关闭">×</span>
+              </button>`
+            )
+            .join("")}
+          <button class="tab add" data-action="add-project">+</button>
+        `;
+
+        tabsHost.querySelectorAll("[data-view]").forEach((tab) => {
+          tab.addEventListener("click", () => {
+            currentView = tab.dataset.view;
+            if (tab.dataset.project) currentProject = tab.dataset.project;
+            updateView();
+          });
+        });
+
+        tabsHost.querySelectorAll("[data-close-project]").forEach((btn) => {
+          btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const projectName = e.currentTarget.dataset.closeProject;
+            openModal({
+              title: "关闭 Project",
+              sub: `确认关闭 ${projectName}？此操作将停止该 Project 下所有进行中的任务。`,
+              placeholder: "",
+              initialValue: projectName,
+              confirmText: "确认关闭",
+              onConfirm: () => {
+                projects = projects.filter((p) => p !== projectName);
+                if (currentProject === projectName) {
+                  currentView = "dashboard";
+                  currentProject = projects[0] || "";
+                }
+                closeModal();
+                renderTabs();
+                updateView();
+              }
+            });
+          });
+        });
+
+        const addBtn = tabsHost.querySelector("[data-action='add-project']");
+        addBtn.addEventListener("click", () => {
+          openModal({
+            title: "添加 Project",
+            sub: "输入系统目录路径（例如 /Users/me/workspace/new-project）",
+            placeholder: "/Users/me/workspace/new-project",
+            confirmText: "添加",
+            onConfirm: (pathValue) => {
+              if (!pathValue) return;
+              const pieces = pathValue.split("/").filter(Boolean);
+              const projectName = pieces[pieces.length - 1] || `project ${projects.length + 1}`;
+              if (!projects.includes(projectName)) projects.push(projectName);
+              if (!threadStore[projectName]) threadStore[projectName] = [];
+              currentProject = projectName;
+              currentView = "project";
+              closeModal();
+              renderTabs();
+              updateView();
+            }
+          });
+        });
+      }
+
+      function statusOrder(s) {
+        if (s === "waiting") return 0;
+        if (s === "running") return 1;
+        return 2;
+      }
+
+      function sortedAgents() {
+        return [...agents].sort((a, b) => statusOrder(a.status) - statusOrder(b.status));
+      }
+
+      function compactDuration(hms) {
+        const [h, m, s] = (hms || "00:00:00").split(":").map((x) => parseInt(x, 10) || 0);
+        if (h > 0) return `${h}h${String(m).padStart(2, "0")}m`;
+        if (m > 0) return `${m}m${String(s).padStart(2, "0")}s`;
+        return `${s}s`;
+      }
+
+      function cardHTML(a) {
+        const selected = a.id === selectedAgentId ? "selected" : "";
+        return `
+          <article class="card ${selected}" data-agent="${a.id}">
+            <div class="row"><span class="status ${a.status}"></span><div class="title">${a.project} - ${a.thread}</div></div>
+            <div class="msg card-msg">${a.lastMessage}</div>
+            <div class="card-time">Σ ${compactDuration(a.total)} · ⟳ ${compactDuration(a.round)}</div>
+          </article>
+        `;
+      }
+
+      function miniCardHTML(a) {
+        const selected = a.id === selectedAgentId ? "selected" : "";
+        return `
+          <article class="mini-card ${selected}" data-agent="${a.id}">
+            <div class="row">
+              <span class="status ${a.status}"></span>
+              <div class="mini-title">${a.project} - ${a.thread}</div>
+            </div>
+            <div class="mini-msg">${a.lastMessage}</div>
+            <div class="mini-time">Σ ${compactDuration(a.total)} · ⟳ ${compactDuration(a.round)}</div>
+          </article>
+        `;
+      }
+
+      function focusHTML(a) {
+        return `
+          <div class="focus-header">
+            <div class="focus-header-main">
+              <span class="status ${a.status}"></span>
+              <span class="title">${a.name}</span>
+              <span class="meta">${a.project} · ${a.thread}</span>
+              <span class="meta">Total ${a.total} / Round ${a.round}</span>
+            </div>
+            <button class="enter-project-icon" data-enter-project="${a.project}" title="进入 Project">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M8 5h11v11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path>
+                <path d="M7 17L19 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path>
+              </svg>
+            </button>
+          </div>
+          <div class="terminal">
+            <div class="line prompt">$ pwd</div>
+            <div class="line">/Users/me/workspace/${a.project}/worktrees/${a.thread}</div>
+            <div class="line prompt">$ git status -sb</div>
+            <div class="line">## ${a.thread}</div>
+            <div class="line"> M src/dashboard/layout.tsx</div>
+            <div class="line"> M src/terminal/session.ts</div>
+            <div class="line prompt">$ npm run dev</div>
+            <div class="line">[vite] ready in 318ms</div>
+            <div class="line">[agent] ${a.lastMessage}</div>
+            <div class="line prompt">$ <span class="cursor"></span></div>
+          </div>
+        `;
+      }
+
+      function bindCardEvents(scope = document) {
+        scope.querySelectorAll(".card, .mini-card").forEach((card) => {
+          card.addEventListener("click", (e) => {
+            const id = e.currentTarget.dataset.agent;
+            const agent = agents.find((a) => a.id === id);
+            if (currentView === "dashboard" && currentLayout === "grid" && agent) {
+              currentProject = agent.project;
+              selectedThreadByProject[currentProject] = agent.thread;
+              currentView = "project";
+              updateView();
+              return;
+            }
+            selectedAgentId = id;
+            updateLayouts();
+          });
+        });
+      }
+
+      function bindEnterProjectEvents(scope = document) {
+        scope.querySelectorAll("[data-enter-project]").forEach((btn) => {
+          btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            currentProject = e.currentTarget.dataset.enterProject;
+            currentView = "project";
+            updateView();
+          });
+        });
+      }
+
+      function updateBottomStatus(text) {
+        document.getElementById("status-summary").textContent = text;
+      }
+
+      function updateLayouts() {
+        const rows = sortedAgents();
+        const selected = rows.find((x) => x.id === selectedAgentId) || rows[0] || agents[0];
+        selectedAgentId = selected.id;
+        layoutBtns.forEach((x) => x.classList.toggle("active", x.dataset.layout === currentLayout));
+
+        document.querySelectorAll(".layout").forEach((l) => {
+          l.classList.toggle("active", l.id === `layout-${currentLayout}`);
+        });
+
+        const grid = document.getElementById("layout-grid");
+        grid.innerHTML = rows.map(cardHTML).join("");
+        bindCardEvents(grid);
+
+        document.getElementById("focus-left-right").innerHTML = focusHTML(selected);
+        const listLR = document.getElementById("list-left-right");
+        listLR.innerHTML = rows.map(miniCardHTML).join("");
+        bindCardEvents(listLR);
+        bindEnterProjectEvents(document.getElementById("focus-left-right"));
+
+        document.getElementById("focus-top-small").innerHTML = focusHTML(selected);
+        const smallTop = document.getElementById("small-top");
+        smallTop.innerHTML = rows.map(miniCardHTML).join("");
+        bindCardEvents(smallTop);
+        bindEnterProjectEvents(document.getElementById("focus-top-small"));
+
+        document.getElementById("focus-top-large").innerHTML = focusHTML(selected);
+        const smallBottom = document.getElementById("small-bottom");
+        smallBottom.innerHTML = rows.map(miniCardHTML).join("");
+        bindCardEvents(smallBottom);
+        bindEnterProjectEvents(document.getElementById("focus-top-large"));
+
+        updateBottomStatus(`Status: Dashboard ready · Focus ${selected.name}`);
+      }
+
+      function projectThreads(projectName) {
+        return threadStore[projectName] || [];
+      }
+
+      function updateProjectView() {
+        const threads = projectThreads(currentProject);
+        if (!selectedThreadByProject[currentProject] && threads[0]) {
+          selectedThreadByProject[currentProject] = threads[0].thread;
+        }
+        const activeThread = selectedThreadByProject[currentProject] || "";
+        const list = document.getElementById("thread-list");
+        list.innerHTML =
+          threads.length === 0
+            ? `<div class="meta">No thread yet. Click <strong>New Thread</strong> in titlebar.</div>`
+            : threads
+                .map(
+                  (t) => `
+          <div class="thread-item ${t.thread === activeThread ? "active" : ""}" data-thread="${t.thread}">
+            <div class="row"><span class="status ${t.status}"></span><div class="thread-name">${t.thread}</div></div>
+            <div class="meta two-lines">${t.lastMessage || "No message yet."}</div>
+          </div>
+        `
+                )
+                .join("");
+
+        list.querySelectorAll(".thread-item").forEach((el) => {
+          el.addEventListener("click", () => {
+            selectedThreadByProject[currentProject] = el.dataset.thread;
+            updateProjectView();
+          });
+        });
+
+        const body = document.getElementById("project-terminal-body");
+        body.innerHTML = `
+          <div class="line prompt">$ pwd</div>
+          <div class="line">/Users/me/workspace/${currentProject}/worktrees/${activeThread}</div>
+          <div class="line prompt">$ git branch --show-current</div>
+          <div class="line">${activeThread}</div>
+          <div class="line prompt">$ npm run dev</div>
+          <div class="line">[vite] ready in 286ms</div>
+          <div class="line">[terminal] thread session resumed successfully.</div>
+          <div class="line prompt">$ <span class="cursor"></span></div>
+        `;
+        updateBottomStatus(`Status: ${currentProject} active · Thread ${activeThread || "-"}`);
+      }
+
+      function updateView() {
+        const isDashboard = currentView === "dashboard";
+        document.getElementById("view-dashboard").classList.toggle("active", isDashboard);
+        document.getElementById("view-project").classList.toggle("active", !isDashboard);
+        document.getElementById("layout-switch").style.visibility = isDashboard
+          ? "visible"
+          : "hidden";
+        document.getElementById("project-actions").style.display = isDashboard ? "none" : "flex";
+        if (isDashboard) {
+          updateLayouts();
+        } else {
+          updateProjectView();
+        }
+        renderTabs();
+      }
+
+      document.getElementById("new-thread-btn").addEventListener("click", () => {
+        openModal({
+          title: "New Thread",
+          sub: `为 ${currentProject} 输入多行 thread 文本（每行一个，例如 feature/123）`,
+          placeholder: "feature/123\nfix/abc\nchore/docs",
+          confirmText: "创建",
+          multiline: true,
+          onConfirm: (threadName) => {
+            if (!threadName) return;
+            const lines = threadName
+              .split("\n")
+              .map((x) => x.trim())
+              .filter(Boolean);
+            if (lines.length === 0) return;
+            const existing = new Set((threadStore[currentProject] || []).map((t) => t.thread));
+            const newItems = lines
+              .filter((name) => !existing.has(name))
+              .map((name) => ({ thread: name, status: "idle", lastMessage: "No message yet." }));
+            threadStore[currentProject] = [...(threadStore[currentProject] || []), ...newItems];
+            selectedThreadByProject[currentProject] = lines[0];
+            closeModal();
+            updateProjectView();
+          }
+        });
+      });
+
+      renderTabs();
+      updateView();
+    </script>
+  </body>
+</html>
