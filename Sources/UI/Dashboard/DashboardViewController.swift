@@ -1,305 +1,633 @@
 import AppKit
 
+// MARK: - DashboardDelegate
+
 protocol DashboardDelegate: AnyObject {
-    func dashboard(_ dashboard: DashboardViewController, didSelectWorktree info: WorktreeInfo, surface: TerminalSurface)
+    func dashboardDidSelectProject(_ project: String, thread: String)
+    func dashboardDidRequestEnterProject(_ project: String)
+    func dashboardDidReorderCards(order: [String])
+    func dashboardDidRequestDeleteWorktree(_ path: String)
 }
 
-/// Dashboard view controller that manages Grid and Spotlight modes.
-/// Grid mode: all worktree cards in a responsive grid.
-/// Spotlight mode: one large terminal + sidebar of small cards.
-class DashboardViewController: NSViewController {
+// MARK: - AgentDisplayInfo
+
+struct AgentDisplayInfo {
+    let id: String          // worktree path
+    let name: String        // display name like "Agent-Alpha"
+    let project: String     // repo display name
+    let thread: String      // branch name
+    let status: String      // "running", "waiting", "idle", "error"
+    let lastMessage: String
+    let totalDuration: String   // "HH:MM:SS" format
+    let roundDuration: String   // "HH:MM:SS" format
+    let surface: TerminalSurface
+}
+
+// MARK: - Pasteboard type (used by DraggableGridView)
+
+extension NSPasteboard.PasteboardType {
+    static let terminalCard = NSPasteboard.PasteboardType("com.pmux.terminalCard")
+}
+
+// MARK: - DashboardViewController
+
+class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDelegate, DraggableGridDelegate {
     weak var dashboardDelegate: DashboardDelegate?
 
-    enum Mode {
-        case grid
-        case spotlight(focusedIndex: Int)
+    var currentLayout: DashboardLayout = .leftRight
+    var selectedAgentId: String = ""
+    private(set) var zoomIndex: Int = GridLayout.defaultZoomIndex
+
+    // Data
+    private var agents: [AgentDisplayInfo] = []
+
+    // Grid layout
+    private let gridScrollView = NSScrollView()
+    private let gridContainer = DraggableGridView()
+    private var gridCards: [AgentCardView] = []
+
+    private let gridSpacing: CGFloat = 12
+    private let aspectRatio: CGFloat = 0.6
+
+    // Left-Right layout
+    private let leftRightContainer = NSView()
+    private let leftRightFocusPanel = FocusPanelView()
+    private let leftRightSidebarScroll = NSScrollView()
+    private let leftRightSidebarStack = NSStackView()
+    private var leftRightMiniCards: [MiniCardView] = []
+
+    // Top-Small layout
+    private let topSmallContainer = NSView()
+    private let topSmallFocusPanel = FocusPanelView()
+    private let topSmallTopScroll = NSScrollView()
+    private let topSmallTopStack = NSStackView()
+    private var topSmallMiniCards: [MiniCardView] = []
+
+    // Top-Large layout
+    private let topLargeContainer = NSView()
+    private let topLargeFocusPanel = FocusPanelView()
+    private let topLargeBottomScroll = NSScrollView()
+    private let topLargeBottomStack = NSStackView()
+    private var topLargeMiniCards: [MiniCardView] = []
+
+    private var currentMinCardWidth: CGFloat {
+        GridLayout.zoomLevels[zoomIndex]
     }
 
-    private(set) var mode: Mode = .grid
-    private var cards: [TerminalCardView] = []
-    var cardCount: Int { cards.count }
-    private var worktrees: [(info: WorktreeInfo, surface: TerminalSurface)] = []
-
-    // Grid mode views
-    private let scrollView = NSScrollView()
-    private let gridContainer = NSView()
-
-    // Spotlight mode views
-    private let spotlightContainer = NSView()
-    private let spotlightMainContainer = NSView()
-    private let spotlightSidebar = NSScrollView()
-    private let spotlightSidebarStack = NSStackView()
-    private let openTabButton = NSButton()
-
-    private let minCardWidth: CGFloat = 300
-    private let minCardHeight: CGFloat = 200
-    private let gridSpacing: CGFloat = 12
+    // MARK: - View lifecycle
 
     override func loadView() {
-        self.view = NSView()
-        view.wantsLayer = true
-        view.layer?.backgroundColor = Theme.background.cgColor
+        let root = NSView()
+        root.wantsLayer = true
+        root.layer?.backgroundColor = SemanticColors.panel1.cgColor
+        root.setAccessibilityIdentifier("dashboard.view")
+        self.view = root
 
-        setupGridView()
-        setupSpotlightView()
-        showGrid()
+        setupGridLayout()
+        setupLeftRightLayout()
+        setupTopSmallLayout()
+        setupTopLargeLayout()
+
+        showLayout(currentLayout)
     }
 
-    // MARK: - Setup
+    // MARK: - Public API
 
-    private func setupGridView() {
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = false
-        scrollView.drawsBackground = false
-        scrollView.borderType = .noBorder
+    func updateAgents(_ newAgents: [AgentDisplayInfo]) {
+        agents = newAgents
+
+        // Validate selectedAgentId
+        if !agents.contains(where: { $0.id == selectedAgentId }) {
+            selectedAgentId = sortedAgents().first?.id ?? ""
+        }
+
+        rebuildCurrentLayout()
+    }
+
+    func setLayout(_ layout: DashboardLayout) {
+        guard layout != currentLayout else { return }
+        detachTerminals()
+        currentLayout = layout
+        showLayout(layout)
+        rebuildCurrentLayout()
+    }
+
+    func zoomIn() {
+        setZoomIndex(zoomIndex - 1)
+    }
+
+    func zoomOut() {
+        setZoomIndex(zoomIndex + 1)
+    }
+
+    func detachTerminals() {
+        // Detach all terminal surfaces from focus panels
+        leftRightFocusPanel.terminalContainer.subviews.forEach { $0.removeFromSuperview() }
+        topSmallFocusPanel.terminalContainer.subviews.forEach { $0.removeFromSuperview() }
+        topLargeFocusPanel.terminalContainer.subviews.forEach { $0.removeFromSuperview() }
+    }
+
+    // MARK: - Sorting
+
+    private func sortedAgents() -> [AgentDisplayInfo] {
+        agents.sorted { a, b in
+            statusOrder(a.status) < statusOrder(b.status)
+        }
+    }
+
+    private func statusOrder(_ status: String) -> Int {
+        switch status.lowercased() {
+        case "waiting": return 0
+        case "running": return 1
+        default: return 2
+        }
+    }
+
+    // MARK: - Layout visibility
+
+    private func showLayout(_ layout: DashboardLayout) {
+        gridScrollView.isHidden = true
+        leftRightContainer.isHidden = true
+        topSmallContainer.isHidden = true
+        topLargeContainer.isHidden = true
+
+        switch layout {
+        case .grid:
+            gridScrollView.isHidden = false
+        case .leftRight:
+            leftRightContainer.isHidden = false
+        case .topSmall:
+            topSmallContainer.isHidden = false
+        case .topLarge:
+            topLargeContainer.isHidden = false
+        }
+    }
+
+    private func rebuildCurrentLayout() {
+        switch currentLayout {
+        case .grid:
+            rebuildGrid()
+        case .leftRight:
+            rebuildLeftRight()
+        case .topSmall:
+            rebuildTopSmall()
+        case .topLarge:
+            rebuildTopLarge()
+        }
+    }
+
+    // MARK: - Zoom
+
+    private func setZoomIndex(_ index: Int) {
+        zoomIndex = GridLayout.clampZoomIndex(index)
+        if case .grid = currentLayout {
+            rebuildGrid()
+        }
+    }
+
+    // MARK: - Setup: Grid
+
+    private func setupGridLayout() {
+        gridScrollView.translatesAutoresizingMaskIntoConstraints = false
+        gridScrollView.hasVerticalScroller = true
+        gridScrollView.hasHorizontalScroller = false
+        gridScrollView.drawsBackground = false
+        gridScrollView.borderType = .noBorder
 
         gridContainer.wantsLayer = true
         gridContainer.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.documentView = gridContainer
+        gridContainer.setAccessibilityIdentifier("dashboard.layout.grid")
+        gridContainer.dragDelegate = self
+        gridScrollView.documentView = gridContainer
 
-        view.addSubview(scrollView)
+        view.addSubview(gridScrollView)
 
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: view.topAnchor, constant: gridSpacing),
-            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: gridSpacing),
-            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -gridSpacing),
-            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -gridSpacing),
+            gridScrollView.topAnchor.constraint(equalTo: view.topAnchor, constant: gridSpacing),
+            gridScrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: gridSpacing),
+            gridScrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -gridSpacing),
+            gridScrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -gridSpacing),
         ])
     }
 
-    private func setupSpotlightView() {
-        spotlightContainer.translatesAutoresizingMaskIntoConstraints = false
-        spotlightContainer.wantsLayer = true
-        spotlightContainer.isHidden = true
-        view.addSubview(spotlightContainer)
+    // MARK: - Setup: Left-Right
 
-        // Main terminal area (left, large)
-        spotlightMainContainer.wantsLayer = true
-        spotlightMainContainer.layer?.cornerRadius = Theme.cardCornerRadius
-        spotlightMainContainer.translatesAutoresizingMaskIntoConstraints = false
-        spotlightContainer.addSubview(spotlightMainContainer)
+    private func setupLeftRightLayout() {
+        leftRightContainer.translatesAutoresizingMaskIntoConstraints = false
+        leftRightContainer.wantsLayer = true
+        leftRightContainer.isHidden = true
+        leftRightContainer.setAccessibilityIdentifier("dashboard.layout.left-right")
+        view.addSubview(leftRightContainer)
 
-        // Sidebar (right, small cards stacked)
-        spotlightSidebar.translatesAutoresizingMaskIntoConstraints = false
-        spotlightSidebar.hasVerticalScroller = true
-        spotlightSidebar.scrollerStyle = .overlay
-        spotlightSidebar.drawsBackground = false
-        spotlightSidebar.borderType = .noBorder
+        // Focus panel (left, 78%)
+        leftRightFocusPanel.translatesAutoresizingMaskIntoConstraints = false
+        leftRightFocusPanel.delegate = self
+        leftRightContainer.addSubview(leftRightFocusPanel)
 
-        spotlightSidebarStack.orientation = .vertical
-        spotlightSidebarStack.spacing = 8
-        spotlightSidebarStack.alignment = .leading
-        spotlightSidebarStack.translatesAutoresizingMaskIntoConstraints = false
-        spotlightSidebar.documentView = spotlightSidebarStack
+        // Sidebar scroll (right, 22%)
+        leftRightSidebarScroll.translatesAutoresizingMaskIntoConstraints = false
+        leftRightSidebarScroll.hasVerticalScroller = true
+        leftRightSidebarScroll.scrollerStyle = .overlay
+        leftRightSidebarScroll.drawsBackground = false
+        leftRightSidebarScroll.borderType = .noBorder
 
-        spotlightContainer.addSubview(spotlightSidebar)
+        leftRightSidebarStack.orientation = .vertical
+        leftRightSidebarStack.spacing = 8
+        leftRightSidebarStack.alignment = .leading
+        leftRightSidebarStack.translatesAutoresizingMaskIntoConstraints = false
+        leftRightSidebarScroll.documentView = leftRightSidebarStack
 
-        let sidebarWidth: CGFloat = 200
+        leftRightContainer.addSubview(leftRightSidebarScroll)
 
-        NSLayoutConstraint.activate([
-            spotlightContainer.topAnchor.constraint(equalTo: view.topAnchor, constant: gridSpacing),
-            spotlightContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: gridSpacing),
-            spotlightContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -gridSpacing),
-            spotlightContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -gridSpacing),
-
-            spotlightMainContainer.topAnchor.constraint(equalTo: spotlightContainer.topAnchor),
-            spotlightMainContainer.leadingAnchor.constraint(equalTo: spotlightContainer.leadingAnchor),
-            spotlightMainContainer.bottomAnchor.constraint(equalTo: spotlightContainer.bottomAnchor),
-            spotlightMainContainer.trailingAnchor.constraint(equalTo: spotlightSidebar.leadingAnchor, constant: -gridSpacing),
-
-            spotlightSidebar.topAnchor.constraint(equalTo: spotlightContainer.topAnchor),
-            spotlightSidebar.trailingAnchor.constraint(equalTo: spotlightContainer.trailingAnchor),
-            spotlightSidebar.bottomAnchor.constraint(equalTo: spotlightContainer.bottomAnchor),
-            spotlightSidebar.widthAnchor.constraint(equalToConstant: sidebarWidth),
-        ])
-
-        // "Open in Tab" button (top-right of spotlight main area)
-        openTabButton.title = "Open in Tab ⌘↵"
-        openTabButton.bezelStyle = .recessed
-        openTabButton.isBordered = false
-        openTabButton.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        openTabButton.contentTintColor = Theme.accent
-        openTabButton.target = self
-        openTabButton.action = #selector(openTabButtonClicked)
-        openTabButton.translatesAutoresizingMaskIntoConstraints = false
-        openTabButton.isHidden = true
-        spotlightContainer.addSubview(openTabButton)
+        let spacing: CGFloat = 8
 
         NSLayoutConstraint.activate([
-            openTabButton.topAnchor.constraint(equalTo: spotlightMainContainer.topAnchor, constant: 4),
-            openTabButton.trailingAnchor.constraint(equalTo: spotlightMainContainer.trailingAnchor, constant: -8),
+            leftRightContainer.topAnchor.constraint(equalTo: view.topAnchor, constant: spacing),
+            leftRightContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: spacing),
+            leftRightContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -spacing),
+            leftRightContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -spacing),
+
+            leftRightFocusPanel.topAnchor.constraint(equalTo: leftRightContainer.topAnchor),
+            leftRightFocusPanel.leadingAnchor.constraint(equalTo: leftRightContainer.leadingAnchor),
+            leftRightFocusPanel.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor),
+            leftRightFocusPanel.widthAnchor.constraint(equalTo: leftRightContainer.widthAnchor, multiplier: 0.78, constant: -spacing / 2),
+
+            leftRightSidebarScroll.topAnchor.constraint(equalTo: leftRightContainer.topAnchor),
+            leftRightSidebarScroll.trailingAnchor.constraint(equalTo: leftRightContainer.trailingAnchor),
+            leftRightSidebarScroll.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor),
+            leftRightSidebarScroll.leadingAnchor.constraint(equalTo: leftRightFocusPanel.trailingAnchor, constant: spacing),
         ])
     }
 
-    // MARK: - Data
+    // MARK: - Setup: Top-Small
 
-    func worktreeAt(index: Int) -> (info: WorktreeInfo, surface: TerminalSurface)? {
-        guard index >= 0, index < worktrees.count else { return nil }
-        return worktrees[index]
+    private func setupTopSmallLayout() {
+        topSmallContainer.translatesAutoresizingMaskIntoConstraints = false
+        topSmallContainer.wantsLayer = true
+        topSmallContainer.isHidden = true
+        topSmallContainer.setAccessibilityIdentifier("dashboard.layout.top-small")
+        view.addSubview(topSmallContainer)
+
+        // Top: horizontal scrolling row of mini cards
+        topSmallTopScroll.translatesAutoresizingMaskIntoConstraints = false
+        topSmallTopScroll.hasVerticalScroller = false
+        topSmallTopScroll.hasHorizontalScroller = true
+        topSmallTopScroll.scrollerStyle = .overlay
+        topSmallTopScroll.drawsBackground = false
+        topSmallTopScroll.borderType = .noBorder
+
+        topSmallTopStack.orientation = .horizontal
+        topSmallTopStack.spacing = 8
+        topSmallTopStack.alignment = .centerY
+        topSmallTopStack.translatesAutoresizingMaskIntoConstraints = false
+        topSmallTopScroll.documentView = topSmallTopStack
+
+        topSmallContainer.addSubview(topSmallTopScroll)
+
+        // Bottom: focus panel
+        topSmallFocusPanel.translatesAutoresizingMaskIntoConstraints = false
+        topSmallFocusPanel.delegate = self
+        topSmallContainer.addSubview(topSmallFocusPanel)
+
+        let spacing: CGFloat = 8
+        // Mini card height in top-small: derive from clamped width range 180-260 at 16:9
+        let miniCardHeight: CGFloat = 120
+
+        NSLayoutConstraint.activate([
+            topSmallContainer.topAnchor.constraint(equalTo: view.topAnchor, constant: spacing),
+            topSmallContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: spacing),
+            topSmallContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -spacing),
+            topSmallContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -spacing),
+
+            topSmallTopScroll.topAnchor.constraint(equalTo: topSmallContainer.topAnchor),
+            topSmallTopScroll.leadingAnchor.constraint(equalTo: topSmallContainer.leadingAnchor),
+            topSmallTopScroll.trailingAnchor.constraint(equalTo: topSmallContainer.trailingAnchor),
+            topSmallTopScroll.heightAnchor.constraint(equalToConstant: miniCardHeight),
+
+            topSmallFocusPanel.topAnchor.constraint(equalTo: topSmallTopScroll.bottomAnchor, constant: spacing),
+            topSmallFocusPanel.leadingAnchor.constraint(equalTo: topSmallContainer.leadingAnchor),
+            topSmallFocusPanel.trailingAnchor.constraint(equalTo: topSmallContainer.trailingAnchor),
+            topSmallFocusPanel.bottomAnchor.constraint(equalTo: topSmallContainer.bottomAnchor),
+        ])
     }
 
-    func updateStatus(for path: String, status: AgentStatus) {
-        for card in cards where card.worktreeInfo.path == path {
-            card.status = status
-        }
+    // MARK: - Setup: Top-Large
+
+    private func setupTopLargeLayout() {
+        topLargeContainer.translatesAutoresizingMaskIntoConstraints = false
+        topLargeContainer.wantsLayer = true
+        topLargeContainer.isHidden = true
+        topLargeContainer.setAccessibilityIdentifier("dashboard.layout.top-large")
+        view.addSubview(topLargeContainer)
+
+        // Top: focus panel
+        topLargeFocusPanel.translatesAutoresizingMaskIntoConstraints = false
+        topLargeFocusPanel.delegate = self
+        topLargeContainer.addSubview(topLargeFocusPanel)
+
+        // Bottom: horizontal scrolling row of mini cards
+        topLargeBottomScroll.translatesAutoresizingMaskIntoConstraints = false
+        topLargeBottomScroll.hasVerticalScroller = false
+        topLargeBottomScroll.hasHorizontalScroller = true
+        topLargeBottomScroll.scrollerStyle = .overlay
+        topLargeBottomScroll.drawsBackground = false
+        topLargeBottomScroll.borderType = .noBorder
+
+        topLargeBottomStack.orientation = .horizontal
+        topLargeBottomStack.spacing = 8
+        topLargeBottomStack.alignment = .centerY
+        topLargeBottomStack.translatesAutoresizingMaskIntoConstraints = false
+        topLargeBottomScroll.documentView = topLargeBottomStack
+
+        topLargeContainer.addSubview(topLargeBottomScroll)
+
+        let spacing: CGFloat = 8
+        let miniCardHeight: CGFloat = 120
+
+        NSLayoutConstraint.activate([
+            topLargeContainer.topAnchor.constraint(equalTo: view.topAnchor, constant: spacing),
+            topLargeContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: spacing),
+            topLargeContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -spacing),
+            topLargeContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -spacing),
+
+            topLargeFocusPanel.topAnchor.constraint(equalTo: topLargeContainer.topAnchor),
+            topLargeFocusPanel.leadingAnchor.constraint(equalTo: topLargeContainer.leadingAnchor),
+            topLargeFocusPanel.trailingAnchor.constraint(equalTo: topLargeContainer.trailingAnchor),
+            topLargeFocusPanel.bottomAnchor.constraint(equalTo: topLargeBottomScroll.topAnchor, constant: -spacing),
+
+            topLargeBottomScroll.leadingAnchor.constraint(equalTo: topLargeContainer.leadingAnchor),
+            topLargeBottomScroll.trailingAnchor.constraint(equalTo: topLargeContainer.trailingAnchor),
+            topLargeBottomScroll.bottomAnchor.constraint(equalTo: topLargeContainer.bottomAnchor),
+            topLargeBottomScroll.heightAnchor.constraint(equalToConstant: miniCardHeight),
+        ])
     }
 
-    func setWorktrees(_ worktrees: [(info: WorktreeInfo, surface: TerminalSurface)]) {
-        self.worktrees = worktrees
-        rebuildCards()
-    }
+    // MARK: - Rebuild: Grid
 
-    private func rebuildCards() {
-        cards.forEach { $0.removeFromSuperview() }
-        cards.removeAll()
+    private func rebuildGrid() {
+        gridCards.forEach { $0.removeFromSuperview() }
+        gridCards.removeAll()
 
-        for (info, surface) in worktrees {
-            let card = TerminalCardView(worktreeInfo: info, surface: surface)
+        let sorted = sortedAgents()
+        guard !sorted.isEmpty else { return }
+
+        for agent in sorted {
+            let card = AgentCardView()
             card.delegate = self
-            card.status = .idle
-            cards.append(card)
-        }
-
-        switch mode {
-        case .grid:
-            layoutGrid()
-        case .spotlight(let index):
-            layoutSpotlight(focusedIndex: index)
-        }
-    }
-
-    // MARK: - Grid Layout
-
-    private func showGrid() {
-        mode = .grid
-        scrollView.isHidden = false
-        spotlightContainer.isHidden = true
-        openTabButton.isHidden = true
-        layoutGrid()
-    }
-
-    private func layoutGrid() {
-        // Remove all cards from current parents and clear Auto Layout constraints from Spotlight
-        for card in cards {
-            card.removeFromSuperview()
-            card.removeAllConstraintsFromSuperviews()
-            card.translatesAutoresizingMaskIntoConstraints = true  // back to frame-based
-        }
-
-        guard !cards.isEmpty else { return }
-
-        let availableWidth = scrollView.contentView.bounds.width
-        let columns = max(1, Int(availableWidth / minCardWidth))
-        let cardWidth = (availableWidth - gridSpacing * CGFloat(columns - 1)) / CGFloat(columns)
-        let cardHeight = cardWidth * 0.6  // aspect ratio
-
-        let rows = Int(ceil(Double(cards.count) / Double(columns)))
-        let totalHeight = CGFloat(rows) * cardHeight + CGFloat(rows - 1) * gridSpacing
-
-        gridContainer.frame = NSRect(x: 0, y: 0, width: availableWidth, height: max(totalHeight, scrollView.contentView.bounds.height))
-
-        for (index, card) in cards.enumerated() {
-            let col = index % columns
-            let row = index / columns
-            let x = CGFloat(col) * (cardWidth + gridSpacing)
-            let y = totalHeight - CGFloat(row + 1) * cardHeight - CGFloat(row) * gridSpacing
-
-            card.frame = NSRect(x: x, y: y, width: cardWidth, height: cardHeight)
+            card.configure(
+                id: agent.id,
+                project: agent.project,
+                thread: agent.thread,
+                status: agent.status,
+                lastMessage: agent.lastMessage,
+                totalDuration: agent.totalDuration,
+                roundDuration: agent.roundDuration
+            )
+            card.translatesAutoresizingMaskIntoConstraints = true
+            gridCards.append(card)
             gridContainer.addSubview(card)
-            card.embedTerminal()
+        }
+
+        layoutGridFrames()
+    }
+
+    private var currentGridLayout: GridLayout {
+        let availableWidth = gridScrollView.contentView.bounds.width
+        let availableHeight = gridScrollView.contentView.bounds.height
+        return GridLayout(
+            availableWidth: availableWidth,
+            availableHeight: availableHeight,
+            cardCount: gridCards.count,
+            minCardWidth: currentMinCardWidth,
+            spacing: gridSpacing,
+            aspectRatio: aspectRatio
+        )
+    }
+
+    private func layoutGridFrames() {
+        guard !gridCards.isEmpty else { return }
+        let layout = currentGridLayout
+        let availableWidth = gridScrollView.contentView.bounds.width
+        gridContainer.frame = NSRect(x: 0, y: 0, width: availableWidth, height: layout.scrollContentHeight)
+
+        for (index, card) in gridCards.enumerated() {
+            card.frame = layout.cardFrame(at: index)
         }
     }
 
-    // MARK: - Spotlight Layout
+    // MARK: - Rebuild: Left-Right
 
-    @objc private func openTabButtonClicked() {
-        if case .spotlight(let index) = mode, let worktree = worktreeAt(index: index) {
-            dashboardDelegate?.dashboard(self, didSelectWorktree: worktree.info, surface: worktree.surface)
-        }
-    }
+    private func rebuildLeftRight() {
+        // Clear old mini cards
+        leftRightMiniCards.forEach { $0.removeFromSuperview() }
+        leftRightMiniCards.removeAll()
+        leftRightSidebarStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
-    func enterSpotlight(focusedIndex: Int) {
-        guard focusedIndex >= 0, focusedIndex < cards.count else { return }
-        mode = .spotlight(focusedIndex: focusedIndex)
-        scrollView.isHidden = true
-        spotlightContainer.isHidden = false
-        openTabButton.isHidden = false
-        layoutSpotlight(focusedIndex: focusedIndex)
-    }
+        let sorted = sortedAgents()
+        guard !sorted.isEmpty else { return }
 
-    private func layoutSpotlight(focusedIndex: Int) {
-        // Remove all cards from parents
-        cards.forEach { $0.removeFromSuperview() }
-        spotlightSidebarStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-
-        guard focusedIndex < cards.count else { return }
-
-        // Main card — reparent terminal to spotlight main area
-        let mainCard = cards[focusedIndex]
-        mainCard.surface.reparent(to: spotlightMainContainer)
-
-        // Make the spotlight terminal interactive
-        if let window = view.window {
-            window.makeFirstResponder(mainCard.surface.view)
+        // Configure focus panel with selected agent
+        if let selected = sorted.first(where: { $0.id == selectedAgentId }) ?? sorted.first {
+            selectedAgentId = selected.id
+            configureFocusPanel(leftRightFocusPanel, with: selected)
+            selected.surface.reparent(to: leftRightFocusPanel.terminalContainer)
         }
 
-        // Sidebar cards — small versions of other terminals
-        let sidebarWidth: CGFloat = 200
-        for (index, card) in cards.enumerated() {
-            guard index != focusedIndex else { continue }
+        // Build sidebar mini cards for non-selected agents
+        let sidebarWidth = leftRightSidebarScroll.bounds.width > 0 ? leftRightSidebarScroll.bounds.width : 200
+        for agent in sorted {
+            let card = MiniCardView()
+            card.delegate = self
+            card.configure(
+                id: agent.id,
+                project: agent.project,
+                thread: agent.thread,
+                status: agent.status,
+                lastMessage: agent.lastMessage,
+                totalDuration: agent.totalDuration,
+                roundDuration: agent.roundDuration
+            )
+            card.isSelected = (agent.id == selectedAgentId)
             card.translatesAutoresizingMaskIntoConstraints = false
-            spotlightSidebarStack.addArrangedSubview(card)
+            leftRightMiniCards.append(card)
+            leftRightSidebarStack.addArrangedSubview(card)
 
             NSLayoutConstraint.activate([
                 card.widthAnchor.constraint(equalToConstant: sidebarWidth),
-                card.heightAnchor.constraint(equalToConstant: 120),
             ])
-            card.embedTerminal()
         }
     }
 
-    func exitSpotlight() {
-        showGrid()
+    // MARK: - Rebuild: Top-Small
+
+    private func rebuildTopSmall() {
+        topSmallMiniCards.forEach { $0.removeFromSuperview() }
+        topSmallMiniCards.removeAll()
+        topSmallTopStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+
+        let sorted = sortedAgents()
+        guard !sorted.isEmpty else { return }
+
+        // Configure focus panel
+        if let selected = sorted.first(where: { $0.id == selectedAgentId }) ?? sorted.first {
+            selectedAgentId = selected.id
+            configureFocusPanel(topSmallFocusPanel, with: selected)
+            selected.surface.reparent(to: topSmallFocusPanel.terminalContainer)
+        }
+
+        // Build horizontal mini cards
+        for agent in sorted {
+            let card = MiniCardView()
+            card.delegate = self
+            card.configure(
+                id: agent.id,
+                project: agent.project,
+                thread: agent.thread,
+                status: agent.status,
+                lastMessage: agent.lastMessage,
+                totalDuration: agent.totalDuration,
+                roundDuration: agent.roundDuration
+            )
+            card.isSelected = (agent.id == selectedAgentId)
+            card.translatesAutoresizingMaskIntoConstraints = false
+            topSmallMiniCards.append(card)
+            topSmallTopStack.addArrangedSubview(card)
+
+            // Clamp width 180-260
+            let widthConstraint = card.widthAnchor.constraint(equalToConstant: 220)
+            widthConstraint.priority = .defaultHigh
+            let minWidth = card.widthAnchor.constraint(greaterThanOrEqualToConstant: 180)
+            let maxWidth = card.widthAnchor.constraint(lessThanOrEqualToConstant: 260)
+            NSLayoutConstraint.activate([widthConstraint, minWidth, maxWidth])
+        }
     }
 
-    /// Re-embed terminals in their grid cards after returning from a repo tab
-    func refreshAfterReturn() {
-        switch mode {
-        case .grid:
-            layoutGrid()
-        case .spotlight(let index):
-            layoutSpotlight(focusedIndex: index)
+    // MARK: - Rebuild: Top-Large
+
+    private func rebuildTopLarge() {
+        topLargeMiniCards.forEach { $0.removeFromSuperview() }
+        topLargeMiniCards.removeAll()
+        topLargeBottomStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+
+        let sorted = sortedAgents()
+        guard !sorted.isEmpty else { return }
+
+        // Configure focus panel
+        if let selected = sorted.first(where: { $0.id == selectedAgentId }) ?? sorted.first {
+            selectedAgentId = selected.id
+            configureFocusPanel(topLargeFocusPanel, with: selected)
+            selected.surface.reparent(to: topLargeFocusPanel.terminalContainer)
         }
+
+        // Build horizontal mini cards at bottom
+        for agent in sorted {
+            let card = MiniCardView()
+            card.delegate = self
+            card.configure(
+                id: agent.id,
+                project: agent.project,
+                thread: agent.thread,
+                status: agent.status,
+                lastMessage: agent.lastMessage,
+                totalDuration: agent.totalDuration,
+                roundDuration: agent.roundDuration
+            )
+            card.isSelected = (agent.id == selectedAgentId)
+            card.translatesAutoresizingMaskIntoConstraints = false
+            topLargeMiniCards.append(card)
+            topLargeBottomStack.addArrangedSubview(card)
+
+            // Clamp width 180-260
+            let widthConstraint = card.widthAnchor.constraint(equalToConstant: 220)
+            widthConstraint.priority = .defaultHigh
+            let minWidth = card.widthAnchor.constraint(greaterThanOrEqualToConstant: 180)
+            let maxWidth = card.widthAnchor.constraint(lessThanOrEqualToConstant: 260)
+            NSLayoutConstraint.activate([widthConstraint, minWidth, maxWidth])
+        }
+    }
+
+    // MARK: - Focus panel helper
+
+    private func configureFocusPanel(_ panel: FocusPanelView, with agent: AgentDisplayInfo) {
+        panel.configure(
+            name: agent.name,
+            project: agent.project,
+            thread: agent.thread,
+            status: agent.status,
+            total: agent.totalDuration,
+            round: agent.roundDuration
+        )
     }
 
     // MARK: - Resize
 
     override func viewDidLayout() {
         super.viewDidLayout()
-        switch mode {
-        case .grid:
-            layoutGrid()
-        case .spotlight:
-            break  // Auto Layout handles spotlight
+        if case .grid = currentLayout {
+            layoutGridFrames()
         }
     }
-}
 
-// MARK: - TerminalCardDelegate
+    // MARK: - AgentCardDelegate
+
+    func agentCardClicked(agentId: String) {
+        switch currentLayout {
+        case .grid:
+            // In grid mode, clicking enters the project
+            if let agent = agents.first(where: { $0.id == agentId }) {
+                dashboardDelegate?.dashboardDidSelectProject(agent.project, thread: agent.thread)
+            }
+        default:
+            // In other layouts, change selection and refresh focus panel
+            detachTerminals()
+            selectedAgentId = agentId
+            rebuildCurrentLayout()
+        }
+    }
+
+    // MARK: - FocusPanelDelegate
+
+    func focusPanelDidRequestEnterProject(_ projectName: String) {
+        dashboardDelegate?.dashboardDidRequestEnterProject(projectName)
+    }
+
+    // MARK: - DraggableGridDelegate
+
+    func draggableGrid(_ grid: DraggableGridView, dropIndexFor point: NSPoint) -> Int {
+        currentGridLayout.gridIndex(for: point)
+    }
+
+    func draggableGrid(_ grid: DraggableGridView, dropIndicatorFrameAt index: Int) -> NSRect {
+        guard !gridCards.isEmpty else { return .zero }
+        return currentGridLayout.dropIndicatorFrame(at: index)
+    }
+
+    func draggableGrid(_ grid: DraggableGridView, didDropItemWithPath path: String, atIndex toIndex: Int) {
+        guard let fromIndex = agents.firstIndex(where: { $0.id == path }) else { return }
+        guard fromIndex != toIndex, toIndex >= 0, toIndex <= agents.count else { return }
+
+        var mutableAgents = agents
+        let item = mutableAgents.remove(at: fromIndex)
+        let adjustedIndex = toIndex > fromIndex ? toIndex - 1 : toIndex
+        mutableAgents.insert(item, at: min(adjustedIndex, mutableAgents.count))
+        agents = mutableAgents
+
+        rebuildGrid()
+
+        dashboardDelegate?.dashboardDidReorderCards(order: agents.map { $0.id })
+    }
+}
 
 // MARK: - NSView helper
 
 private extension NSView {
     /// Remove all constraints that reference this view from its superview
     func removeAllConstraintsFromSuperviews() {
-        // Remove constraints owned by this view that reference only itself (width/height)
         for constraint in constraints {
             if constraint.firstItem === self && constraint.secondItem == nil {
                 removeConstraint(constraint)
             }
         }
-        // Remove constraints from superview that reference this view
         if let superview = superview {
             for constraint in superview.constraints {
                 if constraint.firstItem === self || constraint.secondItem === self {
@@ -307,27 +635,5 @@ private extension NSView {
                 }
             }
         }
-    }
-}
-
-// MARK: - TerminalCardDelegate
-
-extension DashboardViewController: TerminalCardDelegate {
-    func terminalCardClicked(_ card: TerminalCardView) {
-        guard let index = cards.firstIndex(where: { $0 === card }) else { return }
-
-        switch mode {
-        case .grid:
-            enterSpotlight(focusedIndex: index)
-        case .spotlight:
-            // Clicked a sidebar card — swap it to spotlight
-            enterSpotlight(focusedIndex: index)
-        }
-    }
-
-    func terminalCardDoubleClicked(_ card: TerminalCardView) {
-        guard let index = cards.firstIndex(where: { $0 === card }) else { return }
-        let worktree = worktrees[index]
-        dashboardDelegate?.dashboard(self, didSelectWorktree: worktree.info, surface: worktree.surface)
     }
 }
