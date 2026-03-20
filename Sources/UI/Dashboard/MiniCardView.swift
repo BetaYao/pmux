@@ -3,6 +3,7 @@ import AppKit
 final class MiniCardView: NSView {
     weak var delegate: AgentCardDelegate?
     private(set) var agentId: String = ""
+    private var currentStatus: String = ""
     var isSelected: Bool = false { didSet { updateAppearance() } }
 
     private let statusDot = NSView()
@@ -32,7 +33,10 @@ final class MiniCardView: NSView {
         let compactRound = AgentDisplayHelpers.compactDuration(roundDuration)
         timeLabel.stringValue = "\u{03A3} \(compactTotal) \u{00B7} \u{27F3} \(compactRound)"
 
-        updateAppearance()
+        if status != currentStatus {
+            currentStatus = status
+            updateAppearance()
+        }
     }
 
     private func setup() {
