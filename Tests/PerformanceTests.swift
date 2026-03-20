@@ -63,7 +63,7 @@ final class PerformanceTests: XCTestCase {
                 _ = SemanticColors.panel2.cgColor
                 _ = SemanticColors.bg.cgColor
                 _ = SemanticColors.text.cgColor
-                _ = SemanticColors.cardBorder.cgColor
+                _ = SemanticColors.line.cgColor
                 _ = SemanticColors.muted.cgColor
                 _ = SemanticColors.line.cgColor
                 _ = SemanticColors.running.cgColor

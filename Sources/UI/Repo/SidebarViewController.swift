@@ -88,11 +88,18 @@ class SidebarViewController: NSViewController {
     }
 
     func updateStatus(for path: String, status: AgentStatus, lastMessage: String = "") {
+        let oldStatus = statuses[path]
+        let oldMessage = lastMessages[path]
         statuses[path] = status
         if !lastMessage.isEmpty {
             lastMessages[path] = lastMessage
         }
-        tableView.reloadData()
+        // Only reload the specific changed row instead of the entire table
+        if let rowIndex = worktrees.firstIndex(where: { $0.path == path }) {
+            if oldStatus != status || oldMessage != lastMessage {
+                tableView.reloadData(forRowIndexes: IndexSet(integer: rowIndex), columnIndexes: IndexSet(integer: 0))
+            }
+        }
     }
 
     func selectWorktree(at index: Int) {
@@ -124,19 +131,60 @@ extension SidebarViewController: NSTableViewDelegate {
         return rowView
     }
 
+    private static let cellIdentifier = NSUserInterfaceItemIdentifier("SidebarWorktreeCell")
+
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let info = worktrees[row]
         let status = statuses[info.path] ?? .unknown
         let message = lastMessages[info.path] ?? ""
-        let isSelected = (row == selectedIndex)
 
-        let cell = NSView()
-        cell.setAccessibilityIdentifier("sidebar.row.\(info.branch.isEmpty ? info.displayName : info.branch)")
+        // Reuse existing cell or create a new one
+        if let existing = tableView.makeView(withIdentifier: Self.cellIdentifier, owner: nil) as? SidebarCellView {
+            existing.update(name: info.displayName, status: status, message: message)
+            return existing
+        }
+
+        let cell = SidebarCellView()
+        cell.identifier = Self.cellIdentifier
+        cell.update(name: info.displayName, status: status, message: message)
         cell.setAccessibilityElement(true)
         cell.setAccessibilityRole(.cell)
+        return cell
+    }
 
-        // ── Row 1: Thread name + status dot ──
-        let nameLabel = NSTextField(labelWithString: info.displayName)
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        guard !suppressSelectionNotification else { return }
+        let row = tableView.selectedRow
+        guard row >= 0 else { return }
+        let oldIndex = selectedIndex
+        selectedIndex = row
+        // Only reload the old and new selected rows instead of the entire table
+        var indexSet = IndexSet(integer: row)
+        if oldIndex != row, oldIndex >= 0, oldIndex < worktrees.count {
+            indexSet.insert(oldIndex)
+        }
+        tableView.reloadData(forRowIndexes: indexSet, columnIndexes: IndexSet(integer: 0))
+        sidebarDelegate?.sidebar(self, didSelectWorktreeAt: row)
+    }
+}
+
+// MARK: - Reusable Cell View
+
+private class SidebarCellView: NSView {
+    private let nameLabel = NSTextField(labelWithString: "")
+    private let dotView = NSView()
+    private let messageLabel = NSTextField(labelWithString: "")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setupViews()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) not supported")
+    }
+
+    private func setupViews() {
         nameLabel.font = NSFont.systemFont(ofSize: 12, weight: .bold)
         nameLabel.textColor = SemanticColors.text
         nameLabel.lineBreakMode = .byTruncatingTail
@@ -144,18 +192,13 @@ extension SidebarViewController: NSTableViewDelegate {
         nameLabel.drawsBackground = false
         nameLabel.isBezeled = false
         nameLabel.isEditable = false
-        cell.addSubview(nameLabel)
+        addSubview(nameLabel)
 
-        // Status dot (8px circle)
-        let dotView = NSView()
         dotView.wantsLayer = true
-        dotView.layer?.backgroundColor = status.color.cgColor
         dotView.layer?.cornerRadius = 4
         dotView.translatesAutoresizingMaskIntoConstraints = false
-        cell.addSubview(dotView)
+        addSubview(dotView)
 
-        // ── Row 2: Last message (2-line clamp) ──
-        let messageLabel = NSTextField(labelWithString: message.isEmpty ? status.rawValue : message)
         messageLabel.font = NSFont.systemFont(ofSize: 12)
         messageLabel.textColor = SemanticColors.muted
         messageLabel.lineBreakMode = .byTruncatingTail
@@ -165,37 +208,30 @@ extension SidebarViewController: NSTableViewDelegate {
         messageLabel.isBezeled = false
         messageLabel.isEditable = false
         messageLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        cell.addSubview(messageLabel)
+        addSubview(messageLabel)
 
         NSLayoutConstraint.activate([
-            // Name label
-            nameLabel.topAnchor.constraint(equalTo: cell.topAnchor, constant: 9),
-            nameLabel.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
+            nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 9),
+            nameLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: dotView.leadingAnchor, constant: -6),
 
-            // Status dot
             dotView.widthAnchor.constraint(equalToConstant: 8),
             dotView.heightAnchor.constraint(equalToConstant: 8),
             dotView.centerYAnchor.constraint(equalTo: nameLabel.centerYAnchor),
-            dotView.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
+            dotView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
 
-            // Message label
             messageLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 2),
-            messageLabel.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
-            messageLabel.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
-            messageLabel.bottomAnchor.constraint(lessThanOrEqualTo: cell.bottomAnchor, constant: -9),
+            messageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            messageLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -9),
         ])
-
-        return cell
     }
 
-    func tableViewSelectionDidChange(_ notification: Notification) {
-        guard !suppressSelectionNotification else { return }
-        let row = tableView.selectedRow
-        guard row >= 0 else { return }
-        selectedIndex = row
-        tableView.reloadData()  // refresh row styles
-        sidebarDelegate?.sidebar(self, didSelectWorktreeAt: row)
+    func update(name: String, status: AgentStatus, message: String) {
+        nameLabel.stringValue = name
+        dotView.layer?.backgroundColor = status.color.cgColor
+        messageLabel.stringValue = message.isEmpty ? status.rawValue : message
+        setAccessibilityIdentifier("sidebar.row.\(name)")
     }
 }
 

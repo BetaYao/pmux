@@ -94,6 +94,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     // MARK: - Public API
 
     func updateAgents(_ newAgents: [AgentDisplayInfo]) {
+        let oldIds = Set(agents.map { $0.id })
+        let newIds = Set(newAgents.map { $0.id })
+        let structureChanged = oldIds != newIds
+
         agents = newAgents
 
         // Validate selectedAgentId
@@ -101,7 +105,68 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
             selectedAgentId = sortedAgents().first?.id ?? ""
         }
 
-        rebuildCurrentLayout()
+        if structureChanged {
+            rebuildCurrentLayout()
+        } else {
+            updateCurrentLayoutInPlace()
+        }
+    }
+
+    /// Update existing views in-place without rebuilding the view hierarchy
+    private func updateCurrentLayoutInPlace() {
+        let sorted = sortedAgents()
+        switch currentLayout {
+        case .grid:
+            updateGridInPlace(sorted)
+        case .leftRight:
+            updateFocusLayoutInPlace(sorted, miniCards: leftRightMiniCards, focusPanel: leftRightFocusPanel)
+        case .topSmall:
+            updateFocusLayoutInPlace(sorted, miniCards: topSmallMiniCards, focusPanel: topSmallFocusPanel)
+        case .topLarge:
+            updateFocusLayoutInPlace(sorted, miniCards: topLargeMiniCards, focusPanel: topLargeFocusPanel)
+        }
+    }
+
+    private func updateGridInPlace(_ sorted: [AgentDisplayInfo]) {
+        guard sorted.count == gridCards.count else {
+            rebuildGrid()
+            return
+        }
+        for (index, agent) in sorted.enumerated() {
+            gridCards[index].configure(
+                id: agent.id,
+                project: agent.project,
+                thread: agent.thread,
+                status: agent.status,
+                lastMessage: agent.lastMessage,
+                totalDuration: agent.totalDuration,
+                roundDuration: agent.roundDuration
+            )
+        }
+    }
+
+    private func updateFocusLayoutInPlace(_ sorted: [AgentDisplayInfo], miniCards: [MiniCardView], focusPanel: FocusPanelView) {
+        guard sorted.count == miniCards.count else {
+            rebuildCurrentLayout()
+            return
+        }
+        // Update focus panel
+        if let selected = sorted.first(where: { $0.id == selectedAgentId }) ?? sorted.first {
+            configureFocusPanel(focusPanel, with: selected)
+        }
+        // Update mini cards
+        for (index, agent) in sorted.enumerated() {
+            miniCards[index].configure(
+                id: agent.id,
+                project: agent.project,
+                thread: agent.thread,
+                status: agent.status,
+                lastMessage: agent.lastMessage,
+                totalDuration: agent.totalDuration,
+                roundDuration: agent.roundDuration
+            )
+            miniCards[index].isSelected = (agent.id == selectedAgentId)
+        }
     }
 
     func setLayout(_ layout: DashboardLayout) {

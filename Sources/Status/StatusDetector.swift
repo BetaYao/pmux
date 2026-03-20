@@ -10,12 +10,14 @@ enum ProcessStatus {
 /// Deterministic status detection: ProcessStatus > ShellPhase > TextPatterns > Unknown
 class StatusDetector {
 
-    /// Detect agent status from available signals (priority order)
+    /// Detect agent status from available signals (priority order).
+    /// Accepts an optional pre-lowercased content string to avoid redundant lowercasing.
     func detect(
         processStatus: ProcessStatus,
         shellInfo: ShellPhaseInfo?,
         content: String,
-        agentDef: AgentDef?
+        agentDef: AgentDef?,
+        lowercasedContent: String? = nil
     ) -> AgentStatus {
         // Priority 1: Process lifecycle overrides everything
         switch processStatus {
@@ -42,7 +44,8 @@ class StatusDetector {
 
         // Priority 3: Text pattern matching (fallback)
         if let agent = agentDef, !content.isEmpty {
-            return agent.detectStatus(from: content)
+            let lower = lowercasedContent ?? content.lowercased()
+            return agent.detectStatus(fromLowercased: lower)
         }
 
         return .unknown
@@ -54,9 +57,14 @@ class StatusDetector {
 extension AgentDef {
     /// Apply rules in order; first match wins
     func detectStatus(from content: String) -> AgentStatus {
-        let lower = content.lowercased()
+        return detectStatus(fromLowercased: content.lowercased())
+    }
+
+    /// Apply rules using pre-lowercased content to avoid redundant lowercasing
+    func detectStatus(fromLowercased lower: String) -> AgentStatus {
         for rule in rules {
             for pattern in rule.patterns {
+                // Patterns are typically short (3-10 chars), lowercasing is cheap
                 if lower.contains(pattern.lowercased()) {
                     return AgentStatus(rawValue: rule.status) ?? .unknown
                 }
@@ -66,18 +74,33 @@ extension AgentDef {
     }
 
     func extractLastMessage(from content: String, maxLen: Int) -> String {
-        let lines = content.components(separatedBy: .newlines)
-        for line in lines.reversed() {
+        // Scan from the end of the string without splitting into an array
+        var endIndex = content.endIndex
+        while endIndex > content.startIndex {
+            // Find start of current line
+            var lineStart = content.index(before: endIndex)
+            while lineStart > content.startIndex && content[content.index(before: lineStart)] != "\n" {
+                lineStart = content.index(before: lineStart)
+            }
+
+            let line = content[lineStart..<endIndex]
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.isEmpty { continue }
-            if isChromeLine(trimmed) { continue }
-            if messageSkipPatterns.contains(where: { trimmed.lowercased().contains($0.lowercased()) }) {
-                continue
+
+            if !trimmed.isEmpty && !isChromeLine(trimmed) {
+                let trimmedLower = trimmed.lowercased()
+                if !messageSkipPatterns.contains(where: { trimmedLower.contains($0.lowercased()) }) {
+                    if trimmed.count > maxLen {
+                        return String(trimmed.prefix(maxLen - 3)) + "..."
+                    }
+                    return trimmed
+                }
             }
-            if trimmed.count > maxLen {
-                return String(trimmed.prefix(maxLen - 3)) + "..."
+
+            // Move to previous line
+            endIndex = lineStart > content.startIndex ? lineStart : content.startIndex
+            if endIndex > content.startIndex && content[content.index(before: endIndex)] == "\n" {
+                endIndex = content.index(before: endIndex)
             }
-            return trimmed
         }
         return ""
     }

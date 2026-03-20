@@ -414,10 +414,21 @@ class MainWindowController: NSWindowController {
         }
     }
 
+    // Cache worktree path -> repo path mapping to avoid repeated git calls
+    private var worktreeRepoCache: [String: String] = [:]
+
     /// Build AgentDisplayInfo array from current worktree data
     private func buildAgentDisplayInfos() -> [AgentDisplayInfo] {
         return allWorktrees.map { (info, surface) in
-            let repoPath = WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
+            // Use cache first, fall back to sync lookup (which itself caches in WorktreeDiscovery)
+            let repoPath: String
+            if let cached = worktreeRepoCache[info.path] {
+                repoPath = cached
+            } else {
+                let found = WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
+                worktreeRepoCache[info.path] = found
+                repoPath = found
+            }
             let project = workspaceManager.tabs.first(where: { $0.repoPath == repoPath })?.displayName ?? URL(fileURLWithPath: repoPath).lastPathComponent
             let status = statusPublisher.status(for: info.path)
             let lastMessage = statusPublisher.lastMessage(for: info.path)
@@ -462,24 +473,26 @@ class MainWindowController: NSWindowController {
         config.workspacePaths.append(path)
         config.save()
 
-        let worktrees = WorktreeDiscovery.discover(repoPath: path)
-        if worktrees.isEmpty {
-            let info = WorktreeInfo(path: path, branch: "main", commitHash: "", isMainWorktree: true)
-            let surface = createSurface(for: info)
-            allWorktrees.append((info: info, surface: surface))
-        } else {
-            for info in worktrees {
-                let surface = createSurface(for: info)
-                allWorktrees.append((info: info, surface: surface))
+        WorktreeDiscovery.discoverAsync(repoPath: path) { [weak self] worktrees in
+            guard let self else { return }
+            if worktrees.isEmpty {
+                let info = WorktreeInfo(path: path, branch: "main", commitHash: "", isMainWorktree: true)
+                let surface = self.createSurface(for: info)
+                self.allWorktrees.append((info: info, surface: surface))
+            } else {
+                for info in worktrees {
+                    let surface = self.createSurface(for: info)
+                    self.allWorktrees.append((info: info, surface: surface))
+                }
             }
+
+            let tabIndex = self.workspaceManager.addTab(repoPath: path, worktrees: worktrees.isEmpty ? [] : worktrees)
+
+            self.dashboardVC?.updateAgents(self.buildAgentDisplayInfos())
+            self.statusPublisher.updateSurfaces(self.surfaces)
+            self.updateTitleBar()
+            self.switchToTab(tabIndex + 1)
         }
-
-        let tabIndex = workspaceManager.addTab(repoPath: path, worktrees: worktrees.isEmpty ? [] : worktrees)
-
-        dashboardVC?.updateAgents(buildAgentDisplayInfos())
-        statusPublisher.updateSurfaces(surfaces)
-        updateTitleBar()
-        switchToTab(tabIndex + 1)
     }
 
     // MARK: - Tab Switching
@@ -531,10 +544,12 @@ class MainWindowController: NSWindowController {
     }
 
     private func openRepoTab(repoPath: String) {
-        let worktrees = WorktreeDiscovery.discover(repoPath: repoPath)
-        let tabIndex = workspaceManager.addTab(repoPath: repoPath, worktrees: worktrees)
-        updateTitleBar()
-        switchToTab(tabIndex + 1)
+        WorktreeDiscovery.discoverAsync(repoPath: repoPath) { [weak self] worktrees in
+            guard let self else { return }
+            let tabIndex = self.workspaceManager.addTab(repoPath: repoPath, worktrees: worktrees)
+            self.updateTitleBar()
+            self.switchToTab(tabIndex + 1)
+        }
     }
 
     // MARK: - Key Handling
@@ -619,60 +634,75 @@ class MainWindowController: NSWindowController {
     // MARK: - Workspace Loading
 
     private func loadWorkspaces() {
-        var allWorktreeInfos: [(info: WorktreeInfo, surface: TerminalSurface)] = []
+        let repoPaths = config.workspacePaths
+        let cardOrder = config.cardOrder
 
-        for repoPath in config.workspacePaths {
-            let worktrees = WorktreeDiscovery.discover(repoPath: repoPath)
-            if worktrees.isEmpty {
-                let info = WorktreeInfo(
-                    path: repoPath,
-                    branch: "main",
-                    commitHash: "",
-                    isMainWorktree: true
-                )
-                let surface = createSurface(for: info)
-                allWorktreeInfos.append((info: info, surface: surface))
-            } else {
-                for info in worktrees {
-                    let surface = createSurface(for: info)
-                    allWorktreeInfos.append((info: info, surface: surface))
+        // Discover all worktrees on a background queue, then update UI on main
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+
+            // Discover worktrees for all repos (single pass, no duplication)
+            var discoveredWorktrees: [(repoPath: String, worktrees: [WorktreeInfo])] = []
+            for repoPath in repoPaths {
+                let worktrees = WorktreeDiscovery.discover(repoPath: repoPath)
+                discoveredWorktrees.append((repoPath, worktrees))
+            }
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+
+                var allWorktreeInfos: [(info: WorktreeInfo, surface: TerminalSurface)] = []
+
+                for (repoPath, worktrees) in discoveredWorktrees {
+                    if worktrees.isEmpty {
+                        let info = WorktreeInfo(
+                            path: repoPath,
+                            branch: "main",
+                            commitHash: "",
+                            isMainWorktree: true
+                        )
+                        let surface = self.createSurface(for: info)
+                        allWorktreeInfos.append((info: info, surface: surface))
+                    } else {
+                        for info in worktrees {
+                            let surface = self.createSurface(for: info)
+                            allWorktreeInfos.append((info: info, surface: surface))
+                        }
+                    }
+
+                    // Reuse already-discovered worktrees for tab creation (no second discover call)
+                    _ = self.workspaceManager.addTab(repoPath: repoPath, worktrees: worktrees)
+                }
+
+                // Apply saved card order
+                if !cardOrder.isEmpty {
+                    allWorktreeInfos.sort { a, b in
+                        let ai = cardOrder.firstIndex(of: a.info.path) ?? Int.max
+                        let bi = cardOrder.firstIndex(of: b.info.path) ?? Int.max
+                        return ai < bi
+                    }
+                }
+
+                self.allWorktrees = allWorktreeInfos
+                self.dashboardVC?.updateAgents(self.buildAgentDisplayInfos())
+                self.updateTitleBar()
+
+                if allWorktreeInfos.isEmpty {
+                    NSLog("No workspaces configured. Add paths to ~/.config/pmux/config.json")
+                }
+
+                // Start polling for agent status
+                self.statusPublisher.start(surfaces: self.surfaces)
+
+                // Start webhook server for agent hook events
+                if self.config.webhook.enabled {
+                    let server = WebhookServer(port: self.config.webhook.port) { [weak self] event in
+                        self?.statusPublisher.webhookProvider.handleEvent(event)
+                    }
+                    server.start()
+                    self.webhookServer = server
                 }
             }
-        }
-
-        // Apply saved card order
-        if !config.cardOrder.isEmpty {
-            allWorktreeInfos.sort { a, b in
-                let ai = config.cardOrder.firstIndex(of: a.info.path) ?? Int.max
-                let bi = config.cardOrder.firstIndex(of: b.info.path) ?? Int.max
-                return ai < bi
-            }
-        }
-
-        self.allWorktrees = allWorktreeInfos
-        dashboardVC?.updateAgents(buildAgentDisplayInfos())
-
-        // Auto-create tabs for all configured repos
-        for repoPath in config.workspacePaths {
-            let worktrees = WorktreeDiscovery.discover(repoPath: repoPath)
-            _ = workspaceManager.addTab(repoPath: repoPath, worktrees: worktrees)
-        }
-        updateTitleBar()
-
-        if allWorktreeInfos.isEmpty {
-            NSLog("No workspaces configured. Add paths to ~/.config/pmux/config.json")
-        }
-
-        // Start polling for agent status
-        statusPublisher.start(surfaces: surfaces)
-
-        // Start webhook server for agent hook events
-        if config.webhook.enabled {
-            let server = WebhookServer(port: config.webhook.port) { [weak self] event in
-                self?.statusPublisher.webhookProvider.handleEvent(event)
-            }
-            server.start()
-            webhookServer = server
         }
     }
 
@@ -759,19 +789,24 @@ class MainWindowController: NSWindowController {
 
     private func worktreeDidDelete(_ info: WorktreeInfo) {
         allWorktrees.removeAll { $0.info.path == info.path }
+        worktreeRepoCache.removeValue(forKey: info.path)
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
         statusPublisher.updateSurfaces(surfaces)
 
         if activeTabIndex > 0 {
             let repoIndex = activeTabIndex - 1
             if let tab = workspaceManager.tab(at: repoIndex) {
-                let updatedWorktrees = WorktreeDiscovery.discover(repoPath: tab.repoPath)
-                workspaceManager.updateWorktrees(at: repoIndex, worktrees: updatedWorktrees)
-                if let repoVC = repoVCs[tab.repoPath] {
-                    repoVC.configure(worktrees: updatedWorktrees, surfaces: surfaces)
-                }
-                if updatedWorktrees.isEmpty {
-                    performCloseRepo(projectName: tab.displayName)
+                let repoPath = tab.repoPath
+                let displayName = tab.displayName
+                WorktreeDiscovery.discoverAsync(repoPath: repoPath) { [weak self] updatedWorktrees in
+                    guard let self else { return }
+                    self.workspaceManager.updateWorktrees(at: repoIndex, worktrees: updatedWorktrees)
+                    if let repoVC = self.repoVCs[repoPath] {
+                        repoVC.configure(worktrees: updatedWorktrees, surfaces: self.surfaces)
+                    }
+                    if updatedWorktrees.isEmpty {
+                        self.performCloseRepo(projectName: displayName)
+                    }
                 }
             }
         }
@@ -1092,22 +1127,36 @@ extension MainWindowController {
     @objc private func handleNavigateToWorktree(_ notification: Notification) {
         guard let worktreePath = notification.userInfo?["worktreePath"] as? String else { return }
 
-        var repoPath: String?
+        // Check already-open tabs first (no git calls needed)
         if let tabIndex = workspaceManager.tabs.firstIndex(where: { tab in
             tab.worktrees.contains(where: { $0.path == worktreePath })
         }) {
-            repoPath = workspaceManager.tabs[tabIndex].repoPath
+            let repoPath = workspaceManager.tabs[tabIndex].repoPath
             switchToTab(tabIndex + 1)
-        } else {
-            guard let foundRepoPath = config.workspacePaths.first(where: { wsPath in
-                WorktreeDiscovery.discover(repoPath: wsPath).contains(where: { $0.path == worktreePath })
-            }) else { return }
-            repoPath = foundRepoPath
-            openRepoTab(repoPath: foundRepoPath)
+            if let repoVC = repoVCs[repoPath] {
+                repoVC.selectWorktree(byPath: worktreePath)
+            }
+            return
         }
 
-        if let rp = repoPath, let repoVC = repoVCs[rp] {
-            repoVC.selectWorktree(byPath: worktreePath)
+        // Fall back: search workspace paths asynchronously
+        let workspacePaths = config.workspacePaths
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var foundRepoPath: String?
+            for wsPath in workspacePaths {
+                let worktrees = WorktreeDiscovery.discover(repoPath: wsPath)
+                if worktrees.contains(where: { $0.path == worktreePath }) {
+                    foundRepoPath = wsPath
+                    break
+                }
+            }
+            DispatchQueue.main.async {
+                guard let self, let repoPath = foundRepoPath else { return }
+                self.openRepoTab(repoPath: repoPath)
+                if let repoVC = self.repoVCs[repoPath] {
+                    repoVC.selectWorktree(byPath: worktreePath)
+                }
+            }
         }
     }
 }

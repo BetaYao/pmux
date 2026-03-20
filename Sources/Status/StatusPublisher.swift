@@ -6,6 +6,7 @@ protocol StatusPublisherDelegate: AnyObject {
 
 /// Periodically polls terminal surfaces and detects agent status changes.
 /// Uses text pattern matching against visible terminal content.
+/// Polling runs on a background queue to avoid blocking the main thread.
 class StatusPublisher {
     weak var delegate: StatusPublisherDelegate?
 
@@ -18,9 +19,20 @@ class StatusPublisher {
     private(set) var webhookProvider = WebhookStatusProvider()
 
     private let pollInterval: TimeInterval = 2.0
+    private let pollQueue = DispatchQueue(label: "com.pmux.status-poll", qos: .utility)
+
+    // Cache: skip detection when viewport text hasn't changed
+    private var lastViewportHashes: [String: Int] = [:]
+    // Pre-lowercased agent names for faster matching
+    private var lowercasedAgentNames: [(name: String, def: AgentDef)] = []
 
     init(agentConfig: AgentDetectConfig = .default) {
         self.agentConfig = agentConfig
+        rebuildAgentNameCache()
+    }
+
+    private func rebuildAgentNameCache() {
+        lowercasedAgentNames = agentConfig.agents.map { ($0.name.lowercased(), $0) }
     }
 
     func start(surfaces: [String: TerminalSurface]) {
@@ -37,10 +49,10 @@ class StatusPublisher {
         webhookProvider.updateWorktrees(Array(surfaces.keys))
 
         timer = Timer.scheduledTimer(withTimeInterval: pollInterval, repeats: true) { [weak self] _ in
-            self?.pollAll()
+            self?.schedulePoll()
         }
         // Run immediately on start
-        pollAll()
+        schedulePoll()
     }
 
     func stop() {
@@ -59,25 +71,42 @@ class StatusPublisher {
         webhookProvider.updateWorktrees(Array(surfaces.keys))
     }
 
-    private func pollAll() {
-        for (path, surface) in surfaces {
+    private func schedulePoll() {
+        // Capture surfaces snapshot on main thread, then poll on background
+        let surfaceSnapshot = surfaces
+        pollQueue.async { [weak self] in
+            self?.pollAll(surfaceSnapshot)
+        }
+    }
+
+    private func pollAll(_ surfaceSnapshot: [String: TerminalSurface]) {
+        for (path, surface) in surfaceSnapshot {
+            let processStatus = surface.processStatus
+            let content = surface.readViewportText() ?? ""
+
+            // Skip expensive text analysis if viewport hasn't changed
+            let contentHash = content.hashValue
+            if let lastHash = lastViewportHashes[path], lastHash == contentHash {
+                continue
+            }
+            lastViewportHashes[path] = contentHash
+
             let tracker = trackers[path] ?? {
                 let t = DebouncedStatusTracker()
                 trackers[path] = t
                 return t
             }()
 
-            let processStatus = surface.processStatus
-            let content = surface.readViewportText() ?? ""
-
-            // Try to find matching agent def from content
-            let agentDef = findAgentDef(in: content)
+            // Lowercase once, reuse for both agent matching and status detection
+            let lowerContent = content.lowercased()
+            let agentDef = findAgentDef(inLowercased: lowerContent)
 
             let textStatus = detector.detect(
                 processStatus: processStatus,
-                shellInfo: nil,  // OSC 133 requires stream interception; future enhancement
+                shellInfo: nil,
                 content: content,
-                agentDef: agentDef
+                agentDef: agentDef,
+                lowercasedContent: lowerContent
             )
             let hookStatus = webhookProvider.status(for: path)
             let detected = AgentStatus.highestPriority([textStatus, hookStatus])
@@ -85,20 +114,22 @@ class StatusPublisher {
             let lastMessage = agentDef?.extractLastMessage(from: content, maxLen: 80) ?? ""
 
             let oldStatus = tracker.currentStatus
-            if tracker.update(status: detected) {
-                delegate?.statusDidChange(worktreePath: path, oldStatus: oldStatus, newStatus: detected, lastMessage: lastMessage)
-            }
-            // Always update last message even if status didn't change
+            let statusChanged = tracker.update(status: detected)
             lastMessages[path] = lastMessage
+
+            if statusChanged {
+                DispatchQueue.main.async { [weak self] in
+                    self?.delegate?.statusDidChange(worktreePath: path, oldStatus: oldStatus, newStatus: detected, lastMessage: lastMessage)
+                }
+            }
         }
     }
 
-    /// Find agent definition by checking if any known agent CLI name appears in the content
-    private func findAgentDef(in content: String) -> AgentDef? {
-        let lower = content.lowercased()
-        for agent in agentConfig.agents {
-            if lower.contains(agent.name.lowercased()) {
-                return agent
+    /// Find agent definition using pre-lowercased content and names
+    private func findAgentDef(inLowercased lowerContent: String) -> AgentDef? {
+        for (name, def) in lowercasedAgentNames {
+            if lowerContent.contains(name) {
+                return def
             }
         }
         return nil

@@ -15,8 +15,32 @@ struct WorktreeInfo {
 }
 
 enum WorktreeDiscovery {
+    private static let backgroundQueue = DispatchQueue(label: "com.pmux.git-discovery", qos: .userInitiated, attributes: .concurrent)
+
+    /// Cache for repo root lookups (path -> repo root)
+    private static var repoRootCache: [String: String] = [:]
+    private static let cacheLock = NSLock()
+
     /// Find the git toplevel (repo root) from any path inside the repo
     static func findRepoRoot(from path: String) -> String? {
+        // Check cache first
+        cacheLock.lock()
+        if let cached = repoRootCache[path] {
+            cacheLock.unlock()
+            return cached
+        }
+        cacheLock.unlock()
+
+        let result = _findRepoRootSync(from: path)
+        if let result {
+            cacheLock.lock()
+            repoRootCache[path] = result
+            cacheLock.unlock()
+        }
+        return result
+    }
+
+    private static func _findRepoRootSync(from path: String) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = ["rev-parse", "--show-toplevel"]
@@ -38,8 +62,42 @@ enum WorktreeDiscovery {
         return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Async version: find repo root on background queue, callback on main
+    static func findRepoRootAsync(from path: String, completion: @escaping (String?) -> Void) {
+        // Check cache first
+        cacheLock.lock()
+        if let cached = repoRootCache[path] {
+            cacheLock.unlock()
+            DispatchQueue.main.async { completion(cached) }
+            return
+        }
+        cacheLock.unlock()
+
+        backgroundQueue.async {
+            let result = _findRepoRootSync(from: path)
+            if let result {
+                cacheLock.lock()
+                repoRootCache[path] = result
+                cacheLock.unlock()
+            }
+            DispatchQueue.main.async { completion(result) }
+        }
+    }
+
     /// Discover all worktrees for a given repository path
     static func discover(repoPath: String) -> [WorktreeInfo] {
+        return _discoverSync(repoPath: repoPath)
+    }
+
+    /// Async version: discover worktrees on background queue, callback on main
+    static func discoverAsync(repoPath: String, completion: @escaping ([WorktreeInfo]) -> Void) {
+        backgroundQueue.async {
+            let result = _discoverSync(repoPath: repoPath)
+            DispatchQueue.main.async { completion(result) }
+        }
+    }
+
+    private static func _discoverSync(repoPath: String) -> [WorktreeInfo] {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = ["worktree", "list", "--porcelain"]

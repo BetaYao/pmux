@@ -13,12 +13,34 @@ class TerminalSurface {
 
     /// Create the terminal surface and add it to the given container view.
     /// If useTmux is true, the surface runs inside a tmux session for persistence.
+    /// When a sessionName is provided, tmux session existence is checked asynchronously
+    /// and the surface is created once the check completes.
     func create(in container: NSView, workingDirectory: String? = nil, sessionName: String? = nil) -> Bool {
         guard let app = GhosttyBridge.shared.app else {
             NSLog("GhosttyBridge not initialized")
             return false
         }
 
+        if let sessionName {
+            // Check tmux session existence on background thread to avoid blocking UI
+            Self.tmuxSessionExistsAsync(sessionName) { [weak self] exists in
+                guard let self else { return }
+                let tmuxCommand: String
+                if exists {
+                    tmuxCommand = "tmux attach-session -t \(sessionName) \\; set-option status off"
+                } else {
+                    tmuxCommand = "tmux new-session -s \(sessionName) \\; set-option status off"
+                }
+                self._createWithCommand(app: app, container: container, workingDirectory: workingDirectory, command: tmuxCommand)
+            }
+            return true  // Surface creation is deferred
+        }
+
+        _createWithCommand(app: app, container: container, workingDirectory: workingDirectory, command: nil)
+        return surface != nil
+    }
+
+    private func _createWithCommand(app: ghostty_app_t, container: NSView, workingDirectory: String?, command: String?) {
         let termView = GhosttyNSView(frame: container.bounds)
         termView.wantsLayer = true
 
@@ -27,24 +49,13 @@ class TerminalSurface {
         config.platform.macos.nsview = Unmanaged.passUnretained(termView).toOpaque()
         config.scale_factor = Double(container.window?.backingScaleFactor ?? 2.0)
 
-        // Build tmux command if session name provided
-        let tmuxCommand: String? = sessionName.map { name in
-            // Check if session exists; attach if so, create if not
-            if Self.tmuxSessionExists(name) {
-                return "tmux attach-session -t \(name) \\; set-option status off"
-            } else {
-                return "tmux new-session -s \(name) \\; set-option status off"
-            }
-        }
-
-        // Use withCString closures to keep C strings alive during surface creation
         let createBlock: () -> Void = {
             self._createSurface(app: app, config: &config, view: termView, container: container)
         }
 
-        if let workingDirectory, let tmuxCommand {
+        if let workingDirectory, let command {
             workingDirectory.withCString { wdPtr in
-                tmuxCommand.withCString { cmdPtr in
+                command.withCString { cmdPtr in
                     config.working_directory = wdPtr
                     config.command = cmdPtr
                     createBlock()
@@ -55,16 +66,14 @@ class TerminalSurface {
                 config.working_directory = wdPtr
                 createBlock()
             }
-        } else if let tmuxCommand {
-            tmuxCommand.withCString { cmdPtr in
+        } else if let command {
+            command.withCString { cmdPtr in
                 config.command = cmdPtr
                 createBlock()
             }
         } else {
             createBlock()
         }
-
-        return surface != nil
     }
 
     private func _createSurface(app: ghostty_app_t, config: inout ghostty_surface_config_s, view: GhosttyNSView, container: NSView) {
@@ -95,19 +104,25 @@ class TerminalSurface {
         ghostty_surface_set_focus(s, true)
     }
 
-    /// Check if a tmux session with given name exists
-    private static func tmuxSessionExists(_ name: String) -> Bool {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["tmux", "has-session", "-t", name]
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
-        do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
-        } catch {
-            return false
+    /// Check if a tmux session with given name exists (async, avoids blocking main thread)
+    private static func tmuxSessionExistsAsync(_ name: String, completion: @escaping (Bool) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = ["tmux", "has-session", "-t", name]
+            process.standardOutput = Pipe()
+            process.standardError = Pipe()
+            let exists: Bool
+            do {
+                try process.run()
+                process.waitUntilExit()
+                exists = process.terminationStatus == 0
+            } catch {
+                exists = false
+            }
+            DispatchQueue.main.async {
+                completion(exists)
+            }
         }
     }
 

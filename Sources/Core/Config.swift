@@ -82,16 +82,26 @@ struct Config: Codable {
         }
     }
 
+    private static let saveQueue = DispatchQueue(label: "com.pmux.config-save", qos: .utility)
+    private static var pendingSaveWorkItem: DispatchWorkItem?
+
     func save() {
-        do {
-            try FileManager.default.createDirectory(at: Config.configDir, withIntermediateDirectories: true)
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(self)
-            try data.write(to: Config.configPath)
-        } catch {
-            NSLog("Failed to save config: \(error)")
+        // Debounced async save: coalesces rapid saves into a single write
+        Config.pendingSaveWorkItem?.cancel()
+        let configCopy = self
+        let workItem = DispatchWorkItem {
+            do {
+                try FileManager.default.createDirectory(at: Config.configDir, withIntermediateDirectories: true)
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                let data = try encoder.encode(configCopy)
+                try data.write(to: Config.configPath, options: .atomic)
+            } catch {
+                NSLog("Failed to save config: \(error)")
+            }
         }
+        Config.pendingSaveWorkItem = workItem
+        Config.saveQueue.asyncAfter(deadline: .now() + 0.3, execute: workItem)
     }
 }
 
