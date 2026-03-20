@@ -33,14 +33,7 @@ final class PanelBackdropView: NSView {
         wantsLayer = true
         isHidden = true
         translatesAutoresizingMaskIntoConstraints = false
-    }
-
-    // MARK: - Drawing
-
-    override var wantsUpdateLayer: Bool { true }
-
-    override func updateLayer() {
-        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.2).cgColor
+        layer?.backgroundColor = SemanticColors.backdropBlack.cgColor
     }
 
     // MARK: - Events

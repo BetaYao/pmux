@@ -166,7 +166,7 @@ enum SemanticColors {
         let p2 = a.isDark ? NSColor(hex: 0x111111) : NSColor(hex: 0xf7f8fb)
         return acc.blended(withFraction: 0.78, of: p2) ?? p2
     }
-    static let backdropBlack: NSColor = NSColor.black.withAlphaComponent(0.2)
+    static let backdropBlack: NSColor = NSColor.black.withAlphaComponent(0.4)
     static let threadRowBg: NSColor = NSColor(name: nil) { a in
         let acc = a.isDark ? NSColor(hex: 0x4f8cff) : NSColor(hex: 0x2563eb)
         return acc.withAlphaComponent(0.07)

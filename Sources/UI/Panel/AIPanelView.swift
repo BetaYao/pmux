@@ -16,8 +16,15 @@ final class AIPanelView: NSView, NSTextViewDelegate {
 
     // MARK: - Subviews
 
+    private let sparklesIcon: NSTextField = {
+        let label = NSTextField(labelWithString: "\u{2728}")
+        label.font = NSFont.systemFont(ofSize: 13)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
     private let headerLabel: NSTextField = {
-        let label = NSTextField(labelWithString: "AI 助手")
+        let label = NSTextField(labelWithString: "AI Assistant")
         label.font = NSFont.boldSystemFont(ofSize: 13)
         label.textColor = SemanticColors.text
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -25,11 +32,14 @@ final class AIPanelView: NSView, NSTextViewDelegate {
     }()
 
     private let closeButton: NSButton = {
-        let button = NSButton(title: "×", target: nil, action: nil)
+        let button = NSButton(title: "\u{00D7}", target: nil, action: nil)
         button.identifier = NSUserInterfaceItemIdentifier("panel.ai.close")
         button.isBordered = false
-        button.font = NSFont.systemFont(ofSize: 16, weight: .medium)
+        button.font = NSFont.systemFont(ofSize: 14, weight: .medium)
         button.contentTintColor = SemanticColors.muted
+        button.wantsLayer = true
+        button.layer?.backgroundColor = NSColor(white: 1, alpha: 0.03).cgColor
+        button.layer?.cornerRadius = 4
         button.translatesAutoresizingMaskIntoConstraints = false
         return button
     }()
@@ -94,10 +104,9 @@ final class AIPanelView: NSView, NSTextViewDelegate {
     }()
 
     private let sendButton: NSButton = {
-        let button = NSButton(title: "发送", target: nil, action: nil)
+        let button = NSButton(image: NSImage(systemSymbolName: "arrow.up", accessibilityDescription: "Send")!, target: nil, action: nil)
         button.identifier = NSUserInterfaceItemIdentifier("panel.ai.send")
         button.isBordered = false
-        button.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
         button.contentTintColor = SemanticColors.text
         button.wantsLayer = true
         button.translatesAutoresizingMaskIntoConstraints = false
@@ -193,6 +202,7 @@ final class AIPanelView: NSView, NSTextViewDelegate {
         inputTextView.delegate = self
 
         addSubview(leftBorder)
+        addSubview(sparklesIcon)
         addSubview(headerLabel)
         addSubview(closeButton)
         addSubview(headerBorder)
@@ -214,12 +224,19 @@ final class AIPanelView: NSView, NSTextViewDelegate {
             leftBorder.bottomAnchor.constraint(equalTo: bottomAnchor),
             leftBorder.widthAnchor.constraint(equalToConstant: 1),
 
-            // Header
-            headerLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            headerLabel.centerYAnchor.constraint(equalTo: topAnchor, constant: 20),
+            // Sparkles icon
+            sparklesIcon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            sparklesIcon.centerYAnchor.constraint(equalTo: topAnchor, constant: 20),
 
+            // Header
+            headerLabel.leadingAnchor.constraint(equalTo: sparklesIcon.trailingAnchor, constant: 6),
+            headerLabel.centerYAnchor.constraint(equalTo: sparklesIcon.centerYAnchor),
+
+            // Close button
             closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             closeButton.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
+            closeButton.widthAnchor.constraint(equalToConstant: 24),
+            closeButton.heightAnchor.constraint(equalToConstant: 24),
 
             // Header border
             headerBorder.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -251,20 +268,22 @@ final class AIPanelView: NSView, NSTextViewDelegate {
             // Send button
             sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             sendButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
-            sendButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 40),
+            sendButton.widthAnchor.constraint(equalToConstant: 28),
+            sendButton.heightAnchor.constraint(equalToConstant: 28),
         ])
 
         applyShadow()
+        applyColors()
 
         // Add welcome message
-        addBubble(role: .assistant, text: "你好，我是工作区助手。可以问我关于当前 project、thread 或命令的问题。（原型演示）")
+        addBubble(role: .assistant, text: "Hello, I'm the workspace assistant. Ask me about this project, threads, or commands. (Prototype demo)")
     }
 
     private func applyShadow() {
         shadow = NSShadow()
-        layer?.shadowColor = NSColor.black.withAlphaComponent(0.12).cgColor
+        layer?.shadowColor = NSColor.black.withAlphaComponent(0.3).cgColor
         layer?.shadowOffset = CGSize(width: -8, height: 0)
-        layer?.shadowRadius = 16
+        layer?.shadowRadius = 24
         layer?.shadowOpacity = 1.0
     }
 
@@ -293,9 +312,26 @@ final class AIPanelView: NSView, NSTextViewDelegate {
             label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
         ])
 
-        container.layer?.cornerRadius = 10
+        // Set bubble colors and corner radii at creation time
+        if role == .user {
+            container.layer?.backgroundColor = NSColor(hex: 0x263554).cgColor
+            // cornerRadius 8/8/2/8 — use maskedCorners for per-corner radii
+            container.layer?.cornerRadius = 8
+            container.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMaxXMaxYCorner]
+            // Bottom-left gets smaller radius via a separate approach — CALayer maskedCorners
+            // only toggles corners on/off. Use uniform 8 and set bottom-right to small via mask.
+            // For simplicity, set cornerRadius to 8 and mask out bottom-left for the 2px effect.
+            // Actually maskedCorners only enables/disables, so approximate: use 8 overall.
+            // The spec says 8/8/2/8 — top-left/top-right/bottom-right/bottom-left → bottom-right = 2
+            // Re-reading: "cornerRadius 8/8/2/8" = TL/TR/BR/BL → BR is 2
+            // AppKit CALayer doesn't support per-corner radii easily; use 8 as dominant and accept approximation.
+        } else {
+            container.layer?.backgroundColor = NSColor(hex: 0x222222).cgColor
+            // cornerRadius 8/8/8/2 — TL/TR/BR/BL → BL is 2
+            container.layer?.cornerRadius = 8
+        }
 
-        // Mark the role via identifier for updateLayer
+        // Mark the role via identifier for appearance updates
         container.identifier = NSUserInterfaceItemIdentifier(role == .user ? "bubble.user" : "bubble.assistant")
 
         return container
@@ -303,36 +339,42 @@ final class AIPanelView: NSView, NSTextViewDelegate {
 
     // MARK: - Drawing
 
-    override var wantsUpdateLayer: Bool { true }
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyColors()
+    }
 
-    override func updateLayer() {
+    override func layout() {
+        super.layout()
+        layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: 0, cornerHeight: 0, transform: nil)
+    }
+
+    private func applyColors() {
         layer?.backgroundColor = SemanticColors.panel.cgColor
-        leftBorder.layer?.backgroundColor = SemanticColors.line.withAlphaComponent(0.45).cgColor
+        leftBorder.layer?.backgroundColor = SemanticColors.line.cgColor
         headerBorder.layer?.backgroundColor = SemanticColors.line.cgColor
         inputBorder.layer?.backgroundColor = SemanticColors.line.cgColor
-        inputTextView.backgroundColor = SemanticColors.panel2
+        inputTextView.backgroundColor = SemanticColors.tileBg
 
-        // Send button tinted background: 22% accent + 78% panel2
-        let accent = SemanticColors.accent
-        let panel2 = SemanticColors.panel2
-        sendButton.layer?.backgroundColor = accent.blended(withFraction: 0.78, of: panel2)?.cgColor
-
-        sendButton.layer?.cornerRadius = 4
+        sendButton.layer?.backgroundColor = SemanticColors.accent.cgColor
+        sendButton.layer?.cornerRadius = 6
 
         // Update bubble backgrounds
+        let userBg = NSColor(hex: 0x263554).cgColor
+        let assistantBg = NSColor(hex: 0x222222).cgColor
         for view in messagesStack.arrangedSubviews {
             if view.identifier?.rawValue == "bubble.user" {
-                // User bubble: 18% accent + 82% panel2
-                view.layer?.backgroundColor = accent.blended(withFraction: 0.82, of: panel2)?.cgColor
+                view.layer?.backgroundColor = userBg
             } else {
-                // Assistant bubble: panel2
-                view.layer?.backgroundColor = panel2.cgColor
+                view.layer?.backgroundColor = assistantBg
             }
         }
 
         // Input scroll view background
         inputScrollView.wantsLayer = true
-        inputScrollView.layer?.backgroundColor = SemanticColors.panel2.cgColor
+        inputScrollView.layer?.backgroundColor = SemanticColors.tileBg.cgColor
+        inputScrollView.layer?.borderWidth = 1
+        inputScrollView.layer?.borderColor = SemanticColors.line.cgColor
         inputScrollView.layer?.cornerRadius = 6
     }
 
@@ -356,7 +398,7 @@ final class AIPanelView: NSView, NSTextViewDelegate {
 
         // Placeholder response after ~450ms
         let truncated = String(text.prefix(80))
-        let response = "收到：\(truncated)"
+        let response = "Received: \(truncated)"
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
             self?.addBubble(role: .assistant, text: response)
         }

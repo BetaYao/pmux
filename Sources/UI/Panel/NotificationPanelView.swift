@@ -16,20 +16,38 @@ final class NotificationPanelView: NSView {
 
     // MARK: - Subviews
 
+    private let bellIcon: NSTextField = {
+        let label = NSTextField(labelWithString: "\u{1F514}")
+        label.font = NSFont.systemFont(ofSize: 13)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
     private let headerLabel: NSTextField = {
-        let label = NSTextField(labelWithString: "通知")
+        let label = NSTextField(labelWithString: "Notifications")
         label.font = NSFont.boldSystemFont(ofSize: 13)
         label.textColor = SemanticColors.text
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
 
+    private let countLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "0")
+        label.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        label.textColor = SemanticColors.muted
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
     private let closeButton: NSButton = {
-        let button = NSButton(title: "×", target: nil, action: nil)
+        let button = NSButton(title: "\u{00D7}", target: nil, action: nil)
         button.identifier = NSUserInterfaceItemIdentifier("panel.notification.close")
         button.isBordered = false
-        button.font = NSFont.systemFont(ofSize: 16, weight: .medium)
+        button.font = NSFont.systemFont(ofSize: 14, weight: .medium)
         button.contentTintColor = SemanticColors.muted
+        button.wantsLayer = true
+        button.layer?.backgroundColor = NSColor(white: 1, alpha: 0.03).cgColor
+        button.layer?.cornerRadius = 4
         button.translatesAutoresizingMaskIntoConstraints = false
         return button
     }()
@@ -106,6 +124,7 @@ final class NotificationPanelView: NSView {
 
     func updateNotifications(_ items: [(title: String, meta: String, worktreePath: String)]) {
         self.items = items
+        countLabel.stringValue = "\(items.count)"
 
         // Remove old items
         for view in contentStack.arrangedSubviews {
@@ -137,7 +156,9 @@ final class NotificationPanelView: NSView {
         closeButton.action = #selector(closeClicked)
 
         addSubview(leftBorder)
+        addSubview(bellIcon)
         addSubview(headerLabel)
+        addSubview(countLabel)
         addSubview(closeButton)
         addSubview(headerBorder)
         addSubview(scrollView)
@@ -151,12 +172,23 @@ final class NotificationPanelView: NSView {
             leftBorder.bottomAnchor.constraint(equalTo: bottomAnchor),
             leftBorder.widthAnchor.constraint(equalToConstant: 1),
 
-            // Header
-            headerLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            headerLabel.centerYAnchor.constraint(equalTo: topAnchor, constant: 20),
+            // Bell icon
+            bellIcon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            bellIcon.centerYAnchor.constraint(equalTo: topAnchor, constant: 20),
 
+            // Header
+            headerLabel.leadingAnchor.constraint(equalTo: bellIcon.trailingAnchor, constant: 6),
+            headerLabel.centerYAnchor.constraint(equalTo: bellIcon.centerYAnchor),
+
+            // Count
+            countLabel.leadingAnchor.constraint(equalTo: headerLabel.trailingAnchor, constant: 6),
+            countLabel.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
+
+            // Close button
             closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             closeButton.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
+            closeButton.widthAnchor.constraint(equalToConstant: 24),
+            closeButton.heightAnchor.constraint(equalToConstant: 24),
 
             // Header border
             headerBorder.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -175,13 +207,14 @@ final class NotificationPanelView: NSView {
         ])
 
         applyShadow()
+        applyColors()
     }
 
     private func applyShadow() {
         shadow = NSShadow()
-        layer?.shadowColor = NSColor.black.withAlphaComponent(0.12).cgColor
+        layer?.shadowColor = NSColor.black.withAlphaComponent(0.3).cgColor
         layer?.shadowOffset = CGSize(width: -8, height: 0)
-        layer?.shadowRadius = 16
+        layer?.shadowRadius = 24
         layer?.shadowOpacity = 1.0
     }
 
@@ -190,6 +223,11 @@ final class NotificationPanelView: NSView {
         container.wantsLayer = true
         container.identifier = NSUserInterfaceItemIdentifier("panel.notification.item.\(index)")
         container.translatesAutoresizingMaskIntoConstraints = false
+
+        container.layer?.backgroundColor = SemanticColors.tileBg.cgColor
+        container.layer?.borderWidth = 1
+        container.layer?.borderColor = SemanticColors.line.cgColor
+        container.layer?.cornerRadius = 6
 
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
@@ -226,17 +264,28 @@ final class NotificationPanelView: NSView {
 
     // MARK: - Drawing
 
-    override var wantsUpdateLayer: Bool { true }
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyColors()
+    }
 
-    override func updateLayer() {
+    override func layout() {
+        super.layout()
+        layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: 0, cornerHeight: 0, transform: nil)
+    }
+
+    private func applyColors() {
         layer?.backgroundColor = SemanticColors.panel.cgColor
-        leftBorder.layer?.backgroundColor = SemanticColors.line.withAlphaComponent(0.45).cgColor
+        leftBorder.layer?.backgroundColor = SemanticColors.line.cgColor
         headerBorder.layer?.backgroundColor = SemanticColors.line.cgColor
 
         // Update item backgrounds
+        let itemBg = SemanticColors.tileBg.cgColor
+        let borderColor = SemanticColors.line.cgColor
         for view in contentStack.arrangedSubviews {
-            view.layer?.backgroundColor = SemanticColors.panel2.cgColor
-            view.layer?.cornerRadius = 8
+            view.layer?.backgroundColor = itemBg
+            view.layer?.borderColor = borderColor
+            view.layer?.cornerRadius = 6
         }
     }
 
