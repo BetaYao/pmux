@@ -214,4 +214,29 @@ enum SemanticColors {
     static let tileBarBg: NSColor = NSColor(name: nil) { a in
         a.isDark ? NSColor(hex: 0x1a1a1a) : NSColor(hex: 0xf0f1f4)
     }
+
+    // MARK: - Project tab tokens
+
+    static let tabSelectedBg: NSColor = NSColor(name: nil) { a in
+        a.isDark ? NSColor(hex: 0x1a2a1a) : NSColor(hex: 0xe8f5e9)
+    }
+    static let tabSelectedBorder: NSColor = NSColor(name: nil) { a in
+        a.isDark ? NSColor(hex: 0x33c17b) : NSColor(hex: 0x1f9d63)
+    }
+    static let tabHoverBg: NSColor = NSColor(name: nil) { a in
+        a.isDark ? NSColor(hex: 0x222222) : NSColor(hex: 0xe0e2e8)
+    }
+    static let tabHoverBorder: NSColor = NSColor(name: nil) { a in
+        a.isDark
+            ? NSColor.white.withAlphaComponent(0.08)
+            : NSColor.black.withAlphaComponent(0.08)
+    }
+    static let iconButtonHoverBg: NSColor = NSColor(name: nil) { a in
+        a.isDark
+            ? NSColor.white.withAlphaComponent(0.07)
+            : NSColor.black.withAlphaComponent(0.07)
+    }
+    static let iconButtonHoverTint: NSColor = NSColor(name: nil) { a in
+        a.isDark ? NSColor.white : NSColor(hex: 0x1f232b)
+    }
 }

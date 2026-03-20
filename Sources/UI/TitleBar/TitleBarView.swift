@@ -191,7 +191,7 @@ final class TitleBarView: NSView, LayoutPopoverDelegate {
 
         // Separator 1 (after traffic lights)
         leftSeparator1.wantsLayer = true
-        leftSeparator1.layer?.backgroundColor = NSColor(hex: 0x3a3a3a).cgColor
+        leftSeparator1.layer?.backgroundColor = SemanticColors.line.cgColor
         leftSeparator1.translatesAutoresizingMaskIntoConstraints = false
         leftArcBlock.addSubview(leftSeparator1)
 
@@ -201,7 +201,7 @@ final class TitleBarView: NSView, LayoutPopoverDelegate {
 
         // Separator 2 (after dashboard, before project tabs) — created but added dynamically
         leftSeparator2.wantsLayer = true
-        leftSeparator2.layer?.backgroundColor = NSColor(hex: 0x3a3a3a).cgColor
+        leftSeparator2.layer?.backgroundColor = SemanticColors.line.cgColor
         leftSeparator2.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             leftSeparator2.widthAnchor.constraint(equalToConstant: 1),
@@ -402,12 +402,14 @@ final class TitleBarView: NSView, LayoutPopoverDelegate {
             hover.bottomAnchor.constraint(equalTo: button.bottomAnchor),
         ])
         hover.onHoverChanged = { [weak button] hovered in
-            button?.layer?.backgroundColor = hovered
-                ? NSColor.white.withAlphaComponent(0.07).cgColor
-                : NSColor.clear.cgColor
-            button?.contentTintColor = hovered
-                ? NSColor.white
-                : NSColor(hex: 0x888888)
+            if let button = button {
+                button.layer?.backgroundColor = hovered
+                    ? button.resolvedCGColor(SemanticColors.iconButtonHoverBg)
+                    : NSColor.clear.cgColor
+                button.contentTintColor = hovered
+                    ? SemanticColors.iconButtonHoverTint
+                    : NSColor(hex: 0x888888)
+            }
         }
     }
 
@@ -494,8 +496,8 @@ final class TitleBarView: NSView, LayoutPopoverDelegate {
         let saved = NSAppearance.current
         NSAppearance.current = window?.effectiveAppearance ?? NSApp.effectiveAppearance
         updateArcBlockColors()
-        leftSeparator1.layer?.backgroundColor = NSColor(hex: 0x3a3a3a).cgColor
-        leftSeparator2.layer?.backgroundColor = NSColor(hex: 0x3a3a3a).cgColor
+        leftSeparator1.layer?.backgroundColor = SemanticColors.line.cgColor
+        leftSeparator2.layer?.backgroundColor = SemanticColors.line.cgColor
         addButton.contentTintColor = SemanticColors.muted
         updateDashboardTabAppearance()
         notifBadge.layer?.backgroundColor = SemanticColors.danger.cgColor
@@ -656,11 +658,20 @@ private final class ProjectTabView: NSView {
             closeButton.heightAnchor.constraint(equalToConstant: 18),
         ])
 
-        let click = NSClickGestureRecognizer(target: self, action: #selector(selectTapped))
-        addGestureRecognizer(click)
     }
 
-    @objc private func selectTapped() {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard frame.contains(point) else { return nil }
+        // Let close button handle its own clicks
+        let local = convert(point, from: superview)
+        if closeButton.frame.contains(local) {
+            return closeButton
+        }
+        // All other clicks go to self (so mouseDown fires)
+        return self
+    }
+
+    override func mouseDown(with event: NSEvent) {
         onSelect?()
     }
 
@@ -670,14 +681,14 @@ private final class ProjectTabView: NSView {
 
     private func updateAppearance() {
         if isSelected {
-            layer?.backgroundColor = NSColor(hex: 0x1a2a1a).cgColor
+            layer?.backgroundColor = resolvedCGColor(SemanticColors.tabSelectedBg)
             layer?.borderWidth = 1.5
-            layer?.borderColor = NSColor(hex: 0x33c17b).cgColor
+            layer?.borderColor = resolvedCGColor(SemanticColors.tabSelectedBorder)
             nameLabel.textColor = SemanticColors.text
         } else if isHovered {
-            layer?.backgroundColor = NSColor(hex: 0x222222).cgColor
+            layer?.backgroundColor = resolvedCGColor(SemanticColors.tabHoverBg)
             layer?.borderWidth = 1.5
-            layer?.borderColor = NSColor.white.withAlphaComponent(0.08).cgColor
+            layer?.borderColor = resolvedCGColor(SemanticColors.tabHoverBorder)
             nameLabel.textColor = SemanticColors.text
         } else {
             layer?.backgroundColor = NSColor.clear.cgColor

@@ -11,6 +11,7 @@ class AppPage {
 
     @discardableResult
     func launch(testConfigPath: String? = nil) -> Self {
+        app.launchArguments += ["-UITesting"]
         if let path = testConfigPath {
             app.launchArguments += ["-UITestConfig", path]
         }
