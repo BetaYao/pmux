@@ -2,8 +2,8 @@ import AppKit
 
 class MainWindowController: NSWindowController {
     private let titleBar = TitleBarView()
-    private let statusBarView = StatusBarView()
     private let contentContainer = NSView()
+    private var windowTrackingArea: NSTrackingArea?
     private let panelBackdrop = PanelBackdropView()
     private let notificationPanel = NotificationPanelView()
     private let aiPanel = AIPanelView()
@@ -267,10 +267,6 @@ class MainWindowController: NSWindowController {
         contentContainer.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(contentContainer)
 
-        // Status bar (32px, bottom)
-        statusBarView.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(statusBarView)
-
         NSLayoutConstraint.activate([
             updateBanner.topAnchor.constraint(equalTo: contentView.topAnchor),
             updateBanner.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
@@ -283,12 +279,11 @@ class MainWindowController: NSWindowController {
             contentContainer.topAnchor.constraint(equalTo: titleBar.bottomAnchor),
             contentContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             contentContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            contentContainer.bottomAnchor.constraint(equalTo: statusBarView.topAnchor),
-
-            statusBarView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            statusBarView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            statusBarView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            contentContainer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
         ])
+
+        // Window hover tracking for arc block styling
+        setupWindowHoverTracking(contentView: contentView)
 
         // Panel backdrop (overlay, z-order above content)
         panelBackdrop.delegate = self
@@ -297,7 +292,7 @@ class MainWindowController: NSWindowController {
             panelBackdrop.topAnchor.constraint(equalTo: titleBar.bottomAnchor),
             panelBackdrop.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             panelBackdrop.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            panelBackdrop.bottomAnchor.constraint(equalTo: statusBarView.topAnchor),
+            panelBackdrop.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
         ])
 
         // Notification panel (overlay, right side, 360px)
@@ -306,7 +301,7 @@ class MainWindowController: NSWindowController {
         NSLayoutConstraint.activate([
             notificationPanel.topAnchor.constraint(equalTo: titleBar.bottomAnchor),
             notificationPanel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            notificationPanel.bottomAnchor.constraint(equalTo: statusBarView.topAnchor),
+            notificationPanel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             notificationPanel.widthAnchor.constraint(equalToConstant: 360),
         ])
 
@@ -316,7 +311,7 @@ class MainWindowController: NSWindowController {
         NSLayoutConstraint.activate([
             aiPanel.topAnchor.constraint(equalTo: titleBar.bottomAnchor),
             aiPanel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            aiPanel.bottomAnchor.constraint(equalTo: statusBarView.topAnchor),
+            aiPanel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             aiPanel.widthAnchor.constraint(equalToConstant: 360),
         ])
 
@@ -340,10 +335,29 @@ class MainWindowController: NSWindowController {
 
         embedViewController(dashboard)
         updateTitleBar()
-        updateStatusBar()
+
 
         // Set title bar layout state
         titleBar.setCurrentLayout(savedLayout)
+    }
+
+    private func setupWindowHoverTracking(contentView: NSView) {
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        contentView.addTrackingArea(area)
+        windowTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        titleBar.setWindowHovered(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        titleBar.setWindowHovered(false)
     }
 
     private func embedViewController(_ vc: NSViewController) {
@@ -392,27 +406,6 @@ class MainWindowController: NSWindowController {
         titleBar.renderTabs()
     }
 
-    private func updateStatusBar() {
-        if activeTabIndex == 0 {
-            // Dashboard mode
-            if let dashboard = dashboardVC, !dashboard.selectedAgentId.isEmpty {
-                let agents = buildAgentDisplayInfos()
-                if let selected = agents.first(where: { $0.id == dashboard.selectedAgentId }) {
-                    statusBarView.updateStatus("Status: Dashboard ready \u{00B7} Focus \(selected.name)")
-                } else {
-                    statusBarView.updateStatus("Status: Dashboard ready")
-                }
-            } else {
-                statusBarView.updateStatus("Status: Dashboard ready")
-            }
-        } else {
-            let repoIndex = activeTabIndex - 1
-            if let tab = workspaceManager.tab(at: repoIndex) {
-                let thread = tab.worktrees.first?.branch ?? ""
-                statusBarView.updateStatus("Status: \(tab.displayName) active \u{00B7} Thread \(thread)")
-            }
-        }
-    }
 
     // Cache worktree path -> repo path mapping to avoid repeated git calls
     private var worktreeRepoCache: [String: String] = [:]
@@ -527,7 +520,7 @@ class MainWindowController: NSWindowController {
         }
 
         updateTitleBar()
-        updateStatusBar()
+
     }
 
     private func getOrCreateRepoVC(for tab: WorkspaceTab) -> RepoViewController {
@@ -812,7 +805,7 @@ class MainWindowController: NSWindowController {
         }
 
         updateTitleBar()
-        updateStatusBar()
+
     }
 
     deinit {
@@ -872,7 +865,7 @@ class MainWindowController: NSWindowController {
         statusPublisher.updateSurfaces(surfaces)
         updateTitleBar()
         switchToTab(activeTabIndex)
-        updateStatusBar()
+
     }
 
     private func killTmuxSession(_ name: String) {
@@ -971,7 +964,18 @@ extension MainWindowController: TitleBarDelegate {
         config.themeMode = next.rawValue
         config.save()
         ThemeMode.applyAppearance(next)
-        statusBarView.updateStatus("Status: Theme switched to \(next.rawValue)")
+    }
+    
+    func titleBarDidRequestCloseWindow() {
+        window?.close()
+    }
+    
+    func titleBarDidRequestMiniaturizeWindow() {
+        window?.miniaturize(nil)
+    }
+    
+    func titleBarDidRequestZoomWindow() {
+        window?.zoom(nil)
     }
 }
 
@@ -1116,7 +1120,6 @@ extension MainWindowController: StatusPublisherDelegate {
                 }
             }
             self.updateTitleBar()
-            self.updateStatusBar()
         }
     }
 }
