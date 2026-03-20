@@ -8,10 +8,19 @@ enum DashboardLayout: String, CaseIterable {
 
     var displayName: String {
         switch self {
-        case .grid: return "1 Grid"
-        case .leftRight: return "2 左大右列"
-        case .topSmall: return "3 上小下大"
-        case .topLarge: return "4 上大下小"
+        case .grid: return "Grid"
+        case .leftRight: return "Left-Right"
+        case .topSmall: return "Top-Small"
+        case .topLarge: return "Top-Large"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .grid: return "square.grid.2x2"
+        case .leftRight: return "rectangle.lefthalf.filled"
+        case .topSmall: return "rectangle.tophalf.inset.filled"
+        case .topLarge: return "rectangle.bottomhalf.inset.filled"
         }
     }
 }
@@ -24,7 +33,6 @@ final class LayoutPopoverView: NSView {
     weak var delegate: LayoutPopoverDelegate?
     private(set) var currentLayout: DashboardLayout = .leftRight
     private var itemViews: [LayoutItemView] = []
-    private let contentStack = NSStackView()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -67,32 +75,47 @@ final class LayoutPopoverView: NSView {
         layer?.shadowOffset = NSSize(width: 0, height: -6)
         layer?.shadowColor = NSColor.black.withAlphaComponent(0.18).cgColor
 
-        // Content stack
-        contentStack.orientation = .vertical
-        contentStack.spacing = 1
-        contentStack.edgeInsets = NSEdgeInsets(top: 4, left: 4, bottom: 4, right: 4)
-        contentStack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(contentStack)
+        // Build items with dividers
+        var topAnchorRef = topAnchor
+        let allCases = DashboardLayout.allCases
+        for (index, layoutCase) in allCases.enumerated() {
+            // Divider between items (not before first)
+            if index > 0 {
+                let divider = NSView()
+                divider.wantsLayer = true
+                divider.translatesAutoresizingMaskIntoConstraints = false
+                divider.identifier = NSUserInterfaceItemIdentifier("layout.divider.\(index)")
+                addSubview(divider)
+                NSLayoutConstraint.activate([
+                    divider.topAnchor.constraint(equalTo: topAnchorRef),
+                    divider.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+                    divider.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+                    divider.heightAnchor.constraint(equalToConstant: 1),
+                ])
+                topAnchorRef = divider.bottomAnchor
+            }
 
-        // Build items
-        for layout in DashboardLayout.allCases {
-            let item = LayoutItemView(layout: layout)
+            let item = LayoutItemView(layout: layoutCase)
             item.target = self
             item.action = #selector(itemClicked(_:))
-            item.identifier = NSUserInterfaceItemIdentifier("layout.item.\(layout.rawValue)")
-            contentStack.addArrangedSubview(item)
+            item.identifier = NSUserInterfaceItemIdentifier("layout.item.\(layoutCase.rawValue)")
+            addSubview(item)
             itemViews.append(item)
+
+            NSLayoutConstraint.activate([
+                item.topAnchor.constraint(equalTo: topAnchorRef),
+                item.leadingAnchor.constraint(equalTo: leadingAnchor),
+                item.trailingAnchor.constraint(equalTo: trailingAnchor),
+            ])
+            topAnchorRef = item.bottomAnchor
         }
 
         NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: 200),
-
-            contentStack.topAnchor.constraint(equalTo: topAnchor),
-            contentStack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            contentStack.trailingAnchor.constraint(equalTo: trailingAnchor),
-            contentStack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            widthAnchor.constraint(equalToConstant: 180),
+            bottomAnchor.constraint(equalTo: topAnchorRef),
         ])
 
+        applyColors()
         updateItemStates()
     }
 
@@ -111,9 +134,26 @@ final class LayoutPopoverView: NSView {
 
     // MARK: - Theme
 
-    override func updateLayer() {
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyColors()
+        // Update dividers
+        for sub in subviews where (sub.identifier?.rawValue ?? "").hasPrefix("layout.divider.") {
+            sub.layer?.backgroundColor = SemanticColors.line.cgColor
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: 8, cornerHeight: 8, transform: nil)
+    }
+
+    private func applyColors() {
         layer?.backgroundColor = SemanticColors.panel.cgColor
-        layer?.borderColor = SemanticColors.line.withAlphaComponent(0.4).cgColor
+        layer?.borderColor = SemanticColors.line.cgColor
+        for sub in subviews where (sub.identifier?.rawValue ?? "").hasPrefix("layout.divider.") {
+            sub.layer?.backgroundColor = SemanticColors.line.cgColor
+        }
     }
 }
 
@@ -124,10 +164,18 @@ private final class LayoutItemView: NSView {
     var target: AnyObject?
     var action: Selector?
 
+    private let iconView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
+    private let checkLabel = NSTextField(labelWithString: "\u{2713}")
     private var isActive = false
     private var isHovered = false
     private var trackingArea: NSTrackingArea?
+
+    // Default text color #aaa
+    private static let defaultTextColor = NSColor(srgbRed: 0xAA / 255.0,
+                                                   green: 0xAA / 255.0,
+                                                    blue: 0xAA / 255.0,
+                                                   alpha: 1.0)
 
     init(layout: DashboardLayout) {
         self.layout = layout
@@ -141,20 +189,46 @@ private final class LayoutItemView: NSView {
 
     private func setup() {
         wantsLayer = true
-        layer?.cornerRadius = 5
         translatesAutoresizingMaskIntoConstraints = false
 
+        // Icon
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.imageScaling = .scaleProportionallyDown
+        if let img = NSImage(systemSymbolName: layout.iconName, accessibilityDescription: layout.displayName) {
+            iconView.image = img
+        }
+        iconView.contentTintColor = Self.defaultTextColor
+        addSubview(iconView)
+
+        // Label
         titleLabel.stringValue = layout.displayName
         titleLabel.font = NSFont.systemFont(ofSize: 12)
+        titleLabel.textColor = Self.defaultTextColor
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
+        // Checkmark
+        checkLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        checkLabel.textColor = SemanticColors.accent
+        checkLabel.translatesAutoresizingMaskIntoConstraints = false
+        checkLabel.isHidden = true
+        addSubview(checkLabel)
+
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 30),
-            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
+            heightAnchor.constraint(equalToConstant: 32),
+
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 16),
+            iconView.heightAnchor.constraint(equalToConstant: 16),
+
+            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 8),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: checkLabel.leadingAnchor, constant: -4),
+
+            checkLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            checkLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
 
         let click = NSClickGestureRecognizer(target: self, action: #selector(handleClick))
@@ -163,11 +237,8 @@ private final class LayoutItemView: NSView {
 
     func setActive(_ active: Bool) {
         isActive = active
-        titleLabel.font = active
-            ? NSFont.systemFont(ofSize: 12, weight: .semibold)
-            : NSFont.systemFont(ofSize: 12)
-        needsDisplay = true
-        updateBackground()
+        checkLabel.isHidden = !active
+        applyAppearance()
     }
 
     @objc private func handleClick() {
@@ -194,44 +265,38 @@ private final class LayoutItemView: NSView {
 
     override func mouseEntered(with event: NSEvent) {
         isHovered = true
-        updateBackground()
+        applyAppearance()
     }
 
     override func mouseExited(with event: NSEvent) {
         isHovered = false
-        updateBackground()
+        applyAppearance()
     }
 
-    private func updateBackground() {
-        if isActive {
-            layer?.backgroundColor = SemanticColors.accent.withAlphaComponent(0.12).cgColor
-        } else if isHovered {
-            layer?.backgroundColor = SemanticColors.line.withAlphaComponent(0.18).cgColor
+    private func applyAppearance() {
+        // Background
+        if isHovered && !isActive {
+            layer?.backgroundColor = NSColor.white.withAlphaComponent(0.03).cgColor
         } else {
             layer?.backgroundColor = NSColor.clear.cgColor
         }
-        titleLabel.textColor = SemanticColors.text
+
+        // Text/icon color
+        if isActive {
+            titleLabel.textColor = SemanticColors.accent
+            iconView.contentTintColor = SemanticColors.accent
+            checkLabel.textColor = SemanticColors.accent
+        } else if isHovered {
+            titleLabel.textColor = NSColor.white
+            iconView.contentTintColor = NSColor.white
+        } else {
+            titleLabel.textColor = Self.defaultTextColor
+            iconView.contentTintColor = Self.defaultTextColor
+        }
     }
 
-    override func updateLayer() {
-        updateBackground()
-    }
-
-    override func becomeFirstResponder() -> Bool {
-        true
-    }
-
-    override var focusRingMaskBounds: NSRect {
-        bounds
-    }
-
-    override func drawFocusRingMask() {
-        let path = NSBezierPath(roundedRect: bounds, xRadius: 5, yRadius: 5)
-        path.fill()
-    }
-
-    override var focusRingType: NSFocusRingType {
-        get { .exterior }
-        set { }
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyAppearance()
     }
 }
