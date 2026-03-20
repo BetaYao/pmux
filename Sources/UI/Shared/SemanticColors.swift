@@ -168,13 +168,24 @@ enum SemanticColors {
     }
     static let backdropBlack: NSColor = NSColor.black.withAlphaComponent(0.4)
     static let threadRowBg: NSColor = NSColor(name: nil) { a in
-        let acc = a.isDark ? NSColor(hex: 0x4f8cff) : NSColor(hex: 0x2563eb)
-        return acc.withAlphaComponent(0.07)
+        a.isDark
+            ? NSColor(srgbRed: 0x1a / 255.0, green: 0x2a / 255.0, blue: 0x1a / 255.0, alpha: 1)
+            : NSColor(hex: 0xe8f5e9)
     }
     static let threadRowBorder: NSColor = NSColor(name: nil) { a in
-        let acc = a.isDark ? NSColor(hex: 0x4f8cff) : NSColor(hex: 0x2563eb)
-        let ln = a.isDark ? NSColor(hex: 0x222222) : NSColor(hex: 0xd7dbe3)
-        return acc.blended(withFraction: 0.62, of: ln) ?? acc.withAlphaComponent(0.38)
+        a.isDark
+            ? NSColor(srgbRed: 51 / 255.0, green: 193 / 255.0, blue: 123 / 255.0, alpha: 0.25)
+            : NSColor(srgbRed: 51 / 255.0, green: 193 / 255.0, blue: 123 / 255.0, alpha: 0.35)
+    }
+    static let threadRowHoverBg: NSColor = NSColor(name: nil) { a in
+        a.isDark
+            ? NSColor(white: 1, alpha: 0.03)
+            : NSColor(white: 0, alpha: 0.03)
+    }
+    static let threadRowHoverBorder: NSColor = NSColor(name: nil) { a in
+        a.isDark
+            ? NSColor(white: 1, alpha: 0.04)
+            : NSColor(white: 0, alpha: 0.04)
     }
 
     // MARK: - Zoom-specific tokens

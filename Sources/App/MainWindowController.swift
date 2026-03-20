@@ -954,13 +954,9 @@ extension MainWindowController: TitleBarDelegate {
     }
 
     func titleBarDidToggleTheme() {
-        let current = ThemeMode(rawValue: config.themeMode) ?? .system
-        let next: ThemeMode
-        switch current {
-        case .system: next = .light
-        case .light: next = .dark
-        case .dark: next = .system
-        }
+        // Two-state toggle based on current effective appearance
+        let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let next: ThemeMode = isDark ? .light : .dark
         config.themeMode = next.rawValue
         config.save()
         ThemeMode.applyAppearance(next)
@@ -1012,6 +1008,10 @@ extension MainWindowController: DashboardDelegate {
 extension MainWindowController: RepoViewDelegate {
     func repoView(_ repoVC: RepoViewController, didRequestDeleteWorktree info: WorktreeInfo) {
         confirmAndDeleteWorktree(info)
+    }
+
+    func repoViewDidRequestNewThread(_ repoVC: RepoViewController) {
+        showNewBranchDialog()
     }
 }
 

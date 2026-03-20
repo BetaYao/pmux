@@ -3,15 +3,21 @@ import AppKit
 protocol SidebarDelegate: AnyObject {
     func sidebar(_ sidebar: SidebarViewController, didSelectWorktreeAt index: Int)
     func sidebar(_ sidebar: SidebarViewController, didRequestDeleteWorktreeAt index: Int)
+    func sidebarDidRequestNewThread(_ sidebar: SidebarViewController)
 }
 
 /// Left sidebar showing thread list with status dots
 class SidebarViewController: NSViewController {
     weak var sidebarDelegate: SidebarDelegate?
 
+    private let headerBar = NSView()
+    private let threadsLabel = NSTextField(labelWithString: "Threads")
+    private let countLabel = NSTextField(labelWithString: "")
+    private let addButton = SidebarAddButton()
+    private let headerBorder = NSView()
     private let scrollView = NSScrollView()
     private let tableView = NSTableView()
-    private let emptyStateLabel = NSTextField(labelWithString: "No thread yet. Click New Thread in titlebar.")
+    private let emptyStateLabel = NSTextField(labelWithString: "No thread yet. Click + to create one.")
     private var worktrees: [WorktreeInfo] = []
     private var statuses: [String: AgentStatus] = [:]
     private var lastMessages: [String: String] = [:]
@@ -21,8 +27,41 @@ class SidebarViewController: NSViewController {
     override func loadView() {
         self.view = NSView()
         view.wantsLayer = true
-        view.layer?.backgroundColor = SemanticColors.panel.cgColor
+        view.layer?.backgroundColor = SemanticColors.tileBg.cgColor
 
+        // MARK: Header bar
+        headerBar.translatesAutoresizingMaskIntoConstraints = false
+        headerBar.wantsLayer = true
+        view.addSubview(headerBar)
+
+        threadsLabel.translatesAutoresizingMaskIntoConstraints = false
+        threadsLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        threadsLabel.textColor = NSColor(white: 0.667, alpha: 1) // #aaa
+        threadsLabel.drawsBackground = false
+        threadsLabel.isBezeled = false
+        threadsLabel.isEditable = false
+        headerBar.addSubview(threadsLabel)
+
+        countLabel.translatesAutoresizingMaskIntoConstraints = false
+        countLabel.font = NSFont.systemFont(ofSize: 11)
+        countLabel.textColor = NSColor(white: 0.333, alpha: 1) // #555
+        countLabel.drawsBackground = false
+        countLabel.isBezeled = false
+        countLabel.isEditable = false
+        headerBar.addSubview(countLabel)
+
+        addButton.translatesAutoresizingMaskIntoConstraints = false
+        addButton.target = self
+        addButton.action = #selector(addThreadClicked)
+        addButton.setAccessibilityIdentifier("sidebar.addThread")
+        headerBar.addSubview(addButton)
+
+        headerBorder.translatesAutoresizingMaskIntoConstraints = false
+        headerBorder.wantsLayer = true
+        headerBorder.layer?.backgroundColor = SemanticColors.line.cgColor
+        headerBar.addSubview(headerBorder)
+
+        // MARK: Scroll view + table
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.hasVerticalScroller = true
         scrollView.scrollerStyle = .overlay
@@ -63,7 +102,30 @@ class SidebarViewController: NSViewController {
         view.addSubview(emptyStateLabel)
 
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
+            // Header bar
+            headerBar.topAnchor.constraint(equalTo: view.topAnchor),
+            headerBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            headerBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            headerBar.heightAnchor.constraint(equalToConstant: 36),
+
+            threadsLabel.centerYAnchor.constraint(equalTo: headerBar.centerYAnchor),
+            threadsLabel.leadingAnchor.constraint(equalTo: headerBar.leadingAnchor, constant: 12),
+
+            countLabel.centerYAnchor.constraint(equalTo: headerBar.centerYAnchor),
+            countLabel.leadingAnchor.constraint(equalTo: threadsLabel.trailingAnchor, constant: 6),
+
+            addButton.centerYAnchor.constraint(equalTo: headerBar.centerYAnchor),
+            addButton.trailingAnchor.constraint(equalTo: headerBar.trailingAnchor, constant: -8),
+            addButton.widthAnchor.constraint(equalToConstant: 24),
+            addButton.heightAnchor.constraint(equalToConstant: 24),
+
+            headerBorder.leadingAnchor.constraint(equalTo: headerBar.leadingAnchor),
+            headerBorder.trailingAnchor.constraint(equalTo: headerBar.trailingAnchor),
+            headerBorder.bottomAnchor.constraint(equalTo: headerBar.bottomAnchor),
+            headerBorder.heightAnchor.constraint(equalToConstant: 1),
+
+            // Scroll view below header
+            scrollView.topAnchor.constraint(equalTo: headerBar.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -75,8 +137,13 @@ class SidebarViewController: NSViewController {
         ])
     }
 
+    @objc private func addThreadClicked() {
+        sidebarDelegate?.sidebarDidRequestNewThread(self)
+    }
+
     func setWorktrees(_ worktrees: [WorktreeInfo]) {
         self.worktrees = worktrees
+        countLabel.stringValue = "\(worktrees.count)"
         emptyStateLabel.isHidden = !worktrees.isEmpty
         scrollView.isHidden = worktrees.isEmpty
         tableView.reloadData()
@@ -124,10 +191,8 @@ extension SidebarViewController: NSTableViewDataSource {
 extension SidebarViewController: NSTableViewDelegate {
 
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-        let info = worktrees[row]
         let isSelected = (row == selectedIndex)
-        let status = statuses[info.path] ?? .unknown
-        let rowView = ThreadRowView(isActive: isSelected, status: status)
+        let rowView = ThreadRowView(isActive: isSelected)
         return rowView
     }
 
@@ -185,7 +250,12 @@ private class SidebarCellView: NSView {
     }
 
     private func setupViews() {
-        nameLabel.font = NSFont.systemFont(ofSize: 12, weight: .bold)
+        dotView.wantsLayer = true
+        dotView.layer?.cornerRadius = 3.5
+        dotView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(dotView)
+
+        nameLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         nameLabel.textColor = SemanticColors.text
         nameLabel.lineBreakMode = .byTruncatingTail
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -194,12 +264,7 @@ private class SidebarCellView: NSView {
         nameLabel.isEditable = false
         addSubview(nameLabel)
 
-        dotView.wantsLayer = true
-        dotView.layer?.cornerRadius = 4
-        dotView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(dotView)
-
-        messageLabel.font = NSFont.systemFont(ofSize: 12)
+        messageLabel.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .regular)
         messageLabel.textColor = SemanticColors.muted
         messageLabel.lineBreakMode = .byTruncatingTail
         messageLabel.maximumNumberOfLines = 2
@@ -211,17 +276,17 @@ private class SidebarCellView: NSView {
         addSubview(messageLabel)
 
         NSLayoutConstraint.activate([
-            nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 9),
-            nameLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: dotView.leadingAnchor, constant: -6),
-
-            dotView.widthAnchor.constraint(equalToConstant: 8),
-            dotView.heightAnchor.constraint(equalToConstant: 8),
+            dotView.widthAnchor.constraint(equalToConstant: 7),
+            dotView.heightAnchor.constraint(equalToConstant: 7),
+            dotView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             dotView.centerYAnchor.constraint(equalTo: nameLabel.centerYAnchor),
-            dotView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+
+            nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 9),
+            nameLabel.leadingAnchor.constraint(equalTo: dotView.trailingAnchor, constant: 6),
+            nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
 
             messageLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 2),
-            messageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            messageLabel.leadingAnchor.constraint(equalTo: dotView.trailingAnchor, constant: 6),
             messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             messageLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -9),
         ])
@@ -237,14 +302,14 @@ private class SidebarCellView: NSView {
 
 // MARK: - Custom Row View
 
-/// Thread row with accent-tinted selection style.
+/// Thread row with green-tinted selection and hover styles.
 private class ThreadRowView: NSTableRowView {
     private let isActive: Bool
-    private let status: AgentStatus
+    private var isHovered = false
+    private var trackingArea: NSTrackingArea?
 
-    init(isActive: Bool, status: AgentStatus) {
+    init(isActive: Bool) {
         self.isActive = isActive
-        self.status = status
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = 6
@@ -252,6 +317,35 @@ private class ThreadRowView: NSTableRowView {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) not supported")
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = trackingArea {
+            removeTrackingArea(existing)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInActiveApp],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        if !isActive {
+            isHovered = true
+            needsDisplay = true
+        }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        if isHovered {
+            isHovered = false
+            needsDisplay = true
+        }
     }
 
     override func drawSelection(in dirtyRect: NSRect) {
@@ -262,15 +356,20 @@ private class ThreadRowView: NSTableRowView {
         super.draw(dirtyRect)
 
         if isActive {
-            // Background: accent at 7% blended with panel
-            let accentBg = SemanticColors.accent.withAlphaComponent(0.07)
-            accentBg.setFill()
+            SemanticColors.threadRowBg.setFill()
             let bgPath = NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6)
             bgPath.fill()
 
-            // Border: accent at 38% blended with line
-            let borderColor = SemanticColors.accent.blended(withFraction: 0.62, of: SemanticColors.line) ?? SemanticColors.accent.withAlphaComponent(0.38)
-            borderColor.setStroke()
+            SemanticColors.threadRowBorder.setStroke()
+            let borderPath = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
+            borderPath.lineWidth = 1
+            borderPath.stroke()
+        } else if isHovered {
+            SemanticColors.threadRowHoverBg.setFill()
+            let bgPath = NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6)
+            bgPath.fill()
+
+            SemanticColors.threadRowHoverBorder.setStroke()
             let borderPath = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
             borderPath.lineWidth = 1
             borderPath.stroke()
@@ -278,6 +377,77 @@ private class ThreadRowView: NSTableRowView {
     }
 
     override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
+}
+
+// MARK: - Sidebar Add Button
+
+/// "+" button with hover effect for sidebar header.
+private class SidebarAddButton: NSButton {
+    private var isHovered = false
+    private var hoverTrackingArea: NSTrackingArea?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+    }
+
+    private func setup() {
+        title = ""
+        isBordered = false
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        layer?.backgroundColor = NSColor(white: 1, alpha: 0.04).cgColor
+
+        let plusLabel = NSTextField(labelWithString: "+")
+        plusLabel.font = NSFont.systemFont(ofSize: 14, weight: .medium)
+        plusLabel.textColor = NSColor(white: 0.667, alpha: 1) // #aaa
+        plusLabel.translatesAutoresizingMaskIntoConstraints = false
+        plusLabel.drawsBackground = false
+        plusLabel.isBezeled = false
+        plusLabel.isEditable = false
+        plusLabel.tag = 100
+        addSubview(plusLabel)
+        NSLayoutConstraint.activate([
+            plusLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
+            plusLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = hoverTrackingArea {
+            removeTrackingArea(existing)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInActiveApp],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        layer?.backgroundColor = NSColor(white: 1, alpha: 0.09).cgColor
+        if let label = viewWithTag(100) as? NSTextField {
+            label.textColor = .white
+        }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        layer?.backgroundColor = NSColor(white: 1, alpha: 0.04).cgColor
+        if let label = viewWithTag(100) as? NSTextField {
+            label.textColor = NSColor(white: 0.667, alpha: 1)
+        }
+    }
 }
 
 // MARK: - NSMenuDelegate

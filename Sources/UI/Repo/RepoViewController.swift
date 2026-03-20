@@ -2,6 +2,7 @@ import AppKit
 
 protocol RepoViewDelegate: AnyObject {
     func repoView(_ repoVC: RepoViewController, didRequestDeleteWorktree info: WorktreeInfo)
+    func repoViewDidRequestNewThread(_ repoVC: RepoViewController)
 }
 
 /// Full repo view: sidebar (thread list) + single immersive terminal
@@ -48,10 +49,10 @@ class RepoViewController: NSViewController {
         // Terminal container (right column) with panel styling
         terminalContainer.translatesAutoresizingMaskIntoConstraints = false
         terminalContainer.wantsLayer = true
-        terminalContainer.layer?.backgroundColor = SemanticColors.panel2.cgColor
+        terminalContainer.layer?.backgroundColor = SemanticColors.tileBg.cgColor
         terminalContainer.layer?.borderWidth = 1
-        terminalContainer.layer?.borderColor = SemanticColors.line.withAlphaComponent(0.38).cgColor
-        terminalContainer.layer?.cornerRadius = 8
+        terminalContainer.layer?.borderColor = SemanticColors.line.cgColor
+        terminalContainer.layer?.cornerRadius = 4
         terminalContainer.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
         terminalContainer.setAccessibilityIdentifier("project.terminal")
         terminalContainer.setAccessibilityElement(true)
@@ -72,10 +73,6 @@ class RepoViewController: NSViewController {
             isStacked = shouldStack
             applyLayout()
         }
-
-        // Update dynamic border color (appearance changes)
-        terminalContainer.layer?.borderColor = SemanticColors.line.withAlphaComponent(0.38).cgColor
-        terminalContainer.layer?.backgroundColor = SemanticColors.panel2.cgColor
 
         if needsTerminalOnLayout && terminalContainer.bounds.width > 0 {
             needsTerminalOnLayout = false
@@ -213,6 +210,10 @@ extension RepoViewController: SidebarDelegate {
     func sidebar(_ sidebar: SidebarViewController, didRequestDeleteWorktreeAt index: Int) {
         guard index >= 0, index < worktrees.count else { return }
         repoDelegate?.repoView(self, didRequestDeleteWorktree: worktrees[index])
+    }
+
+    func sidebarDidRequestNewThread(_ sidebar: SidebarViewController) {
+        repoDelegate?.repoViewDidRequestNewThread(self)
     }
 }
 
