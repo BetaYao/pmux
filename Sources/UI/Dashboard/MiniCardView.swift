@@ -193,9 +193,15 @@ final class MiniCardView: NSView {
         updateAppearance()
     }
 
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        updateAppearance()
+    }
+
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        updateAppearance()
+        needsDisplay = true
     }
 
     private func updateAppearance() {

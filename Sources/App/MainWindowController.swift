@@ -991,6 +991,7 @@ class PmuxWindow: NSWindow {
 extension MainWindowController: NSWindowDelegate {
     func windowDidResize(_ notification: Notification) {}
 
+
     func windowWillClose(_ notification: Notification) {
         statusPublisher.stop()
         webhookServer?.stop()

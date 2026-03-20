@@ -47,7 +47,7 @@ final class AgentCardView: NSView {
         wantsLayer = true
         layer?.cornerRadius = 4
         layer?.masksToBounds = true
-        layer?.backgroundColor = SemanticColors.tileBg.cgColor
+        // Colors set in applyColors() via viewDidMoveToWindow/viewDidChangeEffectiveAppearance
 
         // Terminal container — fills top area
         terminalContainer.wantsLayer = true
@@ -56,13 +56,11 @@ final class AgentCardView: NSView {
 
         // Separator line
         separatorLine.wantsLayer = true
-        separatorLine.layer?.backgroundColor = SemanticColors.line.cgColor
         separatorLine.translatesAutoresizingMaskIntoConstraints = false
         addSubview(separatorLine)
 
         // Bottom bar
         bottomBar.wantsLayer = true
-        bottomBar.layer?.backgroundColor = SemanticColors.tileBarBg.cgColor
         bottomBar.translatesAutoresizingMaskIntoConstraints = false
         addSubview(bottomBar)
 
@@ -155,12 +153,24 @@ final class AgentCardView: NSView {
         updateBorder()
     }
 
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        applyColors()
+    }
+
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+
+    private func applyColors() {
         layer?.backgroundColor = SemanticColors.tileBg.cgColor
         bottomBar.layer?.backgroundColor = SemanticColors.tileBarBg.cgColor
         separatorLine.layer?.backgroundColor = SemanticColors.line.cgColor
         statusDot.layer?.backgroundColor = AgentDisplayHelpers.statusColor(currentStatus).cgColor
+        branchLabel.textColor = SemanticColors.text
+        statusLabel.textColor = SemanticColors.muted
         updateBorder()
     }
 

@@ -45,8 +45,7 @@ final class FocusPanelView: NSView {
         wantsLayer = true
         layer?.cornerRadius = 4
         layer?.borderWidth = 1
-        layer?.borderColor = SemanticColors.line.cgColor
-        layer?.backgroundColor = SemanticColors.tileBg.cgColor
+        // Colors set in applyColors() via updateLayer
         setAccessibilityIdentifier("dashboard.focusPanel")
 
         setupHeader()
@@ -230,9 +229,15 @@ final class FocusPanelView: NSView {
         }
     }
 
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        applyColors()
+    }
+
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        applyColors()
+        needsDisplay = true
     }
 
     private func applyColors() {

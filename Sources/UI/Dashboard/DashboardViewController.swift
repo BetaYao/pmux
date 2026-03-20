@@ -77,9 +77,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     // MARK: - View lifecycle
 
     override func loadView() {
-        let root = NSView()
+        let root = DashboardRootView()
         root.wantsLayer = true
-        root.layer?.backgroundColor = SemanticColors.panel.cgColor
         root.setAccessibilityIdentifier("dashboard.view")
         self.view = root
 
@@ -700,5 +699,18 @@ private extension NSView {
                 }
             }
         }
+    }
+}
+
+// MARK: - Dashboard Root View (resolves bg color via updateLayer)
+
+private class DashboardRootView: NSView {
+    override var wantsUpdateLayer: Bool { true }
+    override func updateLayer() {
+        layer?.backgroundColor = SemanticColors.bg.cgColor
+    }
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
     }
 }
