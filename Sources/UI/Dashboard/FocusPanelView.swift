@@ -14,6 +14,9 @@ final class FocusPanelView: NSView {
     private let metaLabel = NSTextField(labelWithString: "")
     private let durationLabel = NSTextField(labelWithString: "")
     private let enterButton = NSButton()
+    private let arrowButton = NSView()
+    private let arrowImageView = NSImageView()
+    private var isArrowHovered = false
     private var projectName: String = ""
 
     override init(frame frameRect: NSRect) {
@@ -40,10 +43,10 @@ final class FocusPanelView: NSView {
 
     private func setup() {
         wantsLayer = true
-        layer?.cornerRadius = 8
+        layer?.cornerRadius = 4
         layer?.borderWidth = 1
-        layer?.borderColor = SemanticColors.line.withAlphaComponent(0.38).cgColor
-        layer?.backgroundColor = SemanticColors.panel2.cgColor
+        layer?.borderColor = SemanticColors.line.cgColor
+        layer?.backgroundColor = SemanticColors.tileBg.cgColor
         setAccessibilityIdentifier("dashboard.focusPanel")
 
         setupHeader()
@@ -58,7 +61,7 @@ final class FocusPanelView: NSView {
         // Bottom border for header
         let headerBorder = NSView()
         headerBorder.wantsLayer = true
-        headerBorder.layer?.backgroundColor = SemanticColors.line.withAlphaComponent(0.55).cgColor
+        headerBorder.layer?.backgroundColor = SemanticColors.lineAlpha55.cgColor
         headerBorder.translatesAutoresizingMaskIntoConstraints = false
         headerView.addSubview(headerBorder)
 
@@ -111,6 +114,32 @@ final class FocusPanelView: NSView {
         )
         enterButton.addTrackingArea(trackingArea)
 
+        // Arrow button (chevron.right) for project detail navigation
+        arrowButton.wantsLayer = true
+        arrowButton.layer?.cornerRadius = 5
+        arrowButton.layer?.backgroundColor = NSColor(white: 1, alpha: 0.04).cgColor
+        arrowButton.translatesAutoresizingMaskIntoConstraints = false
+        headerView.addSubview(arrowButton)
+
+        if let chevronImage = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Enter project") {
+            let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
+            arrowImageView.image = chevronImage.withSymbolConfiguration(config)
+            arrowImageView.contentTintColor = NSColor(hex: 0x999999)
+        }
+        arrowImageView.translatesAutoresizingMaskIntoConstraints = false
+        arrowButton.addSubview(arrowImageView)
+
+        let arrowClick = NSClickGestureRecognizer(target: self, action: #selector(enterProjectClicked))
+        arrowButton.addGestureRecognizer(arrowClick)
+
+        let arrowTracking = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self,
+            userInfo: ["target": "arrowButton"]
+        )
+        arrowButton.addTrackingArea(arrowTracking)
+
         NSLayoutConstraint.activate([
             headerView.topAnchor.constraint(equalTo: topAnchor),
             headerView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -136,7 +165,15 @@ final class FocusPanelView: NSView {
             durationLabel.leadingAnchor.constraint(equalTo: metaLabel.trailingAnchor, constant: 8),
             durationLabel.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
 
-            enterButton.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -10),
+            arrowButton.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -10),
+            arrowButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+            arrowButton.widthAnchor.constraint(equalToConstant: 22),
+            arrowButton.heightAnchor.constraint(equalToConstant: 22),
+
+            arrowImageView.centerXAnchor.constraint(equalTo: arrowButton.centerXAnchor),
+            arrowImageView.centerYAnchor.constraint(equalTo: arrowButton.centerYAnchor),
+
+            enterButton.trailingAnchor.constraint(equalTo: arrowButton.leadingAnchor, constant: -6),
             enterButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
             enterButton.widthAnchor.constraint(equalToConstant: 28),
             enterButton.heightAnchor.constraint(equalToConstant: 28),
@@ -170,21 +207,36 @@ final class FocusPanelView: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        if let target = event.trackingArea?.userInfo?["target"] as? String, target == "enterButton" {
-            enterButton.layer?.backgroundColor = SemanticColors.line.withAlphaComponent(0.22).cgColor
+        if let target = event.trackingArea?.userInfo?["target"] as? String {
+            if target == "enterButton" {
+                enterButton.layer?.backgroundColor = SemanticColors.lineAlpha22.cgColor
+            } else if target == "arrowButton" {
+                isArrowHovered = true
+                arrowButton.layer?.backgroundColor = NSColor(white: 1, alpha: 0.09).cgColor
+                arrowImageView.contentTintColor = .white
+            }
         }
     }
 
     override func mouseExited(with event: NSEvent) {
-        if let target = event.trackingArea?.userInfo?["target"] as? String, target == "enterButton" {
-            enterButton.layer?.backgroundColor = nil
+        if let target = event.trackingArea?.userInfo?["target"] as? String {
+            if target == "enterButton" {
+                enterButton.layer?.backgroundColor = nil
+            } else if target == "arrowButton" {
+                isArrowHovered = false
+                arrowButton.layer?.backgroundColor = NSColor(white: 1, alpha: 0.04).cgColor
+                arrowImageView.contentTintColor = NSColor(hex: 0x999999)
+            }
         }
     }
 
-    override var wantsUpdateLayer: Bool { true }
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyColors()
+    }
 
-    override func updateLayer() {
-        layer?.borderColor = SemanticColors.line.withAlphaComponent(0.38).cgColor
-        layer?.backgroundColor = SemanticColors.panel2.cgColor
+    private func applyColors() {
+        layer?.borderColor = SemanticColors.line.cgColor
+        layer?.backgroundColor = SemanticColors.tileBg.cgColor
     }
 }
