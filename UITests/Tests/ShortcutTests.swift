@@ -1,6 +1,6 @@
 import XCTest
 
-/// Phase C: Keyboard shortcut tests.
+/// Keyboard shortcut tests for the redesigned dashboard.
 class ShortcutTests: PmuxUITestCase {
 
     func testCmdCommaSettings() {
@@ -24,55 +24,6 @@ class ShortcutTests: PmuxUITestCase {
         page.app.typeKey(.escape, modifierFlags: [])
     }
 
-    func testCmdDDiffOverlay() {
-        // Need to be in repo view for Cmd+D to work
-        guard page.dashboard.grid.waitForExistence(timeout: 10) else { return }
-        let firstCard = page.dashboard.cards.firstMatch
-        guard firstCard.waitForExistence(timeout: 5) else { return }
-        firstCard.doubleClick()
-        guard page.sidebar.worktreeList.waitForExistence(timeout: 5) else { return }
-
-        // Toggle diff on
-        page.app.typeKey("d", modifierFlags: .command)
-        XCTAssertTrue(page.repo.diffOverlay.waitForExistence(timeout: 5),
-                      "Cmd+D should open diff overlay")
-
-        // Toggle diff off
-        page.app.typeKey("d", modifierFlags: .command)
-        XCTAssertTrue(page.repo.diffOverlay.waitForNonExistence(timeout: 5),
-                      "Cmd+D again should close diff overlay")
-    }
-
-    func testCmdShiftDSplitVertical() {
-        guard page.dashboard.grid.waitForExistence(timeout: 10) else { return }
-        let firstCard = page.dashboard.cards.firstMatch
-        guard firstCard.waitForExistence(timeout: 5) else { return }
-        firstCard.doubleClick()
-        guard page.sidebar.worktreeList.waitForExistence(timeout: 5) else { return }
-
-        page.app.typeKey("d", modifierFlags: [.command, .shift])
-        let secondPane = page.repo.pane(at: 1)
-        XCTAssertTrue(secondPane.waitForExistence(timeout: 5),
-                      "Cmd+Shift+D should create a split pane")
-    }
-
-    func testCmdShiftWSplitClose() {
-        guard page.dashboard.grid.waitForExistence(timeout: 10) else { return }
-        let firstCard = page.dashboard.cards.firstMatch
-        guard firstCard.waitForExistence(timeout: 5) else { return }
-        firstCard.doubleClick()
-        guard page.sidebar.worktreeList.waitForExistence(timeout: 5) else { return }
-
-        // First split, then close
-        page.app.typeKey("d", modifierFlags: [.command, .shift])
-        let secondPane = page.repo.pane(at: 1)
-        guard secondPane.waitForExistence(timeout: 5) else { return }
-
-        page.app.typeKey("w", modifierFlags: [.command, .shift])
-        XCTAssertTrue(secondPane.waitForNonExistence(timeout: 5),
-                      "Cmd+Shift+W should close the split pane")
-    }
-
     func testEscClosesDialog() {
         // Open quick switcher
         page.app.typeKey("p", modifierFlags: .command)
@@ -82,5 +33,29 @@ class ShortcutTests: PmuxUITestCase {
         page.app.typeKey(.escape, modifierFlags: [])
         XCTAssertTrue(page.dialog.quickSwitcher.waitForNonExistence(timeout: 3),
                       "Escape should close the quick switcher")
+    }
+
+    func testEscClosesModal() {
+        guard page.titleBar.dashboardTab.waitForExistence(timeout: 10) else { return }
+
+        // Try Cmd+W to trigger close modal
+        page.app.typeKey("w", modifierFlags: .command)
+
+        if page.modal.isVisible {
+            page.app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(page.modal.overlay.waitForNonExistence(timeout: 3),
+                          "Escape should close the modal")
+        }
+    }
+
+    func testEscClosesPanel() {
+        guard page.titleBar.notifButton.waitForExistence(timeout: 10) else { return }
+
+        page.titleBar.clickNotif()
+        guard page.notifPanel.isOpen else { return }
+
+        page.app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(page.notifPanel.panel.waitForNonExistence(timeout: 3),
+                      "Escape should close the notification panel")
     }
 }

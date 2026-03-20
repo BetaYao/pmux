@@ -1,6 +1,7 @@
 import XCTest
 
 /// Top-level page object for the pmux app.
+/// Provides access to all sub-page objects.
 class AppPage {
     let app: XCUIApplication
 
@@ -21,10 +22,15 @@ class AppPage {
         app.terminate()
     }
 
-    var dashboard: DashboardPage { DashboardPage(app) }
-    var tabBar: TabBarPage { TabBarPage(app) }
-    var sidebar: SidebarPage { SidebarPage(app) }
-    var settings: SettingsPage { SettingsPage(app) }
-    var dialog: DialogPage { DialogPage(app) }
-    var repo: RepoPage { RepoPage(app) }
+    lazy var titleBar = TitleBarPage(app)
+    lazy var layoutPopover = LayoutPopoverPage(app)
+    lazy var dashboard = DashboardPage(app)
+    lazy var sidebar = SidebarPage(app)
+    lazy var settings = SettingsPage(app)
+    lazy var modal = ModalPage(app)
+    lazy var notifPanel = NotificationPanelPage(app)
+    lazy var aiPanel = AIPanelPage(app)
+    lazy var statusBar = StatusBarPage(app)
+    lazy var repo = RepoPage(app)
+    lazy var dialog = DialogPage(app)
 }

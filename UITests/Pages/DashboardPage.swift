@@ -1,39 +1,27 @@
 import XCTest
 
-/// Page object for Dashboard grid/spotlight views.
+/// Page object for the redesigned Dashboard with multiple layout modes.
 class DashboardPage {
-    private let app: XCUIApplication
+    let app: XCUIApplication
 
-    init(_ app: XCUIApplication) {
-        self.app = app
-    }
+    init(_ app: XCUIApplication) { self.app = app }
 
-    var grid: XCUIElement {
-        app.groups["dashboard.grid"]
-    }
+    var dashboardView: XCUIElement { app.groups["dashboard.view"] }
+    var gridLayout: XCUIElement { app.groups["dashboard.layout.grid"] }
+    var leftRightLayout: XCUIElement { app.groups["dashboard.layout.left-right"] }
+    var topSmallLayout: XCUIElement { app.groups["dashboard.layout.top-small"] }
+    var topLargeLayout: XCUIElement { app.groups["dashboard.layout.top-large"] }
+    var focusPanel: XCUIElement { app.groups["dashboard.focusPanel"] }
+    var enterProjectButton: XCUIElement { app.buttons["dashboard.focusPanel.enterProject"] }
 
-    /// All dashboard card elements (groups with "dashboard.card.*" identifiers).
     var cards: XCUIElementQuery {
-        app.groups.matching(NSPredicate(format: "identifier MATCHES 'dashboard\\.card\\.[^.]+$'"))
+        app.groups.matching(NSPredicate(format: "identifier BEGINSWITH 'dashboard.card.'"))
+    }
+    var miniCards: XCUIElementQuery {
+        app.groups.matching(NSPredicate(format: "identifier BEGINSWITH 'dashboard.miniCard.'"))
     }
 
-    func card(named name: String) -> XCUIElement {
-        app.groups["dashboard.card.\(name)"]
-    }
-
-    func cardStatus(named name: String) -> String {
-        app.staticTexts["dashboard.cardStatus.\(name)"].label
-    }
-
-    func cardMessage(named name: String) -> String {
-        app.staticTexts["dashboard.cardMessage.\(name)"].label
-    }
-
-    func tapCard(named name: String) {
-        card(named: name).click()
-    }
-
-    func doubleClickCard(named name: String) {
-        card(named: name).doubleClick()
-    }
+    func tapCard(id: String) { app.groups["dashboard.card.\(id)"].waitAndClick() }
+    func tapMiniCard(id: String) { app.groups["dashboard.miniCard.\(id)"].waitAndClick() }
+    func tapEnterProject() { enterProjectButton.waitAndClick() }
 }
