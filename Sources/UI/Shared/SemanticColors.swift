@@ -20,7 +20,7 @@ enum SemanticColors {
     // The NSColor(name:) block still resolves per-appearance at draw time,
     // but the NSColor wrapper object itself is allocated only once.
     static let bg: NSColor = NSColor(name: nil) { appearance in
-        appearance.isDark ? NSColor(hex: 0x0b0b0b) : NSColor(hex: 0xf3f4f7)
+        appearance.isDark ? NSColor(hex: 0x0b0b0b) : NSColor(hex: 0xe8eaef)
     }
 
     static let panel: NSColor = NSColor(name: nil) { appearance in
@@ -197,9 +197,9 @@ enum SemanticColors {
         a.isDark ? NSColor(hex: 0x1a1a1a) : NSColor(hex: 0xf5f5f5)
     }
     static let tileBg: NSColor = NSColor(name: nil) { a in
-        a.isDark ? NSColor(hex: 0x111111) : NSColor(hex: 0xfafafa)
+        a.isDark ? NSColor(hex: 0x111111) : NSColor(hex: 0xffffff)
     }
     static let tileBarBg: NSColor = NSColor(name: nil) { a in
-        a.isDark ? NSColor(hex: 0x1a1a1a) : NSColor(hex: 0xf5f5f5)
+        a.isDark ? NSColor(hex: 0x1a1a1a) : NSColor(hex: 0xf0f1f4)
     }
 }

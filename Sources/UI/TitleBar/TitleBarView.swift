@@ -342,8 +342,13 @@ final class TitleBarView: NSView, LayoutPopoverDelegate {
 
     private func setupLayoutPopover() {
         layoutPopover.delegate = self
-        addSubview(layoutPopover)
+        // Popover must be added to a parent that won't clip it.
+        // It will be reparented to window contentView by MainWindowController.
+    }
 
+    /// Call from MainWindowController to add popover to contentView so it's not clipped by titlebar bounds
+    func installPopover(in parentView: NSView) {
+        parentView.addSubview(layoutPopover)
         NSLayoutConstraint.activate([
             layoutPopover.topAnchor.constraint(equalTo: bottomAnchor, constant: 4),
             layoutPopover.trailingAnchor.constraint(equalTo: viewSwitcherButton.trailingAnchor),

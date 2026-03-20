@@ -20,3 +20,4 @@ ghostty/.zig-cache/
 
 # SPM
 .build/
+.superpowers/

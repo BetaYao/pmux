@@ -108,12 +108,26 @@ class MainWindowController: NSWindowController {
         let newBranchItem = NSMenuItem(title: "New Branch...", action: #selector(showNewBranchDialog), keyEquivalent: "n")
         newBranchItem.keyEquivalentModifierMask = .command
         fileMenu.addItem(newBranchItem)
-        fileMenuItem.submenu = fileMenu
-        mainMenu.addItem(fileMenuItem)
-
         let quickSwitchItem = NSMenuItem(title: "Quick Switch...", action: #selector(showQuickSwitcher), keyEquivalent: "p")
         quickSwitchItem.keyEquivalentModifierMask = .command
         fileMenu.addItem(quickSwitchItem)
+        fileMenuItem.submenu = fileMenu
+        mainMenu.addItem(fileMenuItem)
+
+        // Edit menu (standard Cut/Copy/Paste/Undo/Redo)
+        let editMenuItem = NSMenuItem()
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        let redoItem = NSMenuItem(title: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+        redoItem.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(redoItem)
+        editMenu.addItem(NSMenuItem.separator())
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editMenuItem.submenu = editMenu
+        mainMenu.addItem(editMenuItem)
 
         // View menu
         let viewMenuItem = NSMenuItem()
@@ -143,6 +157,33 @@ class MainWindowController: NSWindowController {
 
         viewMenuItem.submenu = viewMenu
         mainMenu.addItem(viewMenuItem)
+
+        // Window menu (standard macOS window management)
+        let windowMenuItem = NSMenuItem()
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.miniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.zoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(NSMenuItem.separator())
+        let nextTabItem = NSMenuItem(title: "Next Tab", action: #selector(selectNextTab), keyEquivalent: "}")
+        nextTabItem.keyEquivalentModifierMask = .command
+        windowMenu.addItem(nextTabItem)
+        let prevTabItem = NSMenuItem(title: "Previous Tab", action: #selector(selectPreviousTab), keyEquivalent: "{")
+        prevTabItem.keyEquivalentModifierMask = .command
+        windowMenu.addItem(prevTabItem)
+        windowMenu.addItem(NSMenuItem.separator())
+        windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
+        windowMenuItem.submenu = windowMenu
+        mainMenu.addItem(windowMenuItem)
+        NSApp.windowsMenu = windowMenu
+
+        // Help menu
+        let helpMenuItem = NSMenuItem()
+        let helpMenu = NSMenu(title: "Help")
+        let keyboardShortcutsItem = NSMenuItem(title: "Keyboard Shortcuts", action: #selector(showKeyboardShortcuts), keyEquivalent: "")
+        helpMenu.addItem(keyboardShortcutsItem)
+        helpMenuItem.submenu = helpMenu
+        mainMenu.addItem(helpMenuItem)
+        NSApp.helpMenu = helpMenu
 
         NSApp.mainMenu = mainMenu
     }
@@ -209,6 +250,39 @@ class MainWindowController: NSWindowController {
         let repoIndex = activeTabIndex - 1
         guard let tab = workspaceManager.tab(at: repoIndex) else { return }
         showCloseProjectModal(tab.displayName)
+    }
+
+    @objc private func selectNextTab() {
+        let maxIndex = workspaceManager.tabs.count // 0=dashboard, 1..N=projects
+        let next = activeTabIndex + 1 > maxIndex ? 0 : activeTabIndex + 1
+        switchToTab(next)
+    }
+
+    @objc private func selectPreviousTab() {
+        let maxIndex = workspaceManager.tabs.count
+        let prev = activeTabIndex - 1 < 0 ? maxIndex : activeTabIndex - 1
+        switchToTab(prev)
+    }
+
+    @objc private func showKeyboardShortcuts() {
+        let alert = NSAlert()
+        alert.messageText = "Keyboard Shortcuts"
+        alert.informativeText = """
+        ⌘N  New Branch
+        ⌘P  Quick Switch
+        ⌘W  Close Tab
+        ⌘0  Dashboard
+        ⌘D  Show Diff
+        ⌘,  Settings
+        ⌘}  Next Tab
+        ⌘{  Previous Tab
+        ⌘-  Zoom In (Smaller Cards)
+        ⌘=  Zoom Out (Larger Cards)
+        Esc  Close Dialog / Exit Spotlight
+        """
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     @objc private func dashboardZoomIn() {
@@ -316,6 +390,9 @@ class MainWindowController: NSWindowController {
             aiPanel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             aiPanel.widthAnchor.constraint(equalToConstant: 360),
         ])
+
+        // Layout popover (above panels, below modal)
+        titleBar.installPopover(in: contentView)
 
         // Unified modal (overlay, full screen, highest z-order)
         modalView.delegate = self
@@ -956,12 +1033,21 @@ extension MainWindowController: TitleBarDelegate {
     }
 
     func titleBarDidToggleTheme() {
-        // Two-state toggle based on current effective appearance
-        let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let isDark = window?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let next: ThemeMode = isDark ? .light : .dark
         config.themeMode = next.rawValue
         config.save()
         ThemeMode.applyAppearance(next)
+        // Window appearance must also be updated since it was set explicitly in init
+        switch next {
+        case .dark:
+            window?.appearance = NSAppearance(named: .darkAqua)
+        case .light:
+            window?.appearance = NSAppearance(named: .aqua)
+        case .system:
+            window?.appearance = nil
+        }
+        window?.backgroundColor = Theme.background
     }
     
     func titleBarDidRequestCloseWindow() {

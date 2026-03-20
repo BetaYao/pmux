@@ -170,7 +170,8 @@ final class AgentCardView: NSView {
             layer.borderColor = SemanticColors.accent.cgColor
             layer.borderWidth = 1.5
         } else {
-            layer.borderWidth = 0
+            layer.borderColor = SemanticColors.line.cgColor
+            layer.borderWidth = 1
         }
     }
 }
