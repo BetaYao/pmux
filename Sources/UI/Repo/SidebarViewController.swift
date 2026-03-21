@@ -22,7 +22,7 @@ class SidebarViewController: NSViewController {
     private let headerBar = NSView()
     private let threadsLabel = NSTextField(labelWithString: "Threads")
     private let countLabel = NSTextField(labelWithString: "")
-    private let addButton = SidebarAddButton()
+    private let addButton = NSButton()
     private let headerBorder = NSView()
     private let scrollView = NSScrollView()
     private let tableView = NSTableView()
@@ -60,6 +60,12 @@ class SidebarViewController: NSViewController {
         headerBar.addSubview(countLabel)
 
         addButton.translatesAutoresizingMaskIntoConstraints = false
+        addButton.title = ""
+        addButton.bezelStyle = .texturedRounded
+        addButton.isBordered = true
+        addButton.image = NSImage(named: NSImage.addTemplateName)
+        addButton.imagePosition = .imageOnly
+        addButton.contentTintColor = SemanticColors.muted
         addButton.target = self
         addButton.action = #selector(addThreadClicked)
         addButton.setAccessibilityIdentifier("sidebar.addThread")
@@ -397,77 +403,6 @@ private class ThreadRowView: NSTableRowView {
     }
 
     override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
-}
-
-// MARK: - Sidebar Add Button
-
-/// "+" button with hover effect for sidebar header.
-private class SidebarAddButton: NSButton {
-    private var isHovered = false
-    private var hoverTrackingArea: NSTrackingArea?
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        setup()
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        setup()
-    }
-
-    private func setup() {
-        title = ""
-        isBordered = false
-        wantsLayer = true
-        layer?.cornerRadius = 6
-        layer?.backgroundColor = NSColor(white: 1, alpha: 0.04).cgColor
-
-        let plusLabel = NSTextField(labelWithString: "+")
-        plusLabel.font = NSFont.systemFont(ofSize: 14, weight: .medium)
-        plusLabel.textColor = NSColor(white: 0.667, alpha: 1) // #aaa
-        plusLabel.translatesAutoresizingMaskIntoConstraints = false
-        plusLabel.drawsBackground = false
-        plusLabel.isBezeled = false
-        plusLabel.isEditable = false
-        plusLabel.tag = 100
-        addSubview(plusLabel)
-        NSLayoutConstraint.activate([
-            plusLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
-            plusLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let existing = hoverTrackingArea {
-            removeTrackingArea(existing)
-        }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInActiveApp],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(area)
-        hoverTrackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        isHovered = true
-        layer?.backgroundColor = NSColor(white: 1, alpha: 0.09).cgColor
-        if let label = viewWithTag(100) as? NSTextField {
-            label.textColor = .white
-        }
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        isHovered = false
-        layer?.backgroundColor = NSColor(white: 1, alpha: 0.04).cgColor
-        if let label = viewWithTag(100) as? NSTextField {
-            label.textColor = NSColor(white: 0.667, alpha: 1)
-        }
-    }
 }
 
 // MARK: - NSMenuDelegate

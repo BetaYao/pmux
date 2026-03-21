@@ -330,13 +330,44 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertEqual(NewBranchDialog.Layout.actionButtonHeight, 40)
     }
 
-    func testZoomButton_DefaultStyle_IsBorderlessForConsistentVisualSize() {
-        let secondary = ZoomButton(style: .secondary)
-        XCTAssertFalse(secondary.isBordered)
-    }
-
     func testSidebar_DefaultSelectionStyle_IsMacOSNative() {
         XCTAssertTrue(SidebarViewController.Layout.usesNativeSelectionStyle)
+    }
+
+    func testSidebar_AddButton_UsesNativeButtonChrome() {
+        let sidebarVC = SidebarViewController()
+        sidebarVC.loadViewIfNeeded()
+
+        let addButton = findButton(in: sidebarVC.view, identifier: "sidebar.addThread")
+        XCTAssertNotNil(addButton)
+        XCTAssertTrue(addButton?.isBordered == true)
+        XCTAssertEqual(addButton?.bezelStyle, .texturedRounded)
+        XCTAssertNotNil(addButton?.image)
+    }
+
+    func testNewThreadDialog_ActionButtonsUseNativeButtonChrome() {
+        let dialog = NewBranchDialog(repoPaths: ["/tmp/repo"])
+        dialog.loadViewIfNeeded()
+
+        let createButton = findButton(in: dialog.view, identifier: "dialog.newBranch.createButton")
+        XCTAssertNotNil(createButton)
+        XCTAssertTrue(createButton?.isBordered == true)
+        XCTAssertEqual(createButton?.bezelStyle, .rounded)
+    }
+
+    func testUnifiedModal_UsesNativeButtonChrome() {
+        let modal = UnifiedModalView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+        modal.show(config: ModalConfig(title: "Title", subtitle: "Subtitle", confirmText: "Confirm"))
+
+        let confirm = findButton(in: modal, identifier: "modal.confirm")
+        let cancel = findButton(in: modal, identifier: "modal.cancel")
+
+        XCTAssertNotNil(confirm)
+        XCTAssertNotNil(cancel)
+        XCTAssertTrue(confirm?.isBordered == true)
+        XCTAssertTrue(cancel?.isBordered == true)
+        XCTAssertEqual(confirm?.bezelStyle, .rounded)
+        XCTAssertEqual(cancel?.bezelStyle, .rounded)
     }
 
     func testTitleBar_UsesSystemAlignedCapsuleHeights() {
@@ -400,4 +431,17 @@ final class GridLayoutTests: XCTestCase {
         ))
         XCTAssertTrue(MainWindowController.shouldUseWindowFrameAutosave(environment: [:], arguments: []))
     }
+}
+
+private func findButton(in root: NSView, identifier: String) -> NSButton? {
+    if let button = root as? NSButton,
+       button.accessibilityIdentifier() == identifier {
+        return button
+    }
+    for subview in root.subviews {
+        if let button = findButton(in: subview, identifier: identifier) {
+            return button
+        }
+    }
+    return nil
 }

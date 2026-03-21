@@ -149,14 +149,11 @@ final class UnifiedModalView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
     }
 
     private func styleSingleLineInput(_ field: NSTextField) {
-        field.backgroundColor = SemanticColors.tileBg
+        field.backgroundColor = .textBackgroundColor
         field.textColor = SemanticColors.text
-        field.focusRingType = .none
-        field.isBordered = false
-        field.wantsLayer = true
-        field.layer?.cornerRadius = 6
-        field.layer?.borderWidth = 1
-        field.layer?.borderColor = SemanticColors.line.cgColor
+        field.focusRingType = .default
+        field.isBordered = true
+        field.bezelStyle = .roundedBezel
     }
 
     private func styleMultilineInput(scrollView: NSScrollView, textView: NSTextView) {
@@ -174,9 +171,9 @@ final class UnifiedModalView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
 
     private func styleConfirmButton() {
         guard let config = currentConfig else { return }
-        confirmButton.wantsLayer = true
-        confirmButton.isBordered = false
-        confirmButton.layer?.cornerRadius = 6
+        confirmButton.wantsLayer = false
+        confirmButton.isBordered = true
+        confirmButton.bezelStyle = .rounded
 
         let color: NSColor
         switch config.confirmStyle {
@@ -185,14 +182,12 @@ final class UnifiedModalView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
         case .warn:
             color = SemanticColors.danger
         }
-        confirmButton.layer?.backgroundColor = color.cgColor
-        confirmButton.contentTintColor = .white
+        confirmButton.contentTintColor = color
 
         // Style cancel button
-        cancelButton.wantsLayer = true
-        cancelButton.isBordered = false
-        cancelButton.layer?.cornerRadius = 6
-        cancelButton.layer?.backgroundColor = NSColor(white: 1, alpha: 0.03).cgColor
+        cancelButton.wantsLayer = false
+        cancelButton.isBordered = true
+        cancelButton.bezelStyle = .rounded
         cancelButton.contentTintColor = NSColor(hex: 0xaaaaaa)
     }
 
