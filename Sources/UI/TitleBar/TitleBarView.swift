@@ -122,6 +122,14 @@ final class TitleBarView: NSView {
         viewSwitcherButton.menu = makeLayoutMenu()
     }
 
+    func notificationsAnchorView() -> NSView {
+        notifButton
+    }
+
+    func aiAnchorView() -> NSView {
+        aiButton
+    }
+
     // MARK: - Setup
 
     private func setup() {

@@ -147,6 +147,9 @@ final class NotificationPanelView: NSView {
 
     private func setup() {
         identifier = NSUserInterfaceItemIdentifier("panel.notification")
+        setAccessibilityIdentifier("panel.notification")
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
         wantsLayer = true
         translatesAutoresizingMaskIntoConstraints = false
         isHidden = true

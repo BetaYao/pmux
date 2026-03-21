@@ -18,10 +18,10 @@ class MainWindowController: NSWindowController {
     private let backgroundEffectView = NSVisualEffectView()
     private let contentContainer = NSView()
     private var windowTrackingArea: NSTrackingArea?
-    private let panelBackdrop = PanelBackdropView()
     private let notificationPanel = NotificationPanelView()
     private let aiPanel = AIPanelView()
-    private let modalView = UnifiedModalView()
+    private let notificationPopover = NSPopover()
+    private let aiPopover = NSPopover()
     private let titleBarAccessory = NSTitlebarAccessoryViewController()
 
     private var dashboardVC: DashboardViewController?
@@ -55,14 +55,6 @@ class MainWindowController: NSWindowController {
         return pub
     }()
     private var webhookServer: WebhookServer?
-
-    // Modal context
-    private enum ModalContext {
-        case closeProject(String)
-        case addProject
-        case newThread
-    }
-    private var currentModalContext: ModalContext?
 
     static func shouldUseWindowFrameAutosave(
         environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -421,45 +413,7 @@ class MainWindowController: NSWindowController {
         // Window hover tracking for arc block styling
         setupWindowHoverTracking(contentView: contentView)
 
-        // Panel backdrop (overlay, z-order above content)
-        panelBackdrop.delegate = self
-        contentView.addSubview(panelBackdrop)
-        NSLayoutConstraint.activate([
-            panelBackdrop.topAnchor.constraint(equalTo: contentContainer.topAnchor),
-            panelBackdrop.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            panelBackdrop.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            panelBackdrop.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-        ])
-
-        // Notification panel (overlay, right side, 360px)
-        notificationPanel.delegate = self
-        contentView.addSubview(notificationPanel)
-        NSLayoutConstraint.activate([
-            notificationPanel.topAnchor.constraint(equalTo: contentContainer.topAnchor),
-            notificationPanel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            notificationPanel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            notificationPanel.widthAnchor.constraint(equalToConstant: 360),
-        ])
-
-        // AI panel (overlay, right side, 360px)
-        aiPanel.delegate = self
-        contentView.addSubview(aiPanel)
-        NSLayoutConstraint.activate([
-            aiPanel.topAnchor.constraint(equalTo: contentContainer.topAnchor),
-            aiPanel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            aiPanel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            aiPanel.widthAnchor.constraint(equalToConstant: 360),
-        ])
-
-        // Unified modal (overlay, full screen, highest z-order)
-        modalView.delegate = self
-        contentView.addSubview(modalView)
-        NSLayoutConstraint.activate([
-            modalView.topAnchor.constraint(equalTo: contentView.topAnchor),
-            modalView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            modalView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            modalView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-        ])
+        setupPanelPopovers()
 
         // Create dashboard
         let savedLayout = DashboardLayout(rawValue: config.dashboardLayout) ?? .leftRight
@@ -478,6 +432,24 @@ class MainWindowController: NSWindowController {
 
         applyWindowBackgroundStyle()
         positionStandardWindowButtons()
+    }
+
+    private func setupPanelPopovers() {
+        notificationPanel.delegate = self
+        notificationPanel.frame = NSRect(x: 0, y: 0, width: 360, height: 460)
+        notificationPopover.contentSize = notificationPanel.frame.size
+        notificationPopover.behavior = .transient
+        notificationPopover.animates = true
+        notificationPopover.delegate = self
+        notificationPopover.contentViewController = ViewHostController(hostedView: notificationPanel)
+
+        aiPanel.delegate = self
+        aiPanel.frame = NSRect(x: 0, y: 0, width: 360, height: 460)
+        aiPopover.contentSize = aiPanel.frame.size
+        aiPopover.behavior = .transient
+        aiPopover.animates = true
+        aiPopover.delegate = self
+        aiPopover.contentViewController = ViewHostController(hostedView: aiPanel)
     }
 
     private func applyWindowBackgroundStyle() {
@@ -764,44 +736,65 @@ class MainWindowController: NSWindowController {
     // MARK: - Panel Management
 
     private func closeBothPanels() {
-        notificationPanel.setOpen(false)
-        aiPanel.setOpen(false)
-        panelBackdrop.setVisible(false)
+        notificationPopover.performClose(nil)
+        aiPopover.performClose(nil)
+        notificationPanel.setOpen(false, animated: false)
+        aiPanel.setOpen(false, animated: false)
     }
 
     private func toggleNotificationPanel() {
-        if notificationPanel.isOpen {
-            notificationPanel.setOpen(false)
-            panelBackdrop.setVisible(false)
-        } else {
-            aiPanel.setOpen(false)
-            notificationPanel.setOpen(true)
-            panelBackdrop.setVisible(true)
+        if notificationPopover.isShown {
+            notificationPopover.performClose(nil)
+            notificationPanel.setOpen(false, animated: false)
+            return
         }
+
+        aiPopover.performClose(nil)
+        aiPanel.setOpen(false, animated: false)
+
+        notificationPanel.updateNotifications(NotificationHistory.shared.entries.map {
+            (
+                title: "\($0.branch)  \($0.status.rawValue)",
+                meta: $0.message,
+                worktreePath: $0.worktreePath
+            )
+        })
+        notificationPanel.setOpen(true, animated: false)
+
+        let anchor = titleBar.notificationsAnchorView()
+        notificationPopover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
     }
 
     private func toggleAIPanel() {
-        if aiPanel.isOpen {
-            aiPanel.setOpen(false)
-            panelBackdrop.setVisible(false)
-        } else {
-            notificationPanel.setOpen(false)
-            aiPanel.setOpen(true)
-            panelBackdrop.setVisible(true)
+        if aiPopover.isShown {
+            aiPopover.performClose(nil)
+            aiPanel.setOpen(false, animated: false)
+            return
         }
+
+        notificationPopover.performClose(nil)
+        notificationPanel.setOpen(false, animated: false)
+
+        aiPanel.setOpen(true, animated: false)
+        let anchor = titleBar.aiAnchorView()
+        aiPopover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
     }
 
     // MARK: - Modal Helpers
 
     private func showCloseProjectModal(_ projectName: String) {
         closeBothPanels()
-        currentModalContext = .closeProject(projectName)
-        modalView.show(config: ModalConfig(
-            title: "Close \"\(projectName)\"?",
-            subtitle: "This will close all terminals and kill tmux sessions for this repository.",
-            confirmText: "Close",
-            confirmStyle: .warn
-        ))
+
+        let alert = NSAlert()
+        alert.messageText = "Close \"\(projectName)\"?"
+        alert.informativeText = "This will close all terminals and kill tmux sessions for this repository."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Close")
+        alert.addButton(withTitle: "Cancel")
+
+        if alert.runModal() == .alertFirstButtonReturn {
+            performCloseRepo(projectName: projectName)
+        }
     }
 
     private func showAddProjectModal() {
@@ -810,14 +803,23 @@ class MainWindowController: NSWindowController {
 
     private func showNewThreadModal() {
         closeBothPanels()
-        currentModalContext = .newThread
-        modalView.show(config: ModalConfig(
-            title: "New Thread",
-            subtitle: "Create a new branch/thread for the current project.",
-            placeholder: "branch-name",
-            confirmText: "Create",
-            isMultiline: false
-        ))
+
+        let alert = NSAlert()
+        alert.messageText = "New Thread"
+        alert.informativeText = "Create a new branch/thread for the current project."
+        alert.alertStyle = .informational
+
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        input.placeholderString = "branch-name"
+        alert.accessoryView = input
+
+        alert.addButton(withTitle: "Create")
+        alert.addButton(withTitle: "Cancel")
+
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            showNewBranchDialog()
+        }
     }
 
     // MARK: - Workspace Loading
@@ -1263,44 +1265,12 @@ extension MainWindowController: RepoViewDelegate {
     }
 }
 
-// MARK: - UnifiedModalDelegate
-
-extension MainWindowController: UnifiedModalDelegate {
-    func modalDidConfirm(value: String) {
-        guard let context = currentModalContext else { return }
-        currentModalContext = nil
-
-        switch context {
-        case .closeProject(let projectName):
-            performCloseRepo(projectName: projectName)
-        case .addProject:
-            // Not used -- add project uses open panel directly
-            break
-        case .newThread:
-            // Show the new branch dialog with the value as a hint
-            showNewBranchDialog()
-        }
-    }
-
-    func modalDidCancel() {
-        currentModalContext = nil
-    }
-}
-
-// MARK: - PanelBackdropDelegate
-
-extension MainWindowController: PanelBackdropDelegate {
-    func backdropClicked() {
-        closeBothPanels()
-    }
-}
-
 // MARK: - NotificationPanelDelegate
 
 extension MainWindowController: NotificationPanelDelegate {
     func notificationPanelDidRequestClose() {
-        notificationPanel.setOpen(false)
-        panelBackdrop.setVisible(false)
+        notificationPopover.performClose(nil)
+        notificationPanel.setOpen(false, animated: false)
     }
 
     func notificationPanelDidSelectItem(worktreePath: String) {
@@ -1317,8 +1287,8 @@ extension MainWindowController: NotificationPanelDelegate {
 
 extension MainWindowController: AIPanelDelegate {
     func aiPanelDidRequestClose() {
-        aiPanel.setOpen(false)
-        panelBackdrop.setVisible(false)
+        aiPopover.performClose(nil)
+        aiPanel.setOpen(false, animated: false)
     }
 }
 
@@ -1532,5 +1502,41 @@ extension MainWindowController: UpdateBannerDelegate {
     func updateBannerDidClickRetry(_ banner: UpdateBanner) {
         guard let release = pendingRelease else { return }
         updateManager.download(release: release)
+    }
+}
+
+extension MainWindowController: NSPopoverDelegate {
+    func popoverDidClose(_ notification: Notification) {
+        guard let popover = notification.object as? NSPopover else { return }
+        if popover === notificationPopover {
+            notificationPanel.setOpen(false, animated: false)
+        } else if popover === aiPopover {
+            aiPanel.setOpen(false, animated: false)
+        }
+    }
+}
+
+private final class ViewHostController: NSViewController {
+    private let hostedView: NSView
+
+    init(hostedView: NSView) {
+        self.hostedView = hostedView
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) not supported")
+    }
+
+    override func loadView() {
+        hostedView.translatesAutoresizingMaskIntoConstraints = false
+        view = NSView(frame: NSRect(origin: .zero, size: hostedView.frame.size))
+        view.addSubview(hostedView)
+        NSLayoutConstraint.activate([
+            hostedView.topAnchor.constraint(equalTo: view.topAnchor),
+            hostedView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            hostedView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            hostedView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
     }
 }

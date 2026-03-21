@@ -5,10 +5,10 @@ protocol QuickSwitcherDelegate: AnyObject {
 }
 
 /// Spotlight-style quick switcher for jumping to worktrees by fuzzy search.
-class QuickSwitcherViewController: NSViewController {
+class QuickSwitcherViewController: NSViewController, NSSearchFieldDelegate {
     weak var quickSwitcherDelegate: QuickSwitcherDelegate?
 
-    private let searchField = NSTextField()
+    private let searchField = NSSearchField()
     private let resultsTableView = NSTableView()
     private let resultsScrollView = NSScrollView()
 
@@ -43,6 +43,7 @@ class QuickSwitcherViewController: NSViewController {
         searchField.isBordered = true
         searchField.bezelStyle = .roundedBezel
         searchField.focusRingType = .none
+        searchField.sendsWholeSearchString = true
         searchField.delegate = self
         searchField.setAccessibilityIdentifier("dialog.quickSwitcher.searchField")
         searchField.translatesAutoresizingMaskIntoConstraints = false

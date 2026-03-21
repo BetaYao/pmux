@@ -136,18 +136,23 @@ final class AIPanelView: NSView, NSTextViewDelegate {
 
     // MARK: - Public API
 
-    func setOpen(_ open: Bool) {
+    func setOpen(_ open: Bool, animated: Bool = true) {
         guard open != isOpen else { return }
         isOpen = open
         isHidden = false
 
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.22
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            self.animator().alphaValue = open ? 1.0 : 0.0
-        }, completionHandler: {
-            if !open { self.isHidden = true }
-        })
+        if animated {
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.22
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                self.animator().alphaValue = open ? 1.0 : 0.0
+            }, completionHandler: {
+                if !open { self.isHidden = true }
+            })
+        } else {
+            alphaValue = open ? 1.0 : 0.0
+            isHidden = !open
+        }
     }
 
     func addBubble(role: BubbleRole, text: String) {
@@ -189,6 +194,9 @@ final class AIPanelView: NSView, NSTextViewDelegate {
 
     private func setup() {
         identifier = NSUserInterfaceItemIdentifier("panel.ai")
+        setAccessibilityIdentifier("panel.ai")
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
         wantsLayer = true
         translatesAutoresizingMaskIntoConstraints = false
         isHidden = true

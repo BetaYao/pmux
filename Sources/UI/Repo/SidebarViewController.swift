@@ -88,11 +88,7 @@ class SidebarViewController: NSViewController {
 
         tableView.backgroundColor = .clear
         tableView.headerView = nil
-        if Layout.usesNativeSelectionStyle {
-            tableView.selectionHighlightStyle = .regular
-        } else {
-            tableView.selectionHighlightStyle = .none
-        }
+        tableView.selectionHighlightStyle = .regular
         tableView.rowHeight = 60
         tableView.intercellSpacing = NSSize(width: 0, height: 4)
         tableView.delegate = self
@@ -209,15 +205,6 @@ extension SidebarViewController: NSTableViewDataSource {
 // MARK: - NSTableViewDelegate
 
 extension SidebarViewController: NSTableViewDelegate {
-
-    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-        guard !Layout.usesNativeSelectionStyle else { return nil }
-
-        let isSelected = (row == selectedIndex)
-        let rowView = ThreadRowView(isActive: isSelected)
-        return rowView
-    }
-
     private static let cellIdentifier = NSUserInterfaceItemIdentifier("SidebarWorktreeCell")
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -257,9 +244,9 @@ extension SidebarViewController: NSTableViewDelegate {
 
 // MARK: - Reusable Cell View
 
-private class SidebarCellView: NSView {
+private final class SidebarCellView: NSTableCellView {
     private let nameLabel = NSTextField(labelWithString: "")
-    private let dotView = NSView()
+    private let dotImageView = NSImageView()
     private let messageLabel = NSTextField(labelWithString: "")
 
     override init(frame frameRect: NSRect) {
@@ -272,10 +259,9 @@ private class SidebarCellView: NSView {
     }
 
     private func setupViews() {
-        dotView.wantsLayer = true
-        dotView.layer?.cornerRadius = 3.5
-        dotView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(dotView)
+        dotImageView.translatesAutoresizingMaskIntoConstraints = false
+        dotImageView.imageScaling = .scaleProportionallyDown
+        addSubview(dotImageView)
 
         nameLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         nameLabel.textColor = SemanticColors.text
@@ -298,17 +284,17 @@ private class SidebarCellView: NSView {
         addSubview(messageLabel)
 
         NSLayoutConstraint.activate([
-            dotView.widthAnchor.constraint(equalToConstant: 7),
-            dotView.heightAnchor.constraint(equalToConstant: 7),
-            dotView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: SidebarViewController.Layout.cellLeadingInset),
-            dotView.centerYAnchor.constraint(equalTo: nameLabel.centerYAnchor),
+            dotImageView.widthAnchor.constraint(equalToConstant: 10),
+            dotImageView.heightAnchor.constraint(equalToConstant: 10),
+            dotImageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: SidebarViewController.Layout.cellLeadingInset),
+            dotImageView.centerYAnchor.constraint(equalTo: nameLabel.centerYAnchor),
 
             nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 9),
-            nameLabel.leadingAnchor.constraint(equalTo: dotView.trailingAnchor, constant: 6),
+            nameLabel.leadingAnchor.constraint(equalTo: dotImageView.trailingAnchor, constant: 6),
             nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -SidebarViewController.Layout.cellTrailingInset),
 
             messageLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 2),
-            messageLabel.leadingAnchor.constraint(equalTo: dotView.trailingAnchor, constant: 6),
+            messageLabel.leadingAnchor.constraint(equalTo: dotImageView.trailingAnchor, constant: 6),
             messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -SidebarViewController.Layout.cellTrailingInset),
             messageLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -9),
         ])
@@ -316,93 +302,12 @@ private class SidebarCellView: NSView {
 
     func update(name: String, status: AgentStatus, message: String) {
         nameLabel.stringValue = name
-        dotView.layer?.backgroundColor = status.color.cgColor
+        let symbolConfig = NSImage.SymbolConfiguration(pointSize: 8, weight: .bold)
+        dotImageView.image = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: nil)?.withSymbolConfiguration(symbolConfig)
+        dotImageView.contentTintColor = status.color
         messageLabel.stringValue = message.isEmpty ? status.rawValue : message
         setAccessibilityIdentifier("sidebar.row.\(name)")
     }
-}
-
-// MARK: - Custom Row View
-
-/// Thread row with green-tinted selection and hover styles.
-private class ThreadRowView: NSTableRowView {
-    private let isActive: Bool
-    private var isHovered = false
-    private var trackingArea: NSTrackingArea?
-
-    init(isActive: Bool) {
-        self.isActive = isActive
-        super.init(frame: .zero)
-        wantsLayer = true
-        layer?.cornerRadius = 6
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) not supported")
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let existing = trackingArea {
-            removeTrackingArea(existing)
-        }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInActiveApp],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        if !isActive {
-            isHovered = true
-            needsDisplay = true
-        }
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        if isHovered {
-            isHovered = false
-            needsDisplay = true
-        }
-    }
-
-    override func drawSelection(in dirtyRect: NSRect) {
-        // Selection handled in draw(dirtyRect:)
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-
-        if isActive {
-            SemanticColors.threadRowBg.setFill()
-            let bgRect = bounds.insetBy(dx: SidebarViewController.Layout.rowBackgroundHorizontalInset, dy: 0)
-            let bgPath = NSBezierPath(roundedRect: bgRect, xRadius: 6, yRadius: 6)
-            bgPath.fill()
-
-            SemanticColors.threadRowBorder.setStroke()
-            let borderRect = bgRect.insetBy(dx: 0.5, dy: 0.5)
-            let borderPath = NSBezierPath(roundedRect: borderRect, xRadius: 6, yRadius: 6)
-            borderPath.lineWidth = 1
-            borderPath.stroke()
-        } else if isHovered {
-            SemanticColors.threadRowHoverBg.setFill()
-            let bgRect = bounds.insetBy(dx: SidebarViewController.Layout.rowBackgroundHorizontalInset, dy: 0)
-            let bgPath = NSBezierPath(roundedRect: bgRect, xRadius: 6, yRadius: 6)
-            bgPath.fill()
-
-            SemanticColors.threadRowHoverBorder.setStroke()
-            let borderRect = bgRect.insetBy(dx: 0.5, dy: 0.5)
-            let borderPath = NSBezierPath(roundedRect: borderRect, xRadius: 6, yRadius: 6)
-            borderPath.lineWidth = 1
-            borderPath.stroke()
-        }
-    }
-
-    override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
 }
 
 // MARK: - NSMenuDelegate
