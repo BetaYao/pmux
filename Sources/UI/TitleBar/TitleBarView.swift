@@ -661,10 +661,9 @@ private final class ProjectTabView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard frame.contains(point) else { return nil }
+        guard bounds.contains(point) else { return nil }
         // Let close button handle its own clicks
-        let local = convert(point, from: superview)
-        if closeButton.frame.contains(local) {
+        if closeButton.frame.contains(point) {
             return closeButton
         }
         // All other clicks go to self (so mouseDown fires)
