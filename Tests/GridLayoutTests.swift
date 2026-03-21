@@ -289,4 +289,115 @@ final class GridLayoutTests: XCTestCase {
     func testFocusPanel_DefaultHeaderPosition_IsBottom() {
         XCTAssertEqual(FocusPanelView.defaultHeaderPosition, .bottom)
     }
+
+    func testRepoView_DefaultTopInset_IsEightPoints() {
+        XCTAssertEqual(RepoViewController.layoutTopInset, 8)
+    }
+
+    func testSidebar_DefaultBackground_IsTransparent() {
+        let sidebarVC = SidebarViewController()
+        sidebarVC.loadViewIfNeeded()
+
+        guard let bgColor = sidebarVC.view.layer?.backgroundColor,
+              let nsColor = NSColor(cgColor: bgColor)
+        else {
+            XCTFail("Sidebar background color should exist")
+            return
+        }
+
+        XCTAssertLessThanOrEqual(nsColor.alphaComponent, 0.001)
+    }
+
+    func testSidebar_UsesComfortableRowInsets() {
+        XCTAssertEqual(SidebarViewController.Layout.listHorizontalInset, 0)
+        XCTAssertEqual(SidebarViewController.Layout.rowBackgroundHorizontalInset, 8)
+        XCTAssertEqual(SidebarViewController.Layout.cellLeadingInset, 8)
+        XCTAssertEqual(SidebarViewController.Layout.cellTrailingInset, 6)
+    }
+
+    func testSidebar_HeaderSeparator_DefaultsToHidden() {
+        XCTAssertFalse(SidebarViewController.Layout.showsHeaderSeparator)
+    }
+
+    func testRepoView_SideBySideTerminalCorners_LeftOnlyRounded() {
+        XCTAssertEqual(RepoViewController.terminalCornerRadius, 10)
+        let expected: CACornerMask = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+        XCTAssertEqual(RepoViewController.sideBySideTerminalMaskedCorners, expected)
+    }
+
+    func testNewThreadDialog_ActionButtonsUseEqualSizingPolicy() {
+        XCTAssertTrue(NewBranchDialog.Layout.actionButtonsFillEqually)
+        XCTAssertEqual(NewBranchDialog.Layout.actionButtonHeight, 40)
+    }
+
+    func testZoomButton_DefaultStyle_IsBorderlessForConsistentVisualSize() {
+        let secondary = ZoomButton(style: .secondary)
+        XCTAssertFalse(secondary.isBordered)
+    }
+
+    func testSidebar_DefaultSelectionStyle_IsMacOSNative() {
+        XCTAssertTrue(SidebarViewController.Layout.usesNativeSelectionStyle)
+    }
+
+    func testTitleBar_UsesSystemAlignedCapsuleHeights() {
+        XCTAssertEqual(TitleBarView.Layout.barHeight, 45)
+        XCTAssertEqual(TitleBarView.Layout.capsuleHeight, 37)
+        XCTAssertEqual(TitleBarView.Layout.arcVerticalOffset, 2)
+        XCTAssertEqual(TitleBarView.Layout.dashboardLeadingInset, 16)
+        XCTAssertEqual(TitleBarView.Layout.dashboardHorizontalPadding, 10)
+    }
+
+    func testTitleBar_DashboardLabelUsesSemanticTextNotSpacePadding() {
+        let titleBar = TitleBarView()
+        titleBar.layoutSubtreeIfNeeded()
+
+        let dashboard = titleBar.subviews
+            .flatMap { $0.subviews }
+            .compactMap { $0 as? NSButton }
+            .first { $0.accessibilityIdentifier() == "titlebar.dashboardTab" }
+
+        XCTAssertNotNil(dashboard)
+        XCTAssertEqual(dashboard?.attributedTitle.string, "\u{FFFC} Dashboard")
+    }
+
+    func testMainWindowController_TrafficLightsAlignWithCapsuleCenter() {
+        let originY = MainWindowController.trafficLightButtonOriginY(containerHeight: 52, buttonHeight: 12)
+        XCTAssertEqual(originY, 22, accuracy: 0.001)
+    }
+
+    func testMainWindowController_DoesNotUseEscAsGlobalShortcut() {
+        XCTAssertFalse(MainWindowController.shouldHandleEscShortcut())
+    }
+
+    func testDashboardFocusLayouts_UseEdgeFlushSpacingAndCornerMasks() {
+        XCTAssertEqual(DashboardViewController.LayoutMetrics.focusPanelCornerRadius, 10)
+        XCTAssertEqual(DashboardViewController.LayoutMetrics.containerHorizontalInset, 0)
+        XCTAssertEqual(DashboardViewController.LayoutMetrics.containerBottomInset, 0)
+        XCTAssertEqual(DashboardViewController.LayoutMetrics.topSmallFocusJoinSpacing, 8)
+        XCTAssertEqual(DashboardViewController.LayoutMetrics.topLargeFocusJoinSpacing, 0)
+        XCTAssertEqual(DashboardViewController.LayoutMetrics.topSmallMiniRowHorizontalInset, 8)
+        XCTAssertEqual(DashboardViewController.LayoutMetrics.topLargeMiniRowHorizontalInset, 8)
+        XCTAssertEqual(DashboardViewController.LayoutMetrics.topLargeMiniRowBottomInset, 8)
+
+        let topSmallExpected: CACornerMask = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        XCTAssertEqual(DashboardViewController.LayoutMetrics.topSmallFocusMaskedCorners, topSmallExpected)
+
+        let topLargeExpected: CACornerMask = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+        XCTAssertEqual(DashboardViewController.LayoutMetrics.topLargeFocusMaskedCorners, topLargeExpected)
+
+        let leftRightExpected: CACornerMask = [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
+        XCTAssertEqual(DashboardViewController.LayoutMetrics.leftRightFocusMaskedCorners, leftRightExpected)
+    }
+
+    func testMainWindowController_WindowAutosaveDisabledInUITestEnvironment() {
+        XCTAssertFalse(MainWindowController.shouldUseWindowFrameAutosave(
+            environment: ["XCTestConfigurationFilePath": "/tmp/test.xctestconfiguration"],
+            arguments: []
+        ))
+        XCTAssertFalse(MainWindowController.shouldUseWindowFrameAutosave(
+            environment: [:],
+            arguments: ["-PmuxUITesting"]
+        ))
+        XCTAssertTrue(MainWindowController.shouldUseWindowFrameAutosave(environment: [:], arguments: []))
+    }
 }

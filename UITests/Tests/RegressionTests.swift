@@ -156,4 +156,39 @@ class RegressionTests: PmuxUITestCase {
                              "Top-large layout should start below titlebar")
     }
 
+    func testProjectDetailContentStartsBelowTitlebarCapsule() throws {
+        XCTAssertTrue(page.titleBar.viewMenuButton.waitForExistence(timeout: 10),
+                      "Titlebar capsule should exist")
+        let titlebarMaxY = page.titleBar.viewMenuButton.frame.maxY
+
+        let projectTabs = page.app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'titlebar.projectTab.'"))
+        if projectTabs.count > 0 {
+            let firstTab = projectTabs.element(boundBy: 0)
+            XCTAssertTrue(firstTab.waitForExistence(timeout: 5), "First project tab should exist")
+            firstTab.waitAndClick()
+        } else if page.sidebar.worktreeList.exists || page.repo.terminal.exists {
+            // Already in project detail from previous persisted window state.
+        } else {
+            let firstCard = page.dashboard.cards.firstMatch
+            guard firstCard.waitForExistence(timeout: 5) else {
+                throw XCTSkip("No project tabs/cards available to open project detail")
+            }
+            firstCard.waitAndClick()
+            guard page.dashboard.enterProjectButton.waitForExistence(timeout: 5) else {
+                throw XCTSkip("Enter project button not available in current dashboard state")
+            }
+            page.dashboard.tapEnterProject()
+        }
+
+        XCTAssertTrue(page.sidebar.worktreeList.waitForExistence(timeout: 10),
+                      "Sidebar should be visible in project detail")
+        XCTAssertTrue(page.repo.terminal.waitForExistence(timeout: 10),
+                      "Terminal card should be visible in project detail")
+
+        XCTAssertGreaterThan(page.sidebar.worktreeList.frame.minY, titlebarMaxY,
+                             "Sidebar should start below titlebar capsule")
+        XCTAssertGreaterThan(page.repo.terminal.frame.minY, titlebarMaxY,
+                             "Terminal card should start below titlebar capsule")
+    }
+
 }

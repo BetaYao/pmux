@@ -11,6 +11,7 @@ final class FocusPanelView: NSView {
     }
 
     static let defaultHeaderPosition: HeaderPosition = .bottom
+    static let defaultCornerRadius: CGFloat = 10
 
     enum Typography {
         static let primaryPointSize: CGFloat = 13
@@ -53,13 +54,20 @@ final class FocusPanelView: NSView {
 
     private func setup() {
         wantsLayer = true
-        layer?.cornerRadius = 4
+        layer?.cornerRadius = Self.defaultCornerRadius
+        layer?.cornerCurve = .continuous
+        layer?.masksToBounds = true
         layer?.borderWidth = 1
         // Colors set in applyColors() via updateLayer
         setAccessibilityIdentifier("dashboard.focusPanel")
 
         setupHeader()
         setupTerminalContainer()
+    }
+
+    func setCornerMask(_ maskedCorners: CACornerMask, radius: CGFloat = defaultCornerRadius) {
+        layer?.cornerRadius = radius
+        layer?.maskedCorners = maskedCorners
     }
 
     private func setupHeader() {

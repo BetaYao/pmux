@@ -84,6 +84,11 @@ protocol NewBranchDialogDelegate: AnyObject {
 
 /// Zoom 风格的新分支弹窗
 class NewBranchDialog: NSViewController {
+    enum Layout {
+        static let actionButtonsFillEqually = true
+        static let actionButtonHeight: CGFloat = 40
+    }
+
     weak var dialogDelegate: NewBranchDialogDelegate?
     
     private let repoPopup = NSPopUpButton()
@@ -164,6 +169,9 @@ class NewBranchDialog: NSViewController {
         buttonStack.orientation = .horizontal
         buttonStack.spacing = 12
         buttonStack.alignment = .centerY
+        if Layout.actionButtonsFillEqually {
+            buttonStack.distribution = .fillEqually
+        }
         
         let mainStack = NSStackView(views: [
             titleLabel,
@@ -190,10 +198,9 @@ class NewBranchDialog: NSViewController {
             branchField.widthAnchor.constraint(equalToConstant: 280),
             baseBranchPopup.widthAnchor.constraint(equalToConstant: 280),
             
-            createButton.widthAnchor.constraint(equalToConstant: 100),
-            createButton.heightAnchor.constraint(equalToConstant: 36),
-            cancelButton.widthAnchor.constraint(equalToConstant: 100),
-            cancelButton.heightAnchor.constraint(equalToConstant: 36),
+            buttonStack.widthAnchor.constraint(equalToConstant: 292),
+            createButton.heightAnchor.constraint(equalToConstant: Layout.actionButtonHeight),
+            cancelButton.heightAnchor.constraint(equalToConstant: Layout.actionButtonHeight),
         ])
         
         // 加载第一个 repo 的分支
@@ -430,7 +437,7 @@ class ZoomButton: NSButton {
     private func setup() {
         wantsLayer = true
         layer?.cornerRadius = 8
-        bezelStyle = .recessed
+        isBordered = false
         setButtonType(.momentaryPushIn)
         
         // 设置文字样式
@@ -456,9 +463,13 @@ class ZoomButton: NSButton {
         switch style {
         case .primary:
             layer?.backgroundColor = SemanticColors.accent.cgColor
+            layer?.borderWidth = 0
+            layer?.borderColor = nil
             contentTintColor = .white
         case .secondary:
-            layer?.backgroundColor = NSColor(white: 1, alpha: 0.03).cgColor
+            layer?.backgroundColor = SemanticColors.tileBg.cgColor
+            layer?.borderWidth = 1
+            layer?.borderColor = SemanticColors.line.cgColor
             contentTintColor = NSColor(hex: 0xaaaaaa)
         }
     }
@@ -485,7 +496,7 @@ class ZoomButton: NSButton {
             case .primary:
                 layer?.backgroundColor = SemanticColors.accent.blended(withFraction: 0.15, of: .white)?.cgColor
             case .secondary:
-                layer?.backgroundColor = NSColor(white: 1, alpha: 0.06).cgColor
+                layer?.backgroundColor = SemanticColors.tileBg.blended(withFraction: 0.08, of: .white)?.cgColor
             }
         }
     }

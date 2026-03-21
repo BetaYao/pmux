@@ -8,6 +8,15 @@ protocol SidebarDelegate: AnyObject {
 
 /// Left sidebar showing thread list with status dots
 class SidebarViewController: NSViewController {
+    enum Layout {
+        static let listHorizontalInset: CGFloat = 0
+        static let rowBackgroundHorizontalInset: CGFloat = 8
+        static let cellLeadingInset: CGFloat = 8
+        static let cellTrailingInset: CGFloat = 6
+        static let usesNativeSelectionStyle = true
+        static let showsHeaderSeparator = false
+    }
+
     weak var sidebarDelegate: SidebarDelegate?
 
     private let headerBar = NSView()
@@ -27,7 +36,7 @@ class SidebarViewController: NSViewController {
     override func loadView() {
         self.view = NSView()
         view.wantsLayer = true
-        view.layer?.backgroundColor = SemanticColors.tileBg.cgColor
+        view.layer?.backgroundColor = NSColor.clear.cgColor
 
         // MARK: Header bar
         headerBar.translatesAutoresizingMaskIntoConstraints = false
@@ -59,6 +68,7 @@ class SidebarViewController: NSViewController {
         headerBorder.translatesAutoresizingMaskIntoConstraints = false
         headerBorder.wantsLayer = true
         headerBorder.layer?.backgroundColor = SemanticColors.line.cgColor
+        headerBorder.isHidden = !Layout.showsHeaderSeparator
         headerBar.addSubview(headerBorder)
 
         // MARK: Scroll view + table
@@ -67,12 +77,16 @@ class SidebarViewController: NSViewController {
         scrollView.scrollerStyle = .overlay
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
-        scrollView.contentInsets = NSEdgeInsets(top: 6, left: 6, bottom: 6, right: 6)
+        scrollView.contentInsets = NSEdgeInsets(top: 6, left: Layout.listHorizontalInset, bottom: 6, right: Layout.listHorizontalInset)
         view.addSubview(scrollView)
 
         tableView.backgroundColor = .clear
         tableView.headerView = nil
-        tableView.selectionHighlightStyle = .none
+        if Layout.usesNativeSelectionStyle {
+            tableView.selectionHighlightStyle = .regular
+        } else {
+            tableView.selectionHighlightStyle = .none
+        }
         tableView.rowHeight = 60
         tableView.intercellSpacing = NSSize(width: 0, height: 4)
         tableView.delegate = self
@@ -122,7 +136,7 @@ class SidebarViewController: NSViewController {
             headerBorder.leadingAnchor.constraint(equalTo: headerBar.leadingAnchor),
             headerBorder.trailingAnchor.constraint(equalTo: headerBar.trailingAnchor),
             headerBorder.bottomAnchor.constraint(equalTo: headerBar.bottomAnchor),
-            headerBorder.heightAnchor.constraint(equalToConstant: 1),
+            headerBorder.heightAnchor.constraint(equalToConstant: Layout.showsHeaderSeparator ? 1 : 0),
 
             // Scroll view below header
             scrollView.topAnchor.constraint(equalTo: headerBar.bottomAnchor),
@@ -191,6 +205,8 @@ extension SidebarViewController: NSTableViewDataSource {
 extension SidebarViewController: NSTableViewDelegate {
 
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        guard !Layout.usesNativeSelectionStyle else { return nil }
+
         let isSelected = (row == selectedIndex)
         let rowView = ThreadRowView(isActive: isSelected)
         return rowView
@@ -278,16 +294,16 @@ private class SidebarCellView: NSView {
         NSLayoutConstraint.activate([
             dotView.widthAnchor.constraint(equalToConstant: 7),
             dotView.heightAnchor.constraint(equalToConstant: 7),
-            dotView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            dotView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: SidebarViewController.Layout.cellLeadingInset),
             dotView.centerYAnchor.constraint(equalTo: nameLabel.centerYAnchor),
 
             nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 9),
             nameLabel.leadingAnchor.constraint(equalTo: dotView.trailingAnchor, constant: 6),
-            nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
+            nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -SidebarViewController.Layout.cellTrailingInset),
 
             messageLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 2),
             messageLabel.leadingAnchor.constraint(equalTo: dotView.trailingAnchor, constant: 6),
-            messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -SidebarViewController.Layout.cellTrailingInset),
             messageLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -9),
         ])
     }
@@ -357,20 +373,24 @@ private class ThreadRowView: NSTableRowView {
 
         if isActive {
             SemanticColors.threadRowBg.setFill()
-            let bgPath = NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6)
+            let bgRect = bounds.insetBy(dx: SidebarViewController.Layout.rowBackgroundHorizontalInset, dy: 0)
+            let bgPath = NSBezierPath(roundedRect: bgRect, xRadius: 6, yRadius: 6)
             bgPath.fill()
 
             SemanticColors.threadRowBorder.setStroke()
-            let borderPath = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
+            let borderRect = bgRect.insetBy(dx: 0.5, dy: 0.5)
+            let borderPath = NSBezierPath(roundedRect: borderRect, xRadius: 6, yRadius: 6)
             borderPath.lineWidth = 1
             borderPath.stroke()
         } else if isHovered {
             SemanticColors.threadRowHoverBg.setFill()
-            let bgPath = NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6)
+            let bgRect = bounds.insetBy(dx: SidebarViewController.Layout.rowBackgroundHorizontalInset, dy: 0)
+            let bgPath = NSBezierPath(roundedRect: bgRect, xRadius: 6, yRadius: 6)
             bgPath.fill()
 
             SemanticColors.threadRowHoverBorder.setStroke()
-            let borderPath = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
+            let borderRect = bgRect.insetBy(dx: 0.5, dy: 0.5)
+            let borderPath = NSBezierPath(roundedRect: borderRect, xRadius: 6, yRadius: 6)
             borderPath.lineWidth = 1
             borderPath.stroke()
         }

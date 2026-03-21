@@ -64,6 +64,32 @@ class MainWindowController: NSWindowController {
     }
     private var currentModalContext: ModalContext?
 
+    static func shouldUseWindowFrameAutosave(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        arguments: [String] = ProcessInfo.processInfo.arguments
+    ) -> Bool {
+        if environment["XCTestConfigurationFilePath"] != nil {
+            return false
+        }
+        if arguments.contains("-PmuxUITesting") {
+            return false
+        }
+        if let idx = arguments.firstIndex(of: "-ApplePersistenceIgnoreState"),
+           arguments.indices.contains(idx + 1),
+           arguments[idx + 1].caseInsensitiveCompare("YES") == .orderedSame {
+            return false
+        }
+        return true
+    }
+
+    static func shouldHandleEscShortcut() -> Bool {
+        false
+    }
+
+    static func trafficLightButtonOriginY(containerHeight: CGFloat, buttonHeight: CGFloat) -> CGFloat {
+        (containerHeight / 2) + TitleBarView.Layout.arcVerticalOffset - (buttonHeight / 2)
+    }
+
     convenience init() {
         let window = PmuxWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
@@ -83,9 +109,16 @@ class MainWindowController: NSWindowController {
 
         self.init(window: window)
 
-        window.setFrameAutosaveName("PmuxMainWindow")
+        if Self.shouldUseWindowFrameAutosave() {
+            window.setFrameAutosaveName("PmuxMainWindow")
+        } else if let visibleFrame = NSScreen.main?.visibleFrame {
+            let width = min(1200, visibleFrame.width * 0.9)
+            let height = min(800, visibleFrame.height * 0.9)
+            let x = visibleFrame.midX - (width / 2)
+            let y = visibleFrame.midY - (height / 2)
+            window.setFrame(NSRect(x: x, y: y, width: width, height: height), display: false)
+        }
         window.delegate = self
-        window.keyHandler = self
 
         setupMenuShortcuts()
         setupLayout()
@@ -467,12 +500,12 @@ class MainWindowController: NSWindowController {
         toolbar.displayMode = .iconOnly
         toolbar.showsBaselineSeparator = false
         window.toolbar = toolbar
-        window.toolbarStyle = .unifiedCompact
+        window.toolbarStyle = .unified
 
         titleBar.delegate = self
         titleBar.translatesAutoresizingMaskIntoConstraints = false
 
-        let accessoryContainer = NSView()
+        let accessoryContainer = NSView(frame: NSRect(x: 0, y: 0, width: 860, height: TitleBarView.Layout.barHeight))
         accessoryContainer.translatesAutoresizingMaskIntoConstraints = false
         accessoryContainer.addSubview(titleBar)
         NSLayoutConstraint.activate([
@@ -480,11 +513,11 @@ class MainWindowController: NSWindowController {
             titleBar.trailingAnchor.constraint(equalTo: accessoryContainer.trailingAnchor),
             titleBar.topAnchor.constraint(equalTo: accessoryContainer.topAnchor),
             titleBar.bottomAnchor.constraint(equalTo: accessoryContainer.bottomAnchor),
-            titleBar.heightAnchor.constraint(equalToConstant: 40),
             accessoryContainer.widthAnchor.constraint(greaterThanOrEqualToConstant: 860),
         ])
 
         titleBarAccessory.view = accessoryContainer
+        titleBarAccessory.fullScreenMinHeight = TitleBarView.Layout.barHeight
         titleBarAccessory.layoutAttribute = .top
         if !window.titlebarAccessoryViewControllers.contains(where: { $0 === titleBarAccessory }) {
             window.addTitlebarAccessoryViewController(titleBarAccessory)
@@ -506,10 +539,9 @@ class MainWindowController: NSWindowController {
         }
 
         let xOffset: CGFloat = 12
-        let yOffset: CGFloat = 10
         let spacing: CGFloat = 6
 
-        let y = container.bounds.height - yOffset - close.frame.height
+        let y = Self.trafficLightButtonOriginY(containerHeight: container.bounds.height, buttonHeight: close.frame.height)
         close.setFrameOrigin(NSPoint(x: xOffset, y: y))
         mini.setFrameOrigin(NSPoint(x: xOffset + close.frame.width + spacing, y: y))
         zoom.setFrameOrigin(NSPoint(x: xOffset + (close.frame.width + spacing) * 2, y: y))
@@ -726,26 +758,6 @@ class MainWindowController: NSWindowController {
         WorktreeDiscovery.discoverAsync(repoPath: repoPath) { [weak self] worktrees in
             guard let self else { return }
             _ = self.integrateDiscoveredRepoForTesting(repoPath: repoPath, worktrees: worktrees)
-        }
-    }
-
-    // MARK: - Key Handling
-
-    func handleEscKey() {
-        // Dismiss modal first
-        if !modalView.isHidden {
-            modalView.dismiss()
-            currentModalContext = nil
-            return
-        }
-        // Then dismiss panels
-        if notificationPanel.isOpen || aiPanel.isOpen {
-            closeBothPanels()
-            return
-        }
-        // Then navigate back to dashboard from project
-        if activeTabIndex > 0 {
-            switchToTab(0)
         }
     }
 
@@ -1090,19 +1102,10 @@ class MainWindowController: NSWindowController {
     }
 }
 
-// MARK: - PmuxWindow
-
-protocol PmuxWindowKeyHandler: AnyObject {
-    func handleEscKey()
-}
-
 class PmuxWindow: NSWindow {
-    weak var keyHandler: PmuxWindowKeyHandler?
-
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown {
-            if event.keyCode == 53 {  // Esc
-                keyHandler?.handleEscKey()
+            if event.keyCode == 53, MainWindowController.shouldHandleEscShortcut() {
                 return
             }
         }
@@ -1259,10 +1262,6 @@ extension MainWindowController: RepoViewDelegate {
         showNewBranchDialog()
     }
 }
-
-// MARK: - PmuxWindowKeyHandler
-
-extension MainWindowController: PmuxWindowKeyHandler {}
 
 // MARK: - UnifiedModalDelegate
 

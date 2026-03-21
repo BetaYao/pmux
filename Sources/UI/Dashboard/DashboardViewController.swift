@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 
 // MARK: - DashboardDelegate
 
@@ -33,6 +34,21 @@ extension NSPasteboard.PasteboardType {
 // MARK: - DashboardViewController
 
 class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDelegate, DraggableGridDelegate {
+    enum LayoutMetrics {
+        static let focusPanelCornerRadius: CGFloat = 10
+        static let containerHorizontalInset: CGFloat = 0
+        static let containerBottomInset: CGFloat = 0
+        static let topSmallFocusJoinSpacing: CGFloat = 8
+        static let topLargeFocusJoinSpacing: CGFloat = 0
+        static let topSmallMiniRowHorizontalInset: CGFloat = 8
+        static let topLargeMiniRowHorizontalInset: CGFloat = 8
+        static let topLargeMiniRowBottomInset: CGFloat = 8
+
+        static let topSmallFocusMaskedCorners: CACornerMask = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        static let topLargeFocusMaskedCorners: CACornerMask = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+        static let leftRightFocusMaskedCorners: CACornerMask = [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
+    }
+
     weak var dashboardDelegate: DashboardDelegate?
 
     var currentLayout: DashboardLayout = .leftRight
@@ -358,6 +374,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         // Focus panel (left, 78%)
         leftRightFocusPanel.translatesAutoresizingMaskIntoConstraints = false
         leftRightFocusPanel.delegate = self
+        leftRightFocusPanel.setCornerMask(
+            LayoutMetrics.leftRightFocusMaskedCorners,
+            radius: LayoutMetrics.focusPanelCornerRadius
+        )
         leftRightContainer.addSubview(leftRightFocusPanel)
 
         // Sidebar scroll (right, 22%)
@@ -379,9 +399,9 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
 
         NSLayoutConstraint.activate([
             leftRightContainer.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: layoutTopInset),
-            leftRightContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: spacing),
-            leftRightContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -spacing),
-            leftRightContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -spacing),
+            leftRightContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: LayoutMetrics.containerHorizontalInset),
+            leftRightContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -LayoutMetrics.containerHorizontalInset),
+            leftRightContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -LayoutMetrics.containerBottomInset),
 
             leftRightFocusPanel.topAnchor.constraint(equalTo: leftRightContainer.topAnchor),
             leftRightFocusPanel.leadingAnchor.constraint(equalTo: leftRightContainer.leadingAnchor),
@@ -424,24 +444,27 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         // Bottom: focus panel
         topSmallFocusPanel.translatesAutoresizingMaskIntoConstraints = false
         topSmallFocusPanel.delegate = self
+        topSmallFocusPanel.setCornerMask(
+            LayoutMetrics.topSmallFocusMaskedCorners,
+            radius: LayoutMetrics.focusPanelCornerRadius
+        )
         topSmallContainer.addSubview(topSmallFocusPanel)
 
-        let spacing: CGFloat = 8
         // Mini card height in top-small: derive from clamped width range 180-260 at 16:9
         let miniCardHeight: CGFloat = 128
 
         NSLayoutConstraint.activate([
             topSmallContainer.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: layoutTopInset),
-            topSmallContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: spacing),
-            topSmallContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -spacing),
-            topSmallContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -spacing),
+            topSmallContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: LayoutMetrics.containerHorizontalInset),
+            topSmallContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -LayoutMetrics.containerHorizontalInset),
+            topSmallContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -LayoutMetrics.containerBottomInset),
 
             topSmallTopScroll.topAnchor.constraint(equalTo: topSmallContainer.topAnchor),
-            topSmallTopScroll.leadingAnchor.constraint(equalTo: topSmallContainer.leadingAnchor),
-            topSmallTopScroll.trailingAnchor.constraint(equalTo: topSmallContainer.trailingAnchor),
+            topSmallTopScroll.leadingAnchor.constraint(equalTo: topSmallContainer.leadingAnchor, constant: LayoutMetrics.topSmallMiniRowHorizontalInset),
+            topSmallTopScroll.trailingAnchor.constraint(equalTo: topSmallContainer.trailingAnchor, constant: -LayoutMetrics.topSmallMiniRowHorizontalInset),
             topSmallTopScroll.heightAnchor.constraint(equalToConstant: miniCardHeight),
 
-            topSmallFocusPanel.topAnchor.constraint(equalTo: topSmallTopScroll.bottomAnchor, constant: spacing),
+            topSmallFocusPanel.topAnchor.constraint(equalTo: topSmallTopScroll.bottomAnchor, constant: LayoutMetrics.topSmallFocusJoinSpacing),
             topSmallFocusPanel.leadingAnchor.constraint(equalTo: topSmallContainer.leadingAnchor),
             topSmallFocusPanel.trailingAnchor.constraint(equalTo: topSmallContainer.trailingAnchor),
             topSmallFocusPanel.bottomAnchor.constraint(equalTo: topSmallContainer.bottomAnchor),
@@ -461,6 +484,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         // Top: focus panel
         topLargeFocusPanel.translatesAutoresizingMaskIntoConstraints = false
         topLargeFocusPanel.delegate = self
+        topLargeFocusPanel.setCornerMask(
+            LayoutMetrics.topLargeFocusMaskedCorners,
+            radius: LayoutMetrics.focusPanelCornerRadius
+        )
         topLargeContainer.addSubview(topLargeFocusPanel)
 
         // Bottom: horizontal scrolling row of mini cards
@@ -479,23 +506,22 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
 
         topLargeContainer.addSubview(topLargeBottomScroll)
 
-        let spacing: CGFloat = 8
         let miniCardHeight: CGFloat = 128
 
         NSLayoutConstraint.activate([
             topLargeContainer.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: layoutTopInset),
-            topLargeContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: spacing),
-            topLargeContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -spacing),
-            topLargeContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -spacing),
+            topLargeContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: LayoutMetrics.containerHorizontalInset),
+            topLargeContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -LayoutMetrics.containerHorizontalInset),
+            topLargeContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -LayoutMetrics.containerBottomInset),
 
             topLargeFocusPanel.topAnchor.constraint(equalTo: topLargeContainer.topAnchor),
             topLargeFocusPanel.leadingAnchor.constraint(equalTo: topLargeContainer.leadingAnchor),
             topLargeFocusPanel.trailingAnchor.constraint(equalTo: topLargeContainer.trailingAnchor),
-            topLargeFocusPanel.bottomAnchor.constraint(equalTo: topLargeBottomScroll.topAnchor, constant: -spacing),
+            topLargeFocusPanel.bottomAnchor.constraint(equalTo: topLargeBottomScroll.topAnchor, constant: -LayoutMetrics.topLargeFocusJoinSpacing),
 
-            topLargeBottomScroll.leadingAnchor.constraint(equalTo: topLargeContainer.leadingAnchor),
-            topLargeBottomScroll.trailingAnchor.constraint(equalTo: topLargeContainer.trailingAnchor),
-            topLargeBottomScroll.bottomAnchor.constraint(equalTo: topLargeContainer.bottomAnchor),
+            topLargeBottomScroll.leadingAnchor.constraint(equalTo: topLargeContainer.leadingAnchor, constant: LayoutMetrics.topLargeMiniRowHorizontalInset),
+            topLargeBottomScroll.trailingAnchor.constraint(equalTo: topLargeContainer.trailingAnchor, constant: -LayoutMetrics.topLargeMiniRowHorizontalInset),
+            topLargeBottomScroll.bottomAnchor.constraint(equalTo: topLargeContainer.bottomAnchor, constant: -LayoutMetrics.topLargeMiniRowBottomInset),
             topLargeBottomScroll.heightAnchor.constraint(equalToConstant: miniCardHeight),
         ])
     }

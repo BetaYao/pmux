@@ -13,6 +13,14 @@ protocol TitleBarDelegate: AnyObject {
 }
 
 final class TitleBarView: NSView {
+    enum Layout {
+        static let barHeight: CGFloat = 45
+        static let capsuleHeight: CGFloat = 37
+        static let arcVerticalOffset: CGFloat = 2
+        static let dashboardLeadingInset: CGFloat = 16
+        static let dashboardHorizontalPadding: CGFloat = 10
+    }
+
     weak var delegate: TitleBarDelegate?
 
     var currentView: String = "dashboard" {
@@ -126,15 +134,13 @@ final class TitleBarView: NSView {
         setupRightArcBlock()
 
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 40),
-
             leftArcBlock.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            leftArcBlock.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 4),
-            leftArcBlock.heightAnchor.constraint(equalToConstant: 34),
+            leftArcBlock.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Layout.arcVerticalOffset),
+            leftArcBlock.heightAnchor.constraint(equalToConstant: Layout.capsuleHeight),
 
             rightArcBlock.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            rightArcBlock.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 4),
-            rightArcBlock.heightAnchor.constraint(equalToConstant: 34),
+            rightArcBlock.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Layout.arcVerticalOffset),
+            rightArcBlock.heightAnchor.constraint(equalToConstant: Layout.capsuleHeight),
 
             // 8px gap between blocks
             rightArcBlock.leadingAnchor.constraint(
@@ -197,8 +203,7 @@ final class TitleBarView: NSView {
         tabsStack.addArrangedSubview(addButton)
 
         NSLayoutConstraint.activate([
-            // Reserve space for native traffic lights at x=12,y=10 in titlebar area.
-            dashboardTab.leadingAnchor.constraint(equalTo: leftArcBlock.leadingAnchor, constant: 74),
+            dashboardTab.leadingAnchor.constraint(equalTo: leftArcBlock.leadingAnchor, constant: Layout.dashboardLeadingInset),
             dashboardTab.centerYAnchor.constraint(equalTo: leftArcBlock.centerYAnchor),
 
             tabsScrollView.leadingAnchor.constraint(equalTo: dashboardTab.trailingAnchor, constant: 4),
@@ -233,8 +238,12 @@ final class TitleBarView: NSView {
             .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
         ]))
         dashboardTab.attributedTitle = attrString
+        dashboardTab.alignment = .left
+        dashboardTab.setContentHuggingPriority(.required, for: .horizontal)
 
+        let contentWidth = ceil(attrString.size().width + (Layout.dashboardHorizontalPadding * 2))
         NSLayoutConstraint.activate([
+            dashboardTab.widthAnchor.constraint(equalToConstant: contentWidth),
             dashboardTab.heightAnchor.constraint(equalToConstant: 28),
         ])
     }

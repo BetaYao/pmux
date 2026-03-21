@@ -7,6 +7,10 @@ protocol RepoViewDelegate: AnyObject {
 
 /// Full repo view: sidebar (thread list) + single immersive terminal
 class RepoViewController: NSViewController {
+    static let layoutTopInset: CGFloat = 8
+    static let terminalCornerRadius: CGFloat = 10
+    static let sideBySideTerminalMaskedCorners: CACornerMask = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+
     weak var repoDelegate: RepoViewDelegate?
     private let sidebarVC = SidebarViewController()
 
@@ -52,8 +56,8 @@ class RepoViewController: NSViewController {
         terminalContainer.layer?.backgroundColor = SemanticColors.tileBg.cgColor
         terminalContainer.layer?.borderWidth = 1
         terminalContainer.layer?.borderColor = SemanticColors.line.cgColor
-        terminalContainer.layer?.cornerRadius = 4
-        terminalContainer.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+        terminalContainer.layer?.cornerRadius = Self.terminalCornerRadius
+        terminalContainer.layer?.maskedCorners = Self.sideBySideTerminalMaskedCorners
         terminalContainer.setAccessibilityIdentifier("project.terminal")
         terminalContainer.setAccessibilityElement(true)
         terminalContainer.setAccessibilityRole(.group)
@@ -87,6 +91,7 @@ class RepoViewController: NSViewController {
         stackConstraints.removeAll()
 
         let gap: CGFloat = 12
+        let topAnchor = view.safeAreaLayoutGuide.topAnchor
 
         if isStacked {
             // Vertical stack: 220px sidebar on top, terminal below
@@ -95,7 +100,7 @@ class RepoViewController: NSViewController {
 
             stackConstraints = [
                 sidebarHeight,
-                sidebarContainer.topAnchor.constraint(equalTo: view.topAnchor),
+                sidebarContainer.topAnchor.constraint(equalTo: topAnchor, constant: Self.layoutTopInset),
                 sidebarContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
                 sidebarContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
 
@@ -113,18 +118,18 @@ class RepoViewController: NSViewController {
             sidebarWidthConstraint.isActive = true
 
             stackConstraints = [
-                sidebarContainer.topAnchor.constraint(equalTo: view.topAnchor),
+                sidebarContainer.topAnchor.constraint(equalTo: topAnchor, constant: Self.layoutTopInset),
                 sidebarContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
                 sidebarContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor),
 
-                terminalContainer.topAnchor.constraint(equalTo: view.topAnchor),
+                terminalContainer.topAnchor.constraint(equalTo: topAnchor, constant: Self.layoutTopInset),
                 terminalContainer.leadingAnchor.constraint(equalTo: sidebarContainer.trailingAnchor, constant: gap),
                 terminalContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
                 terminalContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             ]
 
             // No rounded corners on right edge (full height)
-            terminalContainer.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+            terminalContainer.layer?.maskedCorners = Self.sideBySideTerminalMaskedCorners
         }
 
         NSLayoutConstraint.activate(stackConstraints)
