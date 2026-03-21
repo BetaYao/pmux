@@ -1,0 +1,40 @@
+import Foundation
+
+struct AgentInfo {
+    let id: String                     // worktree path (unique key)
+    var agentType: AgentType           // detected from terminal content
+    let project: String                // repo display name
+    let branch: String                 // git branch
+    var status: AgentStatus            // current status
+    var lastMessage: String            // latest message
+    var roundDuration: TimeInterval    // seconds in current running round
+    let startedAt: Date?               // for computing totalDuration live
+    weak var surface: TerminalSurface? // weak ref, MainWindowController owns
+    var channel: AgentChannel?         // communication channel (strong ref, AgentHead owns)
+    var taskProgress: TaskProgress     // current task progress
+
+    /// Total duration computed live from startedAt
+    var totalDuration: TimeInterval {
+        guard let startedAt else { return 0 }
+        return Date().timeIntervalSince(startedAt)
+    }
+}
+
+/// Tracks an agent's task progress (how many tasks completed out of total)
+struct TaskProgress {
+    var totalTasks: Int = 0            // total tasks in current session
+    var completedTasks: Int = 0        // tasks completed so far
+    var currentTask: String?           // description of current task
+
+    var isActive: Bool { totalTasks > 0 }
+
+    var summary: String {
+        guard isActive else { return "" }
+        return "\(completedTasks)/\(totalTasks)"
+    }
+
+    var percentage: Double {
+        guard totalTasks > 0 else { return 0 }
+        return Double(completedTasks) / Double(totalTasks)
+    }
+}
