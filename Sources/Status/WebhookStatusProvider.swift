@@ -10,6 +10,7 @@ class WebhookStatusProvider {
         let worktreePath: String
         var status: AgentStatus
         var lastEvent: Date
+        var lastMessage: String?
     }
 
     func updateWorktrees(_ paths: [String]) {
@@ -34,16 +35,20 @@ class WebhookStatusProvider {
             }
 
             let status = event.event.agentStatus(data: event.data)
+            let message = Self.extractMessage(from: event)
+
             if var existing = sessions[event.sessionId] {
                 existing.status = status
                 existing.lastEvent = Date()
+                if let message { existing.lastMessage = message }
                 sessions[event.sessionId] = existing
             } else {
                 sessions[event.sessionId] = SessionState(
                     sessionId: event.sessionId,
                     worktreePath: worktreePath,
                     status: status,
-                    lastEvent: Date()
+                    lastEvent: Date(),
+                    lastMessage: message
                 )
             }
         }
@@ -56,6 +61,54 @@ class WebhookStatusProvider {
                 .filter { $0.worktreePath == canon }
                 .map { $0.status }
             return AgentStatus.highestPriority(sessionStatuses)
+        }
+    }
+
+    /// Returns the most recent webhook-derived message for a worktree, or nil
+    func lastMessage(for worktreePath: String) -> String? {
+        queue.sync {
+            let canon = canonicalize(worktreePath)
+            // Pick the session with the most recent event
+            return sessions.values
+                .filter { $0.worktreePath == canon }
+                .max(by: { $0.lastEvent < $1.lastEvent })?
+                .lastMessage
+        }
+    }
+
+    /// Extract a human-readable message from a webhook event
+    private static func extractMessage(from event: WebhookEvent) -> String? {
+        let data = event.data
+        switch event.event {
+        case .toolUseStart:
+            if let toolName = data?["tool_name"] as? String {
+                return "Using \(toolName)"
+            }
+            return nil
+        case .toolUseEnd:
+            if let toolName = data?["tool_name"] as? String {
+                return "Done: \(toolName)"
+            }
+            return nil
+        case .agentStop:
+            let reason = data?["stop_reason"] as? String ?? "done"
+            return "Stopped: \(reason)"
+        case .error:
+            let message = data?["message"] as? String ?? "Error occurred"
+            return message
+        case .prompt:
+            let message = data?["message"] as? String ?? "Waiting for input"
+            return message
+        case .notification:
+            if let message = data?["message"] as? String {
+                return message
+            }
+            if let title = data?["title"] as? String {
+                return title
+            }
+            return nil
+        case .sessionStart:
+            return "Session started"
         }
     }
 

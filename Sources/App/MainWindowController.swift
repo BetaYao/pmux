@@ -17,6 +17,12 @@ class MainWindowController: NSWindowController {
     private var surfaces: [String: TerminalSurface] = [:]
     private var allWorktrees: [(info: WorktreeInfo, surface: TerminalSurface)] = []
 
+    private static let iso8601: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
     // Repo views, keyed by repo path
     private var repoVCs: [String: RepoViewController] = [:]
     private var activeTabIndex: Int = 0  // 0 = Dashboard
@@ -511,6 +517,15 @@ class MainWindowController: NSWindowController {
             let project = workspaceManager.tabs.first(where: { $0.repoPath == repoPath })?.displayName ?? URL(fileURLWithPath: repoPath).lastPathComponent
             let status = statusPublisher.status(for: info.path)
             let lastMessage = statusPublisher.lastMessage(for: info.path)
+            let totalSeconds: TimeInterval
+            if let startStr = config.worktreeStartedAt[info.path],
+               let startDate = MainWindowController.iso8601.date(from: startStr) {
+                totalSeconds = Date().timeIntervalSince(startDate)
+            } else {
+                totalSeconds = 0
+            }
+            let roundSeconds = statusPublisher.roundDuration(for: info.path)
+
             return AgentDisplayInfo(
                 id: info.path,
                 name: info.branch,
@@ -518,8 +533,8 @@ class MainWindowController: NSWindowController {
                 thread: info.branch,
                 status: status.rawValue.lowercased(),
                 lastMessage: lastMessage.isEmpty ? "No active task." : lastMessage,
-                totalDuration: "00:00:00",
-                roundDuration: "00:00:00",
+                totalDuration: AgentDisplayHelpers.formatDuration(totalSeconds),
+                roundDuration: AgentDisplayHelpers.formatDuration(roundSeconds),
                 surface: surface
             )
         }
@@ -752,6 +767,17 @@ class MainWindowController: NSWindowController {
                     // Reuse already-discovered worktrees for tab creation (no second discover call)
                     _ = self.workspaceManager.addTab(repoPath: repoPath, worktrees: worktrees)
                 }
+
+                // Record startedAt for newly discovered worktrees
+                let now = MainWindowController.iso8601.string(from: Date())
+                var configChanged = false
+                for (info, _) in allWorktreeInfos {
+                    if self.config.worktreeStartedAt[info.path] == nil {
+                        self.config.worktreeStartedAt[info.path] = now
+                        configChanged = true
+                    }
+                }
+                if configChanged { self.config.save() }
 
                 // Apply saved card order
                 if !cardOrder.isEmpty {
@@ -1101,6 +1127,10 @@ extension MainWindowController: DashboardDelegate {
         guard let item = allWorktrees.first(where: { $0.info.path == path }) else { return }
         confirmAndDeleteWorktree(item.info)
     }
+
+    func dashboardDidRequestAddProject() {
+        addRepoViaOpenPanel()
+    }
 }
 
 // MARK: - RepoViewDelegate
@@ -1184,6 +1214,13 @@ extension MainWindowController: NewBranchDialogDelegate {
     func newBranchDialog(_ dialog: NewBranchDialog, didCreateWorktree info: WorktreeInfo, inRepo repoPath: String) {
         let surface = createSurface(for: info)
         allWorktrees.append((info: info, surface: surface))
+
+        // Record startedAt for the new worktree
+        if config.worktreeStartedAt[info.path] == nil {
+            config.worktreeStartedAt[info.path] = MainWindowController.iso8601.string(from: Date())
+            config.save()
+        }
+
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
         statusPublisher.updateSurfaces(surfaces)
 

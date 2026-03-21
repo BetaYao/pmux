@@ -12,6 +12,7 @@ struct Config: Codable {
     var zoomIndex: Int
     var dashboardLayout: String
     var themeMode: String
+    var worktreeStartedAt: [String: String]
 
     enum CodingKeys: String, CodingKey {
         case workspacePaths = "workspace_paths"
@@ -25,6 +26,7 @@ struct Config: Codable {
         case zoomIndex = "zoom_index"
         case dashboardLayout = "dashboard_layout"
         case themeMode = "theme_mode"
+        case worktreeStartedAt = "worktree_started_at"
     }
 
     init() {
@@ -39,6 +41,7 @@ struct Config: Codable {
         zoomIndex = 3
         dashboardLayout = "left-right"
         themeMode = "dark"
+        worktreeStartedAt = [:]
     }
 
     init(from decoder: Decoder) throws {
@@ -54,6 +57,7 @@ struct Config: Codable {
         zoomIndex = try container.decodeIfPresent(Int.self, forKey: .zoomIndex) ?? 3
         dashboardLayout = try container.decodeIfPresent(String.self, forKey: .dashboardLayout) ?? "left-right"
         themeMode = try container.decodeIfPresent(String.self, forKey: .themeMode) ?? "dark"
+        worktreeStartedAt = try container.decodeIfPresent([String: String].self, forKey: .worktreeStartedAt) ?? [:]
     }
 
     static let configDir = FileManager.default.homeDirectoryForCurrentUser

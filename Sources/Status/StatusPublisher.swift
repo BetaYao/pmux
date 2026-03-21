@@ -16,6 +16,7 @@ class StatusPublisher {
     private var surfaces: [String: TerminalSurface] = [:]
     private var agentConfig: AgentDetectConfig
     private var lastMessages: [String: String] = [:]
+    private var runningStartTimes: [String: Date] = [:]
     private(set) var webhookProvider = WebhookStatusProvider()
 
     private let pollInterval: TimeInterval = 2.0
@@ -111,13 +112,22 @@ class StatusPublisher {
             let hookStatus = webhookProvider.status(for: path)
             let detected = AgentStatus.highestPriority([textStatus, hookStatus])
 
-            let lastMessage = agentDef?.extractLastMessage(from: content, maxLen: 80) ?? ""
+            // Prefer structured webhook message over terminal text scan
+            let webhookMessage = webhookProvider.lastMessage(for: path)
+            let terminalMessage = agentDef?.extractLastMessage(from: content, maxLen: 80) ?? ""
+            let lastMessage = webhookMessage ?? (terminalMessage.isEmpty ? nil : terminalMessage) ?? ""
 
             let oldStatus = tracker.currentStatus
             let statusChanged = tracker.update(status: detected)
             lastMessages[path] = lastMessage
 
+            // Track round duration: record when entering Running, clear when leaving
             if statusChanged {
+                if detected == .running && oldStatus != .running {
+                    runningStartTimes[path] = Date()
+                } else if detected != .running && oldStatus == .running {
+                    runningStartTimes[path] = nil
+                }
                 DispatchQueue.main.async { [weak self] in
                     self?.delegate?.statusDidChange(worktreePath: path, oldStatus: oldStatus, newStatus: detected, lastMessage: lastMessage)
                 }
@@ -141,6 +151,12 @@ class StatusPublisher {
 
     func lastMessage(for path: String) -> String {
         lastMessages[path] ?? ""
+    }
+
+    /// Returns seconds since the current Running round started, or 0 if not running
+    func roundDuration(for path: String) -> TimeInterval {
+        guard let start = runningStartTimes[path] else { return 0 }
+        return Date().timeIntervalSince(start)
     }
 
     deinit {
