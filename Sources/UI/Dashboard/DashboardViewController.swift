@@ -7,6 +7,7 @@ protocol DashboardDelegate: AnyObject {
     func dashboardDidRequestEnterProject(_ project: String)
     func dashboardDidReorderCards(order: [String])
     func dashboardDidRequestDeleteWorktree(_ path: String)
+    func dashboardDidRequestAddProject()
 }
 
 // MARK: - AgentDisplayInfo
@@ -70,6 +71,9 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     private let topLargeBottomStack = NSStackView()
     private var topLargeMiniCards: [MiniCardView] = []
 
+    // Empty state
+    private let emptyStateView = NSView()
+
     private var currentMinCardWidth: CGFloat {
         GridLayout.zoomLevels[zoomIndex]
     }
@@ -82,6 +86,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         root.setAccessibilityIdentifier("dashboard.view")
         self.view = root
 
+        setupEmptyState()
         setupGridLayout()
         setupLeftRightLayout()
         setupTopSmallLayout()
@@ -98,6 +103,20 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         let structureChanged = oldIds != newIds
 
         agents = newAgents
+
+        // Show empty state when no agents
+        if agents.isEmpty {
+            emptyStateView.isHidden = false
+            showLayout(currentLayout) // hides all layout containers
+            gridScrollView.isHidden = true
+            leftRightContainer.isHidden = true
+            topSmallContainer.isHidden = true
+            topLargeContainer.isHidden = true
+            return
+        } else {
+            emptyStateView.isHidden = true
+            showLayout(currentLayout)
+        }
 
         // Validate selectedAgentId
         if !agents.contains(where: { $0.id == selectedAgentId }) {
@@ -247,6 +266,56 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         if case .grid = currentLayout {
             rebuildGrid()
         }
+    }
+
+    // MARK: - Setup: Empty State
+
+    private func setupEmptyState() {
+        emptyStateView.translatesAutoresizingMaskIntoConstraints = false
+        emptyStateView.isHidden = true
+        view.addSubview(emptyStateView)
+
+        // Folder icon button
+        let button = NSButton()
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.bezelStyle = .regularSquare
+        button.isBordered = false
+        button.title = ""
+        if let folderImage = NSImage(systemSymbolName: "folder.badge.plus", accessibilityDescription: "Open Folder") {
+            let config = NSImage.SymbolConfiguration(pointSize: 48, weight: .light)
+            button.image = folderImage.withSymbolConfiguration(config)
+        }
+        button.contentTintColor = .secondaryLabelColor
+        button.imagePosition = .imageOnly
+        button.target = self
+        button.action = #selector(emptyStateAddProjectClicked)
+        button.setAccessibilityIdentifier("dashboard.emptyState.addButton")
+        emptyStateView.addSubview(button)
+
+        // Subtitle label
+        let label = NSTextField(labelWithString: "Add a workspace to get started")
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.font = .systemFont(ofSize: 14)
+        label.textColor = .secondaryLabelColor
+        label.alignment = .center
+        emptyStateView.addSubview(label)
+
+        NSLayoutConstraint.activate([
+            emptyStateView.topAnchor.constraint(equalTo: view.topAnchor),
+            emptyStateView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            emptyStateView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            emptyStateView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+            button.centerXAnchor.constraint(equalTo: emptyStateView.centerXAnchor),
+            button.centerYAnchor.constraint(equalTo: emptyStateView.centerYAnchor, constant: -16),
+
+            label.topAnchor.constraint(equalTo: button.bottomAnchor, constant: 12),
+            label.centerXAnchor.constraint(equalTo: emptyStateView.centerXAnchor),
+        ])
+    }
+
+    @objc private func emptyStateAddProjectClicked() {
+        dashboardDelegate?.dashboardDidRequestAddProject()
     }
 
     // MARK: - Setup: Grid
