@@ -504,37 +504,17 @@ class MainWindowController: NSWindowController {
 
     /// Build AgentDisplayInfo array from current worktree data
     private func buildAgentDisplayInfos() -> [AgentDisplayInfo] {
-        return allWorktrees.map { (info, surface) in
-            // Use cache first, fall back to sync lookup (which itself caches in WorktreeDiscovery)
-            let repoPath: String
-            if let cached = worktreeRepoCache[info.path] {
-                repoPath = cached
-            } else {
-                let found = WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
-                worktreeRepoCache[info.path] = found
-                repoPath = found
-            }
-            let project = workspaceManager.tabs.first(where: { $0.repoPath == repoPath })?.displayName ?? URL(fileURLWithPath: repoPath).lastPathComponent
-            let status = statusPublisher.status(for: info.path)
-            let lastMessage = statusPublisher.lastMessage(for: info.path)
-            let totalSeconds: TimeInterval
-            if let startStr = config.worktreeStartedAt[info.path],
-               let startDate = MainWindowController.iso8601.date(from: startStr) {
-                totalSeconds = Date().timeIntervalSince(startDate)
-            } else {
-                totalSeconds = 0
-            }
-            let roundSeconds = statusPublisher.roundDuration(for: info.path)
-
+        return AgentHead.shared.allAgents().compactMap { agent in
+            guard let surface = agent.surface else { return nil }
             return AgentDisplayInfo(
-                id: info.path,
-                name: info.branch,
-                project: project,
-                thread: info.branch,
-                status: status.rawValue.lowercased(),
-                lastMessage: lastMessage.isEmpty ? "No active task." : lastMessage,
-                totalDuration: AgentDisplayHelpers.formatDuration(totalSeconds),
-                roundDuration: AgentDisplayHelpers.formatDuration(roundSeconds),
+                id: agent.id,
+                name: agent.branch,
+                project: agent.project,
+                thread: agent.branch,
+                status: agent.status.rawValue.lowercased(),
+                lastMessage: agent.lastMessage.isEmpty ? "No active task." : agent.lastMessage,
+                totalDuration: AgentDisplayHelpers.formatDuration(agent.totalDuration),
+                roundDuration: AgentDisplayHelpers.formatDuration(agent.roundDuration),
                 surface: surface
             )
         }
@@ -789,6 +769,20 @@ class MainWindowController: NSWindowController {
                 }
 
                 self.allWorktrees = allWorktreeInfos
+
+                // Register all agents with AgentHead
+                for (info, surface) in allWorktreeInfos {
+                    let repo = self.worktreeRepoCache[info.path] ?? WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
+                    let proj = self.workspaceManager.tabs.first(where: { $0.repoPath == repo })?.displayName
+                        ?? URL(fileURLWithPath: repo).lastPathComponent
+                    let started = self.config.worktreeStartedAt[info.path].flatMap { MainWindowController.iso8601.date(from: $0) }
+                    let sessionName = self.config.backend == "tmux" ? Self.tmuxSessionName(for: info.path) : nil
+                    AgentHead.shared.register(worktreePath: info.path, branch: info.branch, project: proj, surface: surface, startedAt: started, tmuxSessionName: sessionName)
+                }
+                if !cardOrder.isEmpty {
+                    AgentHead.shared.reorder(paths: cardOrder)
+                }
+
                 self.dashboardVC?.updateAgents(self.buildAgentDisplayInfos())
                 self.updateTitleBar()
 
@@ -803,6 +797,7 @@ class MainWindowController: NSWindowController {
                 if self.config.webhook.enabled {
                     let server = WebhookServer(port: self.config.webhook.port) { [weak self] event in
                         self?.statusPublisher.webhookProvider.handleEvent(event)
+                        AgentHead.shared.handleWebhookEvent(event)
                     }
                     server.start()
                     self.webhookServer = server
@@ -895,6 +890,7 @@ class MainWindowController: NSWindowController {
     private func worktreeDidDelete(_ info: WorktreeInfo) {
         allWorktrees.removeAll { $0.info.path == info.path }
         worktreeRepoCache.removeValue(forKey: info.path)
+        AgentHead.shared.unregister(worktreePath: info.path)
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
         statusPublisher.updateSurfaces(surfaces)
 
@@ -947,6 +943,7 @@ class MainWindowController: NSWindowController {
                 surface.destroy()
                 surfaces.removeValue(forKey: worktree.path)
             }
+            AgentHead.shared.unregister(worktreePath: worktree.path)
             if config.backend == "tmux" {
                 let sessionName = Self.tmuxSessionName(for: worktree.path)
                 killTmuxSession(sessionName)
