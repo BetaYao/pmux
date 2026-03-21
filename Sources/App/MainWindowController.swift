@@ -1126,9 +1126,8 @@ extension MainWindowController: DashboardDelegate {
         config.save()
     }
 
-    func dashboardDidRequestDeleteWorktree(_ path: String) {
-        // path is now a terminal ID from the dashboard
-        guard let agent = AgentHead.shared.agent(for: path) else { return }
+    func dashboardDidRequestDelete(_ terminalID: String) {
+        guard let agent = AgentHead.shared.agent(for: terminalID) else { return }
         let worktreePath = agent.worktreePath
         guard let item = allWorktrees.first(where: { $0.info.path == worktreePath }) else { return }
         confirmAndDeleteWorktree(item.info)

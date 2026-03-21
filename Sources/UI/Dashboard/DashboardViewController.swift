@@ -6,7 +6,7 @@ protocol DashboardDelegate: AnyObject {
     func dashboardDidSelectProject(_ project: String, thread: String)
     func dashboardDidRequestEnterProject(_ project: String)
     func dashboardDidReorderCards(order: [String])
-    func dashboardDidRequestDeleteWorktree(_ path: String)
+    func dashboardDidRequestDelete(_ terminalID: String)
     func dashboardDidRequestAddProject()
 }
 
@@ -735,8 +735,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         return currentGridLayout.dropIndicatorFrame(at: index)
     }
 
-    func draggableGrid(_ grid: DraggableGridView, didDropItemWithPath path: String, atIndex toIndex: Int) {
-        guard let fromIndex = agents.firstIndex(where: { $0.id == path }) else { return }
+    func draggableGrid(_ grid: DraggableGridView, didDropItemWithID id: String, atIndex toIndex: Int) {
+        guard let fromIndex = agents.firstIndex(where: { $0.id == id }) else { return }
         guard fromIndex != toIndex, toIndex >= 0, toIndex <= agents.count else { return }
 
         var mutableAgents = agents

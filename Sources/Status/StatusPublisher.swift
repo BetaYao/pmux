@@ -39,6 +39,7 @@ class StatusPublisher {
     }
 
     func start(surfaces: [String: TerminalSurface]) {
+        let inputWorktreePaths = Array(surfaces.keys)
         self.surfaces = [:]
         self.worktreePaths = [:]
         for (worktreePath, surface) in surfaces {
@@ -54,7 +55,7 @@ class StatusPublisher {
             }
         }
 
-        webhookProvider.updateWorktrees(Array(surfaces.keys))
+        webhookProvider.updateWorktrees(inputWorktreePaths)
 
         timer = Timer.scheduledTimer(withTimeInterval: pollInterval, repeats: true) { [weak self] _ in
             self?.schedulePoll()
@@ -69,6 +70,7 @@ class StatusPublisher {
     }
 
     func updateSurfaces(_ surfaces: [String: TerminalSurface]) {
+        let inputWorktreePaths = Array(surfaces.keys)
         self.surfaces = [:]
         self.worktreePaths = [:]
         for (worktreePath, surface) in surfaces {
@@ -81,7 +83,7 @@ class StatusPublisher {
                 trackers[terminalID] = DebouncedStatusTracker()
             }
         }
-        webhookProvider.updateWorktrees(Array(surfaces.keys))
+        webhookProvider.updateWorktrees(inputWorktreePaths)
     }
 
     private func schedulePoll() {
