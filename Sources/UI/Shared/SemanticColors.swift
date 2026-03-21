@@ -32,15 +32,17 @@ enum SemanticColors {
     // The NSColor(name:) block still resolves per-appearance at draw time,
     // but the NSColor wrapper object itself is allocated only once.
     static let bg: NSColor = NSColor(name: nil) { appearance in
-        appearance.isDark ? NSColor(hex: 0x0b0b0b) : NSColor(hex: 0xe8eaef)
+        appearance.isDark
+            ? NSColor(srgbRed: 0x10 / 255.0, green: 0x18 / 255.0, blue: 0x1d / 255.0, alpha: 0.40)
+            : NSColor(hex: 0xe8eaef)
     }
 
     static let panel: NSColor = NSColor(name: nil) { appearance in
-        appearance.isDark ? NSColor(hex: 0x1a1a1a) : NSColor(hex: 0xffffff)
+        appearance.isDark ? NSColor(hex: 0x0f1011) : NSColor(hex: 0xffffff)
     }
 
     static let panel2: NSColor = NSColor(name: nil) { appearance in
-        appearance.isDark ? NSColor(hex: 0x111111) : NSColor(hex: 0xf7f8fb)
+        appearance.isDark ? NSColor(hex: 0x101112) : NSColor(hex: 0xf7f8fb)
     }
 
     static let text: NSColor = NSColor(name: nil) { appearance in
@@ -49,6 +51,10 @@ enum SemanticColors {
 
     static let muted: NSColor = NSColor(name: nil) { appearance in
         appearance.isDark ? NSColor(hex: 0xa8afbc) : NSColor(hex: 0x636b78)
+    }
+
+    static let subtle: NSColor = NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor(hex: 0x8b93a3) : NSColor(hex: 0x717a88)
     }
 
     static let line: NSColor = NSColor(name: nil) { appearance in
@@ -203,13 +209,13 @@ enum SemanticColors {
     // MARK: - Zoom-specific tokens
 
     static let arcBlockHover: NSColor = NSColor(name: nil) { a in
-        a.isDark ? NSColor(hex: 0x232323) : NSColor(hex: 0xf0f0f0)
+        a.isDark ? NSColor(hex: 0x151618) : NSColor(hex: 0xf0f0f0)
     }
     static let arcBlockInactive: NSColor = NSColor(name: nil) { a in
-        a.isDark ? NSColor(hex: 0x1a1a1a) : NSColor(hex: 0xf5f5f5)
+        a.isDark ? NSColor(hex: 0x0f1011) : NSColor(hex: 0xf5f5f5)
     }
     static let tileBg: NSColor = NSColor(name: nil) { a in
-        a.isDark ? NSColor(hex: 0x111111) : NSColor(hex: 0xffffff)
+        a.isDark ? NSColor(hex: 0x0f1011) : NSColor(hex: 0xffffff)
     }
     static let tileBarBg: NSColor = NSColor(name: nil) { a in
         a.isDark ? NSColor(hex: 0x1a1a1a) : NSColor(hex: 0xf0f1f4)
@@ -224,7 +230,7 @@ enum SemanticColors {
         a.isDark ? NSColor(hex: 0x33c17b) : NSColor(hex: 0x1f9d63)
     }
     static let tabHoverBg: NSColor = NSColor(name: nil) { a in
-        a.isDark ? NSColor(hex: 0x222222) : NSColor(hex: 0xe0e2e8)
+        a.isDark ? NSColor(hex: 0x151618) : NSColor(hex: 0xe0e2e8)
     }
     static let tabHoverBorder: NSColor = NSColor(name: nil) { a in
         a.isDark

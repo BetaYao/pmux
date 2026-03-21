@@ -8,7 +8,6 @@ class CoreTests: PmuxUITestCase {
     func testViewMenuOpensAndHasAllOptions() {
         guard page.titleBar.viewMenuButton.waitForExistence(timeout: 10) else { return }
         page.titleBar.clickViewMenu()
-        guard page.layoutPopover.popover.waitForExistence(timeout: 5) else { return }
 
         XCTAssertTrue(page.layoutPopover.gridItem.waitForExistence(timeout: 3))
         XCTAssertTrue(page.layoutPopover.leftRightItem.waitForExistence(timeout: 3))
@@ -19,7 +18,6 @@ class CoreTests: PmuxUITestCase {
     func testSwitchToGridLayout() {
         guard page.titleBar.viewMenuButton.waitForExistence(timeout: 10) else { return }
         page.titleBar.clickViewMenu()
-        guard page.layoutPopover.popover.waitForExistence(timeout: 5) else { return }
 
         page.layoutPopover.selectGrid()
         XCTAssertTrue(page.dashboard.gridLayout.waitForExistence(timeout: 5),
@@ -29,7 +27,6 @@ class CoreTests: PmuxUITestCase {
     func testSwitchToLeftRightLayout() {
         guard page.titleBar.viewMenuButton.waitForExistence(timeout: 10) else { return }
         page.titleBar.clickViewMenu()
-        guard page.layoutPopover.popover.waitForExistence(timeout: 5) else { return }
 
         page.layoutPopover.selectLeftRight()
         XCTAssertTrue(page.dashboard.leftRightLayout.waitForExistence(timeout: 5),

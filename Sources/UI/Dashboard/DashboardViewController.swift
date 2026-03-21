@@ -49,12 +49,13 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
 
     private let gridSpacing: CGFloat = 3
     private let aspectRatio: CGFloat = 0.5625
+    private let layoutTopInset: CGFloat = 8
 
     // Left-Right layout
     private let leftRightContainer = NSView()
     private let leftRightFocusPanel = FocusPanelView()
     private let leftRightSidebarScroll = NSScrollView()
-    private let leftRightSidebarStack = NSStackView()
+    private let leftRightSidebarStack = FlippedStackView()
     private var leftRightMiniCards: [MiniCardView] = []
 
     // Top-Small layout
@@ -330,13 +331,14 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         gridContainer.wantsLayer = true
         gridContainer.translatesAutoresizingMaskIntoConstraints = false
         gridContainer.setAccessibilityIdentifier("dashboard.layout.grid")
+        gridContainer.setAccessibilityElement(true)
         gridContainer.dragDelegate = self
         gridScrollView.documentView = gridContainer
 
         view.addSubview(gridScrollView)
 
         NSLayoutConstraint.activate([
-            gridScrollView.topAnchor.constraint(equalTo: view.topAnchor, constant: gridSpacing),
+            gridScrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: layoutTopInset),
             gridScrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: gridSpacing),
             gridScrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -gridSpacing),
             gridScrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -gridSpacing),
@@ -350,6 +352,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         leftRightContainer.wantsLayer = true
         leftRightContainer.isHidden = true
         leftRightContainer.setAccessibilityIdentifier("dashboard.layout.left-right")
+        leftRightContainer.setAccessibilityElement(true)
         view.addSubview(leftRightContainer)
 
         // Focus panel (left, 78%)
@@ -375,7 +378,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         let spacing: CGFloat = 8
 
         NSLayoutConstraint.activate([
-            leftRightContainer.topAnchor.constraint(equalTo: view.topAnchor, constant: spacing),
+            leftRightContainer.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: layoutTopInset),
             leftRightContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: spacing),
             leftRightContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -spacing),
             leftRightContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -spacing),
@@ -399,6 +402,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         topSmallContainer.wantsLayer = true
         topSmallContainer.isHidden = true
         topSmallContainer.setAccessibilityIdentifier("dashboard.layout.top-small")
+        topSmallContainer.setAccessibilityElement(true)
         view.addSubview(topSmallContainer)
 
         // Top: horizontal scrolling row of mini cards
@@ -411,7 +415,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
 
         topSmallTopStack.orientation = .horizontal
         topSmallTopStack.spacing = 8
-        topSmallTopStack.alignment = .centerY
+        topSmallTopStack.alignment = .top
         topSmallTopStack.translatesAutoresizingMaskIntoConstraints = false
         topSmallTopScroll.documentView = topSmallTopStack
 
@@ -424,10 +428,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
 
         let spacing: CGFloat = 8
         // Mini card height in top-small: derive from clamped width range 180-260 at 16:9
-        let miniCardHeight: CGFloat = 150
+        let miniCardHeight: CGFloat = 128
 
         NSLayoutConstraint.activate([
-            topSmallContainer.topAnchor.constraint(equalTo: view.topAnchor, constant: spacing),
+            topSmallContainer.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: layoutTopInset),
             topSmallContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: spacing),
             topSmallContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -spacing),
             topSmallContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -spacing),
@@ -451,6 +455,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         topLargeContainer.wantsLayer = true
         topLargeContainer.isHidden = true
         topLargeContainer.setAccessibilityIdentifier("dashboard.layout.top-large")
+        topLargeContainer.setAccessibilityElement(true)
         view.addSubview(topLargeContainer)
 
         // Top: focus panel
@@ -468,17 +473,17 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
 
         topLargeBottomStack.orientation = .horizontal
         topLargeBottomStack.spacing = 8
-        topLargeBottomStack.alignment = .centerY
+        topLargeBottomStack.alignment = .top
         topLargeBottomStack.translatesAutoresizingMaskIntoConstraints = false
         topLargeBottomScroll.documentView = topLargeBottomStack
 
         topLargeContainer.addSubview(topLargeBottomScroll)
 
         let spacing: CGFloat = 8
-        let miniCardHeight: CGFloat = 150
+        let miniCardHeight: CGFloat = 128
 
         NSLayoutConstraint.activate([
-            topLargeContainer.topAnchor.constraint(equalTo: view.topAnchor, constant: spacing),
+            topLargeContainer.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: layoutTopInset),
             topLargeContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: spacing),
             topLargeContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -spacing),
             topLargeContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -spacing),
@@ -782,4 +787,8 @@ private class DashboardRootView: NSView {
         super.viewDidChangeEffectiveAppearance()
         needsDisplay = true
     }
+}
+
+private final class FlippedStackView: NSStackView {
+    override var isFlipped: Bool { true }
 }

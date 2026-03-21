@@ -10,12 +10,9 @@ protocol TitleBarDelegate: AnyObject {
     func titleBarDidToggleNotifications()
     func titleBarDidToggleAI()
     func titleBarDidToggleTheme()
-    func titleBarDidRequestCloseWindow()
-    func titleBarDidRequestMiniaturizeWindow()
-    func titleBarDidRequestZoomWindow()
 }
 
-final class TitleBarView: NSView, LayoutPopoverDelegate {
+final class TitleBarView: NSView {
     weak var delegate: TitleBarDelegate?
 
     var currentView: String = "dashboard" {
@@ -30,14 +27,8 @@ final class TitleBarView: NSView, LayoutPopoverDelegate {
     private let leftArcBlock = NSView()
     private let rightArcBlock = NSView()
 
-    // Traffic lights
-    private let trafficRed = TrafficDot(activeColor: NSColor(hex: 0xff5f57))
-    private let trafficYellow = TrafficDot(activeColor: NSColor(hex: 0xfebb2e))
-    private let trafficGreen = TrafficDot(activeColor: NSColor(hex: 0x28c840))
-
     // Left controls
     private let dashboardTab = NSButton()
-    private let leftSeparator1 = NSView()
     private let leftSeparator2 = NSView()
     private let tabsScrollView = NSScrollView()
     private let tabsStack = NSStackView()
@@ -51,12 +42,12 @@ final class TitleBarView: NSView, LayoutPopoverDelegate {
     private let aiButton = NSButton()
     private let themeButton = NSButton()
 
-    // Popover
-    private let layoutPopover = LayoutPopoverView()
+    private var currentLayout: DashboardLayout = .grid
 
     // State
     private var isWindowHovered = false
     private var notifCount = 0
+    private var hoverTrackingArea: NSTrackingArea?
 
     // MARK: - Init
 
@@ -75,21 +66,15 @@ final class TitleBarView: NSView, LayoutPopoverDelegate {
     func setWindowHovered(_ hovered: Bool) {
         isWindowHovered = hovered
         updateArcBlockColors()
-        trafficRed.setWindowHovered(hovered)
-        trafficYellow.setWindowHovered(hovered)
-        trafficGreen.setWindowHovered(hovered)
     }
 
     func renderTabs() {
-        // Remove old project tabs
-        for tab in projectTabViews {
-            tab.removeFromSuperview()
+        // Fully reset arranged subviews to avoid stale NSStackView state
+        for view in tabsStack.arrangedSubviews {
+            tabsStack.removeArrangedSubview(view)
+            view.removeFromSuperview()
         }
         projectTabViews.removeAll()
-
-        // Remove dynamic items from tabs stack
-        leftSeparator2.removeFromSuperview()
-        addButton.removeFromSuperview()
 
         // Add separator before project tabs if needed
         if !projects.isEmpty {
@@ -125,13 +110,8 @@ final class TitleBarView: NSView, LayoutPopoverDelegate {
     }
 
     func setCurrentLayout(_ layout: DashboardLayout) {
-        layoutPopover.setLayout(layout)
-    }
-
-    // MARK: - LayoutPopoverDelegate
-
-    func layoutPopover(_ popover: LayoutPopoverView, didSelect layout: DashboardLayout) {
-        delegate?.titleBarDidSelectLayout(layout)
+        currentLayout = layout
+        viewSwitcherButton.menu = makeLayoutMenu()
     }
 
     // MARK: - Setup
@@ -140,21 +120,21 @@ final class TitleBarView: NSView, LayoutPopoverDelegate {
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
         translatesAutoresizingMaskIntoConstraints = false
+        setAccessibilityIdentifier("titlebar")
 
         setupLeftArcBlock()
         setupRightArcBlock()
-        setupLayoutPopover()
 
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 48),
+            heightAnchor.constraint(equalToConstant: 40),
 
             leftArcBlock.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            leftArcBlock.centerYAnchor.constraint(equalTo: centerYAnchor),
-            leftArcBlock.heightAnchor.constraint(equalToConstant: 36),
+            leftArcBlock.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 4),
+            leftArcBlock.heightAnchor.constraint(equalToConstant: 34),
 
             rightArcBlock.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            rightArcBlock.centerYAnchor.constraint(equalTo: centerYAnchor),
-            rightArcBlock.heightAnchor.constraint(equalToConstant: 36),
+            rightArcBlock.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 4),
+            rightArcBlock.heightAnchor.constraint(equalToConstant: 34),
 
             // 8px gap between blocks
             rightArcBlock.leadingAnchor.constraint(
@@ -170,30 +150,6 @@ final class TitleBarView: NSView, LayoutPopoverDelegate {
         leftArcBlock.layer?.cornerRadius = 10
         leftArcBlock.translatesAutoresizingMaskIntoConstraints = false
         addSubview(leftArcBlock)
-
-        // Traffic lights
-        let trafficStack = NSStackView(views: [trafficRed, trafficYellow, trafficGreen])
-        trafficStack.orientation = .horizontal
-        trafficStack.spacing = 6
-        trafficStack.translatesAutoresizingMaskIntoConstraints = false
-        leftArcBlock.addSubview(trafficStack)
-
-        // Traffic light click actions + accessibility
-        trafficRed.target = self
-        trafficRed.action = #selector(trafficRedClicked)
-        trafficRed.setAccessibilityLabel("Close")
-        trafficYellow.target = self
-        trafficYellow.action = #selector(trafficYellowClicked)
-        trafficYellow.setAccessibilityLabel("Minimize")
-        trafficGreen.target = self
-        trafficGreen.action = #selector(trafficGreenClicked)
-        trafficGreen.setAccessibilityLabel("Zoom")
-
-        // Separator 1 (after traffic lights)
-        leftSeparator1.wantsLayer = true
-        leftSeparator1.layer?.backgroundColor = SemanticColors.line.cgColor
-        leftSeparator1.translatesAutoresizingMaskIntoConstraints = false
-        leftArcBlock.addSubview(leftSeparator1)
 
         // Dashboard tab
         configureDashboardTab()
@@ -241,15 +197,8 @@ final class TitleBarView: NSView, LayoutPopoverDelegate {
         tabsStack.addArrangedSubview(addButton)
 
         NSLayoutConstraint.activate([
-            trafficStack.leadingAnchor.constraint(equalTo: leftArcBlock.leadingAnchor, constant: 12),
-            trafficStack.centerYAnchor.constraint(equalTo: leftArcBlock.centerYAnchor),
-
-            leftSeparator1.leadingAnchor.constraint(equalTo: trafficStack.trailingAnchor, constant: 10),
-            leftSeparator1.widthAnchor.constraint(equalToConstant: 1),
-            leftSeparator1.heightAnchor.constraint(equalToConstant: 18),
-            leftSeparator1.centerYAnchor.constraint(equalTo: leftArcBlock.centerYAnchor),
-
-            dashboardTab.leadingAnchor.constraint(equalTo: leftSeparator1.trailingAnchor, constant: 6),
+            // Reserve space for native traffic lights at x=12,y=10 in titlebar area.
+            dashboardTab.leadingAnchor.constraint(equalTo: leftArcBlock.leadingAnchor, constant: 74),
             dashboardTab.centerYAnchor.constraint(equalTo: leftArcBlock.centerYAnchor),
 
             tabsScrollView.leadingAnchor.constraint(equalTo: dashboardTab.trailingAnchor, constant: 4),
@@ -347,21 +296,6 @@ final class TitleBarView: NSView, LayoutPopoverDelegate {
         ])
     }
 
-    private func setupLayoutPopover() {
-        layoutPopover.delegate = self
-        // Popover must be added to a parent that won't clip it.
-        // It will be reparented to window contentView by MainWindowController.
-    }
-
-    /// Call from MainWindowController to add popover to contentView so it's not clipped by titlebar bounds
-    func installPopover(in parentView: NSView) {
-        parentView.addSubview(layoutPopover)
-        NSLayoutConstraint.activate([
-            layoutPopover.topAnchor.constraint(equalTo: bottomAnchor, constant: 4),
-            layoutPopover.trailingAnchor.constraint(equalTo: viewSwitcherButton.trailingAnchor),
-        ])
-    }
-
     // MARK: - Arc Icon Button Helper
 
     private func configureArcIconButton(_ button: NSButton, symbol: String,
@@ -427,7 +361,39 @@ final class TitleBarView: NSView, LayoutPopoverDelegate {
     }
 
     @objc private func viewMenuClicked() {
-        layoutPopover.toggle()
+        let menu = makeLayoutMenu()
+        _ = menu.popUp(positioning: nil, at: NSPoint(x: 0, y: viewSwitcherButton.bounds.height), in: viewSwitcherButton)
+    }
+
+    private func makeLayoutMenu() -> NSMenu {
+        let menu = NSMenu(title: "Layout")
+        addLayoutMenuItem(menu, title: "Grid", symbol: "square.grid.2x2", layout: .grid)
+        addLayoutMenuItem(menu, title: "Left Right", symbol: "rectangle.split.2x1", layout: .leftRight)
+        addLayoutMenuItem(menu, title: "Top Small", symbol: "rectangle.split.1x2", layout: .topSmall)
+        addLayoutMenuItem(menu, title: "Top Large", symbol: "rectangle.tophalf.filled", layout: .topLarge)
+        return menu
+    }
+
+    private func addLayoutMenuItem(_ menu: NSMenu, title: String, symbol: String, layout: DashboardLayout) {
+        let item = NSMenuItem(title: title, action: #selector(layoutMenuItemSelected(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = layout.rawValue
+        item.state = (currentLayout == layout) ? .on : .off
+        if let image = NSImage(systemSymbolName: symbol, accessibilityDescription: title) {
+            let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .regular)
+            item.image = image.withSymbolConfiguration(config)
+        }
+        menu.addItem(item)
+    }
+
+    @objc private func layoutMenuItemSelected(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let layout = DashboardLayout(rawValue: raw)
+        else {
+            return
+        }
+        currentLayout = layout
+        delegate?.titleBarDidSelectLayout(layout)
     }
 
     @objc private func notifClicked() {
@@ -440,18 +406,6 @@ final class TitleBarView: NSView, LayoutPopoverDelegate {
 
     @objc private func themeClicked() {
         delegate?.titleBarDidToggleTheme()
-    }
-
-    @objc private func trafficRedClicked() {
-        delegate?.titleBarDidRequestCloseWindow()
-    }
-
-    @objc private func trafficYellowClicked() {
-        delegate?.titleBarDidRequestMiniaturizeWindow()
-    }
-
-    @objc private func trafficGreenClicked() {
-        delegate?.titleBarDidRequestZoomWindow()
     }
 
     // MARK: - State
@@ -496,80 +450,42 @@ final class TitleBarView: NSView, LayoutPopoverDelegate {
         let saved = NSAppearance.current
         NSAppearance.current = window?.effectiveAppearance ?? NSApp.effectiveAppearance
         updateArcBlockColors()
-        leftSeparator1.layer?.backgroundColor = SemanticColors.line.cgColor
         leftSeparator2.layer?.backgroundColor = SemanticColors.line.cgColor
         addButton.contentTintColor = SemanticColors.muted
         updateDashboardTabAppearance()
         notifBadge.layer?.backgroundColor = SemanticColors.danger.cgColor
         NSAppearance.current = saved
     }
-}
 
-// MARK: - TrafficDot
-
-private final class TrafficDot: NSView {
-    var target: AnyObject?
-    var action: Selector?
-
-    private let activeColor: NSColor
-    private let inactiveColor = NSColor(hex: 0x555555)
-    private var isWindowHovered = false
-
-    override var acceptsFirstResponder: Bool { true }
-    override var canBecomeKeyView: Bool { true }
-    override var focusRingType: NSFocusRingType {
-        get { .exterior }
-        set { /* always exterior */ }
-    }
-
-    init(activeColor: NSColor) {
-        self.activeColor = activeColor
-        super.init(frame: .zero)
-        wantsLayer = true
-        layer?.cornerRadius = 6
-        layer?.backgroundColor = inactiveColor.cgColor
-        translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: 12),
-            heightAnchor.constraint(equalToConstant: 12),
-        ])
-        setAccessibilityRole(.button)
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) not supported")
-    }
-
-    func setAccessibilityName(_ name: String) {
-        setAccessibilityLabel(name)
-    }
-
-    func setWindowHovered(_ hovered: Bool) {
-        isWindowHovered = hovered
-        layer?.backgroundColor = hovered ? activeColor.cgColor : inactiveColor.cgColor
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        if let target = target, let action = action {
-            NSApp.sendAction(action, to: target, from: self)
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = hoverTrackingArea {
+            removeTrackingArea(existing)
         }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
     }
 
-    override func keyDown(with event: NSEvent) {
-        // Space or Return activates the button (standard keyboard activation)
-        if event.keyCode == 49 || event.keyCode == 36 {
-            if let target = target, let action = action {
-                NSApp.sendAction(action, to: target, from: self)
-            }
-        } else {
-            super.keyDown(with: event)
-        }
+    override func mouseEntered(with event: NSEvent) {
+        setWindowHovered(true)
+        super.mouseEntered(with: event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        setWindowHovered(false)
+        super.mouseExited(with: event)
     }
 }
 
 // MARK: - ProjectTabView
 
-private final class ProjectTabView: NSView {
+private final class ProjectTabView: NSButton {
     var onSelect: (() -> Void)?
     var onClose: (() -> Void)?
 
@@ -581,6 +497,9 @@ private final class ProjectTabView: NSView {
     private var isHovered = false
     private let projectName: String
 
+    override var mouseDownCanMoveWindow: Bool { false }
+    override var acceptsFirstResponder: Bool { true }
+
     init(name: String) {
         self.projectName = name
         super.init(frame: .zero)
@@ -589,6 +508,10 @@ private final class ProjectTabView: NSView {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) not supported")
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
     }
 
     func setSelected(_ selected: Bool) {
@@ -610,6 +533,10 @@ private final class ProjectTabView: NSView {
     private func setup() {
         wantsLayer = true
         layer?.cornerRadius = 7
+        isBordered = false
+        title = ""
+        target = self
+        action = #selector(selectTapped)
         translatesAutoresizingMaskIntoConstraints = false
 
         // Status dot
@@ -660,17 +587,7 @@ private final class ProjectTabView: NSView {
 
     }
 
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        guard bounds.contains(point) else { return nil }
-        // Let close button handle its own clicks
-        if closeButton.frame.contains(point) {
-            return closeButton
-        }
-        // All other clicks go to self (so mouseDown fires)
-        return self
-    }
-
-    override func mouseDown(with event: NSEvent) {
+    @objc private func selectTapped() {
         onSelect?()
     }
 

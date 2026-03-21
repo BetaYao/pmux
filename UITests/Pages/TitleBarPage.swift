@@ -17,7 +17,7 @@ final class TitleBarPage {
     var themeToggle: XCUIElement { app.buttons["titlebar.themeToggle"] }
 
     func projectTab(named name: String) -> XCUIElement {
-        app.groups["titlebar.projectTab.\(name)"]
+        app.buttons["titlebar.projectTab.\(name)"]
     }
     func closeProjectTab(named name: String) {
         app.buttons["titlebar.projectTab.\(name).close"].waitAndClick()

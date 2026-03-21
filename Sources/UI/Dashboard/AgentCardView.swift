@@ -5,6 +5,12 @@ protocol AgentCardDelegate: AnyObject {
 }
 
 final class AgentCardView: NSView {
+    enum Typography {
+        static let primaryPointSize: CGFloat = 13
+        static let bodyPointSize: CGFloat = 12
+        static let secondaryPointSize: CGFloat = 11
+    }
+
     weak var delegate: AgentCardDelegate?
     private(set) var agentId: String = ""
     var isSelected: Bool = false { didSet { updateBorder() } }
@@ -64,23 +70,23 @@ final class AgentCardView: NSView {
         bottomBar.translatesAutoresizingMaskIntoConstraints = false
         addSubview(bottomBar)
 
-        // Status dot (6px circle)
+        // Status dot
         statusDot.wantsLayer = true
-        statusDot.layer?.cornerRadius = 3
+        statusDot.layer?.cornerRadius = 3.5
         statusDot.translatesAutoresizingMaskIntoConstraints = false
         bottomBar.addSubview(statusDot)
 
         // Branch label
-        branchLabel.font = NSFont.systemFont(ofSize: 9, weight: .medium)
-        branchLabel.textColor = .white
+        branchLabel.font = NSFont.systemFont(ofSize: Typography.bodyPointSize, weight: .medium)
+        branchLabel.textColor = SemanticColors.text
         branchLabel.lineBreakMode = .byTruncatingTail
         branchLabel.maximumNumberOfLines = 1
         branchLabel.translatesAutoresizingMaskIntoConstraints = false
         bottomBar.addSubview(branchLabel)
 
         // Status text label (right-aligned, dim)
-        statusLabel.font = NSFont.systemFont(ofSize: 8, weight: .regular)
-        statusLabel.textColor = NSColor(calibratedRed: 0.333, green: 0.333, blue: 0.333, alpha: 1.0) // #555
+        statusLabel.font = NSFont.systemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
+        statusLabel.textColor = SemanticColors.muted
         statusLabel.lineBreakMode = .byTruncatingTail
         statusLabel.maximumNumberOfLines = 1
         statusLabel.alignment = .right
@@ -101,17 +107,17 @@ final class AgentCardView: NSView {
             separatorLine.heightAnchor.constraint(equalToConstant: 1),
             separatorLine.bottomAnchor.constraint(equalTo: bottomBar.topAnchor),
 
-            // Bottom bar — fixed 24px height
+            // Bottom bar
             bottomBar.leadingAnchor.constraint(equalTo: leadingAnchor),
             bottomBar.trailingAnchor.constraint(equalTo: trailingAnchor),
             bottomBar.bottomAnchor.constraint(equalTo: bottomAnchor),
-            bottomBar.heightAnchor.constraint(equalToConstant: 24),
+            bottomBar.heightAnchor.constraint(equalToConstant: 30),
 
             // Status dot inside bottom bar
             statusDot.leadingAnchor.constraint(equalTo: bottomBar.leadingAnchor, constant: 8),
             statusDot.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
-            statusDot.widthAnchor.constraint(equalToConstant: 6),
-            statusDot.heightAnchor.constraint(equalToConstant: 6),
+            statusDot.widthAnchor.constraint(equalToConstant: 7),
+            statusDot.heightAnchor.constraint(equalToConstant: 7),
 
             // Branch label
             branchLabel.leadingAnchor.constraint(equalTo: statusDot.trailingAnchor, constant: 5),

@@ -1,13 +1,28 @@
 import AppKit
 
 class MainWindowController: NSWindowController {
+    struct GlassBackgroundConfig {
+        let enabled: Bool
+        let material: NSVisualEffectView.Material
+        let blendingMode: NSVisualEffectView.BlendingMode
+    }
+
+    static func glassBackgroundConfig(isDark: Bool) -> GlassBackgroundConfig {
+        if isDark {
+            return GlassBackgroundConfig(enabled: true, material: .hudWindow, blendingMode: .behindWindow)
+        }
+        return GlassBackgroundConfig(enabled: false, material: .contentBackground, blendingMode: .behindWindow)
+    }
+
     private let titleBar = TitleBarView()
+    private let backgroundEffectView = NSVisualEffectView()
     private let contentContainer = NSView()
     private var windowTrackingArea: NSTrackingArea?
     private let panelBackdrop = PanelBackdropView()
     private let notificationPanel = NotificationPanelView()
     private let aiPanel = AIPanelView()
     private let modalView = UnifiedModalView()
+    private let titleBarAccessory = NSTitlebarAccessoryViewController()
 
     private var dashboardVC: DashboardViewController?
     private var config = Config.load()
@@ -60,16 +75,13 @@ class MainWindowController: NSWindowController {
         window.minSize = NSSize(width: 600, height: 400)
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
+        window.isOpaque = false
+        window.backgroundColor = .clear
 
         // Set window appearance from config (already applied globally in main.swift)
         window.appearance = NSApp.appearance
 
         self.init(window: window)
-
-        // Hide real traffic lights
-        window.standardWindowButton(.closeButton)?.isHidden = true
-        window.standardWindowButton(.miniaturizeButton)?.isHidden = true
-        window.standardWindowButton(.zoomButton)?.isHidden = true
 
         window.setFrameAutosaveName("PmuxMainWindow")
         window.delegate = self
@@ -340,16 +352,17 @@ class MainWindowController: NSWindowController {
     private func setupLayout() {
         guard let contentView = window?.contentView else { return }
 
+        setupNativeTitleBar()
+
         // Update banner (above title bar, hidden by default)
         updateBanner.translatesAutoresizingMaskIntoConstraints = false
         updateBanner.isHidden = true
         updateBanner.delegate = self
         contentView.addSubview(updateBanner)
 
-        // Title bar (40px)
-        titleBar.translatesAutoresizingMaskIntoConstraints = false
-        titleBar.delegate = self
-        contentView.addSubview(titleBar)
+        backgroundEffectView.translatesAutoresizingMaskIntoConstraints = false
+        backgroundEffectView.state = .followsWindowActiveState
+        contentView.addSubview(backgroundEffectView, positioned: .below, relativeTo: nil)
 
         // Content container (fills middle)
         contentContainer.wantsLayer = true
@@ -357,15 +370,16 @@ class MainWindowController: NSWindowController {
         contentView.addSubview(contentContainer)
 
         NSLayoutConstraint.activate([
+            backgroundEffectView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            backgroundEffectView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            backgroundEffectView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            backgroundEffectView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+
             updateBanner.topAnchor.constraint(equalTo: contentView.topAnchor),
             updateBanner.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             updateBanner.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
 
-            titleBar.topAnchor.constraint(equalTo: updateBanner.bottomAnchor),
-            titleBar.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            titleBar.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-
-            contentContainer.topAnchor.constraint(equalTo: titleBar.bottomAnchor),
+            contentContainer.topAnchor.constraint(equalTo: updateBanner.bottomAnchor),
             contentContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             contentContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             contentContainer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
@@ -378,7 +392,7 @@ class MainWindowController: NSWindowController {
         panelBackdrop.delegate = self
         contentView.addSubview(panelBackdrop)
         NSLayoutConstraint.activate([
-            panelBackdrop.topAnchor.constraint(equalTo: titleBar.bottomAnchor),
+            panelBackdrop.topAnchor.constraint(equalTo: contentContainer.topAnchor),
             panelBackdrop.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             panelBackdrop.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             panelBackdrop.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
@@ -388,7 +402,7 @@ class MainWindowController: NSWindowController {
         notificationPanel.delegate = self
         contentView.addSubview(notificationPanel)
         NSLayoutConstraint.activate([
-            notificationPanel.topAnchor.constraint(equalTo: titleBar.bottomAnchor),
+            notificationPanel.topAnchor.constraint(equalTo: contentContainer.topAnchor),
             notificationPanel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             notificationPanel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             notificationPanel.widthAnchor.constraint(equalToConstant: 360),
@@ -398,14 +412,11 @@ class MainWindowController: NSWindowController {
         aiPanel.delegate = self
         contentView.addSubview(aiPanel)
         NSLayoutConstraint.activate([
-            aiPanel.topAnchor.constraint(equalTo: titleBar.bottomAnchor),
+            aiPanel.topAnchor.constraint(equalTo: contentContainer.topAnchor),
             aiPanel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             aiPanel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             aiPanel.widthAnchor.constraint(equalToConstant: 360),
         ])
-
-        // Layout popover (above panels, below modal)
-        titleBar.installPopover(in: contentView)
 
         // Unified modal (overlay, full screen, highest z-order)
         modalView.delegate = self
@@ -431,6 +442,77 @@ class MainWindowController: NSWindowController {
 
         // Set title bar layout state
         titleBar.setCurrentLayout(savedLayout)
+
+        applyWindowBackgroundStyle()
+        positionStandardWindowButtons()
+    }
+
+    private func applyWindowBackgroundStyle() {
+        guard let window else { return }
+        let isDark = window.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let config = Self.glassBackgroundConfig(isDark: isDark)
+
+        backgroundEffectView.material = config.material
+        backgroundEffectView.blendingMode = config.blendingMode
+        backgroundEffectView.isHidden = !config.enabled
+
+        window.isOpaque = !config.enabled
+        window.backgroundColor = config.enabled ? .clear : Theme.background
+    }
+
+    private func setupNativeTitleBar() {
+        guard let window else { return }
+
+        let toolbar = NSToolbar(identifier: "pmux.mainToolbar")
+        toolbar.displayMode = .iconOnly
+        toolbar.showsBaselineSeparator = false
+        window.toolbar = toolbar
+        window.toolbarStyle = .unifiedCompact
+
+        titleBar.delegate = self
+        titleBar.translatesAutoresizingMaskIntoConstraints = false
+
+        let accessoryContainer = NSView()
+        accessoryContainer.translatesAutoresizingMaskIntoConstraints = false
+        accessoryContainer.addSubview(titleBar)
+        NSLayoutConstraint.activate([
+            titleBar.leadingAnchor.constraint(equalTo: accessoryContainer.leadingAnchor),
+            titleBar.trailingAnchor.constraint(equalTo: accessoryContainer.trailingAnchor),
+            titleBar.topAnchor.constraint(equalTo: accessoryContainer.topAnchor),
+            titleBar.bottomAnchor.constraint(equalTo: accessoryContainer.bottomAnchor),
+            titleBar.heightAnchor.constraint(equalToConstant: 40),
+            accessoryContainer.widthAnchor.constraint(greaterThanOrEqualToConstant: 860),
+        ])
+
+        titleBarAccessory.view = accessoryContainer
+        titleBarAccessory.layoutAttribute = .top
+        if !window.titlebarAccessoryViewControllers.contains(where: { $0 === titleBarAccessory }) {
+            window.addTitlebarAccessoryViewController(titleBarAccessory)
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            self?.positionStandardWindowButtons()
+        }
+    }
+
+    private func positionStandardWindowButtons() {
+        guard let window else { return }
+        guard let close = window.standardWindowButton(.closeButton),
+              let mini = window.standardWindowButton(.miniaturizeButton),
+              let zoom = window.standardWindowButton(.zoomButton),
+              let container = close.superview
+        else {
+            return
+        }
+
+        let xOffset: CGFloat = 12
+        let yOffset: CGFloat = 10
+        let spacing: CGFloat = 6
+
+        let y = container.bounds.height - yOffset - close.frame.height
+        close.setFrameOrigin(NSPoint(x: xOffset, y: y))
+        mini.setFrameOrigin(NSPoint(x: xOffset + close.frame.width + spacing, y: y))
+        zoom.setFrameOrigin(NSPoint(x: xOffset + (close.frame.width + spacing) * 2, y: y))
     }
 
     private func setupWindowHoverTracking(contentView: NSView) {
@@ -549,24 +631,47 @@ class MainWindowController: NSWindowController {
 
         WorktreeDiscovery.discoverAsync(repoPath: path) { [weak self] worktrees in
             guard let self else { return }
-            if worktrees.isEmpty {
-                let info = WorktreeInfo(path: path, branch: "main", commitHash: "", isMainWorktree: true)
-                let surface = self.createSurface(for: info)
-                self.allWorktrees.append((info: info, surface: surface))
-            } else {
-                for info in worktrees {
-                    let surface = self.createSurface(for: info)
-                    self.allWorktrees.append((info: info, surface: surface))
-                }
-            }
-
-            let tabIndex = self.workspaceManager.addTab(repoPath: path, worktrees: worktrees.isEmpty ? [] : worktrees)
-
-            self.dashboardVC?.updateAgents(self.buildAgentDisplayInfos())
-            self.statusPublisher.updateSurfaces(self.surfaces)
-            self.updateTitleBar()
-            self.switchToTab(tabIndex + 1)
+            _ = self.integrateDiscoveredRepoForTesting(repoPath: path, worktrees: worktrees)
         }
+    }
+
+    @discardableResult
+    func integrateDiscoveredRepoForTesting(repoPath: String, worktrees: [WorktreeInfo], activateTab: Bool = true) -> Int {
+        let effectiveWorktrees: [WorktreeInfo]
+        if worktrees.isEmpty {
+            effectiveWorktrees = [WorktreeInfo(path: repoPath, branch: "main", commitHash: "", isMainWorktree: true)]
+        } else {
+            effectiveWorktrees = worktrees
+        }
+
+        for info in effectiveWorktrees {
+            let surface = createSurface(for: info)
+            allWorktrees.append((info: info, surface: surface))
+        }
+
+        let tabIndex = workspaceManager.addTab(repoPath: repoPath, worktrees: worktrees.isEmpty ? [] : worktrees)
+        let projectName = workspaceManager.tabs.first(where: { $0.repoPath == repoPath })?.displayName
+            ?? URL(fileURLWithPath: repoPath).lastPathComponent
+
+        let now = MainWindowController.iso8601.string(from: Date())
+        for info in effectiveWorktrees {
+            if config.worktreeStartedAt[info.path] == nil {
+                config.worktreeStartedAt[info.path] = now
+            }
+            let surface = createSurface(for: info)
+            let started = config.worktreeStartedAt[info.path].flatMap { MainWindowController.iso8601.date(from: $0) }
+            let sessionName = config.backend == "tmux" ? Self.tmuxSessionName(for: info.path) : nil
+            AgentHead.shared.register(worktreePath: info.path, branch: info.branch, project: projectName, surface: surface, startedAt: started, tmuxSessionName: sessionName)
+        }
+        config.save()
+
+        dashboardVC?.updateAgents(buildAgentDisplayInfos())
+        statusPublisher.updateSurfaces(surfaces)
+        updateTitleBar()
+        if activateTab {
+            switchToTab(tabIndex + 1)
+        }
+        return tabIndex
     }
 
     // MARK: - Tab Switching
@@ -620,9 +725,7 @@ class MainWindowController: NSWindowController {
     private func openRepoTab(repoPath: String) {
         WorktreeDiscovery.discoverAsync(repoPath: repoPath) { [weak self] worktrees in
             guard let self else { return }
-            let tabIndex = self.workspaceManager.addTab(repoPath: repoPath, worktrees: worktrees)
-            self.updateTitleBar()
-            self.switchToTab(tabIndex + 1)
+            _ = self.integrateDiscoveredRepoForTesting(repoPath: repoPath, worktrees: worktrees)
         }
     }
 
@@ -1010,7 +1113,22 @@ class PmuxWindow: NSWindow {
 // MARK: - NSWindowDelegate
 
 extension MainWindowController: NSWindowDelegate {
-    func windowDidResize(_ notification: Notification) {}
+    func windowDidResize(_ notification: Notification) {
+        positionStandardWindowButtons()
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        applyWindowBackgroundStyle()
+        positionStandardWindowButtons()
+    }
+
+    func windowDidEndLiveResize(_ notification: Notification) {
+        positionStandardWindowButtons()
+    }
+
+    func windowDidChangeEffectiveAppearance(_ notification: Notification) {
+        applyWindowBackgroundStyle()
+    }
 
 
     func windowWillClose(_ notification: Notification) {
@@ -1082,7 +1200,7 @@ extension MainWindowController: TitleBarDelegate {
         if let appearance = window?.appearance {
             NSAppearance.current = appearance
         }
-        window?.backgroundColor = Theme.background
+        applyWindowBackgroundStyle()
     }
     
     func titleBarDidRequestCloseWindow() {

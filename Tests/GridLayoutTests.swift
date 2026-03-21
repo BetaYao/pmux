@@ -1,4 +1,5 @@
 import XCTest
+import AppKit
 @testable import pmux
 
 final class GridLayoutTests: XCTestCase {
@@ -148,6 +149,12 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertLessThan(frame3.origin.y, frame0.origin.y)
     }
 
+    func testCardFrame_SingleCardAnchoredToTop() {
+        let layout = makeLayout(width: 900, height: 800, cardCount: 1, minCardWidth: 300, spacing: 12, aspectRatio: 0.6)
+        let frame = layout.cardFrame(at: 0)
+        XCTAssertEqual(frame.origin.y, layout.scrollContentHeight - layout.cardHeight, accuracy: 0.01)
+    }
+
     func testCardFrame_OutOfBounds() {
         let layout = makeLayout(cardCount: 3)
         XCTAssertEqual(layout.cardFrame(at: -1), .zero)
@@ -158,8 +165,8 @@ final class GridLayoutTests: XCTestCase {
 
     func testGridIndex_TopLeftCorner() {
         let layout = makeLayout(width: 900, cardCount: 6, minCardWidth: 300, spacing: 12, aspectRatio: 0.6)
-        // Top-left of first card (top row in flipped coords = high y in unflipped)
-        let topY = layout.totalHeight - 1
+        // Top-left of first card (top row in unflipped document coords)
+        let topY = layout.scrollContentHeight - 1
         let index = layout.gridIndex(for: CGPoint(x: 10, y: topY))
         XCTAssertEqual(index, 0)
     }
@@ -233,5 +240,53 @@ final class GridLayoutTests: XCTestCase {
             XCTAssertGreaterThan(layout.cardWidth, 0)
             XCTAssertGreaterThan(layout.cardHeight, 0)
         }
+    }
+
+    func testTitleBar_InstallsHoverTrackingArea() {
+        let titleBar = TitleBarView(frame: NSRect(x: 0, y: 0, width: 900, height: 48))
+        titleBar.updateTrackingAreas()
+        XCTAssertGreaterThan(titleBar.trackingAreas.count, 0)
+    }
+
+    func testGlassBackgroundConfig_DarkModeEnabled() {
+        let config = MainWindowController.glassBackgroundConfig(isDark: true)
+        XCTAssertTrue(config.enabled)
+        XCTAssertEqual(config.material, .hudWindow)
+        XCTAssertEqual(config.blendingMode, .behindWindow)
+    }
+
+    func testGlassBackgroundConfig_LightModeDisabled() {
+        let config = MainWindowController.glassBackgroundConfig(isDark: false)
+        XCTAssertFalse(config.enabled)
+    }
+
+    func testIntegrateDiscoveredRepoForTesting_RegistersFallbackAgentWhenNoWorktrees() {
+        let controller = MainWindowController()
+        let repoPath = "/tmp/pmux-test-\(UUID().uuidString)"
+
+        _ = controller.integrateDiscoveredRepoForTesting(repoPath: repoPath, worktrees: [], activateTab: false)
+
+        let agent = AgentHead.shared.agent(for: repoPath)
+        XCTAssertNotNil(agent)
+
+        AgentHead.shared.unregister(worktreePath: repoPath)
+    }
+
+    func testDashboardTypographyBaselines_AreMacReadable() {
+        XCTAssertEqual(AgentCardView.Typography.primaryPointSize, 13)
+        XCTAssertEqual(AgentCardView.Typography.bodyPointSize, 12)
+        XCTAssertEqual(AgentCardView.Typography.secondaryPointSize, 11)
+
+        XCTAssertEqual(MiniCardView.Typography.primaryPointSize, 13)
+        XCTAssertEqual(MiniCardView.Typography.bodyPointSize, 12)
+        XCTAssertEqual(MiniCardView.Typography.secondaryPointSize, 11)
+
+        XCTAssertEqual(FocusPanelView.Typography.primaryPointSize, 13)
+        XCTAssertEqual(FocusPanelView.Typography.bodyPointSize, 12)
+        XCTAssertEqual(FocusPanelView.Typography.secondaryPointSize, 11)
+    }
+
+    func testFocusPanel_DefaultHeaderPosition_IsBottom() {
+        XCTAssertEqual(FocusPanelView.defaultHeaderPosition, .bottom)
     }
 }

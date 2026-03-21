@@ -48,7 +48,7 @@ struct GridLayout {
         let col = index % columns
         let row = index / columns
         let x = CGFloat(col) * (cardWidth + spacing)
-        let y = totalHeight - CGFloat(row + 1) * cardHeight - CGFloat(row) * spacing
+        let y = scrollContentHeight - CGFloat(row + 1) * cardHeight - CGFloat(row) * spacing
         return CGRect(x: x, y: y, width: cardWidth, height: cardHeight)
     }
 
@@ -60,7 +60,7 @@ struct GridLayout {
         let x = CGFloat(col) * (cardWidth + spacing) - 3
         let y: CGFloat
         if row < rows {
-            y = totalHeight - CGFloat(row + 1) * cardHeight - CGFloat(row) * spacing
+            y = scrollContentHeight - CGFloat(row + 1) * cardHeight - CGFloat(row) * spacing
         } else {
             y = 0
         }
@@ -71,7 +71,7 @@ struct GridLayout {
     func gridIndex(for point: CGPoint) -> Int {
         guard cardCount > 0 else { return 0 }
         let col = min(columns - 1, max(0, Int(point.x / (cardWidth + spacing))))
-        let row = min(rows - 1, max(0, Int((totalHeight - point.y) / (cardHeight + spacing))))
+        let row = min(rows - 1, max(0, Int((scrollContentHeight - point.y) / (cardHeight + spacing))))
         return min(cardCount, row * columns + col)
     }
 
