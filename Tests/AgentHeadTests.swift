@@ -8,33 +8,31 @@ import XCTest
 final class AgentHeadTests: XCTestCase {
 
     /// Helper: register a test agent without a real surface.
-    /// Uses the internal register path that AgentHead provides.
+    /// Returns the terminal ID (surface.id) for use in subsequent calls.
+    @discardableResult
     private func registerTestAgent(
         path: String, branch: String = "main", project: String = "TestProject",
         startedAt: Date? = nil
-    ) {
-        // We need a TerminalSurface for the API, but the tests focus on
-        // data management (status, type, ordering) not rendering.
-        // TerminalSurface() without Ghostty init is just an NSView wrapper.
-        // If this hangs in CI, we'll need a mock — for now it works headlessly.
+    ) -> String {
         let surface = TerminalSurface()
         AgentHead.shared.register(
-            worktreePath: path, branch: branch, project: project,
-            surface: surface, startedAt: startedAt
+            surface: surface, worktreePath: path, branch: branch, project: project,
+            startedAt: startedAt
         )
+        return surface.id
     }
 
     override func setUp() {
         super.setUp()
         // Clear shared state between tests
         for agent in AgentHead.shared.allAgents() {
-            AgentHead.shared.unregister(worktreePath: agent.id)
+            AgentHead.shared.unregister(terminalID: agent.id)
         }
     }
 
     override func tearDown() {
         for agent in AgentHead.shared.allAgents() {
-            AgentHead.shared.unregister(worktreePath: agent.id)
+            AgentHead.shared.unregister(terminalID: agent.id)
         }
         super.tearDown()
     }
@@ -42,11 +40,12 @@ final class AgentHeadTests: XCTestCase {
     // MARK: - Registration
 
     func testRegisterAndQuery() {
-        registerTestAgent(path: "/tmp/repo/main", project: "MyProject")
+        let tid = registerTestAgent(path: "/tmp/repo/main", project: "MyProject")
 
         let agents = AgentHead.shared.allAgents()
         XCTAssertEqual(agents.count, 1)
-        XCTAssertEqual(agents[0].id, "/tmp/repo/main")
+        XCTAssertEqual(agents[0].id, tid)
+        XCTAssertEqual(agents[0].worktreePath, "/tmp/repo/main")
         XCTAssertEqual(agents[0].branch, "main")
         XCTAssertEqual(agents[0].project, "MyProject")
         XCTAssertEqual(agents[0].agentType, .unknown)
@@ -54,93 +53,153 @@ final class AgentHeadTests: XCTestCase {
     }
 
     func testUnregister() {
-        registerTestAgent(path: "/tmp/repo/main")
-        AgentHead.shared.unregister(worktreePath: "/tmp/repo/main")
+        let tid = registerTestAgent(path: "/tmp/repo/main")
+        AgentHead.shared.unregister(terminalID: tid)
 
         XCTAssertEqual(AgentHead.shared.allAgents().count, 0)
-        XCTAssertNil(AgentHead.shared.agent(for: "/tmp/repo/main"))
+        XCTAssertNil(AgentHead.shared.agent(for: tid))
+        XCTAssertNil(AgentHead.shared.agent(forWorktree: "/tmp/repo/main"))
     }
 
     // MARK: - Status Updates
 
     func testUpdateStatus() {
-        registerTestAgent(path: "/tmp/repo/main")
+        let tid = registerTestAgent(path: "/tmp/repo/main")
 
         AgentHead.shared.updateStatus(
-            worktreePath: "/tmp/repo/main",
+            terminalID: tid,
             status: .running,
             lastMessage: "Editing file.swift",
             roundDuration: 30.0
         )
 
-        let agent = AgentHead.shared.agent(for: "/tmp/repo/main")
+        let agent = AgentHead.shared.agent(for: tid)
         XCTAssertEqual(agent?.status, .running)
         XCTAssertEqual(agent?.lastMessage, "Editing file.swift")
         XCTAssertEqual(agent?.roundDuration, 30.0)
     }
 
-    func testUpdateStatusForUnknownPath() {
-        // Should not crash when updating non-existent path
+    func testUpdateStatusForUnknownID() {
+        // Should not crash when updating non-existent terminal ID
         AgentHead.shared.updateStatus(
-            worktreePath: "/nonexistent",
+            terminalID: "nonexistent-id",
             status: .running,
             lastMessage: "test",
             roundDuration: 0
         )
-        XCTAssertNil(AgentHead.shared.agent(for: "/nonexistent"))
+        XCTAssertNil(AgentHead.shared.agent(for: "nonexistent-id"))
     }
 
-    // MARK: - Agent Type Detection
+    // MARK: - Detection Updates (type upgrade rules)
 
-    func testUpdateAgentType() {
-        registerTestAgent(path: "/tmp/repo/main")
+    func testUpdateDetectionFromUnknown() {
+        let tid = registerTestAgent(path: "/tmp/repo/main")
 
-        AgentHead.shared.updateAgentType(worktreePath: "/tmp/repo/main", type: .claudeCode)
+        AgentHead.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .claudeCode)
 
-        let agent = AgentHead.shared.agent(for: "/tmp/repo/main")
+        let agent = AgentHead.shared.agent(for: tid)
         XCTAssertEqual(agent?.agentType, .claudeCode)
     }
 
-    func testUpdateAgentTypeOnlyWhenUnknown() {
-        registerTestAgent(path: "/tmp/repo/main")
+    func testUpdateDetectionAIAgentCannotDemoteToShellTask() {
+        let tid = registerTestAgent(path: "/tmp/repo/main")
 
-        AgentHead.shared.updateAgentType(worktreePath: "/tmp/repo/main", type: .claudeCode)
-        // Should not overwrite once set
-        AgentHead.shared.updateAgentType(worktreePath: "/tmp/repo/main", type: .codex)
+        // Set to AI agent first
+        AgentHead.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .claudeCode)
+        // Attempt to demote to shell task — should be blocked
+        AgentHead.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .brew)
 
-        let agent = AgentHead.shared.agent(for: "/tmp/repo/main")
+        let agent = AgentHead.shared.agent(for: tid)
         XCTAssertEqual(agent?.agentType, .claudeCode)
     }
 
-    func testUpdateAgentTypeIgnoresUnknown() {
-        registerTestAgent(path: "/tmp/repo/main")
+    func testUpdateDetectionAIAgentCanUpgradeToAnotherAIAgent() {
+        let tid = registerTestAgent(path: "/tmp/repo/main")
 
-        AgentHead.shared.updateAgentType(worktreePath: "/tmp/repo/main", type: .unknown)
+        AgentHead.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .codex)
+        // Another AI agent should be allowed
+        AgentHead.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .claudeCode)
 
-        let agent = AgentHead.shared.agent(for: "/tmp/repo/main")
+        let agent = AgentHead.shared.agent(for: tid)
+        XCTAssertEqual(agent?.agentType, .claudeCode)
+    }
+
+    func testUpdateDetectionShellTaskCanBeReplaced() {
+        let tid = registerTestAgent(path: "/tmp/repo/main")
+
+        AgentHead.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .brew)
+        // Shell task can be replaced by any type
+        AgentHead.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .claudeCode)
+
+        let agent = AgentHead.shared.agent(for: tid)
+        XCTAssertEqual(agent?.agentType, .claudeCode)
+    }
+
+    func testUpdateDetectionShellTaskCanBeReplacedByShellTask() {
+        let tid = registerTestAgent(path: "/tmp/repo/main")
+
+        AgentHead.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .brew)
+        AgentHead.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .make)
+
+        let agent = AgentHead.shared.agent(for: tid)
+        XCTAssertEqual(agent?.agentType, .make)
+    }
+
+    func testUpdateDetectionIgnoresUnknownType() {
+        let tid = registerTestAgent(path: "/tmp/repo/main")
+
+        AgentHead.shared.updateDetection(terminalID: tid, commandLine: nil, agentType: .unknown)
+
+        let agent = AgentHead.shared.agent(for: tid)
         XCTAssertEqual(agent?.agentType, .unknown)
+    }
+
+    func testUpdateDetectionSetsCommandLine() {
+        let tid = registerTestAgent(path: "/tmp/repo/main")
+
+        AgentHead.shared.updateDetection(terminalID: tid, commandLine: "brew install ffmpeg", agentType: .brew)
+
+        let agent = AgentHead.shared.agent(for: tid)
+        XCTAssertEqual(agent?.commandLine, "brew install ffmpeg")
+        XCTAssertEqual(agent?.agentType, .brew)
+    }
+
+    // MARK: - Worktree Lookup
+
+    func testAgentForWorktree() {
+        let tid = registerTestAgent(path: "/tmp/repo/main")
+
+        let agent = AgentHead.shared.agent(forWorktree: "/tmp/repo/main")
+        XCTAssertNotNil(agent)
+        XCTAssertEqual(agent?.id, tid)
+        XCTAssertEqual(agent?.worktreePath, "/tmp/repo/main")
+    }
+
+    func testAgentForWorktreeReturnsNilForUnknown() {
+        XCTAssertNil(AgentHead.shared.agent(forWorktree: "/nonexistent"))
     }
 
     // MARK: - Ordering
 
     func testAllAgentsPreservesInsertionOrder() {
-        registerTestAgent(path: "/a", branch: "a")
-        registerTestAgent(path: "/b", branch: "b")
-        registerTestAgent(path: "/c", branch: "c")
+        let tidA = registerTestAgent(path: "/a", branch: "a")
+        let tidB = registerTestAgent(path: "/b", branch: "b")
+        let tidC = registerTestAgent(path: "/c", branch: "c")
 
-        let paths = AgentHead.shared.allAgents().map { $0.id }
-        XCTAssertEqual(paths, ["/a", "/b", "/c"])
+        let ids = AgentHead.shared.allAgents().map { $0.id }
+        XCTAssertEqual(ids, [tidA, tidB, tidC])
     }
 
-    func testReorder() {
+    func testReorderWithWorktreePaths() {
         registerTestAgent(path: "/a", branch: "a")
         registerTestAgent(path: "/b", branch: "b")
         registerTestAgent(path: "/c", branch: "c")
 
+        // reorder accepts worktree paths
         AgentHead.shared.reorder(paths: ["/c", "/a", "/b"])
 
-        let paths = AgentHead.shared.allAgents().map { $0.id }
-        XCTAssertEqual(paths, ["/c", "/a", "/b"])
+        let worktreePaths = AgentHead.shared.allAgents().map { $0.worktreePath }
+        XCTAssertEqual(worktreePaths, ["/c", "/a", "/b"])
     }
 
     // MARK: - Project Filtering
@@ -159,17 +218,17 @@ final class AgentHeadTests: XCTestCase {
 
     func testTotalDurationComputedFromStartedAt() {
         let fiveMinutesAgo = Date().addingTimeInterval(-300)
-        registerTestAgent(path: "/tmp/repo/main", startedAt: fiveMinutesAgo)
+        let tid = registerTestAgent(path: "/tmp/repo/main", startedAt: fiveMinutesAgo)
 
-        let agent = AgentHead.shared.agent(for: "/tmp/repo/main")!
+        let agent = AgentHead.shared.agent(for: tid)!
         XCTAssertGreaterThan(agent.totalDuration, 299)
         XCTAssertLessThan(agent.totalDuration, 302)
     }
 
     func testTotalDurationZeroWhenNoStartedAt() {
-        registerTestAgent(path: "/tmp/repo/main", startedAt: nil)
+        let tid = registerTestAgent(path: "/tmp/repo/main", startedAt: nil)
 
-        let agent = AgentHead.shared.agent(for: "/tmp/repo/main")!
+        let agent = AgentHead.shared.agent(for: tid)!
         XCTAssertEqual(agent.totalDuration, 0)
     }
 }

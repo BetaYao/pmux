@@ -777,7 +777,7 @@ class MainWindowController: NSWindowController {
                         ?? URL(fileURLWithPath: repo).lastPathComponent
                     let started = self.config.worktreeStartedAt[info.path].flatMap { MainWindowController.iso8601.date(from: $0) }
                     let sessionName = self.config.backend == "tmux" ? Self.tmuxSessionName(for: info.path) : nil
-                    AgentHead.shared.register(worktreePath: info.path, branch: info.branch, project: proj, surface: surface, startedAt: started, tmuxSessionName: sessionName)
+                    AgentHead.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: started, tmuxSessionName: sessionName)
                 }
                 if !cardOrder.isEmpty {
                     AgentHead.shared.reorder(paths: cardOrder)
@@ -890,7 +890,9 @@ class MainWindowController: NSWindowController {
     private func worktreeDidDelete(_ info: WorktreeInfo) {
         allWorktrees.removeAll { $0.info.path == info.path }
         worktreeRepoCache.removeValue(forKey: info.path)
-        AgentHead.shared.unregister(worktreePath: info.path)
+        if let agent = AgentHead.shared.agent(forWorktree: info.path) {
+            AgentHead.shared.unregister(terminalID: agent.id)
+        }
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
         statusPublisher.updateSurfaces(surfaces)
 
@@ -943,7 +945,9 @@ class MainWindowController: NSWindowController {
                 surface.destroy()
                 surfaces.removeValue(forKey: worktree.path)
             }
-            AgentHead.shared.unregister(worktreePath: worktree.path)
+            if let agent = AgentHead.shared.agent(forWorktree: worktree.path) {
+                AgentHead.shared.unregister(terminalID: agent.id)
+            }
             if config.backend == "tmux" {
                 let sessionName = Self.tmuxSessionName(for: worktree.path)
                 killTmuxSession(sessionName)
@@ -1116,12 +1120,17 @@ extension MainWindowController: DashboardDelegate {
     }
 
     func dashboardDidReorderCards(order: [String]) {
-        config.cardOrder = order
+        // order contains terminal IDs; map back to worktree paths for config persistence
+        let paths = order.compactMap { AgentHead.shared.agent(for: $0)?.worktreePath }
+        config.cardOrder = paths
         config.save()
     }
 
     func dashboardDidRequestDeleteWorktree(_ path: String) {
-        guard let item = allWorktrees.first(where: { $0.info.path == path }) else { return }
+        // path is now a terminal ID from the dashboard
+        guard let agent = AgentHead.shared.agent(for: path) else { return }
+        let worktreePath = agent.worktreePath
+        guard let item = allWorktrees.first(where: { $0.info.path == worktreePath }) else { return }
         confirmAndDeleteWorktree(item.info)
     }
 

@@ -7,14 +7,17 @@ protocol AgentHeadDelegate: AnyObject {
 /// Single source of truth for all agent information.
 /// Consumers query AgentHead instead of assembling data from multiple sources.
 /// Also manages communication channels for each agent.
+/// Primary key: terminal ID (TerminalSurface.id).
 class AgentHead {
     static let shared = AgentHead()
 
     weak var delegate: AgentHeadDelegate?
 
-    private var agents: [String: AgentInfo] = [:]
-    private var orderedPaths: [String] = []
-    /// Strong references to channels (keyed by worktree path)
+    private var agents: [String: AgentInfo] = [:]       // keyed by terminal ID
+    private var orderedIDs: [String] = []
+    /// Reverse index: worktree path → terminal ID
+    private var worktreeIndex: [String: String] = [:]
+    /// Strong references to channels (keyed by terminal ID)
     private var channels: [String: AgentChannel] = [:]
     private let lock = NSLock()
 
@@ -22,53 +25,61 @@ class AgentHead {
 
     // MARK: - Registration
 
-    func register(worktreePath: String, branch: String, project: String,
-                  surface: TerminalSurface, startedAt: Date?,
+    func register(surface: TerminalSurface, worktreePath: String, branch: String,
+                  project: String, startedAt: Date?,
                   tmuxSessionName: String? = nil) {
         lock.lock()
         defer { lock.unlock() }
+
+        let terminalID = surface.id
 
         // Create a default TmuxChannel if we have a session name
         var channel: AgentChannel?
         if let sessionName = tmuxSessionName {
             channel = TmuxChannel(sessionName: sessionName)
-            channels[worktreePath] = channel
+            channels[terminalID] = channel
         }
 
         let info = AgentInfo(
-            id: worktreePath,
+            id: terminalID,
+            worktreePath: worktreePath,
             agentType: .unknown,
             project: project,
             branch: branch,
             status: .unknown,
             lastMessage: "",
+            commandLine: nil,
             roundDuration: 0,
             startedAt: startedAt,
             surface: surface,
             channel: channel,
             taskProgress: TaskProgress()
         )
-        agents[worktreePath] = info
-        if !orderedPaths.contains(worktreePath) {
-            orderedPaths.append(worktreePath)
+        agents[terminalID] = info
+        worktreeIndex[worktreePath] = terminalID
+        if !orderedIDs.contains(terminalID) {
+            orderedIDs.append(terminalID)
         }
     }
 
-    func unregister(worktreePath: String) {
+    func unregister(terminalID: String) {
         lock.lock()
         defer { lock.unlock() }
 
-        agents.removeValue(forKey: worktreePath)
-        channels.removeValue(forKey: worktreePath)
-        orderedPaths.removeAll { $0 == worktreePath }
+        if let info = agents[terminalID] {
+            worktreeIndex.removeValue(forKey: info.worktreePath)
+        }
+        agents.removeValue(forKey: terminalID)
+        channels.removeValue(forKey: terminalID)
+        orderedIDs.removeAll { $0 == terminalID }
     }
 
     // MARK: - Updates
 
-    func updateStatus(worktreePath: String, status: AgentStatus,
+    func updateStatus(terminalID: String, status: AgentStatus,
                       lastMessage: String, roundDuration: TimeInterval) {
         lock.lock()
-        guard var info = agents[worktreePath] else {
+        guard var info = agents[terminalID] else {
             lock.unlock()
             return
         }
@@ -76,7 +87,7 @@ class AgentHead {
         info.status = status
         info.lastMessage = lastMessage
         info.roundDuration = roundDuration
-        agents[worktreePath] = info
+        agents[terminalID] = info
         lock.unlock()
 
         if changed {
@@ -87,10 +98,10 @@ class AgentHead {
     }
 
     /// Update task progress for an agent
-    func updateTaskProgress(worktreePath: String, totalTasks: Int,
+    func updateTaskProgress(terminalID: String, totalTasks: Int,
                             completedTasks: Int, currentTask: String?) {
         lock.lock()
-        guard var info = agents[worktreePath] else {
+        guard var info = agents[terminalID] else {
             lock.unlock()
             return
         }
@@ -102,7 +113,7 @@ class AgentHead {
             completedTasks: completedTasks,
             currentTask: currentTask
         )
-        agents[worktreePath] = info
+        agents[terminalID] = info
         lock.unlock()
 
         if changed {
@@ -112,69 +123,100 @@ class AgentHead {
         }
     }
 
-    /// Only updates agent type if current type is .unknown (prevents thrashing).
-    /// When type is detected as .claudeCode, upgrades the channel to HooksChannel.
-    func updateAgentType(worktreePath: String, type: AgentType) {
-        guard type != .unknown else { return }
-
+    /// Update detection results for an agent (command line and/or agent type).
+    /// Type update rules:
+    /// - .unknown → any type allowed
+    /// - shell task (isShellTask) → any type allowed
+    /// - AI agent (isAIAgent) → only another AI agent allowed (no demotion)
+    /// When type is .claudeCode, upgrades TmuxChannel → HooksChannel.
+    func updateDetection(terminalID: String, commandLine: String?, agentType: AgentType) {
         lock.lock()
-        guard var info = agents[worktreePath], info.agentType == .unknown else {
+        guard var info = agents[terminalID] else {
             lock.unlock()
             return
         }
-        info.agentType = type
 
-        // Upgrade channel for Claude Code: TmuxChannel → HooksChannel
-        if type == .claudeCode, let tmux = channels[worktreePath] as? TmuxChannel {
-            let hooks = HooksChannel(sessionName: tmux.sessionName)
-            channels[worktreePath] = hooks
-            info.channel = hooks
+        var changed = false
+
+        // Update command line if provided
+        if let cl = commandLine, info.commandLine != cl {
+            info.commandLine = cl
+            changed = true
         }
 
-        agents[worktreePath] = info
+        // Apply type update rules
+        if agentType != .unknown {
+            let currentType = info.agentType
+            let allowed: Bool
+            if currentType == .unknown {
+                allowed = true
+            } else if currentType.isShellTask {
+                allowed = true
+            } else if currentType.isAIAgent {
+                allowed = agentType.isAIAgent
+            } else {
+                allowed = true
+            }
+
+            if allowed && currentType != agentType {
+                info.agentType = agentType
+                changed = true
+
+                // Upgrade channel for Claude Code: TmuxChannel → HooksChannel
+                if agentType == .claudeCode, let tmux = channels[terminalID] as? TmuxChannel {
+                    let hooks = HooksChannel(sessionName: tmux.sessionName)
+                    channels[terminalID] = hooks
+                    info.channel = hooks
+                }
+            }
+        }
+
+        agents[terminalID] = info
         lock.unlock()
 
-        DispatchQueue.main.async { [weak self] in
-            self?.delegate?.agentDidUpdate(info)
+        if changed {
+            DispatchQueue.main.async { [weak self] in
+                self?.delegate?.agentDidUpdate(info)
+            }
         }
     }
 
     // MARK: - Channel Communication
 
     /// Send a command to a specific agent
-    func sendCommand(to worktreePath: String, command: String) {
+    func sendCommand(to terminalID: String, command: String) {
         lock.lock()
-        let channel = channels[worktreePath]
+        let channel = channels[terminalID]
         lock.unlock()
 
         channel?.sendCommand(command)
     }
 
     /// Read recent output from a specific agent
-    func readOutput(from worktreePath: String, lines: Int = 50) -> String? {
+    func readOutput(from terminalID: String, lines: Int = 50) -> String? {
         lock.lock()
-        let channel = channels[worktreePath]
+        let channel = channels[terminalID]
         lock.unlock()
 
         return channel?.readOutput(lines: lines)
     }
 
     /// Get the channel for a specific agent (for direct access)
-    func channel(for worktreePath: String) -> AgentChannel? {
+    func channel(for terminalID: String) -> AgentChannel? {
         lock.lock()
         defer { lock.unlock() }
-        return channels[worktreePath]
+        return channels[terminalID]
     }
 
     /// Route a webhook event to the appropriate HooksChannel based on cwd matching
     func handleWebhookEvent(_ event: WebhookEvent) {
         lock.lock()
-        // Find the agent whose path matches the event's cwd
-        let matchingPath = agents.keys.first { path in
-            event.cwd == path || event.cwd.hasPrefix(path + "/")
-        }
-        guard let path = matchingPath,
-              let hooks = channels[path] as? HooksChannel else {
+        // Find the agent whose worktree path matches the event's cwd
+        let matchingTID = worktreeIndex.first { (worktreePath, _) in
+            event.cwd == worktreePath || event.cwd.hasPrefix(worktreePath + "/")
+        }?.value
+        guard let tid = matchingTID,
+              let hooks = channels[tid] as? HooksChannel else {
             lock.unlock()
             return
         }
@@ -185,14 +227,17 @@ class AgentHead {
 
     // MARK: - Ordering
 
-    /// Reorder agents to match card ordering from config
+    /// Reorder agents to match card ordering from config.
+    /// Accepts worktree paths (for config persistence) and maps internally via worktreeIndex.
     func reorder(paths: [String]) {
         lock.lock()
         defer { lock.unlock() }
 
-        orderedPaths.sort { a, b in
-            let ai = paths.firstIndex(of: a) ?? Int.max
-            let bi = paths.firstIndex(of: b) ?? Int.max
+        orderedIDs.sort { a, b in
+            let pathA = agents[a]?.worktreePath ?? ""
+            let pathB = agents[b]?.worktreePath ?? ""
+            let ai = paths.firstIndex(of: pathA) ?? Int.max
+            let bi = paths.firstIndex(of: pathB) ?? Int.max
             return ai < bi
         }
     }
@@ -203,20 +248,30 @@ class AgentHead {
         lock.lock()
         defer { lock.unlock() }
 
-        return orderedPaths.compactMap { agents[$0] }
+        return orderedIDs.compactMap { agents[$0] }
     }
 
-    func agent(for worktreePath: String) -> AgentInfo? {
+    /// Look up agent by terminal ID
+    func agent(for terminalID: String) -> AgentInfo? {
         lock.lock()
         defer { lock.unlock() }
 
-        return agents[worktreePath]
+        return agents[terminalID]
+    }
+
+    /// Convenience lookup by worktree path via reverse index
+    func agent(forWorktree worktreePath: String) -> AgentInfo? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard let tid = worktreeIndex[worktreePath] else { return nil }
+        return agents[tid]
     }
 
     func agentsForProject(_ project: String) -> [AgentInfo] {
         lock.lock()
         defer { lock.unlock() }
 
-        return orderedPaths.compactMap { agents[$0] }.filter { $0.project == project }
+        return orderedIDs.compactMap { agents[$0] }.filter { $0.project == project }
     }
 }

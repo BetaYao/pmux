@@ -13,7 +13,7 @@ protocol DashboardDelegate: AnyObject {
 // MARK: - AgentDisplayInfo
 
 struct AgentDisplayInfo {
-    let id: String          // worktree path
+    let id: String          // terminal ID (from TerminalSurface.id)
     let name: String        // display name like "Agent-Alpha"
     let project: String     // repo display name
     let thread: String      // branch name
