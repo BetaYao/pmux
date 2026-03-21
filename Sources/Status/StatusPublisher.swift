@@ -126,7 +126,6 @@ class StatusPublisher {
             let roundDur = runningStartTimes[path].map { Date().timeIntervalSince($0) } ?? 0
             AgentHead.shared.updateAgentType(worktreePath: path, type: agentType)
             AgentHead.shared.updateStatus(worktreePath: path, status: detected, lastMessage: lastMessage, roundDuration: roundDur)
-
             // Track round duration: record when entering Running, clear when leaving
             if statusChanged {
                 if detected == .running && oldStatus != .running {

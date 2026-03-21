@@ -66,12 +66,14 @@
 		9FBFA436458AD7779334ED23 /* WebhookEventTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F7656A28D73AED5F839290 /* WebhookEventTests.swift */; };
 		A31EEC00CEDE19B8E32CA403 /* AgentHead.swift in Sources */ = {isa = PBXBuildFile; fileRef = 937ED76E5A4460A17EC68FEB /* AgentHead.swift */; };
 		A357EF18BE70C245C966FF08 /* AppPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2E95C5F464B8578C668BF1D /* AppPage.swift */; };
+		A4E761BAFD0AB77EB01F55AE /* TaskProgressParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19D21803E9CB8C1E169DC610 /* TaskProgressParser.swift */; };
 		A55B96084977A61AF3B865D5 /* WebhookEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C0F1D7B03234E96555BA541 /* WebhookEvent.swift */; };
 		A64BED7E816CBDA7FC1BF839 /* DashboardViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03DD0B1EDEA8D7C296293DBB /* DashboardViewController.swift */; };
 		A86DCE7B3BB3833E3EE61761 /* NotificationHistoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3ED258854A39F6D22491F894 /* NotificationHistoryTests.swift */; };
 		A9F5FA923308602EE4C6667E /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 988C3307F71A295CBE3FC7A7 /* main.swift */; };
 		AABB9A1BC321A6D4017A44ED /* WebhookStatusProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 568696E724BCC3EF9912CDA9 /* WebhookStatusProvider.swift */; };
 		AB1BA7210EA6888AC27ACA0F /* TitleBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 717B331C5968FFF9C4CD4C4B /* TitleBarView.swift */; };
+		ACD9C6AB30216786478DB0DA /* TaskProgressParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75352E99A112855A0E137D7D /* TaskProgressParserTests.swift */; };
 		AD0D7B6CA672F155FFEE198F /* UpdateBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FF8EDDF9980A95624D70EBF /* UpdateBanner.swift */; };
 		B8234C74B95A86C2FCDE122A /* LayoutPopoverPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F9FFEA8DCA0DE251857F1A9 /* LayoutPopoverPage.swift */; };
 		BC2163AECF13737DDEB5802B /* StatusPublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60E67A393334BDBEDDD4CF28 /* StatusPublisher.swift */; };
@@ -124,6 +126,7 @@
 		07378DF0DB8804405A28DCC5 /* SettingsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPage.swift; sourceTree = "<group>"; };
 		079B4C9EB16FC26ACDF4D3DA /* WorktreeDeleter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeDeleter.swift; sourceTree = "<group>"; };
 		0DC0F4B17429A591BDDF7B01 /* TerminalSurfaceReparentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSurfaceReparentTests.swift; sourceTree = "<group>"; };
+		19D21803E9CB8C1E169DC610 /* TaskProgressParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskProgressParser.swift; sourceTree = "<group>"; };
 		1A2C2EB17847BCD154B8BDB3 /* AgentHeadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentHeadTests.swift; sourceTree = "<group>"; };
 		1A57D292637AF94241500129 /* Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Config.swift; sourceTree = "<group>"; };
 		1DE277A37F3962D03137A728 /* SettingsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewController.swift; sourceTree = "<group>"; };
@@ -160,6 +163,7 @@
 		6AE64E9301722FAD9592FA2B /* pmuxUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = pmuxUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		6F9FFEA8DCA0DE251857F1A9 /* LayoutPopoverPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutPopoverPage.swift; sourceTree = "<group>"; };
 		717B331C5968FFF9C4CD4C4B /* TitleBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitleBarView.swift; sourceTree = "<group>"; };
+		75352E99A112855A0E137D7D /* TaskProgressParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskProgressParserTests.swift; sourceTree = "<group>"; };
 		775FFC41426A242F2A4754A4 /* UpdateCheckerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCheckerTests.swift; sourceTree = "<group>"; };
 		7E03E31357AAE4FB9F6D1A71 /* AgentType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentType.swift; sourceTree = "<group>"; };
 		7FF70596F66D6407538CD7D4 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
@@ -256,6 +260,7 @@
 				BBE6553B298A5AEE6F205D67 /* OSC133ParserTests.swift */,
 				DD0B78C6BCFF989EA91143A7 /* SemVerTests.swift */,
 				8FB8EE102BA233C405EDFE8E /* StatusDetectorTests.swift */,
+				75352E99A112855A0E137D7D /* TaskProgressParserTests.swift */,
 				0DC0F4B17429A591BDDF7B01 /* TerminalSurfaceReparentTests.swift */,
 				775FFC41426A242F2A4754A4 /* UpdateCheckerTests.swift */,
 				D4F7656A28D73AED5F839290 /* WebhookEventTests.swift */,
@@ -277,6 +282,7 @@
 				EB8D46E2A4A072BB5DB9B941 /* OSC133Parser.swift */,
 				40C65AF8BC1451365BA6E43B /* StatusDetector.swift */,
 				60E67A393334BDBEDDD4CF28 /* StatusPublisher.swift */,
+				19D21803E9CB8C1E169DC610 /* TaskProgressParser.swift */,
 				8C0F1D7B03234E96555BA541 /* WebhookEvent.swift */,
 				6195AF42402DC460F5FED65A /* WebhookServer.swift */,
 				568696E724BCC3EF9912CDA9 /* WebhookStatusProvider.swift */,
@@ -644,6 +650,7 @@
 				2EF485F4A4C62E18C970A628 /* OSC133ParserTests.swift in Sources */,
 				9B4B369D03F0053FD72D2B4D /* SemVerTests.swift in Sources */,
 				F55F11B2C86D8D969EEC038F /* StatusDetectorTests.swift in Sources */,
+				ACD9C6AB30216786478DB0DA /* TaskProgressParserTests.swift in Sources */,
 				78899C72920B1210E33BFE1C /* TerminalSurfaceReparentTests.swift in Sources */,
 				32380B3024DDD3D12003DA35 /* UpdateCheckerTests.swift in Sources */,
 				9FBFA436458AD7779334ED23 /* WebhookEventTests.swift in Sources */,
@@ -698,6 +705,7 @@
 				4AA669F5C78D8F447172DC06 /* StatusBadge.swift in Sources */,
 				1CC51D6AFB2CFD4EC3A3A215 /* StatusDetector.swift in Sources */,
 				BC2163AECF13737DDEB5802B /* StatusPublisher.swift in Sources */,
+				A4E761BAFD0AB77EB01F55AE /* TaskProgressParser.swift in Sources */,
 				3E9FA0F0B9528BB6976028CA /* TerminalSurface.swift in Sources */,
 				5AD1EA968B10CD709872C275 /* Theme.swift in Sources */,
 				AB1BA7210EA6888AC27ACA0F /* TitleBarView.swift in Sources */,
