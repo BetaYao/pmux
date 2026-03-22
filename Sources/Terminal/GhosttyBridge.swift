@@ -30,6 +30,9 @@ class GhosttyBridge {
         ghostty_config_load_default_files(config)
         ghostty_config_finalize(config)
 
+        // Always free config — ghostty_app_new copies what it needs
+        defer { ghostty_config_free(config) }
+
         // Set up runtime callbacks
         var runtimeConfig = ghostty_runtime_config_s()
         runtimeConfig.userdata = Unmanaged.passUnretained(self).toOpaque()
@@ -70,13 +73,11 @@ class GhosttyBridge {
         // Create the app
         guard let ghosttyApp = ghostty_app_new(&runtimeConfig, config) else {
             NSLog("Failed to create Ghostty app")
-            ghostty_config_free(config)
             return
         }
 
         self.app = ghosttyApp
         self.isInitialized = true
-        ghostty_config_free(config)
 
         NSLog("Ghostty initialized successfully")
     }
