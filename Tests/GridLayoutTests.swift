@@ -271,7 +271,7 @@ final class GridLayoutTests: XCTestCase {
         let agent = AgentHead.shared.agent(for: repoPath)
         XCTAssertNotNil(agent)
 
-        AgentHead.shared.unregister(worktreePath: repoPath)
+        AgentHead.shared.unregister(terminalID: agent?.id ?? "")
     }
 
     func testDashboardTypographyBaselines_AreMacReadable() {
