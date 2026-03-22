@@ -394,6 +394,68 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertTrue(SidebarViewController.Layout.usesNativeSelectionStyle)
     }
 
+    func testSidebar_TableDisallowsEmptySelection() {
+        let sidebarVC = SidebarViewController()
+        sidebarVC.loadViewIfNeeded()
+
+        let table = findView(in: sidebarVC.view, identifier: "sidebar.worktreeList") as? NSTableView
+        XCTAssertNotNil(table)
+        XCTAssertFalse(table?.allowsEmptySelection ?? true)
+    }
+
+    func testSidebar_TableDoesNotForceSourceListStyle() {
+        let sidebarVC = SidebarViewController()
+        sidebarVC.loadViewIfNeeded()
+
+        let table = findView(in: sidebarVC.view, identifier: "sidebar.worktreeList") as? NSTableView
+        XCTAssertNotNil(table)
+        XCTAssertNotEqual(table?.style, .sourceList)
+    }
+
+    func testSidebar_TableUsesRegularSelectionHighlight() {
+        let sidebarVC = SidebarViewController()
+        sidebarVC.loadViewIfNeeded()
+
+        let table = findView(in: sidebarVC.view, identifier: "sidebar.worktreeList") as? NSTableView
+        XCTAssertNotNil(table)
+        XCTAssertEqual(table?.selectionHighlightStyle, .regular)
+    }
+
+    func testSidebar_DoesNotProvideCustomRowViewForSelectionAppearance() {
+        let sidebarVC = SidebarViewController()
+        sidebarVC.loadViewIfNeeded()
+
+        let info = WorktreeInfo(path: NSHomeDirectory(), branch: "main", commitHash: "abc", isMainWorktree: true)
+        sidebarVC.setWorktrees([info])
+
+        let table = findView(in: sidebarVC.view, identifier: "sidebar.worktreeList") as? NSTableView
+        XCTAssertNotNil(table)
+        XCTAssertFalse(sidebarVC.responds(to: NSSelectorFromString("tableView:rowViewForRow:")))
+    }
+
+    func testRepoShowTerminal_DoesNotForceFirstResponderToTerminalView() {
+        let repoVC = RepoViewController()
+        let window = TrackingWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentViewController = repoVC
+        repoVC.loadViewIfNeeded()
+
+        let info = WorktreeInfo(path: NSHomeDirectory(), branch: "main", commitHash: "abc", isMainWorktree: true)
+        repoVC.configure(worktrees: [info], surfaces: [info.path: TerminalSurface()])
+
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        window.makeFirstResponderCallCount = 0
+
+        repoVC.showTerminal(at: 0)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+
+        XCTAssertEqual(window.makeFirstResponderCallCount, 0)
+    }
+
     func testSidebar_AddButton_UsesNativeButtonChrome() {
         let sidebarVC = SidebarViewController()
         sidebarVC.loadViewIfNeeded()
@@ -464,6 +526,39 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertEqual(dashboard?.attributedTitle.string, "\u{FFFC} Dashboard")
     }
 
+    func testTitleBar_DashboardTabUsesCenteredAlignment() {
+        let titleBar = TitleBarView()
+        titleBar.layoutSubtreeIfNeeded()
+
+        let dashboard = titleBar.subviews
+            .flatMap { $0.subviews }
+            .compactMap { $0 as? NSButton }
+            .first { $0.accessibilityIdentifier() == "titlebar.dashboardTab" }
+
+        XCTAssertNotNil(dashboard)
+        XCTAssertEqual(dashboard?.alignment, .center)
+    }
+
+    func testTitleBar_RenderTabsResetsScrollOffset() {
+        let titleBar = TitleBarView(frame: NSRect(x: 0, y: 0, width: 320, height: 52))
+        titleBar.projects = ["opencode", "ganwork", "feature/new-thread", "long-long-long-branch"]
+        titleBar.currentView = "dashboard"
+        titleBar.renderTabs()
+        titleBar.layoutSubtreeIfNeeded()
+
+        guard let tabsScroll = findFirstScrollView(in: titleBar) else {
+            XCTFail("Expected tabs scroll view")
+            return
+        }
+
+        tabsScroll.contentView.setBoundsOrigin(NSPoint(x: 120, y: 0))
+        tabsScroll.reflectScrolledClipView(tabsScroll.contentView)
+
+        titleBar.renderTabs()
+
+        XCTAssertEqual(tabsScroll.contentView.bounds.origin.x, 0, accuracy: 0.001)
+    }
+
     func testMainWindowController_TrafficLightsAlignWithCapsuleCenter() {
         let originY = MainWindowController.trafficLightButtonOriginY(containerHeight: 52, buttonHeight: 12)
         XCTAssertEqual(originY, 22, accuracy: 0.001)
@@ -482,6 +577,7 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertEqual(DashboardViewController.LayoutMetrics.topSmallMiniRowHorizontalInset, 8)
         XCTAssertEqual(DashboardViewController.LayoutMetrics.topLargeMiniRowHorizontalInset, 8)
         XCTAssertEqual(DashboardViewController.LayoutMetrics.topLargeMiniRowBottomInset, 8)
+        XCTAssertEqual(DashboardViewController.LayoutMetrics.leftRightSidebarTrailingInset, 8)
 
         let topSmallExpected: CACornerMask = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
         XCTAssertEqual(DashboardViewController.LayoutMetrics.topSmallFocusMaskedCorners, topSmallExpected)
@@ -491,6 +587,31 @@ final class GridLayoutTests: XCTestCase {
 
         let leftRightExpected: CACornerMask = [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
         XCTAssertEqual(DashboardViewController.LayoutMetrics.leftRightFocusMaskedCorners, leftRightExpected)
+    }
+
+    func testDashboardLeftRightSidebarScroll_HasTrailingInset() {
+        let dashboard = DashboardViewController()
+        dashboard.loadViewIfNeeded()
+
+        guard let leftRightContainer = findView(in: dashboard.view, identifier: "dashboard.layout.left-right") else {
+            XCTFail("Expected left-right container")
+            return
+        }
+
+        let trailingConstraint = leftRightContainer.constraints.first {
+            guard
+                let first = $0.firstItem as? NSView,
+                let second = $0.secondItem as? NSView
+            else { return false }
+
+            return $0.firstAttribute == .trailing
+                && $0.secondAttribute == .trailing
+                && first is NSScrollView
+                && second == leftRightContainer
+        }
+
+        XCTAssertNotNil(trailingConstraint)
+        XCTAssertEqual(trailingConstraint?.constant ?? .greatestFiniteMagnitude, -8, accuracy: 0.001)
     }
 
     func testMainWindowController_WindowAutosaveDisabledInUITestEnvironment() {
@@ -527,6 +648,11 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertEqual(resolved, "local")
     }
 
+    func testMainWindowController_ResolvePreferredBackend_LocalAutoRecoversToZmx() {
+        let resolved = MainWindowController.resolvePreferredBackend(preferred: "local", zmxAvailable: true, tmuxAvailable: true)
+        XCTAssertEqual(resolved, "zmx")
+    }
+
     func testMainWindowController_IsSupportedZmxVersion() {
         XCTAssertTrue(MainWindowController.isSupportedZmxVersion("0.4.2"))
         XCTAssertTrue(MainWindowController.isSupportedZmxVersion("v0.4.9"))
@@ -559,4 +685,25 @@ private func findView(in root: NSView, identifier: String) -> NSView? {
         }
     }
     return nil
+}
+
+private func findFirstScrollView(in root: NSView) -> NSScrollView? {
+    if let scrollView = root as? NSScrollView {
+        return scrollView
+    }
+    for subview in root.subviews {
+        if let found = findFirstScrollView(in: subview) {
+            return found
+        }
+    }
+    return nil
+}
+
+private final class TrackingWindow: NSWindow {
+    var makeFirstResponderCallCount = 0
+
+    override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
+        makeFirstResponderCallCount += 1
+        return super.makeFirstResponder(responder)
+    }
 }

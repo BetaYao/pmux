@@ -43,6 +43,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         static let topSmallMiniRowHorizontalInset: CGFloat = 8
         static let topLargeMiniRowHorizontalInset: CGFloat = 8
         static let topLargeMiniRowBottomInset: CGFloat = 8
+        static let leftRightSidebarTrailingInset: CGFloat = 8
 
         static let topSmallFocusMaskedCorners: CACornerMask = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
         static let topLargeFocusMaskedCorners: CACornerMask = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
@@ -409,7 +410,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
             leftRightFocusPanel.widthAnchor.constraint(equalTo: leftRightContainer.widthAnchor, multiplier: 0.78, constant: -spacing / 2),
 
             leftRightSidebarScroll.topAnchor.constraint(equalTo: leftRightContainer.topAnchor),
-            leftRightSidebarScroll.trailingAnchor.constraint(equalTo: leftRightContainer.trailingAnchor),
+            leftRightSidebarScroll.trailingAnchor.constraint(equalTo: leftRightContainer.trailingAnchor, constant: -LayoutMetrics.leftRightSidebarTrailingInset),
             leftRightSidebarScroll.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor),
             leftRightSidebarScroll.leadingAnchor.constraint(equalTo: leftRightFocusPanel.trailingAnchor, constant: spacing),
         ])

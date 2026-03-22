@@ -190,10 +190,6 @@ class RepoViewController: NSViewController {
 
         activeSurface = surface
         sidebarVC.selectWorktree(at: index)
-
-        DispatchQueue.main.async { [weak self] in
-            self?.view.window?.makeFirstResponder(surface.view)
-        }
     }
 
     func selectWorktree(byPath path: String) {

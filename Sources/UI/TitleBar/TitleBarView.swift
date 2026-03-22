@@ -54,6 +54,7 @@ final class TitleBarView: NSView {
 
     // State
     private var isWindowHovered = false
+    private var isDashboardTabHovered = false
     private var notifCount = 0
     private var hoverTrackingArea: NSTrackingArea?
 
@@ -108,6 +109,11 @@ final class TitleBarView: NSView {
 
         // Add "+" button at the end
         tabsStack.addArrangedSubview(addButton)
+
+        if currentView == "dashboard" {
+            tabsScrollView.contentView.setBoundsOrigin(.zero)
+            tabsScrollView.reflectScrolledClipView(tabsScrollView.contentView)
+        }
 
         updateDashboardTabAppearance()
     }
@@ -208,6 +214,7 @@ final class TitleBarView: NSView {
             addButton.widthAnchor.constraint(equalToConstant: 30),
             addButton.heightAnchor.constraint(equalToConstant: 28),
         ])
+        setupHoverTracking(for: addButton, defaultTint: SemanticColors.muted)
         tabsStack.addArrangedSubview(addButton)
 
         NSLayoutConstraint.activate([
@@ -246,7 +253,7 @@ final class TitleBarView: NSView {
             .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
         ]))
         dashboardTab.attributedTitle = attrString
-        dashboardTab.alignment = .left
+        dashboardTab.alignment = .center
         dashboardTab.setContentHuggingPriority(.required, for: .horizontal)
 
         let contentWidth = ceil(attrString.size().width + (Layout.dashboardHorizontalPadding * 2))
@@ -254,6 +261,24 @@ final class TitleBarView: NSView {
             dashboardTab.widthAnchor.constraint(equalToConstant: contentWidth),
             dashboardTab.heightAnchor.constraint(equalToConstant: 28),
         ])
+
+        setupDashboardTabHoverTracking()
+    }
+
+    private func setupDashboardTabHoverTracking() {
+        let hover = HoverTrackingView()
+        hover.translatesAutoresizingMaskIntoConstraints = false
+        dashboardTab.addSubview(hover)
+        NSLayoutConstraint.activate([
+            hover.topAnchor.constraint(equalTo: dashboardTab.topAnchor),
+            hover.leadingAnchor.constraint(equalTo: dashboardTab.leadingAnchor),
+            hover.trailingAnchor.constraint(equalTo: dashboardTab.trailingAnchor),
+            hover.bottomAnchor.constraint(equalTo: dashboardTab.bottomAnchor),
+        ])
+        hover.onHoverChanged = { [weak self] hovered in
+            self?.isDashboardTabHovered = hovered
+            self?.updateDashboardTabAppearance(animated: true)
+        }
     }
 
     private func setupRightArcBlock() {
@@ -342,7 +367,7 @@ final class TitleBarView: NSView {
 
     // MARK: - Hover Tracking
 
-    private func setupHoverTracking(for button: NSButton) {
+    private func setupHoverTracking(for button: NSButton, defaultTint: NSColor = NSColor(hex: 0x888888)) {
         let hover = HoverTrackingView()
         hover.translatesAutoresizingMaskIntoConstraints = false
         button.addSubview(hover)
@@ -352,15 +377,40 @@ final class TitleBarView: NSView {
             hover.trailingAnchor.constraint(equalTo: button.trailingAnchor),
             hover.bottomAnchor.constraint(equalTo: button.bottomAnchor),
         ])
-        hover.onHoverChanged = { [weak button] hovered in
-            if let button = button {
-                button.layer?.backgroundColor = hovered
-                    ? button.resolvedCGColor(SemanticColors.iconButtonHoverBg)
-                    : NSColor.clear.cgColor
+        hover.onHoverChanged = { [weak self, weak button] hovered in
+            guard let self, let button else { return }
+            self.updateIconButtonAppearance(button, hovered: hovered, defaultTint: defaultTint, animated: true)
+        }
+    }
+
+    private func updateIconButtonAppearance(_ button: NSButton, hovered: Bool, defaultTint: NSColor, animated: Bool) {
+        let apply = {
+            button.layer?.backgroundColor = hovered
+                ? button.resolvedCGColor(SemanticColors.iconButtonHoverBg)
+                : NSColor.clear.cgColor
+            if animated {
+                button.animator().contentTintColor = hovered
+                    ? SemanticColors.iconButtonHoverTint
+                    : defaultTint
+            } else {
                 button.contentTintColor = hovered
                     ? SemanticColors.iconButtonHoverTint
-                    : NSColor(hex: 0x888888)
+                    : defaultTint
             }
+        }
+
+        if animated {
+            animateHoverTransition(apply)
+        } else {
+            apply()
+        }
+    }
+
+    private func animateHoverTransition(_ changes: @escaping () -> Void) {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.12
+            context.allowsImplicitAnimation = true
+            changes()
         }
     }
 
@@ -433,14 +483,35 @@ final class TitleBarView: NSView {
         updateDashboardTabAppearance()
     }
 
-    private func updateDashboardTabAppearance() {
+    private func updateDashboardTabAppearance(animated: Bool = false) {
         let isActive = currentView == "dashboard"
+        let bgColor: CGColor
+        let tintColor: NSColor
+
         if isActive {
-            dashboardTab.layer?.backgroundColor = SemanticColors.accentAlpha15.cgColor
-            dashboardTab.contentTintColor = SemanticColors.accent
+            bgColor = SemanticColors.accentAlpha15.cgColor
+            tintColor = SemanticColors.accent
+        } else if isDashboardTabHovered {
+            bgColor = SemanticColors.iconButtonHoverBg.cgColor
+            tintColor = SemanticColors.iconButtonHoverTint
         } else {
-            dashboardTab.layer?.backgroundColor = NSColor.clear.cgColor
-            dashboardTab.contentTintColor = SemanticColors.muted
+            bgColor = NSColor.clear.cgColor
+            tintColor = SemanticColors.muted
+        }
+
+        let apply = {
+            self.dashboardTab.layer?.backgroundColor = bgColor
+            if animated {
+                self.dashboardTab.animator().contentTintColor = tintColor
+            } else {
+                self.dashboardTab.contentTintColor = tintColor
+            }
+        }
+
+        if animated {
+            animateHoverTransition(apply)
+        } else {
+            apply()
         }
     }
 

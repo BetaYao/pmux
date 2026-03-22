@@ -105,6 +105,7 @@ class SidebarViewController: NSViewController {
         tableView.backgroundColor = .clear
         tableView.headerView = nil
         tableView.selectionHighlightStyle = .regular
+        tableView.allowsEmptySelection = false
         tableView.rowHeight = 60
         tableView.intercellSpacing = NSSize(width: 0, height: 4)
         tableView.delegate = self

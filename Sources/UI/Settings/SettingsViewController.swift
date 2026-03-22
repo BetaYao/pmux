@@ -139,7 +139,7 @@ class SettingsViewController: NSViewController {
         view.addSubview(backendLabel)
 
         backendPopup.removeAllItems()
-        backendPopup.addItems(withTitles: ["zmx", "local"])
+        backendPopup.addItems(withTitles: ["zmx"])
         backendPopup.selectItem(withTitle: config.backend)
         if backendPopup.indexOfSelectedItem < 0 {
             backendPopup.selectItem(withTitle: "zmx")

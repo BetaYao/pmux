@@ -195,4 +195,187 @@ class TerminalSurfaceReparentTests: XCTestCase {
         XCTAssertTrue(view.acceptsFirstResponder)
         XCTAssertTrue(view.canBecomeKeyView)
     }
+
+    func testGhosttyNSViewConformsToTextInputClientForIME() {
+        let view = GhosttyNSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        XCTAssertTrue(view.conforms(to: NSTextInputClient.self),
+                      "GhosttyNSView must implement NSTextInputClient for IME composition input")
+    }
+
+    func testGhosttyNSViewImplementsPasteActionForResponderChain() {
+        let view = GhosttyNSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        XCTAssertTrue(view.responds(to: NSSelectorFromString("paste:")))
+    }
+
+    func testGhosttyNSViewImplementsPasteAsPlainTextActionForResponderChain() {
+        let view = GhosttyNSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        XCTAssertTrue(view.responds(to: NSSelectorFromString("pasteAsPlainText:")))
+    }
+
+    func testShouldSendRawKeyWhenNotComposing() {
+        XCTAssertTrue(GhosttyNSView.shouldSendRawKey(
+            markedTextBefore: false,
+            hasMarkedTextNow: false,
+            hasAccumulatedText: false
+        ))
+    }
+
+    func testShouldNotSendRawKeyWhenComposingBeforeKeyDown() {
+        XCTAssertFalse(GhosttyNSView.shouldSendRawKey(
+            markedTextBefore: true,
+            hasMarkedTextNow: false,
+            hasAccumulatedText: false
+        ))
+    }
+
+    func testShouldNotSendRawKeyWhenTextWasAccumulatedByIME() {
+        XCTAssertFalse(GhosttyNSView.shouldSendRawKey(
+            markedTextBefore: true,
+            hasMarkedTextNow: false,
+            hasAccumulatedText: true
+        ))
+    }
+
+    func testGhosttyNSViewHasNoFocusRing() {
+        let view = GhosttyNSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        XCTAssertEqual(view.focusRingType, .none)
+    }
+
+    func testGhosttyNSViewFocusVisualUsesSubtleShadow() {
+        let view = GhosttyNSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+
+        XCTAssertEqual(view.layer?.shadowOpacity ?? -1, 0, accuracy: 0.001)
+
+        _ = view.becomeFirstResponder()
+        XCTAssertGreaterThan(view.layer?.shadowOpacity ?? 0, 0)
+
+        _ = view.resignFirstResponder()
+        XCTAssertEqual(view.layer?.shadowOpacity ?? -1, 0, accuracy: 0.001)
+    }
+
+    func testIsPasteShortcut_MatchesCommandV() {
+        let event = makeKeyDownEvent(characters: "v", modifiers: [.command])
+        XCTAssertTrue(GhosttyNSView.isPasteShortcut(event))
+    }
+
+    func testIsPasteShortcut_DoesNotMatchControlV() {
+        let event = makeKeyDownEvent(characters: "v", modifiers: [.control])
+        XCTAssertFalse(GhosttyNSView.isPasteShortcut(event))
+    }
+
+    func testIsPasteShortcut_DoesNotMatchShiftCommandV() {
+        let event = makeKeyDownEvent(characters: "v", modifiers: [.command, .shift])
+        XCTAssertFalse(GhosttyNSView.isPasteShortcut(event))
+    }
+
+    func testShouldHandleControlKeyEquivalent_TrueForControlV() {
+        let event = makeKeyDownEvent(characters: "v", modifiers: [.control])
+        XCTAssertTrue(GhosttyNSView.shouldHandleControlKeyEquivalent(event))
+    }
+
+    func testShouldHandleControlKeyEquivalent_FalseForCommandV() {
+        let event = makeKeyDownEvent(characters: "v", modifiers: [.command])
+        XCTAssertFalse(GhosttyNSView.shouldHandleControlKeyEquivalent(event))
+    }
+
+    func testShouldHandleControlKeyEquivalent_FalseWithoutControl() {
+        let event = makeKeyDownEvent(characters: "v", modifiers: [])
+        XCTAssertFalse(GhosttyNSView.shouldHandleControlKeyEquivalent(event))
+    }
+
+    func testDoCommand_RoutesPasteSelectorToPasteAction() {
+        let view = PasteTrackingGhosttyNSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        view.doCommand(by: #selector(NSText.paste(_:)))
+        XCTAssertEqual(view.pasteCallCount, 1)
+    }
+
+    func testDoCommand_RoutesPasteAsPlainTextSelectorToPasteAction() {
+        let view = PasteTrackingGhosttyNSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        view.doCommand(by: NSSelectorFromString("pasteAsPlainText:"))
+        XCTAssertEqual(view.pasteCallCount, 1)
+    }
+
+    func testPerformKeyEquivalent_CommandVInvokesPasteAction() {
+        let view = PasteTrackingGhosttyNSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        let event = makeKeyDownEvent(characters: "v", modifiers: [.command])
+
+        _ = view.performKeyEquivalent(with: event)
+
+        XCTAssertEqual(view.pasteCallCount, 1)
+    }
+
+    func testPerformKeyEquivalent_ControlVDoesNotInvokePasteAction() {
+        let view = PasteTrackingGhosttyNSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        let event = makeKeyDownEvent(characters: "v", modifiers: [.control])
+
+        _ = view.performKeyEquivalent(with: event)
+
+        XCTAssertEqual(view.pasteCallCount, 0)
+    }
+
+    func testMouseDown_MakesTerminalFirstResponder() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let host = NSView(frame: window.contentView?.bounds ?? .zero)
+        host.autoresizingMask = [.width, .height]
+        window.contentView = host
+
+        let view = GhosttyNSView(frame: host.bounds)
+        view.autoresizingMask = [.width, .height]
+        host.addSubview(view)
+        _ = window.makeFirstResponder(host)
+
+        let event = makeMouseDownEvent(window: window)
+        view.mouseDown(with: event)
+
+        XCTAssertTrue(window.firstResponder === view)
+    }
+
+}
+
+private func makeKeyDownEvent(characters: String, modifiers: NSEvent.ModifierFlags) -> NSEvent {
+    guard let event = NSEvent.keyEvent(
+        with: .keyDown,
+        location: .zero,
+        modifierFlags: modifiers,
+        timestamp: 1,
+        windowNumber: 0,
+        context: nil,
+        characters: characters,
+        charactersIgnoringModifiers: characters,
+        isARepeat: false,
+        keyCode: 9
+    ) else {
+        fatalError("Failed to create key event for test")
+    }
+    return event
+}
+
+private func makeMouseDownEvent(window: NSWindow) -> NSEvent {
+    guard let event = NSEvent.mouseEvent(
+        with: .leftMouseDown,
+        location: NSPoint(x: 10, y: 10),
+        modifierFlags: [],
+        timestamp: 1,
+        windowNumber: window.windowNumber,
+        context: nil,
+        eventNumber: 1,
+        clickCount: 1,
+        pressure: 1
+    ) else {
+        fatalError("Failed to create mouse event for test")
+    }
+    return event
+}
+
+private final class PasteTrackingGhosttyNSView: GhosttyNSView {
+    var pasteCallCount = 0
+
+    override func paste(_ sender: Any?) {
+        pasteCallCount += 1
+    }
 }

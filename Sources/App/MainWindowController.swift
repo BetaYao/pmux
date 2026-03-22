@@ -86,7 +86,8 @@ class MainWindowController: NSWindowController {
     static func resolvePreferredBackend(preferred: String, zmxAvailable: Bool, tmuxAvailable: Bool) -> String {
         switch preferred {
         case "local":
-            return "local"
+            if zmxAvailable { return "zmx" }
+            return tmuxAvailable ? "tmux" : "local"
         case "tmux":
             if zmxAvailable { return "zmx" }
             if tmuxAvailable { return "tmux" }
