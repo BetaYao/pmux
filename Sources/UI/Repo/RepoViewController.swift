@@ -29,8 +29,12 @@ class RepoViewController: NSViewController {
     private var needsTerminalOnLayout = false
 
     private func applyTerminalAppearanceStyle() {
+        let isDark = terminalContainer.effectiveAppearance.isDark
         terminalContainer.layer?.backgroundColor = terminalContainer.resolvedCGColor(SemanticColors.tileBg)
-        terminalContainer.layer?.borderColor = terminalContainer.resolvedCGColor(SemanticColors.line)
+        terminalContainer.layer?.borderWidth = isDark ? 0 : 1
+        terminalContainer.layer?.borderColor = isDark
+            ? NSColor.clear.cgColor
+            : terminalContainer.resolvedCGColor(SemanticColors.line)
     }
 
     override func loadView() {
@@ -62,7 +66,6 @@ class RepoViewController: NSViewController {
         // Terminal container (right column) with panel styling
         terminalContainer.translatesAutoresizingMaskIntoConstraints = false
         terminalContainer.wantsLayer = true
-        terminalContainer.layer?.borderWidth = 1
         terminalContainer.layer?.cornerRadius = Self.terminalCornerRadius
         terminalContainer.layer?.maskedCorners = Self.sideBySideTerminalMaskedCorners
         terminalContainer.setAccessibilityIdentifier("project.terminal")

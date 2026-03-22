@@ -310,6 +310,7 @@ final class GridLayoutTests: XCTestCase {
         let lightRoot = repoVC.view.layer?.backgroundColor
         let lightTerminalBg = terminal?.layer?.backgroundColor
         let lightTerminalBorder = terminal?.layer?.borderColor
+        let lightTerminalBorderWidth = terminal?.layer?.borderWidth
 
         repoVC.view.appearance = NSAppearance(named: .darkAqua)
         repoVC.view.viewDidChangeEffectiveAppearance()
@@ -318,6 +319,7 @@ final class GridLayoutTests: XCTestCase {
         let darkRoot = repoVC.view.layer?.backgroundColor
         let darkTerminalBg = terminal?.layer?.backgroundColor
         let darkTerminalBorder = terminal?.layer?.borderColor
+        let darkTerminalBorderWidth = terminal?.layer?.borderWidth
 
         XCTAssertNotNil(lightRoot)
         XCTAssertNotNil(darkRoot)
@@ -325,6 +327,8 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertNotEqual(lightRoot, darkRoot)
         XCTAssertNotEqual(lightTerminalBg, darkTerminalBg)
         XCTAssertNotEqual(lightTerminalBorder, darkTerminalBorder)
+        XCTAssertEqual(lightTerminalBorderWidth, 1)
+        XCTAssertEqual(darkTerminalBorderWidth, 0)
     }
 
     func testSidebar_DefaultBackground_IsTransparent() {
