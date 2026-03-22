@@ -1,4 +1,5 @@
 import XCTest
+import AppKit
 @testable import pmux
 
 final class GridLayoutTests: XCTestCase {
@@ -148,6 +149,12 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertLessThan(frame3.origin.y, frame0.origin.y)
     }
 
+    func testCardFrame_SingleCardAnchoredToTop() {
+        let layout = makeLayout(width: 900, height: 800, cardCount: 1, minCardWidth: 300, spacing: 12, aspectRatio: 0.6)
+        let frame = layout.cardFrame(at: 0)
+        XCTAssertEqual(frame.origin.y, layout.scrollContentHeight - layout.cardHeight, accuracy: 0.01)
+    }
+
     func testCardFrame_OutOfBounds() {
         let layout = makeLayout(cardCount: 3)
         XCTAssertEqual(layout.cardFrame(at: -1), .zero)
@@ -158,8 +165,8 @@ final class GridLayoutTests: XCTestCase {
 
     func testGridIndex_TopLeftCorner() {
         let layout = makeLayout(width: 900, cardCount: 6, minCardWidth: 300, spacing: 12, aspectRatio: 0.6)
-        // Top-left of first card (top row in flipped coords = high y in unflipped)
-        let topY = layout.totalHeight - 1
+        // Top-left of first card (top row in unflipped document coords)
+        let topY = layout.scrollContentHeight - 1
         let index = layout.gridIndex(for: CGPoint(x: 10, y: topY))
         XCTAssertEqual(index, 0)
     }
@@ -234,4 +241,299 @@ final class GridLayoutTests: XCTestCase {
             XCTAssertGreaterThan(layout.cardHeight, 0)
         }
     }
+
+    func testTitleBar_InstallsHoverTrackingArea() {
+        let titleBar = TitleBarView(frame: NSRect(x: 0, y: 0, width: 900, height: 48))
+        titleBar.updateTrackingAreas()
+        XCTAssertGreaterThan(titleBar.trackingAreas.count, 0)
+    }
+
+    func testGlassBackgroundConfig_DarkModeEnabled() {
+        let config = MainWindowController.glassBackgroundConfig(isDark: true)
+        XCTAssertTrue(config.enabled)
+        XCTAssertEqual(config.material, .hudWindow)
+        XCTAssertEqual(config.blendingMode, .behindWindow)
+    }
+
+    func testGlassBackgroundConfig_LightModeEnabled() {
+        let config = MainWindowController.glassBackgroundConfig(isDark: false)
+        XCTAssertTrue(config.enabled)
+        XCTAssertEqual(config.material, .underWindowBackground)
+        XCTAssertEqual(config.blendingMode, .behindWindow)
+    }
+
+    func testIntegrateDiscoveredRepoForTesting_RegistersFallbackAgentWhenNoWorktrees() {
+        let controller = MainWindowController()
+        let repoPath = "/tmp/pmux-test-\(UUID().uuidString)"
+
+        _ = controller.integrateDiscoveredRepoForTesting(repoPath: repoPath, worktrees: [], activateTab: false)
+
+        let agent = AgentHead.shared.agent(for: repoPath)
+        XCTAssertNotNil(agent)
+
+        AgentHead.shared.unregister(worktreePath: repoPath)
+    }
+
+    func testDashboardTypographyBaselines_AreMacReadable() {
+        XCTAssertEqual(AgentCardView.Typography.primaryPointSize, 13)
+        XCTAssertEqual(AgentCardView.Typography.bodyPointSize, 12)
+        XCTAssertEqual(AgentCardView.Typography.secondaryPointSize, 11)
+
+        XCTAssertEqual(MiniCardView.Typography.primaryPointSize, 13)
+        XCTAssertEqual(MiniCardView.Typography.bodyPointSize, 12)
+        XCTAssertEqual(MiniCardView.Typography.secondaryPointSize, 11)
+
+        XCTAssertEqual(FocusPanelView.Typography.primaryPointSize, 13)
+        XCTAssertEqual(FocusPanelView.Typography.bodyPointSize, 12)
+        XCTAssertEqual(FocusPanelView.Typography.secondaryPointSize, 11)
+    }
+
+    func testFocusPanel_DefaultHeaderPosition_IsBottom() {
+        XCTAssertEqual(FocusPanelView.defaultHeaderPosition, .bottom)
+    }
+
+    func testRepoView_DefaultTopInset_IsEightPoints() {
+        XCTAssertEqual(RepoViewController.layoutTopInset, 8)
+    }
+
+    func testStatusPublisherPollPolicy_PollsPreferredEveryCycle() {
+        let preferred: Set<String> = ["/repo/a"]
+        XCTAssertTrue(StatusPublisher.shouldPollPath("/repo/a", preferredPaths: preferred, pollCycle: 1, nonPreferredStride: 3))
+        XCTAssertTrue(StatusPublisher.shouldPollPath("/repo/a", preferredPaths: preferred, pollCycle: 2, nonPreferredStride: 3))
+    }
+
+    func testStatusPublisherPollPolicy_SkipsNonPreferredBetweenStrideTicks() {
+        let preferred: Set<String> = ["/repo/a"]
+        XCTAssertFalse(StatusPublisher.shouldPollPath("/repo/b", preferredPaths: preferred, pollCycle: 1, nonPreferredStride: 3))
+        XCTAssertFalse(StatusPublisher.shouldPollPath("/repo/b", preferredPaths: preferred, pollCycle: 2, nonPreferredStride: 3))
+    }
+
+    func testStatusPublisherPollPolicy_PollsNonPreferredOnStrideTick() {
+        let preferred: Set<String> = ["/repo/a"]
+        XCTAssertTrue(StatusPublisher.shouldPollPath("/repo/b", preferredPaths: preferred, pollCycle: 3, nonPreferredStride: 3))
+        XCTAssertTrue(StatusPublisher.shouldPollPath("/repo/b", preferredPaths: preferred, pollCycle: 6, nonPreferredStride: 3))
+    }
+
+    func testStatusPublisherPollPolicy_NoPreferredPollsEverything() {
+        XCTAssertTrue(StatusPublisher.shouldPollPath("/repo/a", preferredPaths: [], pollCycle: 1, nonPreferredStride: 3))
+        XCTAssertTrue(StatusPublisher.shouldPollPath("/repo/b", preferredPaths: [], pollCycle: 2, nonPreferredStride: 3))
+    }
+
+    func testRepoView_BackgroundAndTerminalAdaptToAppearanceChanges() {
+        let repoVC = RepoViewController()
+        repoVC.loadViewIfNeeded()
+
+        let terminal = findView(in: repoVC.view, identifier: "project.terminal")
+        XCTAssertNotNil(terminal)
+
+        repoVC.view.appearance = NSAppearance(named: .aqua)
+        repoVC.view.viewDidChangeEffectiveAppearance()
+        repoVC.view.needsDisplay = true
+        repoVC.view.displayIfNeeded()
+        let lightRoot = repoVC.view.layer?.backgroundColor
+        let lightTerminalBg = terminal?.layer?.backgroundColor
+        let lightTerminalBorder = terminal?.layer?.borderColor
+        let lightTerminalBorderWidth = terminal?.layer?.borderWidth
+
+        repoVC.view.appearance = NSAppearance(named: .darkAqua)
+        repoVC.view.viewDidChangeEffectiveAppearance()
+        repoVC.view.needsDisplay = true
+        repoVC.view.displayIfNeeded()
+        let darkRoot = repoVC.view.layer?.backgroundColor
+        let darkTerminalBg = terminal?.layer?.backgroundColor
+        let darkTerminalBorder = terminal?.layer?.borderColor
+        let darkTerminalBorderWidth = terminal?.layer?.borderWidth
+
+        XCTAssertNotNil(lightRoot)
+        XCTAssertNotNil(darkRoot)
+
+        XCTAssertNotEqual(lightRoot, darkRoot)
+        XCTAssertNotEqual(lightTerminalBg, darkTerminalBg)
+        XCTAssertNotEqual(lightTerminalBorder, darkTerminalBorder)
+        XCTAssertEqual(lightTerminalBorderWidth, 1)
+        XCTAssertEqual(darkTerminalBorderWidth, 0)
+    }
+
+    func testSidebar_DefaultBackground_IsTransparent() {
+        let sidebarVC = SidebarViewController()
+        sidebarVC.loadViewIfNeeded()
+
+        guard let bgColor = sidebarVC.view.layer?.backgroundColor,
+              let nsColor = NSColor(cgColor: bgColor)
+        else {
+            XCTFail("Sidebar background color should exist")
+            return
+        }
+
+        XCTAssertLessThanOrEqual(nsColor.alphaComponent, 0.001)
+    }
+
+    func testSidebar_UsesComfortableRowInsets() {
+        XCTAssertEqual(SidebarViewController.Layout.listHorizontalInset, 0)
+        XCTAssertEqual(SidebarViewController.Layout.rowBackgroundHorizontalInset, 8)
+        XCTAssertEqual(SidebarViewController.Layout.cellLeadingInset, 8)
+        XCTAssertEqual(SidebarViewController.Layout.cellTrailingInset, 6)
+    }
+
+    func testSidebar_HeaderSeparator_DefaultsToHidden() {
+        XCTAssertFalse(SidebarViewController.Layout.showsHeaderSeparator)
+    }
+
+    func testRepoView_SideBySideTerminalCorners_LeftOnlyRounded() {
+        XCTAssertEqual(RepoViewController.terminalCornerRadius, 10)
+        let expected: CACornerMask = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+        XCTAssertEqual(RepoViewController.sideBySideTerminalMaskedCorners, expected)
+    }
+
+    func testNewThreadDialog_ActionButtonsUseEqualSizingPolicy() {
+        XCTAssertTrue(NewBranchDialog.Layout.actionButtonsFillEqually)
+        XCTAssertEqual(NewBranchDialog.Layout.actionButtonHeight, 40)
+    }
+
+    func testSidebar_DefaultSelectionStyle_IsMacOSNative() {
+        XCTAssertTrue(SidebarViewController.Layout.usesNativeSelectionStyle)
+    }
+
+    func testSidebar_AddButton_UsesNativeButtonChrome() {
+        let sidebarVC = SidebarViewController()
+        sidebarVC.loadViewIfNeeded()
+
+        let addButton = findButton(in: sidebarVC.view, identifier: "sidebar.addThread")
+        XCTAssertNotNil(addButton)
+        XCTAssertTrue(addButton?.isBordered == true)
+        XCTAssertEqual(addButton?.bezelStyle, .texturedRounded)
+        XCTAssertNotNil(addButton?.image)
+    }
+
+    func testSidebar_DiffButtonExistsAndDefaultDisabled() {
+        let sidebarVC = SidebarViewController()
+        sidebarVC.loadViewIfNeeded()
+
+        let diffButton = findButton(in: sidebarVC.view, identifier: "sidebar.showDiff")
+        XCTAssertNotNil(diffButton)
+        XCTAssertFalse(diffButton?.isEnabled ?? true)
+        XCTAssertEqual(diffButton?.bezelStyle, .texturedRounded)
+        XCTAssertEqual(diffButton?.title, "")
+        XCTAssertEqual(diffButton?.imagePosition, .imageOnly)
+        XCTAssertNotNil(diffButton?.image)
+    }
+
+    func testNewThreadDialog_ActionButtonsUseNativeButtonChrome() {
+        let dialog = NewBranchDialog(repoPaths: ["/tmp/repo"])
+        dialog.loadViewIfNeeded()
+
+        let createButton = findButton(in: dialog.view, identifier: "dialog.newBranch.createButton")
+        XCTAssertNotNil(createButton)
+        XCTAssertTrue(createButton?.isBordered == true)
+        XCTAssertEqual(createButton?.bezelStyle, .rounded)
+    }
+
+    func testUnifiedModal_UsesNativeButtonChrome() {
+        let modal = UnifiedModalView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+        modal.show(config: ModalConfig(title: "Title", subtitle: "Subtitle", confirmText: "Confirm"))
+
+        let confirm = findButton(in: modal, identifier: "modal.confirm")
+        let cancel = findButton(in: modal, identifier: "modal.cancel")
+
+        XCTAssertNotNil(confirm)
+        XCTAssertNotNil(cancel)
+        XCTAssertTrue(confirm?.isBordered == true)
+        XCTAssertTrue(cancel?.isBordered == true)
+        XCTAssertEqual(confirm?.bezelStyle, .rounded)
+        XCTAssertEqual(cancel?.bezelStyle, .rounded)
+    }
+
+    func testTitleBar_UsesSystemAlignedCapsuleHeights() {
+        XCTAssertEqual(TitleBarView.Layout.barHeight, 45)
+        XCTAssertEqual(TitleBarView.Layout.capsuleHeight, 37)
+        XCTAssertEqual(TitleBarView.Layout.arcVerticalOffset, 2)
+        XCTAssertEqual(TitleBarView.Layout.dashboardLeadingInset, 16)
+        XCTAssertEqual(TitleBarView.Layout.dashboardHorizontalPadding, 10)
+    }
+
+    func testTitleBar_DashboardLabelUsesSemanticTextNotSpacePadding() {
+        let titleBar = TitleBarView()
+        titleBar.layoutSubtreeIfNeeded()
+
+        let dashboard = titleBar.subviews
+            .flatMap { $0.subviews }
+            .compactMap { $0 as? NSButton }
+            .first { $0.accessibilityIdentifier() == "titlebar.dashboardTab" }
+
+        XCTAssertNotNil(dashboard)
+        XCTAssertEqual(dashboard?.attributedTitle.string, "\u{FFFC} Dashboard")
+    }
+
+    func testMainWindowController_TrafficLightsAlignWithCapsuleCenter() {
+        let originY = MainWindowController.trafficLightButtonOriginY(containerHeight: 52, buttonHeight: 12)
+        XCTAssertEqual(originY, 22, accuracy: 0.001)
+    }
+
+    func testMainWindowController_DoesNotUseEscAsGlobalShortcut() {
+        XCTAssertFalse(MainWindowController.shouldHandleEscShortcut())
+    }
+
+    func testDashboardFocusLayouts_UseEdgeFlushSpacingAndCornerMasks() {
+        XCTAssertEqual(DashboardViewController.LayoutMetrics.focusPanelCornerRadius, 10)
+        XCTAssertEqual(DashboardViewController.LayoutMetrics.containerHorizontalInset, 0)
+        XCTAssertEqual(DashboardViewController.LayoutMetrics.containerBottomInset, 0)
+        XCTAssertEqual(DashboardViewController.LayoutMetrics.topSmallFocusJoinSpacing, 8)
+        XCTAssertEqual(DashboardViewController.LayoutMetrics.topLargeFocusJoinSpacing, 0)
+        XCTAssertEqual(DashboardViewController.LayoutMetrics.topSmallMiniRowHorizontalInset, 8)
+        XCTAssertEqual(DashboardViewController.LayoutMetrics.topLargeMiniRowHorizontalInset, 8)
+        XCTAssertEqual(DashboardViewController.LayoutMetrics.topLargeMiniRowBottomInset, 8)
+
+        let topSmallExpected: CACornerMask = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        XCTAssertEqual(DashboardViewController.LayoutMetrics.topSmallFocusMaskedCorners, topSmallExpected)
+
+        let topLargeExpected: CACornerMask = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+        XCTAssertEqual(DashboardViewController.LayoutMetrics.topLargeFocusMaskedCorners, topLargeExpected)
+
+        let leftRightExpected: CACornerMask = [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
+        XCTAssertEqual(DashboardViewController.LayoutMetrics.leftRightFocusMaskedCorners, leftRightExpected)
+    }
+
+    func testMainWindowController_WindowAutosaveDisabledInUITestEnvironment() {
+        XCTAssertFalse(MainWindowController.shouldUseWindowFrameAutosave(
+            environment: ["XCTestConfigurationFilePath": "/tmp/test.xctestconfiguration"],
+            arguments: []
+        ))
+        XCTAssertFalse(MainWindowController.shouldUseWindowFrameAutosave(
+            environment: [:],
+            arguments: ["-PmuxUITesting"]
+        ))
+        XCTAssertTrue(MainWindowController.shouldUseWindowFrameAutosave(environment: [:], arguments: []))
+    }
+
+    func testMainWindowController_LightModeUsesGlassBackground() {
+        let cfg = MainWindowController.glassBackgroundConfig(isDark: false)
+        XCTAssertTrue(cfg.enabled)
+        XCTAssertEqual(cfg.material, .underWindowBackground)
+        XCTAssertEqual(cfg.blendingMode, .behindWindow)
+    }
+}
+
+private func findButton(in root: NSView, identifier: String) -> NSButton? {
+    if let button = root as? NSButton,
+       button.accessibilityIdentifier() == identifier {
+        return button
+    }
+    for subview in root.subviews {
+        if let button = findButton(in: subview, identifier: identifier) {
+            return button
+        }
+    }
+    return nil
+}
+
+private func findView(in root: NSView, identifier: String) -> NSView? {
+    if root.accessibilityIdentifier() == identifier {
+        return root
+    }
+    for subview in root.subviews {
+        if let view = findView(in: subview, identifier: identifier) {
+            return view
+        }
+    }
+    return nil
 }

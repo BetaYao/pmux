@@ -4,16 +4,27 @@ protocol SidebarDelegate: AnyObject {
     func sidebar(_ sidebar: SidebarViewController, didSelectWorktreeAt index: Int)
     func sidebar(_ sidebar: SidebarViewController, didRequestDeleteWorktreeAt index: Int)
     func sidebarDidRequestNewThread(_ sidebar: SidebarViewController)
+    func sidebar(_ sidebar: SidebarViewController, didRequestShowDiffAt index: Int)
 }
 
 /// Left sidebar showing thread list with status dots
 class SidebarViewController: NSViewController {
+    enum Layout {
+        static let listHorizontalInset: CGFloat = 0
+        static let rowBackgroundHorizontalInset: CGFloat = 8
+        static let cellLeadingInset: CGFloat = 8
+        static let cellTrailingInset: CGFloat = 6
+        static let usesNativeSelectionStyle = true
+        static let showsHeaderSeparator = false
+    }
+
     weak var sidebarDelegate: SidebarDelegate?
 
     private let headerBar = NSView()
     private let threadsLabel = NSTextField(labelWithString: "Threads")
     private let countLabel = NSTextField(labelWithString: "")
-    private let addButton = SidebarAddButton()
+    private let diffButton = NSButton()
+    private let addButton = NSButton()
     private let headerBorder = NSView()
     private let scrollView = NSScrollView()
     private let tableView = NSTableView()
@@ -22,12 +33,13 @@ class SidebarViewController: NSViewController {
     private var statuses: [String: AgentStatus] = [:]
     private var lastMessages: [String: String] = [:]
     private var selectedIndex: Int = 0
+    private var hasExplicitSelection = false
     private var suppressSelectionNotification = false
 
     override func loadView() {
         self.view = NSView()
         view.wantsLayer = true
-        view.layer?.backgroundColor = SemanticColors.tileBg.cgColor
+        view.layer?.backgroundColor = NSColor.clear.cgColor
 
         // MARK: Header bar
         headerBar.translatesAutoresizingMaskIntoConstraints = false
@@ -51,14 +63,34 @@ class SidebarViewController: NSViewController {
         headerBar.addSubview(countLabel)
 
         addButton.translatesAutoresizingMaskIntoConstraints = false
+        addButton.title = ""
+        addButton.bezelStyle = .texturedRounded
+        addButton.isBordered = true
+        addButton.image = NSImage(named: NSImage.addTemplateName)
+        addButton.imagePosition = .imageOnly
+        addButton.contentTintColor = SemanticColors.muted
         addButton.target = self
         addButton.action = #selector(addThreadClicked)
         addButton.setAccessibilityIdentifier("sidebar.addThread")
         headerBar.addSubview(addButton)
 
+        diffButton.translatesAutoresizingMaskIntoConstraints = false
+        diffButton.title = ""
+        diffButton.bezelStyle = .texturedRounded
+        diffButton.isBordered = true
+        diffButton.image = NSImage(systemSymbolName: "doc.text.magnifyingglass", accessibilityDescription: "Show diff")
+        diffButton.imagePosition = .imageOnly
+        diffButton.contentTintColor = SemanticColors.muted
+        diffButton.isEnabled = false
+        diffButton.target = self
+        diffButton.action = #selector(showDiffClicked)
+        diffButton.setAccessibilityIdentifier("sidebar.showDiff")
+        headerBar.addSubview(diffButton)
+
         headerBorder.translatesAutoresizingMaskIntoConstraints = false
         headerBorder.wantsLayer = true
         headerBorder.layer?.backgroundColor = SemanticColors.line.cgColor
+        headerBorder.isHidden = !Layout.showsHeaderSeparator
         headerBar.addSubview(headerBorder)
 
         // MARK: Scroll view + table
@@ -67,12 +99,12 @@ class SidebarViewController: NSViewController {
         scrollView.scrollerStyle = .overlay
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
-        scrollView.contentInsets = NSEdgeInsets(top: 6, left: 6, bottom: 6, right: 6)
+        scrollView.contentInsets = NSEdgeInsets(top: 6, left: Layout.listHorizontalInset, bottom: 6, right: Layout.listHorizontalInset)
         view.addSubview(scrollView)
 
         tableView.backgroundColor = .clear
         tableView.headerView = nil
-        tableView.selectionHighlightStyle = .none
+        tableView.selectionHighlightStyle = .regular
         tableView.rowHeight = 60
         tableView.intercellSpacing = NSSize(width: 0, height: 4)
         tableView.delegate = self
@@ -119,10 +151,14 @@ class SidebarViewController: NSViewController {
             addButton.widthAnchor.constraint(equalToConstant: 24),
             addButton.heightAnchor.constraint(equalToConstant: 24),
 
+            diffButton.centerYAnchor.constraint(equalTo: headerBar.centerYAnchor),
+            diffButton.trailingAnchor.constraint(equalTo: addButton.leadingAnchor, constant: -6),
+            diffButton.heightAnchor.constraint(equalToConstant: 24),
+
             headerBorder.leadingAnchor.constraint(equalTo: headerBar.leadingAnchor),
             headerBorder.trailingAnchor.constraint(equalTo: headerBar.trailingAnchor),
             headerBorder.bottomAnchor.constraint(equalTo: headerBar.bottomAnchor),
-            headerBorder.heightAnchor.constraint(equalToConstant: 1),
+            headerBorder.heightAnchor.constraint(equalToConstant: Layout.showsHeaderSeparator ? 1 : 0),
 
             // Scroll view below header
             scrollView.topAnchor.constraint(equalTo: headerBar.bottomAnchor),
@@ -141,11 +177,25 @@ class SidebarViewController: NSViewController {
         sidebarDelegate?.sidebarDidRequestNewThread(self)
     }
 
+    @objc private func showDiffClicked() {
+        guard hasExplicitSelection,
+              selectedIndex >= 0,
+              selectedIndex < worktrees.count
+        else { return }
+        sidebarDelegate?.sidebar(self, didRequestShowDiffAt: selectedIndex)
+    }
+
+    private func updateDiffButtonState() {
+        diffButton.isEnabled = hasExplicitSelection && selectedIndex >= 0 && selectedIndex < worktrees.count
+    }
+
     func setWorktrees(_ worktrees: [WorktreeInfo]) {
         self.worktrees = worktrees
+        hasExplicitSelection = false
         countLabel.stringValue = "\(worktrees.count)"
         emptyStateLabel.isHidden = !worktrees.isEmpty
         scrollView.isHidden = worktrees.isEmpty
+        updateDiffButtonState()
         tableView.reloadData()
         if !worktrees.isEmpty {
             suppressSelectionNotification = true
@@ -172,6 +222,7 @@ class SidebarViewController: NSViewController {
     func selectWorktree(at index: Int) {
         guard index >= 0, index < worktrees.count else { return }
         selectedIndex = index
+        updateDiffButtonState()
         suppressSelectionNotification = true
         tableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
         suppressSelectionNotification = false
@@ -189,13 +240,6 @@ extension SidebarViewController: NSTableViewDataSource {
 // MARK: - NSTableViewDelegate
 
 extension SidebarViewController: NSTableViewDelegate {
-
-    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-        let isSelected = (row == selectedIndex)
-        let rowView = ThreadRowView(isActive: isSelected)
-        return rowView
-    }
-
     private static let cellIdentifier = NSUserInterfaceItemIdentifier("SidebarWorktreeCell")
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -223,6 +267,8 @@ extension SidebarViewController: NSTableViewDelegate {
         guard row >= 0 else { return }
         let oldIndex = selectedIndex
         selectedIndex = row
+        hasExplicitSelection = true
+        updateDiffButtonState()
         // Only reload the old and new selected rows instead of the entire table
         var indexSet = IndexSet(integer: row)
         if oldIndex != row, oldIndex >= 0, oldIndex < worktrees.count {
@@ -235,9 +281,9 @@ extension SidebarViewController: NSTableViewDelegate {
 
 // MARK: - Reusable Cell View
 
-private class SidebarCellView: NSView {
+private final class SidebarCellView: NSTableCellView {
     private let nameLabel = NSTextField(labelWithString: "")
-    private let dotView = NSView()
+    private let dotImageView = NSImageView()
     private let messageLabel = NSTextField(labelWithString: "")
 
     override init(frame frameRect: NSRect) {
@@ -250,10 +296,9 @@ private class SidebarCellView: NSView {
     }
 
     private func setupViews() {
-        dotView.wantsLayer = true
-        dotView.layer?.cornerRadius = 3.5
-        dotView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(dotView)
+        dotImageView.translatesAutoresizingMaskIntoConstraints = false
+        dotImageView.imageScaling = .scaleProportionallyDown
+        addSubview(dotImageView)
 
         nameLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         nameLabel.textColor = SemanticColors.text
@@ -276,177 +321,29 @@ private class SidebarCellView: NSView {
         addSubview(messageLabel)
 
         NSLayoutConstraint.activate([
-            dotView.widthAnchor.constraint(equalToConstant: 7),
-            dotView.heightAnchor.constraint(equalToConstant: 7),
-            dotView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            dotView.centerYAnchor.constraint(equalTo: nameLabel.centerYAnchor),
+            dotImageView.widthAnchor.constraint(equalToConstant: 10),
+            dotImageView.heightAnchor.constraint(equalToConstant: 10),
+            dotImageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: SidebarViewController.Layout.cellLeadingInset),
+            dotImageView.centerYAnchor.constraint(equalTo: nameLabel.centerYAnchor),
 
             nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 9),
-            nameLabel.leadingAnchor.constraint(equalTo: dotView.trailingAnchor, constant: 6),
-            nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
+            nameLabel.leadingAnchor.constraint(equalTo: dotImageView.trailingAnchor, constant: 6),
+            nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -SidebarViewController.Layout.cellTrailingInset),
 
             messageLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 2),
-            messageLabel.leadingAnchor.constraint(equalTo: dotView.trailingAnchor, constant: 6),
-            messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            messageLabel.leadingAnchor.constraint(equalTo: dotImageView.trailingAnchor, constant: 6),
+            messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -SidebarViewController.Layout.cellTrailingInset),
             messageLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -9),
         ])
     }
 
     func update(name: String, status: AgentStatus, message: String) {
         nameLabel.stringValue = name
-        dotView.layer?.backgroundColor = status.color.cgColor
+        let symbolConfig = NSImage.SymbolConfiguration(pointSize: 8, weight: .bold)
+        dotImageView.image = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: nil)?.withSymbolConfiguration(symbolConfig)
+        dotImageView.contentTintColor = status.color
         messageLabel.stringValue = message.isEmpty ? status.rawValue : message
         setAccessibilityIdentifier("sidebar.row.\(name)")
-    }
-}
-
-// MARK: - Custom Row View
-
-/// Thread row with green-tinted selection and hover styles.
-private class ThreadRowView: NSTableRowView {
-    private let isActive: Bool
-    private var isHovered = false
-    private var trackingArea: NSTrackingArea?
-
-    init(isActive: Bool) {
-        self.isActive = isActive
-        super.init(frame: .zero)
-        wantsLayer = true
-        layer?.cornerRadius = 6
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) not supported")
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let existing = trackingArea {
-            removeTrackingArea(existing)
-        }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInActiveApp],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        if !isActive {
-            isHovered = true
-            needsDisplay = true
-        }
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        if isHovered {
-            isHovered = false
-            needsDisplay = true
-        }
-    }
-
-    override func drawSelection(in dirtyRect: NSRect) {
-        // Selection handled in draw(dirtyRect:)
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-
-        if isActive {
-            SemanticColors.threadRowBg.setFill()
-            let bgPath = NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6)
-            bgPath.fill()
-
-            SemanticColors.threadRowBorder.setStroke()
-            let borderPath = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
-            borderPath.lineWidth = 1
-            borderPath.stroke()
-        } else if isHovered {
-            SemanticColors.threadRowHoverBg.setFill()
-            let bgPath = NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6)
-            bgPath.fill()
-
-            SemanticColors.threadRowHoverBorder.setStroke()
-            let borderPath = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
-            borderPath.lineWidth = 1
-            borderPath.stroke()
-        }
-    }
-
-    override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
-}
-
-// MARK: - Sidebar Add Button
-
-/// "+" button with hover effect for sidebar header.
-private class SidebarAddButton: NSButton {
-    private var isHovered = false
-    private var hoverTrackingArea: NSTrackingArea?
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        setup()
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        setup()
-    }
-
-    private func setup() {
-        title = ""
-        isBordered = false
-        wantsLayer = true
-        layer?.cornerRadius = 6
-        layer?.backgroundColor = NSColor(white: 1, alpha: 0.04).cgColor
-
-        let plusLabel = NSTextField(labelWithString: "+")
-        plusLabel.font = NSFont.systemFont(ofSize: 14, weight: .medium)
-        plusLabel.textColor = NSColor(white: 0.667, alpha: 1) // #aaa
-        plusLabel.translatesAutoresizingMaskIntoConstraints = false
-        plusLabel.drawsBackground = false
-        plusLabel.isBezeled = false
-        plusLabel.isEditable = false
-        plusLabel.tag = 100
-        addSubview(plusLabel)
-        NSLayoutConstraint.activate([
-            plusLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
-            plusLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let existing = hoverTrackingArea {
-            removeTrackingArea(existing)
-        }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInActiveApp],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(area)
-        hoverTrackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        isHovered = true
-        layer?.backgroundColor = NSColor(white: 1, alpha: 0.09).cgColor
-        if let label = viewWithTag(100) as? NSTextField {
-            label.textColor = .white
-        }
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        isHovered = false
-        layer?.backgroundColor = NSColor(white: 1, alpha: 0.04).cgColor
-        if let label = viewWithTag(100) as? NSTextField {
-            label.textColor = NSColor(white: 0.667, alpha: 1)
-        }
     }
 }
 

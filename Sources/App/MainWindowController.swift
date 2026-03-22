@@ -1,13 +1,28 @@
 import AppKit
 
 class MainWindowController: NSWindowController {
+    struct GlassBackgroundConfig {
+        let enabled: Bool
+        let material: NSVisualEffectView.Material
+        let blendingMode: NSVisualEffectView.BlendingMode
+    }
+
+    static func glassBackgroundConfig(isDark: Bool) -> GlassBackgroundConfig {
+        if isDark {
+            return GlassBackgroundConfig(enabled: true, material: .hudWindow, blendingMode: .behindWindow)
+        }
+        return GlassBackgroundConfig(enabled: true, material: .underWindowBackground, blendingMode: .behindWindow)
+    }
+
     private let titleBar = TitleBarView()
+    private let backgroundEffectView = NSVisualEffectView()
     private let contentContainer = NSView()
     private var windowTrackingArea: NSTrackingArea?
-    private let panelBackdrop = PanelBackdropView()
     private let notificationPanel = NotificationPanelView()
     private let aiPanel = AIPanelView()
-    private let modalView = UnifiedModalView()
+    private let notificationPopover = NSPopover()
+    private let aiPopover = NSPopover()
+    private let titleBarAccessory = NSTitlebarAccessoryViewController()
 
     private var dashboardVC: DashboardViewController?
     private var config = Config.load()
@@ -41,13 +56,31 @@ class MainWindowController: NSWindowController {
     }()
     private var webhookServer: WebhookServer?
 
-    // Modal context
-    private enum ModalContext {
-        case closeProject(String)
-        case addProject
-        case newThread
+    static func shouldUseWindowFrameAutosave(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        arguments: [String] = ProcessInfo.processInfo.arguments
+    ) -> Bool {
+        if environment["XCTestConfigurationFilePath"] != nil {
+            return false
+        }
+        if arguments.contains("-PmuxUITesting") {
+            return false
+        }
+        if let idx = arguments.firstIndex(of: "-ApplePersistenceIgnoreState"),
+           arguments.indices.contains(idx + 1),
+           arguments[idx + 1].caseInsensitiveCompare("YES") == .orderedSame {
+            return false
+        }
+        return true
     }
-    private var currentModalContext: ModalContext?
+
+    static func shouldHandleEscShortcut() -> Bool {
+        false
+    }
+
+    static func trafficLightButtonOriginY(containerHeight: CGFloat, buttonHeight: CGFloat) -> CGFloat {
+        (containerHeight / 2) + TitleBarView.Layout.arcVerticalOffset - (buttonHeight / 2)
+    }
 
     convenience init() {
         let window = PmuxWindow(
@@ -60,20 +93,24 @@ class MainWindowController: NSWindowController {
         window.minSize = NSSize(width: 600, height: 400)
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
+        window.isOpaque = false
+        window.backgroundColor = .clear
 
         // Set window appearance from config (already applied globally in main.swift)
         window.appearance = NSApp.appearance
 
         self.init(window: window)
 
-        // Hide real traffic lights
-        window.standardWindowButton(.closeButton)?.isHidden = true
-        window.standardWindowButton(.miniaturizeButton)?.isHidden = true
-        window.standardWindowButton(.zoomButton)?.isHidden = true
-
-        window.setFrameAutosaveName("PmuxMainWindow")
+        if Self.shouldUseWindowFrameAutosave() {
+            window.setFrameAutosaveName("PmuxMainWindow")
+        } else if let visibleFrame = NSScreen.main?.visibleFrame {
+            let width = min(1200, visibleFrame.width * 0.9)
+            let height = min(800, visibleFrame.height * 0.9)
+            let x = visibleFrame.midX - (width / 2)
+            let y = visibleFrame.midY - (height / 2)
+            window.setFrame(NSRect(x: x, y: y, width: width, height: height), display: false)
+        }
         window.delegate = self
-        window.keyHandler = self
 
         setupMenuShortcuts()
         setupLayout()
@@ -145,8 +182,7 @@ class MainWindowController: NSWindowController {
         closeTabItem.keyEquivalentModifierMask = .command
         viewMenu.addItem(closeTabItem)
 
-        let diffItem = NSMenuItem(title: "Show Diff...", action: #selector(showDiffOverlay), keyEquivalent: "d")
-        diffItem.keyEquivalentModifierMask = .command
+        let diffItem = NSMenuItem(title: "Show Diff...", action: #selector(showDiffOverlay), keyEquivalent: "")
         viewMenu.addItem(diffItem)
 
         viewMenu.addItem(NSMenuItem.separator())
@@ -279,7 +315,6 @@ class MainWindowController: NSWindowController {
         ⌘P  Quick Switch
         ⌘W  Close Tab
         ⌘0  Dashboard
-        ⌘D  Show Diff
         ⌘,  Settings
         ⌘}  Next Tab
         ⌘{  Previous Tab
@@ -320,8 +355,11 @@ class MainWindowController: NSWindowController {
         }
 
         guard let path = worktreePath else { return }
+        presentDiffOverlay(for: path)
+    }
 
-        let diffVC = DiffOverlayViewController(worktreePath: path)
+    private func presentDiffOverlay(for worktreePath: String) {
+        let diffVC = DiffOverlayViewController(worktreePath: worktreePath)
         if activeTabIndex == 0 {
             dashboardVC?.presentAsSheet(diffVC)
         } else {
@@ -340,16 +378,17 @@ class MainWindowController: NSWindowController {
     private func setupLayout() {
         guard let contentView = window?.contentView else { return }
 
+        setupNativeTitleBar()
+
         // Update banner (above title bar, hidden by default)
         updateBanner.translatesAutoresizingMaskIntoConstraints = false
         updateBanner.isHidden = true
         updateBanner.delegate = self
         contentView.addSubview(updateBanner)
 
-        // Title bar (40px)
-        titleBar.translatesAutoresizingMaskIntoConstraints = false
-        titleBar.delegate = self
-        contentView.addSubview(titleBar)
+        backgroundEffectView.translatesAutoresizingMaskIntoConstraints = false
+        backgroundEffectView.state = .followsWindowActiveState
+        contentView.addSubview(backgroundEffectView, positioned: .below, relativeTo: nil)
 
         // Content container (fills middle)
         contentContainer.wantsLayer = true
@@ -357,15 +396,16 @@ class MainWindowController: NSWindowController {
         contentView.addSubview(contentContainer)
 
         NSLayoutConstraint.activate([
+            backgroundEffectView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            backgroundEffectView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            backgroundEffectView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            backgroundEffectView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+
             updateBanner.topAnchor.constraint(equalTo: contentView.topAnchor),
             updateBanner.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             updateBanner.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
 
-            titleBar.topAnchor.constraint(equalTo: updateBanner.bottomAnchor),
-            titleBar.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            titleBar.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-
-            contentContainer.topAnchor.constraint(equalTo: titleBar.bottomAnchor),
+            contentContainer.topAnchor.constraint(equalTo: updateBanner.bottomAnchor),
             contentContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             contentContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             contentContainer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
@@ -374,48 +414,7 @@ class MainWindowController: NSWindowController {
         // Window hover tracking for arc block styling
         setupWindowHoverTracking(contentView: contentView)
 
-        // Panel backdrop (overlay, z-order above content)
-        panelBackdrop.delegate = self
-        contentView.addSubview(panelBackdrop)
-        NSLayoutConstraint.activate([
-            panelBackdrop.topAnchor.constraint(equalTo: titleBar.bottomAnchor),
-            panelBackdrop.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            panelBackdrop.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            panelBackdrop.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-        ])
-
-        // Notification panel (overlay, right side, 360px)
-        notificationPanel.delegate = self
-        contentView.addSubview(notificationPanel)
-        NSLayoutConstraint.activate([
-            notificationPanel.topAnchor.constraint(equalTo: titleBar.bottomAnchor),
-            notificationPanel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            notificationPanel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            notificationPanel.widthAnchor.constraint(equalToConstant: 360),
-        ])
-
-        // AI panel (overlay, right side, 360px)
-        aiPanel.delegate = self
-        contentView.addSubview(aiPanel)
-        NSLayoutConstraint.activate([
-            aiPanel.topAnchor.constraint(equalTo: titleBar.bottomAnchor),
-            aiPanel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            aiPanel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            aiPanel.widthAnchor.constraint(equalToConstant: 360),
-        ])
-
-        // Layout popover (above panels, below modal)
-        titleBar.installPopover(in: contentView)
-
-        // Unified modal (overlay, full screen, highest z-order)
-        modalView.delegate = self
-        contentView.addSubview(modalView)
-        NSLayoutConstraint.activate([
-            modalView.topAnchor.constraint(equalTo: contentView.topAnchor),
-            modalView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            modalView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            modalView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-        ])
+        setupPanelPopovers()
 
         // Create dashboard
         let savedLayout = DashboardLayout(rawValue: config.dashboardLayout) ?? .leftRight
@@ -431,6 +430,94 @@ class MainWindowController: NSWindowController {
 
         // Set title bar layout state
         titleBar.setCurrentLayout(savedLayout)
+
+        applyWindowBackgroundStyle()
+        positionStandardWindowButtons()
+    }
+
+    private func setupPanelPopovers() {
+        notificationPanel.delegate = self
+        notificationPanel.frame = NSRect(x: 0, y: 0, width: 360, height: 460)
+        notificationPopover.contentSize = notificationPanel.frame.size
+        notificationPopover.behavior = .transient
+        notificationPopover.animates = true
+        notificationPopover.delegate = self
+        notificationPopover.contentViewController = ViewHostController(hostedView: notificationPanel)
+
+        aiPanel.delegate = self
+        aiPanel.frame = NSRect(x: 0, y: 0, width: 360, height: 460)
+        aiPopover.contentSize = aiPanel.frame.size
+        aiPopover.behavior = .transient
+        aiPopover.animates = true
+        aiPopover.delegate = self
+        aiPopover.contentViewController = ViewHostController(hostedView: aiPanel)
+    }
+
+    private func applyWindowBackgroundStyle() {
+        guard let window else { return }
+        let isDark = window.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let config = Self.glassBackgroundConfig(isDark: isDark)
+
+        backgroundEffectView.material = config.material
+        backgroundEffectView.blendingMode = config.blendingMode
+        backgroundEffectView.isHidden = !config.enabled
+
+        window.isOpaque = !config.enabled
+        window.backgroundColor = config.enabled ? .clear : Theme.background
+    }
+
+    private func setupNativeTitleBar() {
+        guard let window else { return }
+
+        let toolbar = NSToolbar(identifier: "pmux.mainToolbar")
+        toolbar.displayMode = .iconOnly
+        toolbar.showsBaselineSeparator = false
+        window.toolbar = toolbar
+        window.toolbarStyle = .unified
+
+        titleBar.delegate = self
+        titleBar.translatesAutoresizingMaskIntoConstraints = false
+
+        let accessoryContainer = NSView(frame: NSRect(x: 0, y: 0, width: 860, height: TitleBarView.Layout.barHeight))
+        accessoryContainer.translatesAutoresizingMaskIntoConstraints = false
+        accessoryContainer.addSubview(titleBar)
+        NSLayoutConstraint.activate([
+            titleBar.leadingAnchor.constraint(equalTo: accessoryContainer.leadingAnchor),
+            titleBar.trailingAnchor.constraint(equalTo: accessoryContainer.trailingAnchor),
+            titleBar.topAnchor.constraint(equalTo: accessoryContainer.topAnchor),
+            titleBar.bottomAnchor.constraint(equalTo: accessoryContainer.bottomAnchor),
+            accessoryContainer.widthAnchor.constraint(greaterThanOrEqualToConstant: 860),
+        ])
+
+        titleBarAccessory.view = accessoryContainer
+        titleBarAccessory.fullScreenMinHeight = TitleBarView.Layout.barHeight
+        titleBarAccessory.layoutAttribute = .top
+        if !window.titlebarAccessoryViewControllers.contains(where: { $0 === titleBarAccessory }) {
+            window.addTitlebarAccessoryViewController(titleBarAccessory)
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            self?.positionStandardWindowButtons()
+        }
+    }
+
+    private func positionStandardWindowButtons() {
+        guard let window else { return }
+        guard let close = window.standardWindowButton(.closeButton),
+              let mini = window.standardWindowButton(.miniaturizeButton),
+              let zoom = window.standardWindowButton(.zoomButton),
+              let container = close.superview
+        else {
+            return
+        }
+
+        let xOffset: CGFloat = 12
+        let spacing: CGFloat = 6
+
+        let y = Self.trafficLightButtonOriginY(containerHeight: container.bounds.height, buttonHeight: close.frame.height)
+        close.setFrameOrigin(NSPoint(x: xOffset, y: y))
+        mini.setFrameOrigin(NSPoint(x: xOffset + close.frame.width + spacing, y: y))
+        zoom.setFrameOrigin(NSPoint(x: xOffset + (close.frame.width + spacing) * 2, y: y))
     }
 
     private func setupWindowHoverTracking(contentView: NSView) {
@@ -549,24 +636,47 @@ class MainWindowController: NSWindowController {
 
         WorktreeDiscovery.discoverAsync(repoPath: path) { [weak self] worktrees in
             guard let self else { return }
-            if worktrees.isEmpty {
-                let info = WorktreeInfo(path: path, branch: "main", commitHash: "", isMainWorktree: true)
-                let surface = self.createSurface(for: info)
-                self.allWorktrees.append((info: info, surface: surface))
-            } else {
-                for info in worktrees {
-                    let surface = self.createSurface(for: info)
-                    self.allWorktrees.append((info: info, surface: surface))
-                }
-            }
-
-            let tabIndex = self.workspaceManager.addTab(repoPath: path, worktrees: worktrees.isEmpty ? [] : worktrees)
-
-            self.dashboardVC?.updateAgents(self.buildAgentDisplayInfos())
-            self.statusPublisher.updateSurfaces(self.surfaces)
-            self.updateTitleBar()
-            self.switchToTab(tabIndex + 1)
+            _ = self.integrateDiscoveredRepoForTesting(repoPath: path, worktrees: worktrees)
         }
+    }
+
+    @discardableResult
+    func integrateDiscoveredRepoForTesting(repoPath: String, worktrees: [WorktreeInfo], activateTab: Bool = true) -> Int {
+        let effectiveWorktrees: [WorktreeInfo]
+        if worktrees.isEmpty {
+            effectiveWorktrees = [WorktreeInfo(path: repoPath, branch: "main", commitHash: "", isMainWorktree: true)]
+        } else {
+            effectiveWorktrees = worktrees
+        }
+
+        for info in effectiveWorktrees {
+            let surface = createSurface(for: info)
+            allWorktrees.append((info: info, surface: surface))
+        }
+
+        let tabIndex = workspaceManager.addTab(repoPath: repoPath, worktrees: worktrees.isEmpty ? [] : worktrees)
+        let projectName = workspaceManager.tabs.first(where: { $0.repoPath == repoPath })?.displayName
+            ?? URL(fileURLWithPath: repoPath).lastPathComponent
+
+        let now = MainWindowController.iso8601.string(from: Date())
+        for info in effectiveWorktrees {
+            if config.worktreeStartedAt[info.path] == nil {
+                config.worktreeStartedAt[info.path] = now
+            }
+            let surface = createSurface(for: info)
+            let started = config.worktreeStartedAt[info.path].flatMap { MainWindowController.iso8601.date(from: $0) }
+            let sessionName = config.backend == "tmux" ? Self.tmuxSessionName(for: info.path) : nil
+            AgentHead.shared.register(worktreePath: info.path, branch: info.branch, project: projectName, surface: surface, startedAt: started, tmuxSessionName: sessionName)
+        }
+        config.save()
+
+        dashboardVC?.updateAgents(buildAgentDisplayInfos())
+        statusPublisher.updateSurfaces(surfaces)
+        updateTitleBar()
+        if activateTab {
+            switchToTab(tabIndex + 1)
+        }
+        return tabIndex
     }
 
     // MARK: - Tab Switching
@@ -601,7 +711,22 @@ class MainWindowController: NSWindowController {
         }
 
         updateTitleBar()
+        updateStatusPollPreferences()
 
+    }
+
+    private func updateStatusPollPreferences() {
+        guard activeTabIndex > 0 else {
+            statusPublisher.setPreferredPaths([])
+            return
+        }
+
+        let repoIndex = activeTabIndex - 1
+        guard let tab = workspaceManager.tab(at: repoIndex) else {
+            statusPublisher.setPreferredPaths([])
+            return
+        }
+        statusPublisher.setPreferredPaths(tab.worktrees.map(\.path))
     }
 
     private func getOrCreateRepoVC(for tab: WorkspaceTab) -> RepoViewController {
@@ -620,73 +745,72 @@ class MainWindowController: NSWindowController {
     private func openRepoTab(repoPath: String) {
         WorktreeDiscovery.discoverAsync(repoPath: repoPath) { [weak self] worktrees in
             guard let self else { return }
-            let tabIndex = self.workspaceManager.addTab(repoPath: repoPath, worktrees: worktrees)
-            self.updateTitleBar()
-            self.switchToTab(tabIndex + 1)
-        }
-    }
-
-    // MARK: - Key Handling
-
-    func handleEscKey() {
-        // Dismiss modal first
-        if !modalView.isHidden {
-            modalView.dismiss()
-            currentModalContext = nil
-            return
-        }
-        // Then dismiss panels
-        if notificationPanel.isOpen || aiPanel.isOpen {
-            closeBothPanels()
-            return
-        }
-        // Then navigate back to dashboard from project
-        if activeTabIndex > 0 {
-            switchToTab(0)
+            _ = self.integrateDiscoveredRepoForTesting(repoPath: repoPath, worktrees: worktrees)
         }
     }
 
     // MARK: - Panel Management
 
     private func closeBothPanels() {
-        notificationPanel.setOpen(false)
-        aiPanel.setOpen(false)
-        panelBackdrop.setVisible(false)
+        notificationPopover.performClose(nil)
+        aiPopover.performClose(nil)
+        notificationPanel.setOpen(false, animated: false)
+        aiPanel.setOpen(false, animated: false)
     }
 
     private func toggleNotificationPanel() {
-        if notificationPanel.isOpen {
-            notificationPanel.setOpen(false)
-            panelBackdrop.setVisible(false)
-        } else {
-            aiPanel.setOpen(false)
-            notificationPanel.setOpen(true)
-            panelBackdrop.setVisible(true)
+        if notificationPopover.isShown {
+            notificationPopover.performClose(nil)
+            notificationPanel.setOpen(false, animated: false)
+            return
         }
+
+        aiPopover.performClose(nil)
+        aiPanel.setOpen(false, animated: false)
+
+        notificationPanel.updateNotifications(NotificationHistory.shared.entries.map {
+            (
+                title: "\($0.branch)  \($0.status.rawValue)",
+                meta: $0.message,
+                worktreePath: $0.worktreePath
+            )
+        })
+        notificationPanel.setOpen(true, animated: false)
+
+        let anchor = titleBar.notificationsAnchorView()
+        notificationPopover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
     }
 
     private func toggleAIPanel() {
-        if aiPanel.isOpen {
-            aiPanel.setOpen(false)
-            panelBackdrop.setVisible(false)
-        } else {
-            notificationPanel.setOpen(false)
-            aiPanel.setOpen(true)
-            panelBackdrop.setVisible(true)
+        if aiPopover.isShown {
+            aiPopover.performClose(nil)
+            aiPanel.setOpen(false, animated: false)
+            return
         }
+
+        notificationPopover.performClose(nil)
+        notificationPanel.setOpen(false, animated: false)
+
+        aiPanel.setOpen(true, animated: false)
+        let anchor = titleBar.aiAnchorView()
+        aiPopover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
     }
 
     // MARK: - Modal Helpers
 
     private func showCloseProjectModal(_ projectName: String) {
         closeBothPanels()
-        currentModalContext = .closeProject(projectName)
-        modalView.show(config: ModalConfig(
-            title: "Close \"\(projectName)\"?",
-            subtitle: "This will close all terminals and kill tmux sessions for this repository.",
-            confirmText: "Close",
-            confirmStyle: .warn
-        ))
+
+        let alert = NSAlert()
+        alert.messageText = "Close \"\(projectName)\"?"
+        alert.informativeText = "This will close all terminals and kill tmux sessions for this repository."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Close")
+        alert.addButton(withTitle: "Cancel")
+
+        if alert.runModal() == .alertFirstButtonReturn {
+            performCloseRepo(projectName: projectName)
+        }
     }
 
     private func showAddProjectModal() {
@@ -695,14 +819,23 @@ class MainWindowController: NSWindowController {
 
     private func showNewThreadModal() {
         closeBothPanels()
-        currentModalContext = .newThread
-        modalView.show(config: ModalConfig(
-            title: "New Thread",
-            subtitle: "Create a new branch/thread for the current project.",
-            placeholder: "branch-name",
-            confirmText: "Create",
-            isMultiline: false
-        ))
+
+        let alert = NSAlert()
+        alert.messageText = "New Thread"
+        alert.informativeText = "Create a new branch/thread for the current project."
+        alert.alertStyle = .informational
+
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        input.placeholderString = "branch-name"
+        alert.accessoryView = input
+
+        alert.addButton(withTitle: "Create")
+        alert.addButton(withTitle: "Cancel")
+
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            showNewBranchDialog()
+        }
     }
 
     // MARK: - Workspace Loading
@@ -792,6 +925,7 @@ class MainWindowController: NSWindowController {
 
                 // Start polling for agent status
                 self.statusPublisher.start(surfaces: self.surfaces)
+                self.updateStatusPollPreferences()
 
                 // Start webhook server for agent hook events
                 if self.config.webhook.enabled {
@@ -987,19 +1121,10 @@ class MainWindowController: NSWindowController {
     }
 }
 
-// MARK: - PmuxWindow
-
-protocol PmuxWindowKeyHandler: AnyObject {
-    func handleEscKey()
-}
-
 class PmuxWindow: NSWindow {
-    weak var keyHandler: PmuxWindowKeyHandler?
-
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown {
-            if event.keyCode == 53 {  // Esc
-                keyHandler?.handleEscKey()
+            if event.keyCode == 53, MainWindowController.shouldHandleEscShortcut() {
                 return
             }
         }
@@ -1010,7 +1135,22 @@ class PmuxWindow: NSWindow {
 // MARK: - NSWindowDelegate
 
 extension MainWindowController: NSWindowDelegate {
-    func windowDidResize(_ notification: Notification) {}
+    func windowDidResize(_ notification: Notification) {
+        positionStandardWindowButtons()
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        applyWindowBackgroundStyle()
+        positionStandardWindowButtons()
+    }
+
+    func windowDidEndLiveResize(_ notification: Notification) {
+        positionStandardWindowButtons()
+    }
+
+    func windowDidChangeEffectiveAppearance(_ notification: Notification) {
+        applyWindowBackgroundStyle()
+    }
 
 
     func windowWillClose(_ notification: Notification) {
@@ -1082,7 +1222,7 @@ extension MainWindowController: TitleBarDelegate {
         if let appearance = window?.appearance {
             NSAppearance.current = appearance
         }
-        window?.backgroundColor = Theme.background
+        applyWindowBackgroundStyle()
     }
     
     func titleBarDidRequestCloseWindow() {
@@ -1140,41 +1280,9 @@ extension MainWindowController: RepoViewDelegate {
     func repoViewDidRequestNewThread(_ repoVC: RepoViewController) {
         showNewBranchDialog()
     }
-}
 
-// MARK: - PmuxWindowKeyHandler
-
-extension MainWindowController: PmuxWindowKeyHandler {}
-
-// MARK: - UnifiedModalDelegate
-
-extension MainWindowController: UnifiedModalDelegate {
-    func modalDidConfirm(value: String) {
-        guard let context = currentModalContext else { return }
-        currentModalContext = nil
-
-        switch context {
-        case .closeProject(let projectName):
-            performCloseRepo(projectName: projectName)
-        case .addProject:
-            // Not used -- add project uses open panel directly
-            break
-        case .newThread:
-            // Show the new branch dialog with the value as a hint
-            showNewBranchDialog()
-        }
-    }
-
-    func modalDidCancel() {
-        currentModalContext = nil
-    }
-}
-
-// MARK: - PanelBackdropDelegate
-
-extension MainWindowController: PanelBackdropDelegate {
-    func backdropClicked() {
-        closeBothPanels()
+    func repoView(_ repoVC: RepoViewController, didRequestShowDiffForWorktreePath worktreePath: String) {
+        presentDiffOverlay(for: worktreePath)
     }
 }
 
@@ -1182,8 +1290,8 @@ extension MainWindowController: PanelBackdropDelegate {
 
 extension MainWindowController: NotificationPanelDelegate {
     func notificationPanelDidRequestClose() {
-        notificationPanel.setOpen(false)
-        panelBackdrop.setVisible(false)
+        notificationPopover.performClose(nil)
+        notificationPanel.setOpen(false, animated: false)
     }
 
     func notificationPanelDidSelectItem(worktreePath: String) {
@@ -1200,8 +1308,8 @@ extension MainWindowController: NotificationPanelDelegate {
 
 extension MainWindowController: AIPanelDelegate {
     func aiPanelDidRequestClose() {
-        aiPanel.setOpen(false)
-        panelBackdrop.setVisible(false)
+        aiPopover.performClose(nil)
+        aiPanel.setOpen(false, animated: false)
     }
 }
 
@@ -1415,5 +1523,41 @@ extension MainWindowController: UpdateBannerDelegate {
     func updateBannerDidClickRetry(_ banner: UpdateBanner) {
         guard let release = pendingRelease else { return }
         updateManager.download(release: release)
+    }
+}
+
+extension MainWindowController: NSPopoverDelegate {
+    func popoverDidClose(_ notification: Notification) {
+        guard let popover = notification.object as? NSPopover else { return }
+        if popover === notificationPopover {
+            notificationPanel.setOpen(false, animated: false)
+        } else if popover === aiPopover {
+            aiPanel.setOpen(false, animated: false)
+        }
+    }
+}
+
+private final class ViewHostController: NSViewController {
+    private let hostedView: NSView
+
+    init(hostedView: NSView) {
+        self.hostedView = hostedView
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) not supported")
+    }
+
+    override func loadView() {
+        hostedView.translatesAutoresizingMaskIntoConstraints = false
+        view = NSView(frame: NSRect(origin: .zero, size: hostedView.frame.size))
+        view.addSubview(hostedView)
+        NSLayoutConstraint.activate([
+            hostedView.topAnchor.constraint(equalTo: view.topAnchor),
+            hostedView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            hostedView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            hostedView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
     }
 }

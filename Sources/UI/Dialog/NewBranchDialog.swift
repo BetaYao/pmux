@@ -84,13 +84,19 @@ protocol NewBranchDialogDelegate: AnyObject {
 
 /// Zoom 风格的新分支弹窗
 class NewBranchDialog: NSViewController {
+    enum Layout {
+        static let actionButtonsFillEqually = true
+        static let actionButtonHeight: CGFloat = 40
+    }
+
     weak var dialogDelegate: NewBranchDialogDelegate?
     
     private let repoPopup = NSPopUpButton()
     private let branchField = NSTextField()
     private let baseBranchPopup = NSPopUpButton()
-    private let createButton = ZoomButton(style: .primary)
-    private let cancelButton = ZoomButton(style: .secondary)
+    private let createButton = NSButton()
+    private let cancelButton = NSButton()
+    private let createLoadingIndicator = NSProgressIndicator()
     private let errorLabel = NSTextField(labelWithString: "")
     
     private var repoPaths: [String] = []
@@ -164,6 +170,9 @@ class NewBranchDialog: NSViewController {
         buttonStack.orientation = .horizontal
         buttonStack.spacing = 12
         buttonStack.alignment = .centerY
+        if Layout.actionButtonsFillEqually {
+            buttonStack.distribution = .fillEqually
+        }
         
         let mainStack = NSStackView(views: [
             titleLabel,
@@ -190,10 +199,9 @@ class NewBranchDialog: NSViewController {
             branchField.widthAnchor.constraint(equalToConstant: 280),
             baseBranchPopup.widthAnchor.constraint(equalToConstant: 280),
             
-            createButton.widthAnchor.constraint(equalToConstant: 100),
-            createButton.heightAnchor.constraint(equalToConstant: 36),
-            cancelButton.widthAnchor.constraint(equalToConstant: 100),
-            cancelButton.heightAnchor.constraint(equalToConstant: 36),
+            buttonStack.widthAnchor.constraint(equalToConstant: 292),
+            createButton.heightAnchor.constraint(equalToConstant: Layout.actionButtonHeight),
+            cancelButton.heightAnchor.constraint(equalToConstant: Layout.actionButtonHeight),
         ])
         
         // 加载第一个 repo 的分支
@@ -308,11 +316,25 @@ class NewBranchDialog: NSViewController {
     
     private func setupButtons() {
         createButton.title = "Create"
+        createButton.bezelStyle = .rounded
+        createButton.isBordered = true
         createButton.target = self
         createButton.action = #selector(createClicked)
         createButton.setAccessibilityIdentifier("dialog.newBranch.createButton")
-        
+
+        createLoadingIndicator.style = .spinning
+        createLoadingIndicator.controlSize = .small
+        createLoadingIndicator.isDisplayedWhenStopped = false
+        createLoadingIndicator.translatesAutoresizingMaskIntoConstraints = false
+        createButton.addSubview(createLoadingIndicator)
+        NSLayoutConstraint.activate([
+            createLoadingIndicator.centerXAnchor.constraint(equalTo: createButton.centerXAnchor),
+            createLoadingIndicator.centerYAnchor.constraint(equalTo: createButton.centerYAnchor),
+        ])
+
         cancelButton.title = "Cancel"
+        cancelButton.bezelStyle = .rounded
+        cancelButton.isBordered = true
         cancelButton.target = self
         cancelButton.action = #selector(cancelClicked)
         cancelButton.keyEquivalent = "\u{1b}" // Escape key
@@ -352,9 +374,8 @@ class NewBranchDialog: NSViewController {
         guard repoIndex >= 0, repoIndex < repoPaths.count else { return }
         let repoPath = repoPaths[repoIndex]
         let baseBranch = baseBranchPopup.titleOfSelectedItem ?? "main"
-        
-        createButton.isEnabled = false
-        createButton.showLoading()
+
+        setCreateButtonLoading(true)
         
         DispatchQueue.global().async { [weak self] in
             do {
@@ -370,10 +391,19 @@ class NewBranchDialog: NSViewController {
             } catch {
                 DispatchQueue.main.async {
                     self?.showError(error.localizedDescription)
-                    self?.createButton.isEnabled = true
-                    self?.createButton.hideLoading()
+                    self?.setCreateButtonLoading(false)
                 }
             }
+        }
+    }
+
+    private func setCreateButtonLoading(_ loading: Bool) {
+        createButton.isEnabled = !loading
+        createButton.title = loading ? "" : "Create"
+        if loading {
+            createLoadingIndicator.startAnimation(nil)
+        } else {
+            createLoadingIndicator.stopAnimation(nil)
         }
     }
     
@@ -400,136 +430,5 @@ class NewBranchDialog: NSViewController {
                 }
             }
         }
-    }
-}
-
-// MARK: - Zoom Style Button
-class ZoomButton: NSButton {
-    enum Style {
-        case primary    // Zoom 蓝色
-        case secondary  // 灰色
-    }
-    
-    private let style: Style
-    private var trackingArea: NSTrackingArea?
-    private var isLoading = false
-    private let loadingIndicator = NSProgressIndicator()
-    
-    init(style: Style) {
-        self.style = style
-        super.init(frame: .zero)
-        setup()
-    }
-    
-    required init?(coder: NSCoder) {
-        self.style = .primary
-        super.init(coder: coder)
-        setup()
-    }
-    
-    private func setup() {
-        wantsLayer = true
-        layer?.cornerRadius = 8
-        bezelStyle = .recessed
-        setButtonType(.momentaryPushIn)
-        
-        // 设置文字样式
-        font = ZoomTypography.button
-        
-        // 配置颜色
-        updateAppearance()
-        
-        // 添加 loading indicator
-        loadingIndicator.style = .spinning
-        loadingIndicator.isDisplayedWhenStopped = false
-        loadingIndicator.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(loadingIndicator)
-        NSLayoutConstraint.activate([
-            loadingIndicator.centerXAnchor.constraint(equalTo: centerXAnchor),
-            loadingIndicator.centerYAnchor.constraint(equalTo: centerYAnchor),
-            loadingIndicator.widthAnchor.constraint(equalToConstant: 16),
-            loadingIndicator.heightAnchor.constraint(equalToConstant: 16)
-        ])
-    }
-    
-    private func updateAppearance() {
-        switch style {
-        case .primary:
-            layer?.backgroundColor = SemanticColors.accent.cgColor
-            contentTintColor = .white
-        case .secondary:
-            layer?.backgroundColor = NSColor(white: 1, alpha: 0.03).cgColor
-            contentTintColor = NSColor(hex: 0xaaaaaa)
-        }
-    }
-    
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea = trackingArea {
-            removeTrackingArea(trackingArea)
-        }
-        trackingArea = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeAlways],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(trackingArea!)
-    }
-    
-    override func mouseEntered(with event: NSEvent) {
-        guard !isLoading else { return }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.15
-            switch style {
-            case .primary:
-                layer?.backgroundColor = SemanticColors.accent.blended(withFraction: 0.15, of: .white)?.cgColor
-            case .secondary:
-                layer?.backgroundColor = NSColor(white: 1, alpha: 0.06).cgColor
-            }
-        }
-    }
-    
-    override func mouseExited(with event: NSEvent) {
-        guard !isLoading else { return }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.15
-            updateAppearance()
-        }
-    }
-    
-    override func mouseDown(with event: NSEvent) {
-        guard !isLoading else { return }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.1
-            layer?.transform = CATransform3DMakeScale(0.97, 0.97, 1)
-            if style == .primary {
-                layer?.backgroundColor = SemanticColors.accent.blended(withFraction: 0.15, of: .black)?.cgColor
-            }
-        }
-        super.mouseDown(with: event)
-    }
-    
-    override func mouseUp(with event: NSEvent) {
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.1
-            layer?.transform = CATransform3DIdentity
-            updateAppearance()
-        }
-        super.mouseUp(with: event)
-    }
-    
-    func showLoading() {
-        isLoading = true
-        title = ""
-        loadingIndicator.startAnimation(nil)
-        isEnabled = false
-    }
-    
-    func hideLoading() {
-        isLoading = false
-        title = style == .primary ? "Create" : "Cancel"
-        loadingIndicator.stopAnimation(nil)
-        isEnabled = true
     }
 }

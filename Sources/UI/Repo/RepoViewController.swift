@@ -3,10 +3,15 @@ import AppKit
 protocol RepoViewDelegate: AnyObject {
     func repoView(_ repoVC: RepoViewController, didRequestDeleteWorktree info: WorktreeInfo)
     func repoViewDidRequestNewThread(_ repoVC: RepoViewController)
+    func repoView(_ repoVC: RepoViewController, didRequestShowDiffForWorktreePath worktreePath: String)
 }
 
 /// Full repo view: sidebar (thread list) + single immersive terminal
 class RepoViewController: NSViewController {
+    static let layoutTopInset: CGFloat = 8
+    static let terminalCornerRadius: CGFloat = 10
+    static let sideBySideTerminalMaskedCorners: CACornerMask = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+
     weak var repoDelegate: RepoViewDelegate?
     private let sidebarVC = SidebarViewController()
 
@@ -23,10 +28,22 @@ class RepoViewController: NSViewController {
     private var activeSurface: TerminalSurface?
     private var needsTerminalOnLayout = false
 
+    private func applyTerminalAppearanceStyle() {
+        let isDark = terminalContainer.effectiveAppearance.isDark
+        terminalContainer.layer?.backgroundColor = terminalContainer.resolvedCGColor(SemanticColors.tileBg)
+        terminalContainer.layer?.borderWidth = isDark ? 0 : 1
+        terminalContainer.layer?.borderColor = isDark
+            ? NSColor.clear.cgColor
+            : terminalContainer.resolvedCGColor(SemanticColors.line)
+    }
+
     override func loadView() {
-        self.view = NSView()
-        view.wantsLayer = true
-        view.layer?.backgroundColor = SemanticColors.bg.cgColor
+        let rootView = RepoRootView()
+        rootView.wantsLayer = true
+        rootView.onAppearanceChange = { [weak self] in
+            self?.applyTerminalAppearanceStyle()
+        }
+        self.view = rootView
 
         // Sidebar container (left column)
         sidebarContainer.translatesAutoresizingMaskIntoConstraints = false
@@ -49,15 +66,13 @@ class RepoViewController: NSViewController {
         // Terminal container (right column) with panel styling
         terminalContainer.translatesAutoresizingMaskIntoConstraints = false
         terminalContainer.wantsLayer = true
-        terminalContainer.layer?.backgroundColor = SemanticColors.tileBg.cgColor
-        terminalContainer.layer?.borderWidth = 1
-        terminalContainer.layer?.borderColor = SemanticColors.line.cgColor
-        terminalContainer.layer?.cornerRadius = 4
-        terminalContainer.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+        terminalContainer.layer?.cornerRadius = Self.terminalCornerRadius
+        terminalContainer.layer?.maskedCorners = Self.sideBySideTerminalMaskedCorners
         terminalContainer.setAccessibilityIdentifier("project.terminal")
         terminalContainer.setAccessibilityElement(true)
         terminalContainer.setAccessibilityRole(.group)
         view.addSubview(terminalContainer)
+        applyTerminalAppearanceStyle()
 
         sidebarWidthConstraint = sidebarContainer.widthAnchor.constraint(equalToConstant: 300)
 
@@ -87,6 +102,7 @@ class RepoViewController: NSViewController {
         stackConstraints.removeAll()
 
         let gap: CGFloat = 12
+        let topAnchor = view.safeAreaLayoutGuide.topAnchor
 
         if isStacked {
             // Vertical stack: 220px sidebar on top, terminal below
@@ -95,7 +111,7 @@ class RepoViewController: NSViewController {
 
             stackConstraints = [
                 sidebarHeight,
-                sidebarContainer.topAnchor.constraint(equalTo: view.topAnchor),
+                sidebarContainer.topAnchor.constraint(equalTo: topAnchor, constant: Self.layoutTopInset),
                 sidebarContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
                 sidebarContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
 
@@ -113,18 +129,18 @@ class RepoViewController: NSViewController {
             sidebarWidthConstraint.isActive = true
 
             stackConstraints = [
-                sidebarContainer.topAnchor.constraint(equalTo: view.topAnchor),
+                sidebarContainer.topAnchor.constraint(equalTo: topAnchor, constant: Self.layoutTopInset),
                 sidebarContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
                 sidebarContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor),
 
-                terminalContainer.topAnchor.constraint(equalTo: view.topAnchor),
+                terminalContainer.topAnchor.constraint(equalTo: topAnchor, constant: Self.layoutTopInset),
                 terminalContainer.leadingAnchor.constraint(equalTo: sidebarContainer.trailingAnchor, constant: gap),
                 terminalContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
                 terminalContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             ]
 
             // No rounded corners on right edge (full height)
-            terminalContainer.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+            terminalContainer.layer?.maskedCorners = Self.sideBySideTerminalMaskedCorners
         }
 
         NSLayoutConstraint.activate(stackConstraints)
@@ -200,6 +216,22 @@ class RepoViewController: NSViewController {
     }
 }
 
+private final class RepoRootView: NSView {
+    var onAppearanceChange: (() -> Void)?
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        layer?.backgroundColor = resolvedCGColor(SemanticColors.bg)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+        onAppearanceChange?()
+    }
+}
+
 // MARK: - SidebarDelegate
 
 extension RepoViewController: SidebarDelegate {
@@ -214,6 +246,11 @@ extension RepoViewController: SidebarDelegate {
 
     func sidebarDidRequestNewThread(_ sidebar: SidebarViewController) {
         repoDelegate?.repoViewDidRequestNewThread(self)
+    }
+
+    func sidebar(_ sidebar: SidebarViewController, didRequestShowDiffAt index: Int) {
+        guard index >= 0, index < worktrees.count else { return }
+        repoDelegate?.repoView(self, didRequestShowDiffForWorktreePath: worktrees[index].path)
     }
 }
 

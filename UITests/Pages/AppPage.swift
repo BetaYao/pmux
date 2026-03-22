@@ -11,6 +11,11 @@ class AppPage {
 
     @discardableResult
     func launch(testConfigPath: String? = nil) -> Self {
+        app.launchArguments += [
+            "-PmuxUITesting",
+            "-ApplePersistenceIgnoreState", "YES",
+            "-NSQuitAlwaysKeepsWindows", "NO",
+        ]
         if let path = testConfigPath {
             app.launchArguments += ["-UITestConfig", path]
         }

@@ -1,6 +1,12 @@
 import AppKit
 
 final class MiniCardView: NSView {
+    enum Typography {
+        static let primaryPointSize: CGFloat = 13
+        static let bodyPointSize: CGFloat = 12
+        static let secondaryPointSize: CGFloat = 11
+    }
+
     weak var delegate: AgentCardDelegate?
     private(set) var agentId: String = ""
     var isSelected: Bool = false { didSet { updateAppearance() } }
@@ -69,8 +75,8 @@ final class MiniCardView: NSView {
         addSubview(statusDot)
 
         // Project label
-        projectLabel.font = NSFont.systemFont(ofSize: 9, weight: .regular)
-        projectLabel.textColor = NSColor(hex: 0x777777)
+        projectLabel.font = NSFont.systemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
+        projectLabel.textColor = SemanticColors.muted
         projectLabel.lineBreakMode = .byTruncatingTail
         projectLabel.maximumNumberOfLines = 1
         projectLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -78,16 +84,16 @@ final class MiniCardView: NSView {
         addSubview(projectLabel)
 
         // Separator
-        separatorLabel.font = NSFont.systemFont(ofSize: 7, weight: .regular)
-        separatorLabel.textColor = NSColor(hex: 0x333333)
+        separatorLabel.font = NSFont.systemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
+        separatorLabel.textColor = SemanticColors.muted
         separatorLabel.translatesAutoresizingMaskIntoConstraints = false
         separatorLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         separatorLabel.setContentHuggingPriority(.required, for: .horizontal)
         addSubview(separatorLabel)
 
         // Branch label
-        branchLabel.font = NSFont.systemFont(ofSize: 9, weight: .medium)
-        branchLabel.textColor = NSColor.white
+        branchLabel.font = NSFont.systemFont(ofSize: Typography.primaryPointSize, weight: .semibold)
+        branchLabel.textColor = SemanticColors.text
         branchLabel.lineBreakMode = .byTruncatingTail
         branchLabel.maximumNumberOfLines = 1
         branchLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -95,8 +101,8 @@ final class MiniCardView: NSView {
         addSubview(branchLabel)
 
         // Duration label (line 2 left)
-        durationLabel.font = NSFont.systemFont(ofSize: 8, weight: .regular)
-        durationLabel.textColor = NSColor(hex: 0x444444)
+        durationLabel.font = NSFont.systemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
+        durationLabel.textColor = SemanticColors.muted
         durationLabel.lineBreakMode = .byTruncatingTail
         durationLabel.maximumNumberOfLines = 1
         durationLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -104,7 +110,7 @@ final class MiniCardView: NSView {
         addSubview(durationLabel)
 
         // Status text label (line 2 right)
-        statusTextLabel.font = NSFont.systemFont(ofSize: 8, weight: .regular)
+        statusTextLabel.font = NSFont.systemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
         statusTextLabel.lineBreakMode = .byTruncatingTail
         statusTextLabel.maximumNumberOfLines = 1
         statusTextLabel.alignment = .right
@@ -114,8 +120,8 @@ final class MiniCardView: NSView {
         addSubview(statusTextLabel)
 
         // Message area
-        messageLabel.font = NSFont.monospacedSystemFont(ofSize: 8, weight: .regular)
-        messageLabel.textColor = NSColor(hex: 0x666666)
+        messageLabel.font = NSFont.monospacedSystemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
+        messageLabel.textColor = SemanticColors.muted
         messageLabel.lineBreakMode = .byTruncatingTail
         messageLabel.maximumNumberOfLines = 3
         messageLabel.cell?.wraps = true
@@ -208,29 +214,26 @@ final class MiniCardView: NSView {
         guard let layer = layer else { return }
 
         if isSelected {
-            layer.backgroundColor = NSColor(hex: 0x1a1a1a).cgColor
-            layer.borderColor = NSColor(hex: 0x33c17b).cgColor
+            layer.backgroundColor = resolvedCGColor(SemanticColors.panel2)
+            layer.borderColor = resolvedCGColor(SemanticColors.accent)
             layer.borderWidth = 1.5
             layer.shadowOpacity = 0
         } else if isHovered {
-            layer.backgroundColor = NSColor(hex: 0x222222).cgColor
-            layer.borderColor = NSColor.white.withAlphaComponent(0.08).cgColor
+            layer.backgroundColor = resolvedCGColor(SemanticColors.arcBlockHover)
+            layer.borderColor = resolvedCGColor(SemanticColors.lineAlpha40)
             layer.borderWidth = 1.5
             layer.shadowOpacity = 0
-            // Brighten text on hover
-            branchLabel.textColor = NSColor.white
-            messageLabel.textColor = NSColor(hex: 0x888888)
         } else {
             layer.backgroundColor = resolvedCGColor(SemanticColors.tileBarBg)
-            layer.borderColor = NSColor.clear.cgColor
-            layer.borderWidth = 0
-            layer.shadowOpacity = 0
+            layer.borderColor = resolvedCGColor(SemanticColors.lineAlpha45)
+            layer.borderWidth = 1
+            layer.shadowColor = resolvedCGColor(SemanticColors.miniCardShadowDefault)
+            layer.shadowOpacity = 1
+            layer.shadowRadius = 8
+            layer.shadowOffset = NSSize(width: 0, height: -2)
         }
 
-        // Reset text colors for non-hover states
-        if !isHovered {
-            branchLabel.textColor = NSColor.white
-            messageLabel.textColor = NSColor(hex: 0x666666)
-        }
+        branchLabel.textColor = SemanticColors.text
+        messageLabel.textColor = SemanticColors.muted
     }
 }

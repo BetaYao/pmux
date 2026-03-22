@@ -5,6 +5,20 @@ protocol FocusPanelDelegate: AnyObject {
 }
 
 final class FocusPanelView: NSView {
+    enum HeaderPosition: Equatable {
+        case top
+        case bottom
+    }
+
+    static let defaultHeaderPosition: HeaderPosition = .bottom
+    static let defaultCornerRadius: CGFloat = 10
+
+    enum Typography {
+        static let primaryPointSize: CGFloat = 13
+        static let bodyPointSize: CGFloat = 12
+        static let secondaryPointSize: CGFloat = 11
+    }
+
     weak var delegate: FocusPanelDelegate?
     let terminalContainer: NSView = NSView()
 
@@ -14,9 +28,6 @@ final class FocusPanelView: NSView {
     private let metaLabel = NSTextField(labelWithString: "")
     private let durationLabel = NSTextField(labelWithString: "")
     private let enterButton = NSButton()
-    private let arrowButton = NSView()
-    private let arrowImageView = NSImageView()
-    private var isArrowHovered = false
     private var projectName: String = ""
 
     override init(frame frameRect: NSRect) {
@@ -43,7 +54,9 @@ final class FocusPanelView: NSView {
 
     private func setup() {
         wantsLayer = true
-        layer?.cornerRadius = 4
+        layer?.cornerRadius = Self.defaultCornerRadius
+        layer?.cornerCurve = .continuous
+        layer?.masksToBounds = true
         layer?.borderWidth = 1
         // Colors set in applyColors() via updateLayer
         setAccessibilityIdentifier("dashboard.focusPanel")
@@ -52,12 +65,17 @@ final class FocusPanelView: NSView {
         setupTerminalContainer()
     }
 
+    func setCornerMask(_ maskedCorners: CACornerMask, radius: CGFloat = defaultCornerRadius) {
+        layer?.cornerRadius = radius
+        layer?.maskedCorners = maskedCorners
+    }
+
     private func setupHeader() {
         headerView.wantsLayer = true
         headerView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(headerView)
 
-        // Bottom border for header
+        // Top border for header (separates from terminal above)
         let headerBorder = NSView()
         headerBorder.wantsLayer = true
         headerBorder.layer?.backgroundColor = SemanticColors.lineAlpha55.cgColor
@@ -71,83 +89,46 @@ final class FocusPanelView: NSView {
         headerView.addSubview(statusDot)
 
         // Name
-        nameLabel.font = NSFont.systemFont(ofSize: 12, weight: .bold)
+        nameLabel.font = NSFont.systemFont(ofSize: Typography.primaryPointSize, weight: .semibold)
         nameLabel.textColor = SemanticColors.text
         nameLabel.lineBreakMode = .byTruncatingTail
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
         headerView.addSubview(nameLabel)
 
         // Meta (project + thread)
-        metaLabel.font = NSFont.systemFont(ofSize: 12)
+        metaLabel.font = NSFont.systemFont(ofSize: Typography.bodyPointSize)
         metaLabel.textColor = SemanticColors.muted
         metaLabel.lineBreakMode = .byTruncatingTail
         metaLabel.translatesAutoresizingMaskIntoConstraints = false
         headerView.addSubview(metaLabel)
 
         // Duration
-        durationLabel.font = NSFont.systemFont(ofSize: 12)
+        durationLabel.font = NSFont.systemFont(ofSize: Typography.secondaryPointSize)
         durationLabel.textColor = SemanticColors.muted
         durationLabel.lineBreakMode = .byTruncatingTail
         durationLabel.translatesAutoresizingMaskIntoConstraints = false
         headerView.addSubview(durationLabel)
 
         // Enter project button
-        enterButton.bezelStyle = .toolbar
-        enterButton.isBordered = false
+        enterButton.bezelStyle = .texturedRounded
+        enterButton.isBordered = true
         enterButton.image = NSImage(systemSymbolName: "arrow.up.right", accessibilityDescription: "Enter project")
-        enterButton.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
-        enterButton.wantsLayer = true
-        enterButton.layer?.cornerRadius = 8
+        enterButton.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 12, weight: .regular)
         enterButton.target = self
         enterButton.action = #selector(enterProjectClicked)
         enterButton.setAccessibilityIdentifier("dashboard.focusPanel.enterProject")
         enterButton.translatesAutoresizingMaskIntoConstraints = false
         headerView.addSubview(enterButton)
 
-        // Enter button hover tracking
-        let trackingArea = NSTrackingArea(
-            rect: .zero,
-            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
-            owner: self,
-            userInfo: ["target": "enterButton"]
-        )
-        enterButton.addTrackingArea(trackingArea)
-
-        // Arrow button (chevron.right) for project detail navigation
-        arrowButton.wantsLayer = true
-        arrowButton.layer?.cornerRadius = 5
-        arrowButton.layer?.backgroundColor = NSColor(white: 1, alpha: 0.04).cgColor
-        arrowButton.translatesAutoresizingMaskIntoConstraints = false
-        headerView.addSubview(arrowButton)
-
-        if let chevronImage = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Enter project") {
-            let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
-            arrowImageView.image = chevronImage.withSymbolConfiguration(config)
-            arrowImageView.contentTintColor = NSColor(hex: 0x999999)
-        }
-        arrowImageView.translatesAutoresizingMaskIntoConstraints = false
-        arrowButton.addSubview(arrowImageView)
-
-        let arrowClick = NSClickGestureRecognizer(target: self, action: #selector(enterProjectClicked))
-        arrowButton.addGestureRecognizer(arrowClick)
-
-        let arrowTracking = NSTrackingArea(
-            rect: .zero,
-            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
-            owner: self,
-            userInfo: ["target": "arrowButton"]
-        )
-        arrowButton.addTrackingArea(arrowTracking)
-
         NSLayoutConstraint.activate([
-            headerView.topAnchor.constraint(equalTo: topAnchor),
+            headerView.bottomAnchor.constraint(equalTo: bottomAnchor),
             headerView.leadingAnchor.constraint(equalTo: leadingAnchor),
             headerView.trailingAnchor.constraint(equalTo: trailingAnchor),
             headerView.heightAnchor.constraint(equalToConstant: 42),
 
             headerBorder.leadingAnchor.constraint(equalTo: headerView.leadingAnchor),
             headerBorder.trailingAnchor.constraint(equalTo: headerView.trailingAnchor),
-            headerBorder.bottomAnchor.constraint(equalTo: headerView.bottomAnchor),
+            headerBorder.topAnchor.constraint(equalTo: headerView.topAnchor),
             headerBorder.heightAnchor.constraint(equalToConstant: 1),
 
             statusDot.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 10),
@@ -164,18 +145,10 @@ final class FocusPanelView: NSView {
             durationLabel.leadingAnchor.constraint(equalTo: metaLabel.trailingAnchor, constant: 8),
             durationLabel.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
 
-            arrowButton.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -10),
-            arrowButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
-            arrowButton.widthAnchor.constraint(equalToConstant: 22),
-            arrowButton.heightAnchor.constraint(equalToConstant: 22),
-
-            arrowImageView.centerXAnchor.constraint(equalTo: arrowButton.centerXAnchor),
-            arrowImageView.centerYAnchor.constraint(equalTo: arrowButton.centerYAnchor),
-
-            enterButton.trailingAnchor.constraint(equalTo: arrowButton.leadingAnchor, constant: -6),
+            enterButton.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -10),
             enterButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
-            enterButton.widthAnchor.constraint(equalToConstant: 28),
-            enterButton.heightAnchor.constraint(equalToConstant: 28),
+            enterButton.widthAnchor.constraint(equalToConstant: 26),
+            enterButton.heightAnchor.constraint(equalToConstant: 24),
 
             durationLabel.trailingAnchor.constraint(lessThanOrEqualTo: enterButton.leadingAnchor, constant: -8),
         ])
@@ -194,39 +167,15 @@ final class FocusPanelView: NSView {
         addSubview(terminalContainer)
 
         NSLayoutConstraint.activate([
-            terminalContainer.topAnchor.constraint(equalTo: headerView.bottomAnchor),
+            terminalContainer.topAnchor.constraint(equalTo: topAnchor),
             terminalContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
             terminalContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
-            terminalContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
+            terminalContainer.bottomAnchor.constraint(equalTo: headerView.topAnchor),
         ])
     }
 
     @objc private func enterProjectClicked() {
         delegate?.focusPanelDidRequestEnterProject(projectName)
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        if let target = event.trackingArea?.userInfo?["target"] as? String {
-            if target == "enterButton" {
-                enterButton.layer?.backgroundColor = SemanticColors.lineAlpha22.cgColor
-            } else if target == "arrowButton" {
-                isArrowHovered = true
-                arrowButton.layer?.backgroundColor = NSColor(white: 1, alpha: 0.09).cgColor
-                arrowImageView.contentTintColor = .white
-            }
-        }
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        if let target = event.trackingArea?.userInfo?["target"] as? String {
-            if target == "enterButton" {
-                enterButton.layer?.backgroundColor = nil
-            } else if target == "arrowButton" {
-                isArrowHovered = false
-                arrowButton.layer?.backgroundColor = NSColor(white: 1, alpha: 0.04).cgColor
-                arrowImageView.contentTintColor = NSColor(hex: 0x999999)
-            }
-        }
     }
 
     override var wantsUpdateLayer: Bool { true }
@@ -241,7 +190,7 @@ final class FocusPanelView: NSView {
     }
 
     private func applyColors() {
-        layer?.borderColor = resolvedCGColor(SemanticColors.line)
+        layer?.borderColor = resolvedCGColor(SemanticColors.lineAlpha70)
         layer?.backgroundColor = resolvedCGColor(SemanticColors.tileBg)
     }
 }
