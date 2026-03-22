@@ -225,9 +225,12 @@ final class MiniCardView: NSView {
             layer.shadowOpacity = 0
         } else {
             layer.backgroundColor = resolvedCGColor(SemanticColors.tileBarBg)
-            layer.borderColor = NSColor.clear.cgColor
-            layer.borderWidth = 0
-            layer.shadowOpacity = 0
+            layer.borderColor = resolvedCGColor(SemanticColors.lineAlpha45)
+            layer.borderWidth = 1
+            layer.shadowColor = resolvedCGColor(SemanticColors.miniCardShadowDefault)
+            layer.shadowOpacity = 1
+            layer.shadowRadius = 8
+            layer.shadowOffset = NSSize(width: 0, height: -2)
         }
 
         branchLabel.textColor = SemanticColors.text

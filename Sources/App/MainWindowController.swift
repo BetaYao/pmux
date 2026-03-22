@@ -11,7 +11,7 @@ class MainWindowController: NSWindowController {
         if isDark {
             return GlassBackgroundConfig(enabled: true, material: .hudWindow, blendingMode: .behindWindow)
         }
-        return GlassBackgroundConfig(enabled: false, material: .contentBackground, blendingMode: .behindWindow)
+        return GlassBackgroundConfig(enabled: true, material: .underWindowBackground, blendingMode: .behindWindow)
     }
 
     private let titleBar = TitleBarView()
@@ -182,8 +182,7 @@ class MainWindowController: NSWindowController {
         closeTabItem.keyEquivalentModifierMask = .command
         viewMenu.addItem(closeTabItem)
 
-        let diffItem = NSMenuItem(title: "Show Diff...", action: #selector(showDiffOverlay), keyEquivalent: "d")
-        diffItem.keyEquivalentModifierMask = .command
+        let diffItem = NSMenuItem(title: "Show Diff...", action: #selector(showDiffOverlay), keyEquivalent: "")
         viewMenu.addItem(diffItem)
 
         viewMenu.addItem(NSMenuItem.separator())
@@ -316,7 +315,6 @@ class MainWindowController: NSWindowController {
         ⌘P  Quick Switch
         ⌘W  Close Tab
         ⌘0  Dashboard
-        ⌘D  Show Diff
         ⌘,  Settings
         ⌘}  Next Tab
         ⌘{  Previous Tab
@@ -357,8 +355,11 @@ class MainWindowController: NSWindowController {
         }
 
         guard let path = worktreePath else { return }
+        presentDiffOverlay(for: path)
+    }
 
-        let diffVC = DiffOverlayViewController(worktreePath: path)
+    private func presentDiffOverlay(for worktreePath: String) {
+        let diffVC = DiffOverlayViewController(worktreePath: worktreePath)
         if activeTabIndex == 0 {
             dashboardVC?.presentAsSheet(diffVC)
         } else {
@@ -1262,6 +1263,10 @@ extension MainWindowController: RepoViewDelegate {
 
     func repoViewDidRequestNewThread(_ repoVC: RepoViewController) {
         showNewBranchDialog()
+    }
+
+    func repoView(_ repoVC: RepoViewController, didRequestShowDiffForWorktreePath worktreePath: String) {
+        presentDiffOverlay(for: worktreePath)
     }
 }
 

@@ -3,6 +3,7 @@ import AppKit
 protocol RepoViewDelegate: AnyObject {
     func repoView(_ repoVC: RepoViewController, didRequestDeleteWorktree info: WorktreeInfo)
     func repoViewDidRequestNewThread(_ repoVC: RepoViewController)
+    func repoView(_ repoVC: RepoViewController, didRequestShowDiffForWorktreePath worktreePath: String)
 }
 
 /// Full repo view: sidebar (thread list) + single immersive terminal
@@ -27,10 +28,18 @@ class RepoViewController: NSViewController {
     private var activeSurface: TerminalSurface?
     private var needsTerminalOnLayout = false
 
+    private func applyTerminalAppearanceStyle() {
+        terminalContainer.layer?.backgroundColor = terminalContainer.resolvedCGColor(SemanticColors.tileBg)
+        terminalContainer.layer?.borderColor = terminalContainer.resolvedCGColor(SemanticColors.line)
+    }
+
     override func loadView() {
-        self.view = NSView()
-        view.wantsLayer = true
-        view.layer?.backgroundColor = SemanticColors.bg.cgColor
+        let rootView = RepoRootView()
+        rootView.wantsLayer = true
+        rootView.onAppearanceChange = { [weak self] in
+            self?.applyTerminalAppearanceStyle()
+        }
+        self.view = rootView
 
         // Sidebar container (left column)
         sidebarContainer.translatesAutoresizingMaskIntoConstraints = false
@@ -53,15 +62,14 @@ class RepoViewController: NSViewController {
         // Terminal container (right column) with panel styling
         terminalContainer.translatesAutoresizingMaskIntoConstraints = false
         terminalContainer.wantsLayer = true
-        terminalContainer.layer?.backgroundColor = SemanticColors.tileBg.cgColor
         terminalContainer.layer?.borderWidth = 1
-        terminalContainer.layer?.borderColor = SemanticColors.line.cgColor
         terminalContainer.layer?.cornerRadius = Self.terminalCornerRadius
         terminalContainer.layer?.maskedCorners = Self.sideBySideTerminalMaskedCorners
         terminalContainer.setAccessibilityIdentifier("project.terminal")
         terminalContainer.setAccessibilityElement(true)
         terminalContainer.setAccessibilityRole(.group)
         view.addSubview(terminalContainer)
+        applyTerminalAppearanceStyle()
 
         sidebarWidthConstraint = sidebarContainer.widthAnchor.constraint(equalToConstant: 300)
 
@@ -205,6 +213,22 @@ class RepoViewController: NSViewController {
     }
 }
 
+private final class RepoRootView: NSView {
+    var onAppearanceChange: (() -> Void)?
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        layer?.backgroundColor = resolvedCGColor(SemanticColors.bg)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+        onAppearanceChange?()
+    }
+}
+
 // MARK: - SidebarDelegate
 
 extension RepoViewController: SidebarDelegate {
@@ -219,6 +243,11 @@ extension RepoViewController: SidebarDelegate {
 
     func sidebarDidRequestNewThread(_ sidebar: SidebarViewController) {
         repoDelegate?.repoViewDidRequestNewThread(self)
+    }
+
+    func sidebar(_ sidebar: SidebarViewController, didRequestShowDiffAt index: Int) {
+        guard index >= 0, index < worktrees.count else { return }
+        repoDelegate?.repoView(self, didRequestShowDiffForWorktreePath: worktrees[index].path)
     }
 }
 

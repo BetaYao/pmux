@@ -255,9 +255,11 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertEqual(config.blendingMode, .behindWindow)
     }
 
-    func testGlassBackgroundConfig_LightModeDisabled() {
+    func testGlassBackgroundConfig_LightModeEnabled() {
         let config = MainWindowController.glassBackgroundConfig(isDark: false)
-        XCTAssertFalse(config.enabled)
+        XCTAssertTrue(config.enabled)
+        XCTAssertEqual(config.material, .underWindowBackground)
+        XCTAssertEqual(config.blendingMode, .behindWindow)
     }
 
     func testIntegrateDiscoveredRepoForTesting_RegistersFallbackAgentWhenNoWorktrees() {
@@ -292,6 +294,37 @@ final class GridLayoutTests: XCTestCase {
 
     func testRepoView_DefaultTopInset_IsEightPoints() {
         XCTAssertEqual(RepoViewController.layoutTopInset, 8)
+    }
+
+    func testRepoView_BackgroundAndTerminalAdaptToAppearanceChanges() {
+        let repoVC = RepoViewController()
+        repoVC.loadViewIfNeeded()
+
+        let terminal = findView(in: repoVC.view, identifier: "project.terminal")
+        XCTAssertNotNil(terminal)
+
+        repoVC.view.appearance = NSAppearance(named: .aqua)
+        repoVC.view.viewDidChangeEffectiveAppearance()
+        repoVC.view.needsDisplay = true
+        repoVC.view.displayIfNeeded()
+        let lightRoot = repoVC.view.layer?.backgroundColor
+        let lightTerminalBg = terminal?.layer?.backgroundColor
+        let lightTerminalBorder = terminal?.layer?.borderColor
+
+        repoVC.view.appearance = NSAppearance(named: .darkAqua)
+        repoVC.view.viewDidChangeEffectiveAppearance()
+        repoVC.view.needsDisplay = true
+        repoVC.view.displayIfNeeded()
+        let darkRoot = repoVC.view.layer?.backgroundColor
+        let darkTerminalBg = terminal?.layer?.backgroundColor
+        let darkTerminalBorder = terminal?.layer?.borderColor
+
+        XCTAssertNotNil(lightRoot)
+        XCTAssertNotNil(darkRoot)
+
+        XCTAssertNotEqual(lightRoot, darkRoot)
+        XCTAssertNotEqual(lightTerminalBg, darkTerminalBg)
+        XCTAssertNotEqual(lightTerminalBorder, darkTerminalBorder)
     }
 
     func testSidebar_DefaultBackground_IsTransparent() {
@@ -343,6 +376,19 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertTrue(addButton?.isBordered == true)
         XCTAssertEqual(addButton?.bezelStyle, .texturedRounded)
         XCTAssertNotNil(addButton?.image)
+    }
+
+    func testSidebar_DiffButtonExistsAndDefaultDisabled() {
+        let sidebarVC = SidebarViewController()
+        sidebarVC.loadViewIfNeeded()
+
+        let diffButton = findButton(in: sidebarVC.view, identifier: "sidebar.showDiff")
+        XCTAssertNotNil(diffButton)
+        XCTAssertFalse(diffButton?.isEnabled ?? true)
+        XCTAssertEqual(diffButton?.bezelStyle, .texturedRounded)
+        XCTAssertEqual(diffButton?.title, "")
+        XCTAssertEqual(diffButton?.imagePosition, .imageOnly)
+        XCTAssertNotNil(diffButton?.image)
     }
 
     func testNewThreadDialog_ActionButtonsUseNativeButtonChrome() {
@@ -431,6 +477,13 @@ final class GridLayoutTests: XCTestCase {
         ))
         XCTAssertTrue(MainWindowController.shouldUseWindowFrameAutosave(environment: [:], arguments: []))
     }
+
+    func testMainWindowController_LightModeUsesGlassBackground() {
+        let cfg = MainWindowController.glassBackgroundConfig(isDark: false)
+        XCTAssertTrue(cfg.enabled)
+        XCTAssertEqual(cfg.material, .underWindowBackground)
+        XCTAssertEqual(cfg.blendingMode, .behindWindow)
+    }
 }
 
 private func findButton(in root: NSView, identifier: String) -> NSButton? {
@@ -441,6 +494,18 @@ private func findButton(in root: NSView, identifier: String) -> NSButton? {
     for subview in root.subviews {
         if let button = findButton(in: subview, identifier: identifier) {
             return button
+        }
+    }
+    return nil
+}
+
+private func findView(in root: NSView, identifier: String) -> NSView? {
+    if root.accessibilityIdentifier() == identifier {
+        return root
+    }
+    for subview in root.subviews {
+        if let view = findView(in: subview, identifier: identifier) {
+            return view
         }
     }
     return nil

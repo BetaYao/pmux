@@ -190,7 +190,7 @@ final class FocusPanelView: NSView {
     }
 
     private func applyColors() {
-        layer?.borderColor = resolvedCGColor(SemanticColors.line)
+        layer?.borderColor = resolvedCGColor(SemanticColors.lineAlpha70)
         layer?.backgroundColor = resolvedCGColor(SemanticColors.tileBg)
     }
 }

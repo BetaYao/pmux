@@ -34,15 +34,19 @@ enum SemanticColors {
     static let bg: NSColor = NSColor(name: nil) { appearance in
         appearance.isDark
             ? NSColor(srgbRed: 0x10 / 255.0, green: 0x18 / 255.0, blue: 0x1d / 255.0, alpha: 0.40)
-            : NSColor(hex: 0xe8eaef)
+            : NSColor(srgbRed: 0xec / 255.0, green: 0xf3 / 255.0, blue: 0xfb / 255.0, alpha: 0.70)
     }
 
     static let panel: NSColor = NSColor(name: nil) { appearance in
-        appearance.isDark ? NSColor(hex: 0x0f1011) : NSColor(hex: 0xffffff)
+        appearance.isDark
+            ? NSColor(hex: 0x0f1011)
+            : NSColor(srgbRed: 0xff / 255.0, green: 0xff / 255.0, blue: 0xff / 255.0, alpha: 0.84)
     }
 
     static let panel2: NSColor = NSColor(name: nil) { appearance in
-        appearance.isDark ? NSColor(hex: 0x101112) : NSColor(hex: 0xf7f8fb)
+        appearance.isDark
+            ? NSColor(hex: 0x101112)
+            : NSColor(srgbRed: 0xf8 / 255.0, green: 0xfb / 255.0, blue: 0xff / 255.0, alpha: 0.90)
     }
 
     static let text: NSColor = NSColor(name: nil) { appearance in
@@ -58,7 +62,7 @@ enum SemanticColors {
     }
 
     static let line: NSColor = NSColor(name: nil) { appearance in
-        appearance.isDark ? NSColor(hex: 0x222222) : NSColor(hex: 0xd7dbe3)
+        appearance.isDark ? NSColor(hex: 0x222222) : NSColor(hex: 0xc6cfdb)
     }
 
     static let running: NSColor = NSColor(name: nil) { appearance in
@@ -209,16 +213,24 @@ enum SemanticColors {
     // MARK: - Zoom-specific tokens
 
     static let arcBlockHover: NSColor = NSColor(name: nil) { a in
-        a.isDark ? NSColor(hex: 0x151618) : NSColor(hex: 0xf0f0f0)
+        a.isDark ? NSColor(hex: 0x151618) : NSColor(hex: 0xe8edf5)
     }
     static let arcBlockInactive: NSColor = NSColor(name: nil) { a in
-        a.isDark ? NSColor(hex: 0x0f1011) : NSColor(hex: 0xf5f5f5)
+        a.isDark ? NSColor(hex: 0x0f1011) : NSColor(hex: 0xf1f5fb)
     }
     static let tileBg: NSColor = NSColor(name: nil) { a in
-        a.isDark ? NSColor(hex: 0x0f1011) : NSColor(hex: 0xffffff)
+        a.isDark
+            ? NSColor(hex: 0x0f1011)
+            : NSColor(srgbRed: 0xff / 255.0, green: 0xff / 255.0, blue: 0xff / 255.0, alpha: 0.88)
     }
     static let tileBarBg: NSColor = NSColor(name: nil) { a in
-        a.isDark ? NSColor(hex: 0x1a1a1a) : NSColor(hex: 0xf0f1f4)
+        a.isDark
+            ? NSColor(hex: 0x1a1a1a)
+            : NSColor(srgbRed: 0xf4 / 255.0, green: 0xf7 / 255.0, blue: 0xfc / 255.0, alpha: 0.92)
+    }
+
+    static let miniCardShadowDefault: NSColor = NSColor(name: nil) { a in
+        a.isDark ? NSColor.clear : NSColor.black.withAlphaComponent(0.10)
     }
 
     // MARK: - Project tab tokens

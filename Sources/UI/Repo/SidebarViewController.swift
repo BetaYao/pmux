@@ -4,6 +4,7 @@ protocol SidebarDelegate: AnyObject {
     func sidebar(_ sidebar: SidebarViewController, didSelectWorktreeAt index: Int)
     func sidebar(_ sidebar: SidebarViewController, didRequestDeleteWorktreeAt index: Int)
     func sidebarDidRequestNewThread(_ sidebar: SidebarViewController)
+    func sidebar(_ sidebar: SidebarViewController, didRequestShowDiffAt index: Int)
 }
 
 /// Left sidebar showing thread list with status dots
@@ -22,6 +23,7 @@ class SidebarViewController: NSViewController {
     private let headerBar = NSView()
     private let threadsLabel = NSTextField(labelWithString: "Threads")
     private let countLabel = NSTextField(labelWithString: "")
+    private let diffButton = NSButton()
     private let addButton = NSButton()
     private let headerBorder = NSView()
     private let scrollView = NSScrollView()
@@ -31,6 +33,7 @@ class SidebarViewController: NSViewController {
     private var statuses: [String: AgentStatus] = [:]
     private var lastMessages: [String: String] = [:]
     private var selectedIndex: Int = 0
+    private var hasExplicitSelection = false
     private var suppressSelectionNotification = false
 
     override func loadView() {
@@ -70,6 +73,19 @@ class SidebarViewController: NSViewController {
         addButton.action = #selector(addThreadClicked)
         addButton.setAccessibilityIdentifier("sidebar.addThread")
         headerBar.addSubview(addButton)
+
+        diffButton.translatesAutoresizingMaskIntoConstraints = false
+        diffButton.title = ""
+        diffButton.bezelStyle = .texturedRounded
+        diffButton.isBordered = true
+        diffButton.image = NSImage(systemSymbolName: "doc.text.magnifyingglass", accessibilityDescription: "Show diff")
+        diffButton.imagePosition = .imageOnly
+        diffButton.contentTintColor = SemanticColors.muted
+        diffButton.isEnabled = false
+        diffButton.target = self
+        diffButton.action = #selector(showDiffClicked)
+        diffButton.setAccessibilityIdentifier("sidebar.showDiff")
+        headerBar.addSubview(diffButton)
 
         headerBorder.translatesAutoresizingMaskIntoConstraints = false
         headerBorder.wantsLayer = true
@@ -135,6 +151,10 @@ class SidebarViewController: NSViewController {
             addButton.widthAnchor.constraint(equalToConstant: 24),
             addButton.heightAnchor.constraint(equalToConstant: 24),
 
+            diffButton.centerYAnchor.constraint(equalTo: headerBar.centerYAnchor),
+            diffButton.trailingAnchor.constraint(equalTo: addButton.leadingAnchor, constant: -6),
+            diffButton.heightAnchor.constraint(equalToConstant: 24),
+
             headerBorder.leadingAnchor.constraint(equalTo: headerBar.leadingAnchor),
             headerBorder.trailingAnchor.constraint(equalTo: headerBar.trailingAnchor),
             headerBorder.bottomAnchor.constraint(equalTo: headerBar.bottomAnchor),
@@ -157,11 +177,25 @@ class SidebarViewController: NSViewController {
         sidebarDelegate?.sidebarDidRequestNewThread(self)
     }
 
+    @objc private func showDiffClicked() {
+        guard hasExplicitSelection,
+              selectedIndex >= 0,
+              selectedIndex < worktrees.count
+        else { return }
+        sidebarDelegate?.sidebar(self, didRequestShowDiffAt: selectedIndex)
+    }
+
+    private func updateDiffButtonState() {
+        diffButton.isEnabled = hasExplicitSelection && selectedIndex >= 0 && selectedIndex < worktrees.count
+    }
+
     func setWorktrees(_ worktrees: [WorktreeInfo]) {
         self.worktrees = worktrees
+        hasExplicitSelection = false
         countLabel.stringValue = "\(worktrees.count)"
         emptyStateLabel.isHidden = !worktrees.isEmpty
         scrollView.isHidden = worktrees.isEmpty
+        updateDiffButtonState()
         tableView.reloadData()
         if !worktrees.isEmpty {
             suppressSelectionNotification = true
@@ -188,6 +222,7 @@ class SidebarViewController: NSViewController {
     func selectWorktree(at index: Int) {
         guard index >= 0, index < worktrees.count else { return }
         selectedIndex = index
+        updateDiffButtonState()
         suppressSelectionNotification = true
         tableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
         suppressSelectionNotification = false
@@ -232,6 +267,8 @@ extension SidebarViewController: NSTableViewDelegate {
         guard row >= 0 else { return }
         let oldIndex = selectedIndex
         selectedIndex = row
+        hasExplicitSelection = true
+        updateDiffButtonState()
         // Only reload the old and new selected rows instead of the entire table
         var indexSet = IndexSet(integer: row)
         if oldIndex != row, oldIndex >= 0, oldIndex < worktrees.count {
