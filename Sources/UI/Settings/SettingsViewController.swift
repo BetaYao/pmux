@@ -139,8 +139,11 @@ class SettingsViewController: NSViewController {
         view.addSubview(backendLabel)
 
         backendPopup.removeAllItems()
-        backendPopup.addItems(withTitles: ["tmux", "local"])
+        backendPopup.addItems(withTitles: ["zmx", "local"])
         backendPopup.selectItem(withTitle: config.backend)
+        if backendPopup.indexOfSelectedItem < 0 {
+            backendPopup.selectItem(withTitle: "zmx")
+        }
         backendPopup.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(backendPopup)
 
@@ -270,7 +273,7 @@ class SettingsViewController: NSViewController {
     @objc private func saveClicked() {
         // Update config from UI
         config.workspacePaths = workspacePaths
-        config.backend = backendPopup.titleOfSelectedItem ?? "tmux"
+        config.backend = backendPopup.titleOfSelectedItem ?? "zmx"
         config.terminalRowCacheSize = Int(cacheSizeField.stringValue) ?? 200
 
         // Parse agent detection JSON

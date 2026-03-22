@@ -26,6 +26,7 @@ class MainWindowController: NSWindowController {
 
     private var dashboardVC: DashboardViewController?
     private var config = Config.load()
+    private var runtimeBackend: String = "zmx"
     private let workspaceManager = WorkspaceManager()
 
     // All terminal surfaces, keyed by worktree path
@@ -82,6 +83,55 @@ class MainWindowController: NSWindowController {
         (containerHeight / 2) + TitleBarView.Layout.arcVerticalOffset - (buttonHeight / 2)
     }
 
+    static func resolvePreferredBackend(preferred: String, zmxAvailable: Bool, tmuxAvailable: Bool) -> String {
+        switch preferred {
+        case "local":
+            return "local"
+        case "tmux":
+            if zmxAvailable { return "zmx" }
+            if tmuxAvailable { return "tmux" }
+            return zmxAvailable ? "zmx" : "local"
+        case "zmx":
+            if zmxAvailable {
+                return "zmx"
+            }
+            return tmuxAvailable ? "tmux" : "local"
+        default:
+            if zmxAvailable {
+                return "zmx"
+            }
+            return tmuxAvailable ? "tmux" : "local"
+        }
+    }
+
+    static func isSupportedZmxVersion(_ rawVersion: String) -> Bool {
+        let trimmed = rawVersion.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+
+        let semver = trimmed
+            .components(separatedBy: CharacterSet.whitespacesAndNewlines)
+            .first { token in
+                token.contains(".") && token.range(of: #"^v?\d+\.\d+\.\d+"#, options: .regularExpression) != nil
+            }
+            ?? trimmed
+
+        let normalized = semver.hasPrefix("v") ? String(semver.dropFirst()) : semver
+        let parts = normalized
+            .split(separator: ".")
+            .prefix(3)
+            .compactMap { Int($0.filter(\.isNumber)) }
+
+        guard parts.count == 3 else { return false }
+        let major = parts[0]
+        let minor = parts[1]
+        let patch = parts[2]
+
+        if major > 0 { return true }
+        if minor > 4 { return true }
+        if minor < 4 { return false }
+        return patch >= 2
+    }
+
     convenience init() {
         let window = PmuxWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
@@ -115,6 +165,7 @@ class MainWindowController: NSWindowController {
         setupMenuShortcuts()
         setupLayout()
         setupAutoUpdate()
+        normalizeBackendAvailabilityIfNeeded()
         loadWorkspaces()
 
         NotificationCenter.default.addObserver(
@@ -229,6 +280,94 @@ class MainWindowController: NSWindowController {
         NSApp.helpMenu = helpMenu
 
         NSApp.mainMenu = mainMenu
+    }
+
+    private func normalizeBackendAvailabilityIfNeeded() {
+        let zmxAvailable = Self.commandExists("zmx")
+        let tmuxAvailable = Self.commandExists("tmux")
+
+        var targetBackend = Self.resolvePreferredBackend(
+            preferred: config.backend,
+            zmxAvailable: zmxAvailable,
+            tmuxAvailable: tmuxAvailable
+        )
+
+        var warningMessage: String?
+        if config.backend == "zmx" {
+            if !zmxAvailable {
+                warningMessage = "zmx is not installed. Install with `brew install neurosnap/tap/zmx`."
+            } else if let version = Self.commandOutput(["zmx", "version"]), !Self.isSupportedZmxVersion(version) {
+                warningMessage = "zmx version is too old. Please upgrade to zmx 0.4.2+ for stability."
+            }
+        }
+
+        if warningMessage != nil, targetBackend == "zmx" {
+            targetBackend = tmuxAvailable ? "tmux" : "local"
+        }
+
+        runtimeBackend = targetBackend
+
+        if warningMessage == nil, targetBackend != config.backend {
+            config.backend = targetBackend
+            config.save()
+        }
+
+        if let warningMessage {
+            let alert = NSAlert()
+            alert.messageText = "Backend Fallback Activated"
+            alert.informativeText = "\(warningMessage)\nCurrent backend: \(targetBackend)."
+            alert.alertStyle = .warning
+            if config.backend == "zmx" && !zmxAvailable {
+                alert.addButton(withTitle: "Copy Install Command")
+                alert.addButton(withTitle: "Open zmx Docs")
+                alert.addButton(withTitle: "OK")
+                let response = alert.runModal()
+                if response == .alertFirstButtonReturn {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString("brew install neurosnap/tap/zmx", forType: .string)
+                } else if response == .alertSecondButtonReturn,
+                          let url = URL(string: "https://zmx.sh") {
+                    NSWorkspace.shared.open(url)
+                }
+            } else {
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+            }
+        }
+    }
+
+    private static func commandExists(_ command: String) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["bash", "-lc", "command -v \(command)"]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
+        }
+    }
+
+    private static func commandOutput(_ args: [String]) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = args
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            guard let output = String(data: data, encoding: .utf8) else { return nil }
+            return output.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            return nil
+        }
     }
 
     @objc private func switchToDashboard() {
@@ -665,8 +804,8 @@ class MainWindowController: NSWindowController {
             }
             let surface = createSurface(for: info)
             let started = config.worktreeStartedAt[info.path].flatMap { MainWindowController.iso8601.date(from: $0) }
-            let sessionName = config.backend == "tmux" ? Self.tmuxSessionName(for: info.path) : nil
-            AgentHead.shared.register(worktreePath: info.path, branch: info.branch, project: projectName, surface: surface, startedAt: started, tmuxSessionName: sessionName)
+            let sessionName = runtimeBackend == "local" ? nil : Self.persistentSessionName(for: info.path)
+            AgentHead.shared.register(worktreePath: info.path, branch: info.branch, project: projectName, surface: surface, startedAt: started, sessionName: sessionName, backend: runtimeBackend)
         }
         config.save()
 
@@ -803,7 +942,7 @@ class MainWindowController: NSWindowController {
 
         let alert = NSAlert()
         alert.messageText = "Close \"\(projectName)\"?"
-        alert.informativeText = "This will close all terminals and kill tmux sessions for this repository."
+        alert.informativeText = "This will close all terminals and kill persisted sessions for this repository."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Close")
         alert.addButton(withTitle: "Cancel")
@@ -909,8 +1048,8 @@ class MainWindowController: NSWindowController {
                     let proj = self.workspaceManager.tabs.first(where: { $0.repoPath == repo })?.displayName
                         ?? URL(fileURLWithPath: repo).lastPathComponent
                     let started = self.config.worktreeStartedAt[info.path].flatMap { MainWindowController.iso8601.date(from: $0) }
-                    let sessionName = self.config.backend == "tmux" ? Self.tmuxSessionName(for: info.path) : nil
-                    AgentHead.shared.register(worktreePath: info.path, branch: info.branch, project: proj, surface: surface, startedAt: started, tmuxSessionName: sessionName)
+                    let sessionName = self.runtimeBackend == "local" ? nil : Self.persistentSessionName(for: info.path)
+                    AgentHead.shared.register(worktreePath: info.path, branch: info.branch, project: proj, surface: surface, startedAt: started, sessionName: sessionName, backend: self.runtimeBackend)
                 }
                 if !cardOrder.isEmpty {
                     AgentHead.shared.reorder(paths: cardOrder)
@@ -945,8 +1084,9 @@ class MainWindowController: NSWindowController {
             return existing
         }
         let surface = TerminalSurface()
-        if config.backend == "tmux" {
-            surface.sessionName = Self.tmuxSessionName(for: info.path)
+        if runtimeBackend != "local" {
+            surface.sessionName = Self.persistentSessionName(for: info.path)
+            surface.backend = runtimeBackend
         }
         surfaces[info.path] = surface
         return surface
@@ -1054,8 +1194,8 @@ class MainWindowController: NSWindowController {
         NotificationCenter.default.removeObserver(self, name: .navigateToWorktree, object: nil)
     }
 
-    /// Generate a stable tmux session name from a worktree path
-    private static func tmuxSessionName(for path: String) -> String {
+    /// Generate a stable persistent session name from a worktree path.
+    private static func persistentSessionName(for path: String) -> String {
         let url = URL(fileURLWithPath: path)
         let parent = url.deletingLastPathComponent().lastPathComponent
         let name = url.lastPathComponent
@@ -1071,16 +1211,16 @@ class MainWindowController: NSWindowController {
         guard let tabIndex = workspaceManager.tabs.firstIndex(where: { $0.displayName == projectName }) else { return }
         let tab = workspaceManager.tabs[tabIndex]
 
-        // Kill tmux sessions and destroy surfaces for this repo's worktrees
+        // Kill persisted sessions and destroy surfaces for this repo's worktrees
         for worktree in tab.worktrees {
             if let surface = surfaces[worktree.path] {
                 surface.destroy()
                 surfaces.removeValue(forKey: worktree.path)
             }
             AgentHead.shared.unregister(worktreePath: worktree.path)
-            if config.backend == "tmux" {
-                let sessionName = Self.tmuxSessionName(for: worktree.path)
-                killTmuxSession(sessionName)
+            if runtimeBackend != "local" {
+                let sessionName = Self.persistentSessionName(for: worktree.path)
+                killSession(sessionName, backend: runtimeBackend)
             }
         }
 
@@ -1111,10 +1251,14 @@ class MainWindowController: NSWindowController {
 
     }
 
-    private func killTmuxSession(_ name: String) {
+    private func killSession(_ name: String, backend: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["tmux", "kill-session", "-t", name]
+        if backend == "tmux" {
+            process.arguments = ["tmux", "kill-session", "-t", name]
+        } else {
+            process.arguments = ["zmx", "kill", name]
+        }
         process.standardOutput = Pipe()
         process.standardError = Pipe()
         try? process.run()
@@ -1412,6 +1556,7 @@ extension MainWindowController: SettingsDelegate {
     func settingsDidUpdateConfig(_ settings: SettingsViewController, config: Config) {
         let oldPaths = Set(self.config.workspacePaths)
         self.config = config
+        normalizeBackendAvailabilityIfNeeded()
 
         let newPaths = Set(config.workspacePaths)
         if oldPaths != newPaths {

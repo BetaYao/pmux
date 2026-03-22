@@ -16,6 +16,7 @@ class AgentHead {
     private var orderedPaths: [String] = []
     /// Strong references to channels (keyed by worktree path)
     private var channels: [String: AgentChannel] = [:]
+    private var backendsByPath: [String: String] = [:]
     private let lock = NSLock()
 
     private init() {}
@@ -24,16 +25,21 @@ class AgentHead {
 
     func register(worktreePath: String, branch: String, project: String,
                   surface: TerminalSurface, startedAt: Date?,
-                  tmuxSessionName: String? = nil) {
+                  sessionName: String? = nil, backend: String = "zmx") {
         lock.lock()
         defer { lock.unlock() }
 
-        // Create a default TmuxChannel if we have a session name
+        // Create a default channel if we have a session name
         var channel: AgentChannel?
-        if let sessionName = tmuxSessionName {
-            channel = TmuxChannel(sessionName: sessionName)
+        if let sessionName {
+            if backend == "tmux" {
+                channel = TmuxChannel(sessionName: sessionName)
+            } else {
+                channel = ZmxChannel(sessionName: sessionName)
+            }
             channels[worktreePath] = channel
         }
+        backendsByPath[worktreePath] = backend
 
         let info = AgentInfo(
             id: worktreePath,
@@ -60,6 +66,7 @@ class AgentHead {
 
         agents.removeValue(forKey: worktreePath)
         channels.removeValue(forKey: worktreePath)
+        backendsByPath.removeValue(forKey: worktreePath)
         orderedPaths.removeAll { $0 == worktreePath }
     }
 
@@ -124,11 +131,18 @@ class AgentHead {
         }
         info.agentType = type
 
-        // Upgrade channel for Claude Code: TmuxChannel → HooksChannel
-        if type == .claudeCode, let tmux = channels[worktreePath] as? TmuxChannel {
-            let hooks = HooksChannel(sessionName: tmux.sessionName)
-            channels[worktreePath] = hooks
-            info.channel = hooks
+        // Upgrade channel for Claude Code: backend channel -> HooksChannel
+        if type == .claudeCode {
+            let backend = backendsByPath[worktreePath] ?? "zmx"
+            if let zmx = channels[worktreePath] as? ZmxChannel {
+                let hooks = HooksChannel(sessionName: zmx.sessionName, backend: backend)
+                channels[worktreePath] = hooks
+                info.channel = hooks
+            } else if let tmux = channels[worktreePath] as? TmuxChannel {
+                let hooks = HooksChannel(sessionName: tmux.sessionName, backend: backend)
+                channels[worktreePath] = hooks
+                info.channel = hooks
+            }
         }
 
         agents[worktreePath] = info

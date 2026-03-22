@@ -2,31 +2,35 @@ import Foundation
 
 /// Communication channel for Claude Code via Hooks.
 /// Receives structured events through the existing WebhookServer,
-/// sends commands via tmux (same as TmuxChannel).
+/// sends commands via backend channel (zmx by default).
 class HooksChannel: AgentChannel {
     let channelType: AgentChannelType = .hooks
     let supportsStructuredEvents = true
 
-    private let tmux: TmuxChannel
+    private let transport: AgentChannel
     private let lock = NSLock()
 
     /// Accumulated hook events for this agent session
     private(set) var events: [HookEvent] = []
 
-    init(sessionName: String) {
-        self.tmux = TmuxChannel(sessionName: sessionName)
+    init(sessionName: String, backend: String = "zmx") {
+        if backend == "tmux" {
+            self.transport = TmuxChannel(sessionName: sessionName)
+        } else {
+            self.transport = ZmxChannel(sessionName: sessionName)
+        }
     }
 
     // MARK: - AgentChannel
 
-    /// Send command via tmux (hooks don't provide an input channel)
+    /// Send command via backend channel (hooks don't provide an input channel)
     func sendCommand(_ command: String) {
-        tmux.sendCommand(command)
+        transport.sendCommand(command)
     }
 
-    /// Read output via tmux (hooks provide events, not raw output)
+    /// Read output via backend channel (hooks provide events, not raw output)
     func readOutput(lines: Int) -> String? {
-        tmux.readOutput(lines: lines)
+        transport.readOutput(lines: lines)
     }
 
     // MARK: - Hook Events

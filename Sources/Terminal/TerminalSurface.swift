@@ -8,13 +8,13 @@ class TerminalSurface {
     private(set) var surface: ghostty_surface_t?
     private weak var containerView: NSView?
 
-    /// tmux session name (nil = no tmux, direct shell)
+    /// Session name for persistence backend (nil = direct shell)
     var sessionName: String?
+    /// Persistence backend for the sessionName above.
+    var backend: String = "zmx"
 
     /// Create the terminal surface and add it to the given container view.
-    /// If useTmux is true, the surface runs inside a tmux session for persistence.
-    /// When a sessionName is provided, tmux session existence is checked asynchronously
-    /// and the surface is created once the check completes.
+    /// If sessionName is provided, the surface runs inside a persistent backend session.
     func create(in container: NSView, workingDirectory: String? = nil, sessionName: String? = nil) -> Bool {
         guard let app = GhosttyBridge.shared.app else {
             NSLog("GhosttyBridge not initialized")
@@ -22,18 +22,26 @@ class TerminalSurface {
         }
 
         if let sessionName {
-            // Check tmux session existence on background thread to avoid blocking UI
-            Self.tmuxSessionExistsAsync(sessionName) { [weak self] exists in
-                guard let self else { return }
-                let tmuxCommand: String
-                if exists {
-                    tmuxCommand = "tmux attach-session -t \(sessionName) \\; set-option status off"
-                } else {
-                    tmuxCommand = "tmux new-session -s \(sessionName) \\; set-option status off"
+            if backend == "tmux" {
+                // Check tmux session existence on background thread to avoid blocking UI
+                Self.tmuxSessionExistsAsync(sessionName) { [weak self] exists in
+                    guard let self else { return }
+                    let tmuxCommand: String
+                    if exists {
+                        tmuxCommand = "tmux attach-session -t \(sessionName) \\; set-option status off"
+                    } else {
+                        tmuxCommand = "tmux new-session -s \(sessionName) \\; set-option status off"
+                    }
+                    self._createWithCommand(app: app, container: container, workingDirectory: workingDirectory, command: tmuxCommand)
                 }
-                self._createWithCommand(app: app, container: container, workingDirectory: workingDirectory, command: tmuxCommand)
+                return true  // Surface creation is deferred
             }
-            return true  // Surface creation is deferred
+
+            if backend == "zmx" {
+                let zmxCommand = "zmx attach \(sessionName)"
+                _createWithCommand(app: app, container: container, workingDirectory: workingDirectory, command: zmxCommand)
+                return surface != nil
+            }
         }
 
         _createWithCommand(app: app, container: container, workingDirectory: workingDirectory, command: nil)
@@ -158,13 +166,15 @@ class TerminalSurface {
             view.needsDisplay = true
             // Third pass: read the grid size AFTER Ghostty has processed the resize
             DispatchQueue.main.async { [weak self] in
-                self?.refreshTmuxLayout()
+                self?.refreshSessionLayout()
             }
         }
     }
 
-    /// Tell tmux to resize its window to match the terminal's actual grid size
-    func refreshTmuxLayout() {
+    /// Tell tmux to resize its window to match the terminal's actual grid size.
+    /// zmx handles size syncing automatically, so this is tmux-only behavior.
+    func refreshSessionLayout() {
+        guard backend == "tmux" else { return }
         guard let sessionName, let surface else { return }
         let gridSize = ghostty_surface_size(surface)
         guard gridSize.columns > 0, gridSize.rows > 0 else { return }
@@ -190,7 +200,7 @@ class TerminalSurface {
         }
     }
 
-    /// Static version for when we don't have the surface (fallback)
+    /// Static version for when we don't have the surface (tmux fallback).
     static func refreshTmuxClient(_ sessionName: String) {
         DispatchQueue.global().async {
             let resize = Process()
@@ -396,8 +406,8 @@ class GhosttyNSView: NSView {
         ghostty_surface_refresh(surface)
         needsDisplay = true
 
-        // Resize tmux to match the new terminal grid dimensions
-        terminalSurface?.refreshTmuxLayout()
+        // Resize backend session layout if needed (tmux only)
+        terminalSurface?.refreshSessionLayout()
     }
 
     override func becomeFirstResponder() -> Bool {

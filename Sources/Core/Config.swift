@@ -32,7 +32,7 @@ struct Config: Codable {
     init() {
         workspacePaths = []
         activeWorkspaceIndex = 0
-        backend = "tmux"
+        backend = "zmx"
         terminalRowCacheSize = 200
         agentDetect = AgentDetectConfig.default
         webhook = WebhookConfig()
@@ -40,7 +40,7 @@ struct Config: Codable {
         cardOrder = []
         zoomIndex = 3
         dashboardLayout = "left-right"
-        themeMode = "dark"
+        themeMode = "system"
         worktreeStartedAt = [:]
     }
 
@@ -48,7 +48,11 @@ struct Config: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         workspacePaths = try container.decodeIfPresent([String].self, forKey: .workspacePaths) ?? []
         activeWorkspaceIndex = try container.decodeIfPresent(Int.self, forKey: .activeWorkspaceIndex) ?? 0
-        backend = try container.decodeIfPresent(String.self, forKey: .backend) ?? "tmux"
+        var rawBackend = try container.decodeIfPresent(String.self, forKey: .backend) ?? "zmx"
+        if rawBackend == "tmux" {
+            rawBackend = "zmx"
+        }
+        backend = rawBackend
         terminalRowCacheSize = try container.decodeIfPresent(Int.self, forKey: .terminalRowCacheSize) ?? 200
         agentDetect = try container.decodeIfPresent(AgentDetectConfig.self, forKey: .agentDetect) ?? .default
         webhook = try container.decodeIfPresent(WebhookConfig.self, forKey: .webhook) ?? WebhookConfig()
@@ -56,7 +60,7 @@ struct Config: Codable {
         cardOrder = try container.decodeIfPresent([String].self, forKey: .cardOrder) ?? []
         zoomIndex = try container.decodeIfPresent(Int.self, forKey: .zoomIndex) ?? 3
         dashboardLayout = try container.decodeIfPresent(String.self, forKey: .dashboardLayout) ?? "left-right"
-        themeMode = try container.decodeIfPresent(String.self, forKey: .themeMode) ?? "dark"
+        themeMode = try container.decodeIfPresent(String.self, forKey: .themeMode) ?? "system"
         worktreeStartedAt = try container.decodeIfPresent([String: String].self, forKey: .worktreeStartedAt) ?? [:]
     }
 
