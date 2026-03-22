@@ -1,12 +1,14 @@
 import Foundation
 
 struct AgentInfo {
-    let id: String                     // worktree path (unique key)
+    let id: String                     // terminal ID (TerminalSurface.id)
+    let worktreePath: String           // associated worktree path
     var agentType: AgentType           // detected from terminal content
     let project: String                // repo display name
     let branch: String                 // git branch
     var status: AgentStatus            // current status
     var lastMessage: String            // latest message
+    var commandLine: String?           // current command from OSC 133 or text matching
     var roundDuration: TimeInterval    // seconds in current running round
     let startedAt: Date?               // for computing totalDuration live
     weak var surface: TerminalSurface? // weak ref, MainWindowController owns

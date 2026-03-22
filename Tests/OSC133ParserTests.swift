@@ -141,6 +141,53 @@ final class OSC133ParserTests: XCTestCase {
         XCTAssertTrue(markers.isEmpty)
     }
 
+    // MARK: - Command Line Parsing
+
+    func testPreExec_WithCmdline() {
+        let data = Data([0x1b, 0x5d] + "133;C;cmdline=brew install ffmpeg".utf8 + [0x07])
+        let markers = parser.feed(data)
+        XCTAssertEqual(markers.count, 1)
+        XCTAssertEqual(markers[0].kind, .preExec)
+        XCTAssertEqual(markers[0].commandLine, "brew install ffmpeg")
+    }
+
+    func testPreExec_WithCmdlineUrl() {
+        let data = Data([0x1b, 0x5d] + "133;C;cmdline_url=brew%20install%20ffmpeg".utf8 + [0x07])
+        let markers = parser.feed(data)
+        XCTAssertEqual(markers.count, 1)
+        XCTAssertEqual(markers[0].commandLine, "brew install ffmpeg")
+    }
+
+    func testPreExec_NoCmdline() {
+        let data = Data([0x1b, 0x5d] + "133;C".utf8 + [0x07])
+        let markers = parser.feed(data)
+        XCTAssertEqual(markers.count, 1)
+        XCTAssertNil(markers[0].commandLine)
+    }
+
+    func testPreExec_EmptyCmdline() {
+        let data = Data([0x1b, 0x5d] + "133;C;cmdline=".utf8 + [0x07])
+        let markers = parser.feed(data)
+        XCTAssertEqual(markers.count, 1)
+        XCTAssertEqual(markers[0].commandLine, "")
+    }
+
+    func testPreExec_CmdlineUrlEncoded() {
+        let data = Data([0x1b, 0x5d] + "133;C;cmdline_url=echo%20hello%3bworld".utf8 + [0x07])
+        let markers = parser.feed(data)
+        XCTAssertEqual(markers.count, 1)
+        XCTAssertEqual(markers[0].commandLine, "echo hello;world")
+    }
+
+    func testLongCmdline_WithinBuffer() {
+        // A command longer than the old 256 limit but under 1024
+        let longCmd = "docker run --rm -v /path/to/dir:/app -e FOO=bar -e BAZ=qux --name my-container-name-that-is-very-long ubuntu:22.04 bash -c 'echo hello world && sleep 100 && echo done done done done done done done done done done done done done done done'"
+        let data = Data([0x1b, 0x5d] + "133;C;cmdline=\(longCmd)".utf8 + [0x07])
+        let markers = parser.feed(data)
+        XCTAssertEqual(markers.count, 1)
+        XCTAssertEqual(markers[0].commandLine, longCmd)
+    }
+
     // MARK: - Reset
 
     func testReset() {
@@ -160,36 +207,59 @@ final class ShellStateTests: XCTestCase {
     func testPhaseTransitions() {
         let state = ShellState()
 
-        state.addMarker(ParsedMarker(kind: .promptStart, exitCode: nil))
+        state.addMarker(ParsedMarker(kind: .promptStart, exitCode: nil, commandLine: nil))
         XCTAssertEqual(state.phase, .prompt)
 
-        state.addMarker(ParsedMarker(kind: .promptEnd, exitCode: nil))
+        state.addMarker(ParsedMarker(kind: .promptEnd, exitCode: nil, commandLine: nil))
         XCTAssertEqual(state.phase, .input)
 
-        state.addMarker(ParsedMarker(kind: .preExec, exitCode: nil))
+        state.addMarker(ParsedMarker(kind: .preExec, exitCode: nil, commandLine: nil))
         XCTAssertEqual(state.phase, .running)
 
-        state.addMarker(ParsedMarker(kind: .postExec, exitCode: 0))
+        state.addMarker(ParsedMarker(kind: .postExec, exitCode: 0, commandLine: nil))
         XCTAssertEqual(state.phase, .output)
         XCTAssertEqual(state.lastExitCode, 0)
     }
 
     func testExitCodePersists() {
         let state = ShellState()
-        state.addMarker(ParsedMarker(kind: .postExec, exitCode: 42))
+        state.addMarker(ParsedMarker(kind: .postExec, exitCode: 42, commandLine: nil))
         XCTAssertEqual(state.lastExitCode, 42)
 
         // Next prompt cycle doesn't clear exit code unless new postExec
-        state.addMarker(ParsedMarker(kind: .promptStart, exitCode: nil))
+        state.addMarker(ParsedMarker(kind: .promptStart, exitCode: nil, commandLine: nil))
         XCTAssertEqual(state.lastExitCode, 42)
     }
 
     func testReset() {
         let state = ShellState()
-        state.addMarker(ParsedMarker(kind: .preExec, exitCode: nil))
+        state.addMarker(ParsedMarker(kind: .preExec, exitCode: nil, commandLine: nil))
         state.reset()
         XCTAssertEqual(state.phase, .output)
         XCTAssertNil(state.lastExitCode)
+    }
+
+    func testLastCommandLineFromPreExec() {
+        let state = ShellState()
+        state.addMarker(ParsedMarker(kind: .preExec, exitCode: nil, commandLine: "brew install ffmpeg"))
+        XCTAssertEqual(state.lastCommandLine, "brew install ffmpeg")
+        XCTAssertEqual(state.phase, .running)
+    }
+
+    func testLastCommandLinePersistsAcrossCycles() {
+        let state = ShellState()
+        state.addMarker(ParsedMarker(kind: .preExec, exitCode: nil, commandLine: "brew install"))
+        state.addMarker(ParsedMarker(kind: .postExec, exitCode: 0, commandLine: nil))
+        state.addMarker(ParsedMarker(kind: .promptStart, exitCode: nil, commandLine: nil))
+        // commandLine persists until next preExec
+        XCTAssertEqual(state.lastCommandLine, "brew install")
+    }
+
+    func testResetClearsCommandLine() {
+        let state = ShellState()
+        state.addMarker(ParsedMarker(kind: .preExec, exitCode: nil, commandLine: "brew install"))
+        state.reset()
+        XCTAssertNil(state.lastCommandLine)
     }
 }
 

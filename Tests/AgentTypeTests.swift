@@ -66,4 +66,79 @@ final class AgentTypeTests: XCTestCase {
         XCTAssertEqual(AgentType.openCode.displayName, "OpenCode")
         XCTAssertEqual(AgentType.unknown.displayName, "Unknown")
     }
+
+    // MARK: - Shell command detection from command line
+
+    func testDetectFromCommand_Brew() {
+        XCTAssertEqual(AgentType.detect(fromCommand: "brew install ffmpeg"), .brew)
+    }
+
+    func testDetectFromCommand_Make() {
+        XCTAssertEqual(AgentType.detect(fromCommand: "make build"), .make)
+    }
+
+    func testDetectFromCommand_Docker() {
+        XCTAssertEqual(AgentType.detect(fromCommand: "docker run -it ubuntu"), .docker)
+    }
+
+    func testDetectFromCommand_Npm() {
+        XCTAssertEqual(AgentType.detect(fromCommand: "npm run build"), .npm)
+    }
+
+    func testDetectFromCommand_Npx() {
+        XCTAssertEqual(AgentType.detect(fromCommand: "npx create-react-app"), .npm)
+    }
+
+    func testDetectFromCommand_Python() {
+        XCTAssertEqual(AgentType.detect(fromCommand: "python3 script.py"), .python)
+    }
+
+    func testDetectFromCommand_WithFullPath() {
+        XCTAssertEqual(AgentType.detect(fromCommand: "/usr/local/bin/brew install ffmpeg"), .brew)
+    }
+
+    func testDetectFromCommand_WithEnvPrefix() {
+        XCTAssertEqual(AgentType.detect(fromCommand: "ENV=val make build"), .make)
+    }
+
+    func testDetectFromCommand_UnknownCommand() {
+        XCTAssertEqual(AgentType.detect(fromCommand: "myapp --flag"), .shellCommand)
+    }
+
+    func testDetectFromCommand_EmptyString() {
+        XCTAssertEqual(AgentType.detect(fromCommand: ""), .unknown)
+    }
+
+    func testDetectFromCommand_Btop() {
+        XCTAssertEqual(AgentType.detect(fromCommand: "btop"), .btop)
+    }
+
+    func testDetectFromCommand_Cargo() {
+        XCTAssertEqual(AgentType.detect(fromCommand: "cargo build --release"), .cargo)
+    }
+
+    // MARK: - isAIAgent / isShellTask
+
+    func testIsAIAgent() {
+        XCTAssertTrue(AgentType.claudeCode.isAIAgent)
+        XCTAssertTrue(AgentType.codex.isAIAgent)
+        XCTAssertFalse(AgentType.brew.isAIAgent)
+        XCTAssertFalse(AgentType.shellCommand.isAIAgent)
+        XCTAssertFalse(AgentType.unknown.isAIAgent)
+    }
+
+    func testIsShellTask() {
+        XCTAssertTrue(AgentType.brew.isShellTask)
+        XCTAssertTrue(AgentType.shellCommand.isShellTask)
+        XCTAssertFalse(AgentType.claudeCode.isShellTask)
+        XCTAssertFalse(AgentType.unknown.isShellTask)
+    }
+
+    // MARK: - Shell task display names
+
+    func testShellDisplayNames() {
+        XCTAssertEqual(AgentType.brew.displayName, "Homebrew")
+        XCTAssertEqual(AgentType.btop.displayName, "btop")
+        XCTAssertEqual(AgentType.shellCommand.displayName, "Shell")
+    }
 }

@@ -1049,8 +1049,8 @@ class MainWindowController: NSWindowController {
                     let proj = self.workspaceManager.tabs.first(where: { $0.repoPath == repo })?.displayName
                         ?? URL(fileURLWithPath: repo).lastPathComponent
                     let started = self.config.worktreeStartedAt[info.path].flatMap { MainWindowController.iso8601.date(from: $0) }
-                    let sessionName = self.runtimeBackend == "local" ? nil : Self.persistentSessionName(for: info.path)
-                    AgentHead.shared.register(worktreePath: info.path, branch: info.branch, project: proj, surface: surface, startedAt: started, sessionName: sessionName, backend: self.runtimeBackend)
+                    let sessionName = self.config.backend == "tmux" ? Self.tmuxSessionName(for: info.path) : nil
+                    AgentHead.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: started, tmuxSessionName: sessionName, backend: self.runtimeBackend)
                 }
                 if !cardOrder.isEmpty {
                     AgentHead.shared.reorder(paths: cardOrder)
@@ -1165,7 +1165,9 @@ class MainWindowController: NSWindowController {
     private func worktreeDidDelete(_ info: WorktreeInfo) {
         allWorktrees.removeAll { $0.info.path == info.path }
         worktreeRepoCache.removeValue(forKey: info.path)
-        AgentHead.shared.unregister(worktreePath: info.path)
+        if let agent = AgentHead.shared.agent(forWorktree: info.path) {
+            AgentHead.shared.unregister(terminalID: agent.id)
+        }
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
         statusPublisher.updateSurfaces(surfaces)
 
@@ -1218,8 +1220,15 @@ class MainWindowController: NSWindowController {
                 surface.destroy()
                 surfaces.removeValue(forKey: worktree.path)
             }
-            AgentHead.shared.unregister(worktreePath: worktree.path)
-            if runtimeBackend != "local" {
+            if let agent = AgentHead.shared.agent(forWorktree: worktree.path) {
+                AgentHead.shared.unregister(terminalID: agent.id)
+            } else {
+                AgentHead.shared.unregister(terminalID: surface.id)
+            }
+            if config.backend == "tmux" {
+                let sessionName = Self.tmuxSessionName(for: worktree.path)
+                killTmuxSession(sessionName)
+            } else if runtimeBackend != "local" {
                 let sessionName = Self.persistentSessionName(for: worktree.path)
                 killSession(sessionName, backend: runtimeBackend)
             }
@@ -1401,12 +1410,16 @@ extension MainWindowController: DashboardDelegate {
     }
 
     func dashboardDidReorderCards(order: [String]) {
-        config.cardOrder = order
+        // order contains terminal IDs; map back to worktree paths for config persistence
+        let paths = order.compactMap { AgentHead.shared.agent(for: $0)?.worktreePath }
+        config.cardOrder = paths
         config.save()
     }
 
-    func dashboardDidRequestDeleteWorktree(_ path: String) {
-        guard let item = allWorktrees.first(where: { $0.info.path == path }) else { return }
+    func dashboardDidRequestDelete(_ terminalID: String) {
+        guard let agent = AgentHead.shared.agent(for: terminalID) else { return }
+        let worktreePath = agent.worktreePath
+        guard let item = allWorktrees.first(where: { $0.info.path == worktreePath }) else { return }
         confirmAndDeleteWorktree(item.info)
     }
 

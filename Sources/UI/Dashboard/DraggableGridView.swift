@@ -3,7 +3,7 @@ import AppKit
 protocol DraggableGridDelegate: AnyObject {
     func draggableGrid(_ grid: DraggableGridView, dropIndexFor point: NSPoint) -> Int
     func draggableGrid(_ grid: DraggableGridView, dropIndicatorFrameAt index: Int) -> NSRect
-    func draggableGrid(_ grid: DraggableGridView, didDropItemWithPath path: String, atIndex index: Int)
+    func draggableGrid(_ grid: DraggableGridView, didDropItemWithID id: String, atIndex index: Int)
 }
 
 /// NSView subclass that acts as a drag-and-drop destination for reordering cards.
@@ -62,7 +62,7 @@ class DraggableGridView: NSView {
 
         let point = convert(sender.draggingLocation, from: nil)
         let index = delegate.draggableGrid(self, dropIndexFor: point)
-        delegate.draggableGrid(self, didDropItemWithPath: path, atIndex: index)
+        delegate.draggableGrid(self, didDropItemWithID: path, atIndex: index)
         return true
     }
 }

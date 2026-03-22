@@ -13,6 +13,7 @@ enum MarkerKind {
 struct ParsedMarker {
     let kind: MarkerKind
     let exitCode: UInt8?
+    let commandLine: String?
 }
 
 enum ShellPhase {
@@ -69,7 +70,7 @@ class OSC133Parser {
                 } else {
                     oscBuffer.append(byte)
                     // Safety: cap buffer to prevent runaway
-                    if oscBuffer.count > 256 {
+                    if oscBuffer.count > 1024 {
                         oscBuffer.removeAll()
                         state = .normal
                     }
@@ -98,11 +99,9 @@ class OSC133Parser {
         oscBuffer.removeAll()
     }
 
-    /// Parse "133;X" or "133;X;exitcode=N" payload
+    /// Parse "133;X", "133;X;exitcode=N", or "133;C;cmdline=..." payload
     private func parseOSCPayload(_ buffer: [UInt8]) -> ParsedMarker? {
         guard let str = String(bytes: buffer, encoding: .utf8) else { return nil }
-
-        // Must start with "133;"
         guard str.hasPrefix("133;") else { return nil }
 
         let remainder = String(str.dropFirst(4)) // after "133;"
@@ -117,21 +116,30 @@ class OSC133Parser {
         default: return nil
         }
 
-        // Parse optional exit code for PostExec: "D;exitcode=N" or "D;N"
+        let afterKind = String(remainder.dropFirst()) // after the kind char
         var exitCode: UInt8? = nil
-        if kind == .postExec {
-            let params = String(remainder.dropFirst()) // after "D"
-            if params.hasPrefix(";") {
-                let value = String(params.dropFirst()) // after ";"
-                if value.hasPrefix("exitcode=") {
-                    exitCode = UInt8(String(value.dropFirst(9)))
-                } else {
-                    exitCode = UInt8(value)
+        var commandLine: String? = nil
+
+        if afterKind.hasPrefix(";") {
+            let paramStr = String(afterKind.dropFirst()) // after ";"
+
+            // Handle key=value pairs (may have multiple separated by ";")
+            for part in paramStr.split(separator: ";") {
+                let p = String(part)
+                if p.hasPrefix("cmdline_url=") {
+                    let encoded = String(p.dropFirst(12))
+                    commandLine = encoded.removingPercentEncoding ?? encoded
+                } else if p.hasPrefix("cmdline=") {
+                    commandLine = String(p.dropFirst(8))
+                } else if p.hasPrefix("exitcode=") {
+                    exitCode = UInt8(String(p.dropFirst(9)))
+                } else if kind == .postExec {
+                    exitCode = UInt8(p)
                 }
             }
         }
 
-        return ParsedMarker(kind: kind, exitCode: exitCode)
+        return ParsedMarker(kind: kind, exitCode: exitCode, commandLine: commandLine)
     }
 }
 
@@ -140,6 +148,7 @@ class OSC133Parser {
 class ShellState {
     private(set) var phase: ShellPhase = .output
     private(set) var lastExitCode: UInt8? = nil
+    private(set) var lastCommandLine: String? = nil
 
     var phaseInfo: ShellPhaseInfo {
         ShellPhaseInfo(phase: phase, lastExitCode: lastExitCode)
@@ -153,6 +162,9 @@ class ShellState {
             phase = .input
         case .preExec:
             phase = .running
+            if let cmd = marker.commandLine {
+                lastCommandLine = cmd
+            }
         case .postExec:
             phase = .output
             if let code = marker.exitCode {
@@ -164,5 +176,6 @@ class ShellState {
     func reset() {
         phase = .output
         lastExitCode = nil
+        lastCommandLine = nil
     }
 }
