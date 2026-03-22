@@ -21,6 +21,9 @@ class StatusPublisher {
 
     private let pollInterval: TimeInterval = 2.0
     private let pollQueue = DispatchQueue(label: "com.pmux.status-poll", qos: .utility)
+    private let nonPreferredPollStride: Int = 3
+    private var preferredPaths: Set<String> = []
+    private var pollCycle: Int = 0
 
     // Cache: skip detection when viewport text hasn't changed
     private var lastViewportHashes: [String: Int] = [:]
@@ -72,16 +75,27 @@ class StatusPublisher {
         webhookProvider.updateWorktrees(Array(surfaces.keys))
     }
 
+    /// Prefer polling these worktrees every cycle; others are sampled less frequently.
+    func setPreferredPaths(_ paths: [String]) {
+        preferredPaths = Set(paths)
+    }
+
     private func schedulePoll() {
         // Capture surfaces snapshot on main thread, then poll on background
         let surfaceSnapshot = surfaces
+        pollCycle &+= 1
+        let cycle = pollCycle
+        let preferredSnapshot = preferredPaths
         pollQueue.async { [weak self] in
-            self?.pollAll(surfaceSnapshot)
+            self?.pollAll(surfaceSnapshot, preferredPaths: preferredSnapshot, pollCycle: cycle)
         }
     }
 
-    private func pollAll(_ surfaceSnapshot: [String: TerminalSurface]) {
+    private func pollAll(_ surfaceSnapshot: [String: TerminalSurface], preferredPaths: Set<String>, pollCycle: Int) {
         for (path, surface) in surfaceSnapshot {
+            guard Self.shouldPollPath(path, preferredPaths: preferredPaths, pollCycle: pollCycle, nonPreferredStride: nonPreferredPollStride) else {
+                continue
+            }
             let processStatus = surface.processStatus
             let content = surface.readViewportText() ?? ""
 
@@ -162,6 +176,18 @@ class StatusPublisher {
     func roundDuration(for path: String) -> TimeInterval {
         guard let start = runningStartTimes[path] else { return 0 }
         return Date().timeIntervalSince(start)
+    }
+
+    static func shouldPollPath(
+        _ path: String,
+        preferredPaths: Set<String>,
+        pollCycle: Int,
+        nonPreferredStride: Int
+    ) -> Bool {
+        if preferredPaths.isEmpty { return true }
+        if preferredPaths.contains(path) { return true }
+        let stride = max(1, nonPreferredStride)
+        return pollCycle % stride == 0
     }
 
     deinit {

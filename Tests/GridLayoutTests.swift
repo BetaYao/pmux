@@ -296,6 +296,29 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertEqual(RepoViewController.layoutTopInset, 8)
     }
 
+    func testStatusPublisherPollPolicy_PollsPreferredEveryCycle() {
+        let preferred: Set<String> = ["/repo/a"]
+        XCTAssertTrue(StatusPublisher.shouldPollPath("/repo/a", preferredPaths: preferred, pollCycle: 1, nonPreferredStride: 3))
+        XCTAssertTrue(StatusPublisher.shouldPollPath("/repo/a", preferredPaths: preferred, pollCycle: 2, nonPreferredStride: 3))
+    }
+
+    func testStatusPublisherPollPolicy_SkipsNonPreferredBetweenStrideTicks() {
+        let preferred: Set<String> = ["/repo/a"]
+        XCTAssertFalse(StatusPublisher.shouldPollPath("/repo/b", preferredPaths: preferred, pollCycle: 1, nonPreferredStride: 3))
+        XCTAssertFalse(StatusPublisher.shouldPollPath("/repo/b", preferredPaths: preferred, pollCycle: 2, nonPreferredStride: 3))
+    }
+
+    func testStatusPublisherPollPolicy_PollsNonPreferredOnStrideTick() {
+        let preferred: Set<String> = ["/repo/a"]
+        XCTAssertTrue(StatusPublisher.shouldPollPath("/repo/b", preferredPaths: preferred, pollCycle: 3, nonPreferredStride: 3))
+        XCTAssertTrue(StatusPublisher.shouldPollPath("/repo/b", preferredPaths: preferred, pollCycle: 6, nonPreferredStride: 3))
+    }
+
+    func testStatusPublisherPollPolicy_NoPreferredPollsEverything() {
+        XCTAssertTrue(StatusPublisher.shouldPollPath("/repo/a", preferredPaths: [], pollCycle: 1, nonPreferredStride: 3))
+        XCTAssertTrue(StatusPublisher.shouldPollPath("/repo/b", preferredPaths: [], pollCycle: 2, nonPreferredStride: 3))
+    }
+
     func testRepoView_BackgroundAndTerminalAdaptToAppearanceChanges() {
         let repoVC = RepoViewController()
         repoVC.loadViewIfNeeded()

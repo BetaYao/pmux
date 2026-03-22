@@ -711,7 +711,22 @@ class MainWindowController: NSWindowController {
         }
 
         updateTitleBar()
+        updateStatusPollPreferences()
 
+    }
+
+    private func updateStatusPollPreferences() {
+        guard activeTabIndex > 0 else {
+            statusPublisher.setPreferredPaths([])
+            return
+        }
+
+        let repoIndex = activeTabIndex - 1
+        guard let tab = workspaceManager.tab(at: repoIndex) else {
+            statusPublisher.setPreferredPaths([])
+            return
+        }
+        statusPublisher.setPreferredPaths(tab.worktrees.map(\.path))
     }
 
     private func getOrCreateRepoVC(for tab: WorkspaceTab) -> RepoViewController {
@@ -910,6 +925,7 @@ class MainWindowController: NSWindowController {
 
                 // Start polling for agent status
                 self.statusPublisher.start(surfaces: self.surfaces)
+                self.updateStatusPollPreferences()
 
                 // Start webhook server for agent hook events
                 if self.config.webhook.enabled {
