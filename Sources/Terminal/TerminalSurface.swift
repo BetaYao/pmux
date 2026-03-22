@@ -60,30 +60,24 @@ class TerminalSurface {
         config.platform.macos.nsview = Unmanaged.passUnretained(termView).toOpaque()
         config.scale_factor = Double(container.window?.backingScaleFactor ?? 2.0)
 
-        let createBlock: () -> Void = {
+        // Use a flat closure that receives C pointers directly.
+        // Pointers are only valid within the withCString scope,
+        // so _createSurface must be called inside the innermost closure.
+        let create = { [self] (wdPtr: UnsafePointer<CChar>?, cmdPtr: UnsafePointer<CChar>?) in
+            if let wdPtr { config.working_directory = wdPtr }
+            if let cmdPtr { config.command = cmdPtr }
             self._createSurface(app: app, config: &config, view: termView, container: container)
         }
 
-        if let workingDirectory, let command {
-            workingDirectory.withCString { wdPtr in
-                command.withCString { cmdPtr in
-                    config.working_directory = wdPtr
-                    config.command = cmdPtr
-                    createBlock()
-                }
-            }
-        } else if let workingDirectory {
-            workingDirectory.withCString { wdPtr in
-                config.working_directory = wdPtr
-                createBlock()
-            }
-        } else if let command {
-            command.withCString { cmdPtr in
-                config.command = cmdPtr
-                createBlock()
-            }
-        } else {
-            createBlock()
+        switch (workingDirectory, command) {
+        case let (wd?, cmd?):
+            wd.withCString { wdPtr in cmd.withCString { cmdPtr in create(wdPtr, cmdPtr) } }
+        case let (wd?, nil):
+            wd.withCString { wdPtr in create(wdPtr, nil) }
+        case let (nil, cmd?):
+            cmd.withCString { cmdPtr in create(nil, cmdPtr) }
+        case (nil, nil):
+            create(nil, nil)
         }
     }
 
