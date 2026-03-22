@@ -806,7 +806,7 @@ class MainWindowController: NSWindowController {
             let surface = createSurface(for: info)
             let started = config.worktreeStartedAt[info.path].flatMap { MainWindowController.iso8601.date(from: $0) }
             let sessionName = runtimeBackend == "local" ? nil : Self.persistentSessionName(for: info.path)
-            AgentHead.shared.register(worktreePath: info.path, branch: info.branch, project: projectName, surface: surface, startedAt: started, sessionName: sessionName, backend: runtimeBackend)
+            AgentHead.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: projectName, startedAt: started, tmuxSessionName: sessionName, backend: runtimeBackend)
         }
         config.save()
 
@@ -1049,7 +1049,7 @@ class MainWindowController: NSWindowController {
                     let proj = self.workspaceManager.tabs.first(where: { $0.repoPath == repo })?.displayName
                         ?? URL(fileURLWithPath: repo).lastPathComponent
                     let started = self.config.worktreeStartedAt[info.path].flatMap { MainWindowController.iso8601.date(from: $0) }
-                    let sessionName = self.config.backend == "tmux" ? Self.tmuxSessionName(for: info.path) : nil
+                    let sessionName = self.runtimeBackend == "local" ? nil : Self.persistentSessionName(for: info.path)
                     AgentHead.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: started, tmuxSessionName: sessionName, backend: self.runtimeBackend)
                 }
                 if !cardOrder.isEmpty {
@@ -1216,19 +1216,16 @@ class MainWindowController: NSWindowController {
 
         // Kill persisted sessions and destroy surfaces for this repo's worktrees
         for worktree in tab.worktrees {
-            if let surface = surfaces[worktree.path] {
-                surface.destroy()
-                surfaces.removeValue(forKey: worktree.path)
-            }
+            guard let surface = surfaces[worktree.path] else { continue }
+            surface.destroy()
+            surfaces.removeValue(forKey: worktree.path)
+            
             if let agent = AgentHead.shared.agent(forWorktree: worktree.path) {
                 AgentHead.shared.unregister(terminalID: agent.id)
             } else {
                 AgentHead.shared.unregister(terminalID: surface.id)
             }
-            if config.backend == "tmux" {
-                let sessionName = Self.tmuxSessionName(for: worktree.path)
-                killTmuxSession(sessionName)
-            } else if runtimeBackend != "local" {
+            if runtimeBackend != "local" {
                 let sessionName = Self.persistentSessionName(for: worktree.path)
                 killSession(sessionName, backend: runtimeBackend)
             }
