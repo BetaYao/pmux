@@ -1313,6 +1313,16 @@ extension MainWindowController: NSWindowDelegate {
         }
         surfaces.removeAll()
     }
+
+    func cleanupBeforeTermination() {
+        statusPublisher.stop()
+        webhookServer?.stop()
+        webhookServer = nil
+        for (_, surface) in surfaces {
+            surface.destroy()
+        }
+        surfaces.removeAll()
+    }
 }
 
 // MARK: - TitleBarDelegate
