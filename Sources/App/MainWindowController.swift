@@ -178,109 +178,7 @@ class MainWindowController: NSWindowController {
     // MARK: - Menu Shortcuts
 
     private func setupMenuShortcuts() {
-        let mainMenu = NSMenu()
-
-        // App menu
-        let appMenuItem = NSMenuItem()
-        let appMenu = NSMenu()
-        let settingsItem = NSMenuItem(title: "Settings...", action: #selector(showSettings), keyEquivalent: ",")
-        settingsItem.keyEquivalentModifierMask = .command
-        appMenu.addItem(settingsItem)
-        appMenu.addItem(NSMenuItem.separator())
-        let checkUpdateItem = NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates), keyEquivalent: "u")
-        checkUpdateItem.keyEquivalentModifierMask = .command
-        appMenu.addItem(checkUpdateItem)
-        appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(withTitle: "Quit pmux", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        appMenuItem.submenu = appMenu
-        mainMenu.addItem(appMenuItem)
-
-        // File menu
-        let fileMenuItem = NSMenuItem()
-        let fileMenu = NSMenu(title: "File")
-        let newBranchItem = NSMenuItem(title: "New Branch...", action: #selector(showNewBranchDialog), keyEquivalent: "n")
-        newBranchItem.keyEquivalentModifierMask = .command
-        fileMenu.addItem(newBranchItem)
-        let quickSwitchItem = NSMenuItem(title: "Quick Switch...", action: #selector(showQuickSwitcher), keyEquivalent: "p")
-        quickSwitchItem.keyEquivalentModifierMask = .command
-        fileMenu.addItem(quickSwitchItem)
-        fileMenuItem.submenu = fileMenu
-        mainMenu.addItem(fileMenuItem)
-
-        // Edit menu (standard Cut/Copy/Paste/Undo/Redo)
-        let editMenuItem = NSMenuItem()
-        let editMenu = NSMenu(title: "Edit")
-        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
-        let redoItem = NSMenuItem(title: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
-        redoItem.keyEquivalentModifierMask = [.command, .shift]
-        editMenu.addItem(redoItem)
-        editMenu.addItem(NSMenuItem.separator())
-        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
-        editMenuItem.submenu = editMenu
-        mainMenu.addItem(editMenuItem)
-
-        // View menu
-        let viewMenuItem = NSMenuItem()
-        let viewMenu = NSMenu(title: "View")
-
-        let dashItem = NSMenuItem(title: "Dashboard", action: #selector(switchToDashboard), keyEquivalent: "0")
-        dashItem.keyEquivalentModifierMask = .command
-        viewMenu.addItem(dashItem)
-
-        let closeTabItem = NSMenuItem(title: "Close Tab", action: #selector(closeCurrentTab), keyEquivalent: "w")
-        closeTabItem.keyEquivalentModifierMask = .command
-        viewMenu.addItem(closeTabItem)
-
-        let diffItem = NSMenuItem(title: "Show Diff...", action: #selector(showDiffOverlay), keyEquivalent: "")
-        viewMenu.addItem(diffItem)
-
-        viewMenu.addItem(NSMenuItem.separator())
-
-        let zoomInItem = NSMenuItem(title: "Zoom In (Smaller Cards)", action: #selector(dashboardZoomIn), keyEquivalent: "-")
-        zoomInItem.keyEquivalentModifierMask = .command
-        viewMenu.addItem(zoomInItem)
-
-        let zoomOutItem = NSMenuItem(title: "Zoom Out (Larger Cards)", action: #selector(dashboardZoomOut), keyEquivalent: "=")
-        zoomOutItem.keyEquivalentModifierMask = .command
-        viewMenu.addItem(zoomOutItem)
-
-        viewMenuItem.submenu = viewMenu
-        mainMenu.addItem(viewMenuItem)
-
-        // Window menu (standard macOS window management)
-        let windowMenuItem = NSMenuItem()
-        let windowMenu = NSMenu(title: "Window")
-        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.miniaturize(_:)), keyEquivalent: "m")
-        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.zoom(_:)), keyEquivalent: "")
-        windowMenu.addItem(NSMenuItem.separator())
-        let nextTabItem = NSMenuItem(title: "Next Tab", action: #selector(selectNextTab), keyEquivalent: "}")
-        nextTabItem.keyEquivalentModifierMask = .command
-        windowMenu.addItem(nextTabItem)
-        let prevTabItem = NSMenuItem(title: "Previous Tab", action: #selector(selectPreviousTab), keyEquivalent: "{")
-        prevTabItem.keyEquivalentModifierMask = .command
-        windowMenu.addItem(prevTabItem)
-        windowMenu.addItem(NSMenuItem.separator())
-        windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
-        windowMenuItem.submenu = windowMenu
-        mainMenu.addItem(windowMenuItem)
-        NSApp.windowsMenu = windowMenu
-
-        // Help menu
-        let helpMenuItem = NSMenuItem()
-        let helpMenu = NSMenu(title: "Help")
-        let keyboardShortcutsItem = NSMenuItem(title: "Keyboard Shortcuts", action: #selector(showKeyboardShortcuts), keyEquivalent: "")
-        helpMenu.addItem(keyboardShortcutsItem)
-        helpMenu.addItem(NSMenuItem.separator())
-        let docsItem = NSMenuItem(title: "pmux Documentation", action: #selector(openDocumentation), keyEquivalent: "")
-        helpMenu.addItem(docsItem)
-        helpMenuItem.submenu = helpMenu
-        mainMenu.addItem(helpMenuItem)
-        NSApp.helpMenu = helpMenu
-
-        NSApp.mainMenu = mainMenu
+        NSApp.mainMenu = MenuBuilder.buildMainMenu(target: self)
     }
 
     private func normalizeBackendAvailabilityIfNeeded() {
@@ -337,11 +235,11 @@ class MainWindowController: NSWindowController {
         }
     }
 
-    @objc private func switchToDashboard() {
+    @objc func switchToDashboard() {
         switchToTab(0)
     }
 
-    @objc private func showQuickSwitcher() {
+    @objc func showQuickSwitcher() {
         let worktreeInfos = allWorktrees.map { $0.info }
         var statuses: [String: AgentStatus] = [:]
         for (path, _) in surfaces {
@@ -362,7 +260,7 @@ class MainWindowController: NSWindowController {
         }
     }
 
-    @objc private func showSettings() {
+    @objc func showSettings() {
         let settingsVC = SettingsViewController(config: config)
         settingsVC.settingsDelegate = self
         if activeTabIndex == 0 {
@@ -378,7 +276,7 @@ class MainWindowController: NSWindowController {
         }
     }
 
-    @objc private func showNewBranchDialog() {
+    @objc func showNewBranchDialog() {
         let dialog = NewBranchDialog(repoPaths: config.workspacePaths)
         dialog.dialogDelegate = self
         if activeTabIndex == 0 {
@@ -394,26 +292,26 @@ class MainWindowController: NSWindowController {
         }
     }
 
-    @objc private func closeCurrentTab() {
+    @objc func closeCurrentTab() {
         guard activeTabIndex > 0 else { return }
         let repoIndex = activeTabIndex - 1
         guard let tab = workspaceManager.tab(at: repoIndex) else { return }
         showCloseProjectModal(tab.displayName)
     }
 
-    @objc private func selectNextTab() {
+    @objc func selectNextTab() {
         let maxIndex = workspaceManager.tabs.count // 0=dashboard, 1..N=projects
         let next = activeTabIndex + 1 > maxIndex ? 0 : activeTabIndex + 1
         switchToTab(next)
     }
 
-    @objc private func selectPreviousTab() {
+    @objc func selectPreviousTab() {
         let maxIndex = workspaceManager.tabs.count
         let prev = activeTabIndex - 1 < 0 ? maxIndex : activeTabIndex - 1
         switchToTab(prev)
     }
 
-    @objc private func showKeyboardShortcuts() {
+    @objc func showKeyboardShortcuts() {
         let alert = NSAlert()
         alert.messageText = "Keyboard Shortcuts"
         alert.informativeText = """
@@ -433,25 +331,25 @@ class MainWindowController: NSWindowController {
         alert.runModal()
     }
 
-    @objc private func openDocumentation() {
+    @objc func openDocumentation() {
         if let url = URL(string: "https://github.com/nicematt/pmux") {
             NSWorkspace.shared.open(url)
         }
     }
 
-    @objc private func dashboardZoomIn() {
+    @objc func dashboardZoomIn() {
         dashboardVC?.zoomIn()
         config.zoomIndex = dashboardVC?.zoomIndex ?? GridLayout.defaultZoomIndex
         config.save()
     }
 
-    @objc private func dashboardZoomOut() {
+    @objc func dashboardZoomOut() {
         dashboardVC?.zoomOut()
         config.zoomIndex = dashboardVC?.zoomIndex ?? GridLayout.defaultZoomIndex
         config.save()
     }
 
-    @objc private func showDiffOverlay() {
+    @objc func showDiffOverlay() {
         var worktreePath: String?
         if activeTabIndex > 0 {
             let repoIndex = activeTabIndex - 1
