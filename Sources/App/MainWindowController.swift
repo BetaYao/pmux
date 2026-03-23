@@ -771,7 +771,7 @@ class MainWindowController: NSWindowController {
             }
             let surface = createSurface(for: info)
             let started = config.worktreeStartedAt[info.path].flatMap { MainWindowController.iso8601.date(from: $0) }
-            let sessionName = runtimeBackend == "local" ? nil : Self.persistentSessionName(for: info.path)
+            let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
             AgentHead.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: projectName, startedAt: started, tmuxSessionName: sessionName, backend: runtimeBackend)
         }
         config.save()
@@ -1015,7 +1015,7 @@ class MainWindowController: NSWindowController {
                     let proj = self.workspaceManager.tabs.first(where: { $0.repoPath == repo })?.displayName
                         ?? URL(fileURLWithPath: repo).lastPathComponent
                     let started = self.config.worktreeStartedAt[info.path].flatMap { MainWindowController.iso8601.date(from: $0) }
-                    let sessionName = self.runtimeBackend == "local" ? nil : Self.persistentSessionName(for: info.path)
+                    let sessionName = self.runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
                     AgentHead.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: started, tmuxSessionName: sessionName, backend: self.runtimeBackend)
                 }
                 if !cardOrder.isEmpty {
@@ -1052,7 +1052,7 @@ class MainWindowController: NSWindowController {
         }
         let surface = TerminalSurface()
         if runtimeBackend != "local" {
-            surface.sessionName = Self.persistentSessionName(for: info.path)
+            surface.sessionName = SessionManager.persistentSessionName(for: info.path)
             surface.backend = runtimeBackend
         }
         surfaces[info.path] = surface
@@ -1163,17 +1163,6 @@ class MainWindowController: NSWindowController {
         NotificationCenter.default.removeObserver(self, name: .navigateToWorktree, object: nil)
     }
 
-    /// Generate a stable persistent session name from a worktree path.
-    private static func persistentSessionName(for path: String) -> String {
-        let url = URL(fileURLWithPath: path)
-        let parent = url.deletingLastPathComponent().lastPathComponent
-        let name = url.lastPathComponent
-        let sessionName = "pmux-\(parent)-\(name)"
-            .replacingOccurrences(of: ".", with: "_")
-            .replacingOccurrences(of: ":", with: "_")
-        return sessionName
-    }
-
     // MARK: - Close Repo
 
     private func performCloseRepo(projectName: String) {
@@ -1192,8 +1181,8 @@ class MainWindowController: NSWindowController {
                 AgentHead.shared.unregister(terminalID: surface.id)
             }
             if runtimeBackend != "local" {
-                let sessionName = Self.persistentSessionName(for: worktree.path)
-                killSession(sessionName, backend: runtimeBackend)
+                let sessionName = SessionManager.persistentSessionName(for: worktree.path)
+                SessionManager.killSession(sessionName, backend: runtimeBackend)
             }
         }
 
@@ -1224,18 +1213,6 @@ class MainWindowController: NSWindowController {
 
     }
 
-    private func killSession(_ name: String, backend: String) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        if backend == "tmux" {
-            process.arguments = ["tmux", "kill-session", "-t", name]
-        } else {
-            process.arguments = ["zmx", "kill", name]
-        }
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
-        try? process.run()
-    }
 }
 
 class PmuxWindow: NSWindow {

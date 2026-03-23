@@ -178,42 +178,14 @@ class TerminalSurface {
         let cols = Int(gridSize.columns)
         let rows = Int(gridSize.rows)
         DispatchQueue.global().async {
-            // Explicitly resize tmux window to match the Ghostty grid
-            let resize = Process()
-            resize.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            resize.arguments = ["tmux", "resize-window", "-t", sessionName, "-x", "\(cols)", "-y", "\(rows)"]
-            resize.standardOutput = Pipe()
-            resize.standardError = Pipe()
-            try? resize.run()
-            resize.waitUntilExit()
-
-            // Refresh client display
-            let refresh = Process()
-            refresh.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            refresh.arguments = ["tmux", "refresh-client", "-t", sessionName, "-S"]
-            refresh.standardOutput = Pipe()
-            refresh.standardError = Pipe()
-            try? refresh.run()
+            SessionManager.resizeTmuxSession(sessionName, cols: cols, rows: rows)
         }
     }
 
     /// Static version for when we don't have the surface (tmux fallback).
     static func refreshTmuxClient(_ sessionName: String) {
         DispatchQueue.global().async {
-            let resize = Process()
-            resize.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            resize.arguments = ["tmux", "resize-window", "-t", sessionName, "-A"]
-            resize.standardOutput = Pipe()
-            resize.standardError = Pipe()
-            try? resize.run()
-            resize.waitUntilExit()
-
-            let refresh = Process()
-            refresh.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            refresh.arguments = ["tmux", "refresh-client", "-t", sessionName, "-S"]
-            refresh.standardOutput = Pipe()
-            refresh.standardError = Pipe()
-            try? refresh.run()
+            SessionManager.refreshTmuxClient(sessionName)
         }
     }
 
