@@ -30,7 +30,7 @@ class MainWindowController: NSWindowController {
     private let workspaceManager = WorkspaceManager()
 
     // All terminal surfaces, keyed by worktree path
-    private var surfaces: [String: TerminalSurface] = [:]
+    private let surfaceManager = TerminalSurfaceManager()
     private var allWorktrees: [(info: WorktreeInfo, surface: TerminalSurface)] = []
 
     private static let iso8601: ISO8601DateFormatter = {
@@ -242,7 +242,7 @@ class MainWindowController: NSWindowController {
     @objc func showQuickSwitcher() {
         let worktreeInfos = allWorktrees.map { $0.info }
         var statuses: [String: AgentStatus] = [:]
-        for (path, _) in surfaces {
+        for (path, _) in surfaceManager.all {
             statuses[path] = statusPublisher.status(for: path)
         }
         let switcher = QuickSwitcherViewController(worktrees: worktreeInfos, statuses: statuses)
@@ -654,7 +654,7 @@ class MainWindowController: NSWindowController {
         }
 
         for info in effectiveWorktrees {
-            let surface = createSurface(for: info)
+            let surface = surfaceManager.surface(for: info, backend: runtimeBackend)
             allWorktrees.append((info: info, surface: surface))
         }
 
@@ -667,7 +667,7 @@ class MainWindowController: NSWindowController {
             if config.worktreeStartedAt[info.path] == nil {
                 config.worktreeStartedAt[info.path] = now
             }
-            let surface = createSurface(for: info)
+            let surface = surfaceManager.surface(for: info, backend: runtimeBackend)
             let started = config.worktreeStartedAt[info.path].flatMap { MainWindowController.iso8601.date(from: $0) }
             let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
             AgentHead.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: projectName, startedAt: started, tmuxSessionName: sessionName, backend: runtimeBackend)
@@ -675,7 +675,7 @@ class MainWindowController: NSWindowController {
         config.save()
 
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
-        statusPublisher.updateSurfaces(surfaces)
+        statusPublisher.updateSurfaces(surfaceManager.all)
         updateTitleBar()
         if activateTab {
             switchToTab(tabIndex + 1)
@@ -735,13 +735,13 @@ class MainWindowController: NSWindowController {
 
     private func getOrCreateRepoVC(for tab: WorkspaceTab) -> RepoViewController {
         if let existing = repoVCs[tab.repoPath] {
-            existing.configure(worktrees: tab.worktrees, surfaces: surfaces)
+            existing.configure(worktrees: tab.worktrees, surfaces: surfaceManager.all)
             return existing
         }
 
         let repoVC = RepoViewController()
         repoVC.repoDelegate = self
-        repoVC.configure(worktrees: tab.worktrees, surfaces: surfaces)
+        repoVC.configure(worktrees: tab.worktrees, surfaces: surfaceManager.all)
         repoVCs[tab.repoPath] = repoVC
         return repoVC
     }
@@ -872,11 +872,11 @@ class MainWindowController: NSWindowController {
                             commitHash: "",
                             isMainWorktree: true
                         )
-                        let surface = self.createSurface(for: info)
+                        let surface = self.surfaceManager.surface(for: info, backend: runtimeBackend)
                         allWorktreeInfos.append((info: info, surface: surface))
                     } else {
                         for info in worktrees {
-                            let surface = self.createSurface(for: info)
+                            let surface = self.surfaceManager.surface(for: info, backend: runtimeBackend)
                             allWorktreeInfos.append((info: info, surface: surface))
                         }
                     }
@@ -928,7 +928,7 @@ class MainWindowController: NSWindowController {
                 }
 
                 // Start polling for agent status
-                self.statusPublisher.start(surfaces: self.surfaces)
+                self.statusPublisher.start(surfaces: self.surfaceManager.all)
                 self.updateStatusPollPreferences()
 
                 // Start webhook server for agent hook events
@@ -942,19 +942,6 @@ class MainWindowController: NSWindowController {
                 }
             }
         }
-    }
-
-    private func createSurface(for info: WorktreeInfo) -> TerminalSurface {
-        if let existing = surfaces[info.path] {
-            return existing
-        }
-        let surface = TerminalSurface()
-        if runtimeBackend != "local" {
-            surface.sessionName = SessionManager.persistentSessionName(for: info.path)
-            surface.backend = runtimeBackend
-        }
-        surfaces[info.path] = surface
-        return surface
     }
 
     // MARK: - Worktree Deletion
@@ -995,10 +982,7 @@ class MainWindowController: NSWindowController {
     }
 
     private func performDeleteWorktree(_ info: WorktreeInfo, repoPath: String, deleteBranch: Bool, force: Bool) {
-        if let surface = surfaces[info.path] {
-            surface.destroy()
-            surfaces.removeValue(forKey: info.path)
-        }
+        surfaceManager.removeSurface(forPath: info.path)
 
         DispatchQueue.global().async { [weak self] in
             do {
@@ -1033,7 +1017,7 @@ class MainWindowController: NSWindowController {
             AgentHead.shared.unregister(terminalID: agent.id)
         }
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
-        statusPublisher.updateSurfaces(surfaces)
+        statusPublisher.updateSurfaces(surfaceManager.all)
 
         if activeTabIndex > 0 {
             let repoIndex = activeTabIndex - 1
@@ -1044,7 +1028,7 @@ class MainWindowController: NSWindowController {
                     guard let self else { return }
                     self.workspaceManager.updateWorktrees(at: repoIndex, worktrees: updatedWorktrees)
                     if let repoVC = self.repoVCs[repoPath] {
-                        repoVC.configure(worktrees: updatedWorktrees, surfaces: self.surfaces)
+                        repoVC.configure(worktrees: updatedWorktrees, surfaces: self.surfaceManager.all)
                     }
                     if updatedWorktrees.isEmpty {
                         self.performCloseRepo(projectName: displayName)
@@ -1069,10 +1053,8 @@ class MainWindowController: NSWindowController {
 
         // Kill persisted sessions and destroy surfaces for this repo's worktrees
         for worktree in tab.worktrees {
-            guard let surface = surfaces[worktree.path] else { continue }
-            surface.destroy()
-            surfaces.removeValue(forKey: worktree.path)
-            
+            guard let surface = surfaceManager.removeSurface(forPath: worktree.path) else { continue }
+
             if let agent = AgentHead.shared.agent(forWorktree: worktree.path) {
                 AgentHead.shared.unregister(terminalID: agent.id)
             } else {
@@ -1105,7 +1087,7 @@ class MainWindowController: NSWindowController {
 
         // Update UI
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
-        statusPublisher.updateSurfaces(surfaces)
+        statusPublisher.updateSurfaces(surfaceManager.all)
         updateTitleBar()
         switchToTab(activeTabIndex)
 
@@ -1149,20 +1131,14 @@ extension MainWindowController: NSWindowDelegate {
         statusPublisher.stop()
         webhookServer?.stop()
         webhookServer = nil
-        for (_, surface) in surfaces {
-            surface.destroy()
-        }
-        surfaces.removeAll()
+        surfaceManager.removeAll()
     }
 
     func cleanupBeforeTermination() {
         statusPublisher.stop()
         webhookServer?.stop()
         webhookServer = nil
-        for (_, surface) in surfaces {
-            surface.destroy()
-        }
-        surfaces.removeAll()
+        surfaceManager.removeAll()
     }
 }
 
@@ -1323,7 +1299,7 @@ extension MainWindowController: AIPanelDelegate {
 
 extension MainWindowController: NewBranchDialogDelegate {
     func newBranchDialog(_ dialog: NewBranchDialog, didCreateWorktree info: WorktreeInfo, inRepo repoPath: String) {
-        let surface = createSurface(for: info)
+        let surface = surfaceManager.surface(for: info, backend: runtimeBackend)
         allWorktrees.append((info: info, surface: surface))
 
         // Record startedAt for the new worktree
@@ -1333,7 +1309,7 @@ extension MainWindowController: NewBranchDialogDelegate {
         }
 
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
-        statusPublisher.updateSurfaces(surfaces)
+        statusPublisher.updateSurfaces(surfaceManager.all)
 
         if activeTabIndex != 0 {
             switchToTab(0)
