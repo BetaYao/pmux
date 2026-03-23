@@ -38,6 +38,7 @@
 		4FD4643CA0FB6D0DA4F4B9B0 /* QuickSwitcherViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B56433B78474EC934392484F /* QuickSwitcherViewController.swift */; };
 		527EBCAD7FCE46C6593A19C1 /* XCUIElementExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7AF3B0052799EF474C66AB2 /* XCUIElementExtensions.swift */; };
 		52942F1029F87B68193F28F7 /* NotificationHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59CC1020D19CDF9D7333EC53 /* NotificationHistory.swift */; };
+		5406AFFDB6D6EF3D194C2F9D /* StatusPublisherThreadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E73F70BC5F0D6B7C46124B2 /* StatusPublisherThreadTests.swift */; };
 		54F59E44663AF7DC8A2FC856 /* GitDiff.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC86B494727E17528DA0FEA2 /* GitDiff.swift */; };
 		572BEBF51E6543585986172F /* TmuxChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB1E1F8A75CC3DDE09D288F8 /* TmuxChannel.swift */; };
 		5AD1EA968B10CD709872C275 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1FE3D0F0630064FC882E582 /* Theme.swift */; };
@@ -77,6 +78,7 @@
 		AD0D7B6CA672F155FFEE198F /* UpdateBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FF8EDDF9980A95624D70EBF /* UpdateBanner.swift */; };
 		B8234C74B95A86C2FCDE122A /* LayoutPopoverPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F9FFEA8DCA0DE251857F1A9 /* LayoutPopoverPage.swift */; };
 		BC2163AECF13737DDEB5802B /* StatusPublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60E67A393334BDBEDDD4CF28 /* StatusPublisher.swift */; };
+		BDC6D6D9057C6650D5F87B8F /* PasteRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37ED7FB1ACB355C9A54B0A38 /* PasteRegressionTests.swift */; };
 		BFD42F1E88E7E7357011AA44 /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = D789C39B920D21F7CC6153BF /* UpdateChecker.swift */; };
 		C2FD40FCBDA6DB1ED12B1D77 /* NewBranchDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DC0645F3E76444270272B40 /* NewBranchDialog.swift */; };
 		C365198BF2E40B6FC37C692F /* AgentTypeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08DDD9848A72A6676EE8C53 /* AgentTypeTests.swift */; };
@@ -139,6 +141,7 @@
 		2AF24A76ECD06FB8F3DD13F7 /* WebhookServerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookServerTests.swift; sourceTree = "<group>"; };
 		2FAD1E506194FAF66CC6A57F /* GitDiffTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitDiffTests.swift; sourceTree = "<group>"; };
 		37D930D3729FC3162B5B891F /* StatusBarPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarPage.swift; sourceTree = "<group>"; };
+		37ED7FB1ACB355C9A54B0A38 /* PasteRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteRegressionTests.swift; sourceTree = "<group>"; };
 		396E8C5A599E055A2F37F587 /* DraggableGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DraggableGridView.swift; sourceTree = "<group>"; };
 		39A5FA513A09E0CC544B64EA /* SmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmokeTests.swift; sourceTree = "<group>"; };
 		3CDAFEA4CFEA8F7AF27DAB35 /* WorktreeCreator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeCreator.swift; sourceTree = "<group>"; };
@@ -152,6 +155,7 @@
 		46E1829BBCB67537BD9327A4 /* WorkspaceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceManager.swift; sourceTree = "<group>"; };
 		4BD718C45C250DD878B00F6B /* AgentStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentStatus.swift; sourceTree = "<group>"; };
 		4D68C9D89F556E3F2BB829C5 /* FuzzyMatchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FuzzyMatchTests.swift; sourceTree = "<group>"; };
+		4E73F70BC5F0D6B7C46124B2 /* StatusPublisherThreadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusPublisherThreadTests.swift; sourceTree = "<group>"; };
 		51C11ACB7BD467F1B268E437 /* WebhookStatusProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookStatusProviderTests.swift; sourceTree = "<group>"; };
 		55F69EA38A9AFFA065D85DDA /* UnifiedModalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedModalView.swift; sourceTree = "<group>"; };
 		568696E724BCC3EF9912CDA9 /* WebhookStatusProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookStatusProvider.swift; sourceTree = "<group>"; };
@@ -260,6 +264,7 @@
 				BBE6553B298A5AEE6F205D67 /* OSC133ParserTests.swift */,
 				DD0B78C6BCFF989EA91143A7 /* SemVerTests.swift */,
 				8FB8EE102BA233C405EDFE8E /* StatusDetectorTests.swift */,
+				4E73F70BC5F0D6B7C46124B2 /* StatusPublisherThreadTests.swift */,
 				75352E99A112855A0E137D7D /* TaskProgressParserTests.swift */,
 				0DC0F4B17429A591BDDF7B01 /* TerminalSurfaceReparentTests.swift */,
 				775FFC41426A242F2A4754A4 /* UpdateCheckerTests.swift */,
@@ -446,6 +451,7 @@
 			isa = PBXGroup;
 			children = (
 				E5D756A9AE7084B674EC9314 /* CoreTests.swift */,
+				37ED7FB1ACB355C9A54B0A38 /* PasteRegressionTests.swift */,
 				EE16C19617F7B844F4254505 /* RegressionTests.swift */,
 				39A5FA513A09E0CC544B64EA /* SmokeTests.swift */,
 			);
@@ -624,6 +630,7 @@
 				B8234C74B95A86C2FCDE122A /* LayoutPopoverPage.swift in Sources */,
 				5BD293273BB7F22875A61C78 /* ModalPage.swift in Sources */,
 				3611C15BCF49C71B8C3E4263 /* NotificationPanelPage.swift in Sources */,
+				BDC6D6D9057C6650D5F87B8F /* PasteRegressionTests.swift in Sources */,
 				7873C02CEC680DB03B7484ED /* PmuxUITestCase.swift in Sources */,
 				0F734E682967C48DAE248A67 /* RegressionTests.swift in Sources */,
 				2556DB2489BE4A7566E1F516 /* RepoPage.swift in Sources */,
@@ -650,6 +657,7 @@
 				2EF485F4A4C62E18C970A628 /* OSC133ParserTests.swift in Sources */,
 				9B4B369D03F0053FD72D2B4D /* SemVerTests.swift in Sources */,
 				F55F11B2C86D8D969EEC038F /* StatusDetectorTests.swift in Sources */,
+				5406AFFDB6D6EF3D194C2F9D /* StatusPublisherThreadTests.swift in Sources */,
 				ACD9C6AB30216786478DB0DA /* TaskProgressParserTests.swift in Sources */,
 				78899C72920B1210E33BFE1C /* TerminalSurfaceReparentTests.swift in Sources */,
 				32380B3024DDD3D12003DA35 /* UpdateCheckerTests.swift in Sources */,

@@ -20,6 +20,7 @@ class StatusPublisher {
     private var lastMessages: [String: String] = [:]              // keyed by terminal ID
     private var runningStartTimes: [String: Date] = [:]           // keyed by terminal ID
     private(set) var webhookProvider = WebhookStatusProvider()
+    private let lock = NSLock()
 
     private let pollInterval: TimeInterval = 2.0
     private let pollQueue = DispatchQueue(label: "com.pmux.status-poll", qos: .utility)
@@ -43,20 +44,21 @@ class StatusPublisher {
 
     func start(surfaces: [String: TerminalSurface]) {
         let inputWorktreePaths = Array(surfaces.keys)
+        lock.lock()
         self.surfaces = [:]
         self.worktreePaths = [:]
         for (worktreePath, surface) in surfaces {
             self.surfaces[surface.id] = surface
             self.worktreePaths[surface.id] = worktreePath
         }
-        stop()
-
         // Create trackers for each surface
         for terminalID in self.surfaces.keys {
             if trackers[terminalID] == nil {
                 trackers[terminalID] = DebouncedStatusTracker()
             }
         }
+        lock.unlock()
+        stop()
 
         webhookProvider.updateWorktrees(inputWorktreePaths)
 
@@ -74,6 +76,7 @@ class StatusPublisher {
 
     func updateSurfaces(_ surfaces: [String: TerminalSurface]) {
         let inputWorktreePaths = Array(surfaces.keys)
+        lock.lock()
         self.surfaces = [:]
         self.worktreePaths = [:]
         for (worktreePath, surface) in surfaces {
@@ -86,6 +89,7 @@ class StatusPublisher {
                 trackers[terminalID] = DebouncedStatusTracker()
             }
         }
+        lock.unlock()
         webhookProvider.updateWorktrees(inputWorktreePaths)
     }
 
@@ -95,12 +99,14 @@ class StatusPublisher {
     }
 
     private func schedulePoll() {
-        // Capture surfaces snapshot on main thread, then poll on background
+        // Capture surfaces snapshot under lock, then poll on background
+        lock.lock()
         let surfaceSnapshot = surfaces
+        let pathSnapshot = worktreePaths
+        lock.unlock()
         pollCycle &+= 1
         let cycle = pollCycle
         let preferredSnapshot = preferredPaths
-        let pathSnapshot = worktreePaths
         pollQueue.async { [weak self] in
             self?.pollAll(surfaceSnapshot, preferredPaths: preferredSnapshot, pollCycle: cycle, paths: pathSnapshot)
         }
@@ -113,25 +119,32 @@ class StatusPublisher {
                 continue
             }
             let processStatus = surface.processStatus
+            // readViewportText() can be slow — do NOT hold the lock here
             let content = surface.readViewportText() ?? ""
 
             // Skip expensive text analysis if viewport hasn't changed
             let contentHash = content.hashValue
-            if let lastHash = lastViewportHashes[terminalID], lastHash == contentHash {
-                continue
-            }
-            lastViewportHashes[terminalID] = contentHash
 
+            lock.lock()
+            let lastHash = lastViewportHashes[terminalID]
+            lock.unlock()
+
+            if let lastHash, lastHash == contentHash { continue }
+
+            lock.lock()
+            lastViewportHashes[terminalID] = contentHash
             let tracker = trackers[terminalID] ?? {
                 let t = DebouncedStatusTracker()
                 trackers[terminalID] = t
                 return t
             }()
+            lock.unlock()
 
             // Lowercase once, reuse for both agent matching and status detection
             let lowerContent = content.lowercased()
             let agentDef = findAgentDef(inLowercased: lowerContent)
 
+            // detector.detect() can be slow — do NOT hold the lock here
             let textStatus = detector.detect(
                 processStatus: processStatus,
                 shellInfo: nil,
@@ -147,15 +160,14 @@ class StatusPublisher {
             let terminalMessage = agentDef?.extractLastMessage(from: content, maxLen: 80) ?? ""
             let lastMessage = webhookMessage ?? (terminalMessage.isEmpty ? nil : terminalMessage) ?? ""
 
+            // Feed AgentHead with structured data on every poll
+            let agentType = AgentType.detect(fromLowercased: lowerContent)
+
+            lock.lock()
             let oldStatus = tracker.currentStatus
             let statusChanged = tracker.update(status: detected)
             lastMessages[terminalID] = lastMessage
-
-            // Feed AgentHead with structured data on every poll
-            let agentType = AgentType.detect(fromLowercased: lowerContent)
             let roundDur = runningStartTimes[terminalID].map { Date().timeIntervalSince($0) } ?? 0
-            AgentHead.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: agentType)
-            AgentHead.shared.updateStatus(terminalID: terminalID, status: detected, lastMessage: lastMessage, roundDuration: roundDur)
             // Track round duration: record when entering Running, clear when leaving
             if statusChanged {
                 if detected == .running && oldStatus != .running {
@@ -163,6 +175,13 @@ class StatusPublisher {
                 } else if detected != .running && oldStatus == .running {
                     runningStartTimes[terminalID] = nil
                 }
+            }
+            lock.unlock()
+
+            AgentHead.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: agentType)
+            AgentHead.shared.updateStatus(terminalID: terminalID, status: detected, lastMessage: lastMessage, roundDuration: roundDur)
+
+            if statusChanged {
                 DispatchQueue.main.async { [weak self] in
                     self?.delegate?.statusDidChange(worktreePath: worktreePath, oldStatus: oldStatus, newStatus: detected, lastMessage: lastMessage)
                 }
@@ -181,16 +200,23 @@ class StatusPublisher {
     }
 
     func status(for terminalID: String) -> AgentStatus {
-        trackers[terminalID]?.currentStatus ?? .unknown
+        lock.lock()
+        defer { lock.unlock() }
+        return trackers[terminalID]?.currentStatus ?? .unknown
     }
 
     func lastMessage(for terminalID: String) -> String {
-        lastMessages[terminalID] ?? ""
+        lock.lock()
+        defer { lock.unlock() }
+        return lastMessages[terminalID] ?? ""
     }
 
     /// Returns seconds since the current Running round started, or 0 if not running
     func roundDuration(for terminalID: String) -> TimeInterval {
-        guard let start = runningStartTimes[terminalID] else { return 0 }
+        lock.lock()
+        let start = runningStartTimes[terminalID]
+        lock.unlock()
+        guard let start else { return 0 }
         return Date().timeIntervalSince(start)
     }
 
