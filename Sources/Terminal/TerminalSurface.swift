@@ -60,30 +60,24 @@ class TerminalSurface {
         config.platform.macos.nsview = Unmanaged.passUnretained(termView).toOpaque()
         config.scale_factor = Double(container.window?.backingScaleFactor ?? 2.0)
 
-        let createBlock: () -> Void = {
+        // Use a flat closure that receives C pointers directly.
+        // Pointers are only valid within the withCString scope,
+        // so _createSurface must be called inside the innermost closure.
+        let create = { [self] (wdPtr: UnsafePointer<CChar>?, cmdPtr: UnsafePointer<CChar>?) in
+            if let wdPtr { config.working_directory = wdPtr }
+            if let cmdPtr { config.command = cmdPtr }
             self._createSurface(app: app, config: &config, view: termView, container: container)
         }
 
-        if let workingDirectory, let command {
-            workingDirectory.withCString { wdPtr in
-                command.withCString { cmdPtr in
-                    config.working_directory = wdPtr
-                    config.command = cmdPtr
-                    createBlock()
-                }
-            }
-        } else if let workingDirectory {
-            workingDirectory.withCString { wdPtr in
-                config.working_directory = wdPtr
-                createBlock()
-            }
-        } else if let command {
-            command.withCString { cmdPtr in
-                config.command = cmdPtr
-                createBlock()
-            }
-        } else {
-            createBlock()
+        switch (workingDirectory, command) {
+        case let (wd?, cmd?):
+            wd.withCString { wdPtr in cmd.withCString { cmdPtr in create(wdPtr, cmdPtr) } }
+        case let (wd?, nil):
+            wd.withCString { wdPtr in create(wdPtr, nil) }
+        case let (nil, cmd?):
+            cmd.withCString { cmdPtr in create(nil, cmdPtr) }
+        case (nil, nil):
+            create(nil, nil)
         }
     }
 
@@ -184,53 +178,24 @@ class TerminalSurface {
         let cols = Int(gridSize.columns)
         let rows = Int(gridSize.rows)
         DispatchQueue.global().async {
-            // Explicitly resize tmux window to match the Ghostty grid
-            let resize = Process()
-            resize.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            resize.arguments = ["tmux", "resize-window", "-t", sessionName, "-x", "\(cols)", "-y", "\(rows)"]
-            resize.standardOutput = Pipe()
-            resize.standardError = Pipe()
-            try? resize.run()
-            resize.waitUntilExit()
-
-            // Refresh client display
-            let refresh = Process()
-            refresh.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            refresh.arguments = ["tmux", "refresh-client", "-t", sessionName, "-S"]
-            refresh.standardOutput = Pipe()
-            refresh.standardError = Pipe()
-            try? refresh.run()
+            SessionManager.resizeTmuxSession(sessionName, cols: cols, rows: rows)
         }
     }
 
     /// Static version for when we don't have the surface (tmux fallback).
     static func refreshTmuxClient(_ sessionName: String) {
         DispatchQueue.global().async {
-            let resize = Process()
-            resize.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            resize.arguments = ["tmux", "resize-window", "-t", sessionName, "-A"]
-            resize.standardOutput = Pipe()
-            resize.standardError = Pipe()
-            try? resize.run()
-            resize.waitUntilExit()
-
-            let refresh = Process()
-            refresh.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            refresh.arguments = ["tmux", "refresh-client", "-t", sessionName, "-S"]
-            refresh.standardOutput = Pipe()
-            refresh.standardError = Pipe()
-            try? refresh.run()
+            SessionManager.refreshTmuxClient(sessionName)
         }
     }
 
     /// Sync the surface size with the current container bounds
     func syncSize() {
-        guard let surface, let view else { return }
-        let size = view.bounds.size
-        guard size.width > 0, size.height > 0 else { return }
-        let scale = view.window?.backingScaleFactor ?? 2.0
-        ghostty_surface_set_size(surface, UInt32(size.width * scale), UInt32(size.height * scale))
-        ghostty_surface_refresh(surface)
+        guard let view else { return }
+        // Reset the debounce so syncSurfaceSize() will run even if the
+        // same size was already synced through setFrameSize.
+        view.resetLastSyncedSize()
+        view.syncSurfaceSize()
     }
 
     /// Sync the content scale (Retina vs non-Retina)
@@ -379,6 +344,11 @@ class GhosttyNSView: NSView, NSTextInputClient {
 
     private(set) var lastSyncedSize: NSSize = .zero
 
+    /// Reset the debounce guard so the next syncSurfaceSize() runs unconditionally.
+    func resetLastSyncedSize() {
+        lastSyncedSize = .zero
+    }
+
     /// Test accessor for lastSyncedSize
     var lastSyncedSizeForTesting: NSSize { lastSyncedSize }
 
@@ -406,7 +376,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
         syncSurfaceSize()
     }
 
-    private func syncSurfaceSize() {
+    func syncSurfaceSize() {
         let size = bounds.size
         guard size.width > 0, size.height > 0 else { return }
         guard size != lastSyncedSize else { return }

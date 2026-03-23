@@ -23,6 +23,7 @@ struct AgentDisplayInfo {
     let totalDuration: String   // "HH:MM:SS" format
     let roundDuration: String   // "HH:MM:SS" format
     let surface: TerminalSurface
+    let worktreePath: String    // needed to lazily create the terminal
 }
 
 // MARK: - Pasteboard type (used by DraggableGridView)
@@ -595,7 +596,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         if let selected = sorted.first(where: { $0.id == selectedAgentId }) ?? sorted.first {
             selectedAgentId = selected.id
             configureFocusPanel(leftRightFocusPanel, with: selected)
-            selected.surface.reparent(to: leftRightFocusPanel.terminalContainer)
+            embedSurface(selected, in: leftRightFocusPanel.terminalContainer)
         }
 
         // Build sidebar mini cards for non-selected agents
@@ -637,7 +638,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         if let selected = sorted.first(where: { $0.id == selectedAgentId }) ?? sorted.first {
             selectedAgentId = selected.id
             configureFocusPanel(topSmallFocusPanel, with: selected)
-            selected.surface.reparent(to: topSmallFocusPanel.terminalContainer)
+            embedSurface(selected, in: topSmallFocusPanel.terminalContainer)
         }
 
         // Build horizontal mini cards
@@ -681,7 +682,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         if let selected = sorted.first(where: { $0.id == selectedAgentId }) ?? sorted.first {
             selectedAgentId = selected.id
             configureFocusPanel(topLargeFocusPanel, with: selected)
-            selected.surface.reparent(to: topLargeFocusPanel.terminalContainer)
+            embedSurface(selected, in: topLargeFocusPanel.terminalContainer)
         }
 
         // Build horizontal mini cards at bottom
@@ -722,6 +723,16 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
             total: agent.totalDuration,
             round: agent.roundDuration
         )
+    }
+
+    /// Embed a terminal surface into a container, creating it if needed.
+    private func embedSurface(_ agent: AgentDisplayInfo, in container: NSView) {
+        let surface = agent.surface
+        if surface.surface == nil {
+            _ = surface.create(in: container, workingDirectory: agent.worktreePath, sessionName: surface.sessionName)
+        } else {
+            surface.reparent(to: container)
+        }
     }
 
     // MARK: - Resize

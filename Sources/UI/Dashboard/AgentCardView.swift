@@ -23,7 +23,7 @@ final class AgentCardView: NSView {
 
     private let separatorLine = NSView()
     private let statusDot = NSView()
-    private let branchLabel = NSTextField(labelWithString: "")
+    private let projectLabel = NSTextField(labelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "")
     private var isHovered = false
     private var currentStatus: String = ""
@@ -42,7 +42,7 @@ final class AgentCardView: NSView {
         currentStatus = status
         setAccessibilityIdentifier("dashboard.card.\(id)")
 
-        branchLabel.stringValue = thread
+        projectLabel.stringValue = project
         statusLabel.stringValue = status.capitalized
         statusDot.layer?.backgroundColor = AgentDisplayHelpers.statusColor(status).cgColor
 
@@ -76,13 +76,13 @@ final class AgentCardView: NSView {
         statusDot.translatesAutoresizingMaskIntoConstraints = false
         bottomBar.addSubview(statusDot)
 
-        // Branch label
-        branchLabel.font = NSFont.systemFont(ofSize: Typography.bodyPointSize, weight: .medium)
-        branchLabel.textColor = SemanticColors.text
-        branchLabel.lineBreakMode = .byTruncatingTail
-        branchLabel.maximumNumberOfLines = 1
-        branchLabel.translatesAutoresizingMaskIntoConstraints = false
-        bottomBar.addSubview(branchLabel)
+        // Project label
+        projectLabel.font = NSFont.systemFont(ofSize: Typography.bodyPointSize, weight: .medium)
+        projectLabel.textColor = SemanticColors.text
+        projectLabel.lineBreakMode = .byTruncatingTail
+        projectLabel.maximumNumberOfLines = 1
+        projectLabel.translatesAutoresizingMaskIntoConstraints = false
+        bottomBar.addSubview(projectLabel)
 
         // Status text label (right-aligned, dim)
         statusLabel.font = NSFont.systemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
@@ -119,10 +119,10 @@ final class AgentCardView: NSView {
             statusDot.widthAnchor.constraint(equalToConstant: 7),
             statusDot.heightAnchor.constraint(equalToConstant: 7),
 
-            // Branch label
-            branchLabel.leadingAnchor.constraint(equalTo: statusDot.trailingAnchor, constant: 5),
-            branchLabel.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
-            branchLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusLabel.leadingAnchor, constant: -6),
+            // Project label
+            projectLabel.leadingAnchor.constraint(equalTo: statusDot.trailingAnchor, constant: 5),
+            projectLabel.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
+            projectLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusLabel.leadingAnchor, constant: -6),
 
             // Status text label (right-aligned)
             statusLabel.trailingAnchor.constraint(equalTo: bottomBar.trailingAnchor, constant: -8),
@@ -175,7 +175,7 @@ final class AgentCardView: NSView {
         bottomBar.layer?.backgroundColor = resolvedCGColor(SemanticColors.tileBarBg)
         separatorLine.layer?.backgroundColor = resolvedCGColor(SemanticColors.line)
         statusDot.layer?.backgroundColor = resolvedCGColor(AgentDisplayHelpers.statusColor(currentStatus))
-        branchLabel.textColor = SemanticColors.text
+        projectLabel.textColor = SemanticColors.text
         statusLabel.textColor = SemanticColors.muted
         updateBorder()
     }

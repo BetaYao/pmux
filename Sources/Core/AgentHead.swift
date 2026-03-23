@@ -74,10 +74,10 @@ class AgentHead {
 
         if let info = agents[terminalID] {
             worktreeIndex.removeValue(forKey: info.worktreePath)
+            backendsByPath.removeValue(forKey: info.worktreePath)
         }
         agents.removeValue(forKey: terminalID)
         channels.removeValue(forKey: terminalID)
-        backendsByPath.removeValue(forKey: worktreeIndex[terminalID] ?? "")
         orderedIDs.removeAll { $0 == terminalID }
     }
 

@@ -67,6 +67,7 @@ class RepoViewController: NSViewController {
         terminalContainer.translatesAutoresizingMaskIntoConstraints = false
         terminalContainer.wantsLayer = true
         terminalContainer.layer?.cornerRadius = Self.terminalCornerRadius
+        terminalContainer.layer?.masksToBounds = true
         terminalContainer.layer?.maskedCorners = Self.sideBySideTerminalMaskedCorners
         terminalContainer.setAccessibilityIdentifier("project.terminal")
         terminalContainer.setAccessibilityElement(true)
@@ -163,6 +164,13 @@ class RepoViewController: NSViewController {
         }
     }
 
+    func addWorktree(_ info: WorktreeInfo, surface: TerminalSurface) {
+        worktrees.append(info)
+        surfaces[info.path] = surface
+        sidebarVC.setWorktrees(worktrees)
+        showTerminal(at: worktrees.count - 1)
+    }
+
     func reconfigure() {
         sidebarVC.setWorktrees(worktrees)
         if !worktrees.isEmpty {
@@ -190,6 +198,11 @@ class RepoViewController: NSViewController {
 
         activeSurface = surface
         sidebarVC.selectWorktree(at: index)
+
+        // Focus the terminal so the user can type immediately
+        if let terminalView = surface.view {
+            view.window?.makeFirstResponder(terminalView)
+        }
     }
 
     func selectWorktree(byPath path: String) {

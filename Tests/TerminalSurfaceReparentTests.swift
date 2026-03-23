@@ -313,6 +313,16 @@ class TerminalSurfaceReparentTests: XCTestCase {
         XCTAssertEqual(view.pasteCallCount, 0)
     }
 
+    // MARK: - TerminalSurface create graceful failure
+
+    func testCreateWithCommandGracefulFailure() {
+        let surface = TerminalSurface()
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        let result = surface.create(in: container, workingDirectory: "/tmp", sessionName: nil)
+        // Without GhosttyBridge initialized, this should return false gracefully
+        XCTAssertFalse(result)
+    }
+
     func testMouseDown_MakesTerminalFirstResponder() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),

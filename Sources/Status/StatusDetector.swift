@@ -55,22 +55,52 @@ class StatusDetector {
 // MARK: - AgentDef status detection
 
 extension AgentDef {
+    /// Get pre-lowercased rules (computed inline for efficiency)
+    private var lowercasedRules: [(status: String, patterns: [String])] {
+        rules.map { rule in
+            (status: rule.status, patterns: rule.patterns.map { $0.lowercased() })
+        }
+    }
+
+    /// Get pre-lowercased messageSkipPatterns (computed inline for efficiency)
+    private var lowercasedSkipPatterns: [String] {
+        messageSkipPatterns.map { $0.lowercased() }
+    }
+
     /// Apply rules in order; first match wins
     func detectStatus(from content: String) -> AgentStatus {
         return detectStatus(fromLowercased: content.lowercased())
     }
 
-    /// Apply rules using pre-lowercased content to avoid redundant lowercasing
+    /// Apply rules using pre-lowercased content to avoid redundant lowercasing.
+    /// Only scans the last ~10 lines to avoid false positives from old command output
+    /// (e.g. "0 errors" from a successful cargo build triggering Error status).
     func detectStatus(fromLowercased lower: String) -> AgentStatus {
-        for rule in rules {
-            for pattern in rule.patterns {
-                // Patterns are typically short (3-10 chars), lowercasing is cheap
-                if lower.contains(pattern.lowercased()) {
-                    return AgentStatus(rawValue: rule.status) ?? .unknown
+        let tail = Self.lastLines(of: lower, count: 10)
+        for (status, patterns) in lowercasedRules {
+            for pattern in patterns {
+                if tail.contains(pattern) {
+                    return AgentStatus(rawValue: status) ?? .unknown
                 }
             }
         }
         return AgentStatus(rawValue: defaultStatus) ?? .idle
+    }
+
+    /// Extract the last N lines from a string efficiently (no array allocation).
+    private static func lastLines(of text: String, count: Int) -> Substring {
+        var newlinesSeen = 0
+        var idx = text.endIndex
+        while idx > text.startIndex {
+            idx = text.index(before: idx)
+            if text[idx] == "\n" {
+                newlinesSeen += 1
+                if newlinesSeen == count {
+                    return text[text.index(after: idx)...]
+                }
+            }
+        }
+        return text[...]
     }
 
     func extractLastMessage(from content: String, maxLen: Int) -> String {
@@ -88,7 +118,7 @@ extension AgentDef {
 
             if !trimmed.isEmpty && !isChromeLine(trimmed) {
                 let trimmedLower = trimmed.lowercased()
-                if !messageSkipPatterns.contains(where: { trimmedLower.contains($0.lowercased()) }) {
+                if !lowercasedSkipPatterns.contains(where: { trimmedLower.contains($0) }) {
                     if trimmed.count > maxLen {
                         return String(trimmed.prefix(maxLen - 3)) + "..."
                     }

@@ -30,7 +30,7 @@ class MainWindowController: NSWindowController {
     private let workspaceManager = WorkspaceManager()
 
     // All terminal surfaces, keyed by worktree path
-    private var surfaces: [String: TerminalSurface] = [:]
+    private let surfaceManager = TerminalSurfaceManager()
     private var allWorktrees: [(info: WorktreeInfo, surface: TerminalSurface)] = []
 
     private static let iso8601: ISO8601DateFormatter = {
@@ -178,114 +178,12 @@ class MainWindowController: NSWindowController {
     // MARK: - Menu Shortcuts
 
     private func setupMenuShortcuts() {
-        let mainMenu = NSMenu()
-
-        // App menu
-        let appMenuItem = NSMenuItem()
-        let appMenu = NSMenu()
-        let settingsItem = NSMenuItem(title: "Settings...", action: #selector(showSettings), keyEquivalent: ",")
-        settingsItem.keyEquivalentModifierMask = .command
-        appMenu.addItem(settingsItem)
-        appMenu.addItem(NSMenuItem.separator())
-        let checkUpdateItem = NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates), keyEquivalent: "u")
-        checkUpdateItem.keyEquivalentModifierMask = .command
-        appMenu.addItem(checkUpdateItem)
-        appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(withTitle: "Quit pmux", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        appMenuItem.submenu = appMenu
-        mainMenu.addItem(appMenuItem)
-
-        // File menu
-        let fileMenuItem = NSMenuItem()
-        let fileMenu = NSMenu(title: "File")
-        let newBranchItem = NSMenuItem(title: "New Branch...", action: #selector(showNewBranchDialog), keyEquivalent: "n")
-        newBranchItem.keyEquivalentModifierMask = .command
-        fileMenu.addItem(newBranchItem)
-        let quickSwitchItem = NSMenuItem(title: "Quick Switch...", action: #selector(showQuickSwitcher), keyEquivalent: "p")
-        quickSwitchItem.keyEquivalentModifierMask = .command
-        fileMenu.addItem(quickSwitchItem)
-        fileMenuItem.submenu = fileMenu
-        mainMenu.addItem(fileMenuItem)
-
-        // Edit menu (standard Cut/Copy/Paste/Undo/Redo)
-        let editMenuItem = NSMenuItem()
-        let editMenu = NSMenu(title: "Edit")
-        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
-        let redoItem = NSMenuItem(title: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
-        redoItem.keyEquivalentModifierMask = [.command, .shift]
-        editMenu.addItem(redoItem)
-        editMenu.addItem(NSMenuItem.separator())
-        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
-        editMenuItem.submenu = editMenu
-        mainMenu.addItem(editMenuItem)
-
-        // View menu
-        let viewMenuItem = NSMenuItem()
-        let viewMenu = NSMenu(title: "View")
-
-        let dashItem = NSMenuItem(title: "Dashboard", action: #selector(switchToDashboard), keyEquivalent: "0")
-        dashItem.keyEquivalentModifierMask = .command
-        viewMenu.addItem(dashItem)
-
-        let closeTabItem = NSMenuItem(title: "Close Tab", action: #selector(closeCurrentTab), keyEquivalent: "w")
-        closeTabItem.keyEquivalentModifierMask = .command
-        viewMenu.addItem(closeTabItem)
-
-        let diffItem = NSMenuItem(title: "Show Diff...", action: #selector(showDiffOverlay), keyEquivalent: "")
-        viewMenu.addItem(diffItem)
-
-        viewMenu.addItem(NSMenuItem.separator())
-
-        let zoomInItem = NSMenuItem(title: "Zoom In (Smaller Cards)", action: #selector(dashboardZoomIn), keyEquivalent: "-")
-        zoomInItem.keyEquivalentModifierMask = .command
-        viewMenu.addItem(zoomInItem)
-
-        let zoomOutItem = NSMenuItem(title: "Zoom Out (Larger Cards)", action: #selector(dashboardZoomOut), keyEquivalent: "=")
-        zoomOutItem.keyEquivalentModifierMask = .command
-        viewMenu.addItem(zoomOutItem)
-
-        viewMenuItem.submenu = viewMenu
-        mainMenu.addItem(viewMenuItem)
-
-        // Window menu (standard macOS window management)
-        let windowMenuItem = NSMenuItem()
-        let windowMenu = NSMenu(title: "Window")
-        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.miniaturize(_:)), keyEquivalent: "m")
-        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.zoom(_:)), keyEquivalent: "")
-        windowMenu.addItem(NSMenuItem.separator())
-        let nextTabItem = NSMenuItem(title: "Next Tab", action: #selector(selectNextTab), keyEquivalent: "}")
-        nextTabItem.keyEquivalentModifierMask = .command
-        windowMenu.addItem(nextTabItem)
-        let prevTabItem = NSMenuItem(title: "Previous Tab", action: #selector(selectPreviousTab), keyEquivalent: "{")
-        prevTabItem.keyEquivalentModifierMask = .command
-        windowMenu.addItem(prevTabItem)
-        windowMenu.addItem(NSMenuItem.separator())
-        windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
-        windowMenuItem.submenu = windowMenu
-        mainMenu.addItem(windowMenuItem)
-        NSApp.windowsMenu = windowMenu
-
-        // Help menu
-        let helpMenuItem = NSMenuItem()
-        let helpMenu = NSMenu(title: "Help")
-        let keyboardShortcutsItem = NSMenuItem(title: "Keyboard Shortcuts", action: #selector(showKeyboardShortcuts), keyEquivalent: "")
-        helpMenu.addItem(keyboardShortcutsItem)
-        helpMenu.addItem(NSMenuItem.separator())
-        let docsItem = NSMenuItem(title: "pmux Documentation", action: #selector(openDocumentation), keyEquivalent: "")
-        helpMenu.addItem(docsItem)
-        helpMenuItem.submenu = helpMenu
-        mainMenu.addItem(helpMenuItem)
-        NSApp.helpMenu = helpMenu
-
-        NSApp.mainMenu = mainMenu
+        NSApp.mainMenu = MenuBuilder.buildMainMenu(target: self)
     }
 
     private func normalizeBackendAvailabilityIfNeeded() {
-        let zmxAvailable = Self.commandExists("zmx")
-        let tmuxAvailable = Self.commandExists("tmux")
+        let zmxAvailable = ProcessRunner.commandExists("zmx")
+        let tmuxAvailable = ProcessRunner.commandExists("tmux")
 
         var targetBackend = Self.resolvePreferredBackend(
             preferred: config.backend,
@@ -297,7 +195,7 @@ class MainWindowController: NSWindowController {
         if config.backend == "zmx" {
             if !zmxAvailable {
                 warningMessage = "zmx is not installed. Install with `brew install neurosnap/tap/zmx`."
-            } else if let version = Self.commandOutput(["zmx", "version"]), !Self.isSupportedZmxVersion(version) {
+            } else if let version = ProcessRunner.output(["zmx", "version"]), !Self.isSupportedZmxVersion(version) {
                 warningMessage = "zmx version is too old. Please upgrade to zmx 0.4.2+ for stability."
             }
         }
@@ -337,48 +235,14 @@ class MainWindowController: NSWindowController {
         }
     }
 
-    private static func commandExists(_ command: String) -> Bool {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["bash", "-lc", "command -v \(command)"]
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
-        do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
-        } catch {
-            return false
-        }
-    }
-
-    private static func commandOutput(_ args: [String]) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = args
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-        do {
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return nil }
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            guard let output = String(data: data, encoding: .utf8) else { return nil }
-            return output.trimmingCharacters(in: .whitespacesAndNewlines)
-        } catch {
-            return nil
-        }
-    }
-
-    @objc private func switchToDashboard() {
+    @objc func switchToDashboard() {
         switchToTab(0)
     }
 
-    @objc private func showQuickSwitcher() {
+    @objc func showQuickSwitcher() {
         let worktreeInfos = allWorktrees.map { $0.info }
         var statuses: [String: AgentStatus] = [:]
-        for (path, _) in surfaces {
+        for (path, _) in surfaceManager.all {
             statuses[path] = statusPublisher.status(for: path)
         }
         let switcher = QuickSwitcherViewController(worktrees: worktreeInfos, statuses: statuses)
@@ -396,7 +260,7 @@ class MainWindowController: NSWindowController {
         }
     }
 
-    @objc private func showSettings() {
+    @objc func showSettings() {
         let settingsVC = SettingsViewController(config: config)
         settingsVC.settingsDelegate = self
         if activeTabIndex == 0 {
@@ -412,7 +276,7 @@ class MainWindowController: NSWindowController {
         }
     }
 
-    @objc private func showNewBranchDialog() {
+    @objc func showNewBranchDialog() {
         let dialog = NewBranchDialog(repoPaths: config.workspacePaths)
         dialog.dialogDelegate = self
         if activeTabIndex == 0 {
@@ -428,26 +292,26 @@ class MainWindowController: NSWindowController {
         }
     }
 
-    @objc private func closeCurrentTab() {
+    @objc func closeCurrentTab() {
         guard activeTabIndex > 0 else { return }
         let repoIndex = activeTabIndex - 1
         guard let tab = workspaceManager.tab(at: repoIndex) else { return }
         showCloseProjectModal(tab.displayName)
     }
 
-    @objc private func selectNextTab() {
+    @objc func selectNextTab() {
         let maxIndex = workspaceManager.tabs.count // 0=dashboard, 1..N=projects
         let next = activeTabIndex + 1 > maxIndex ? 0 : activeTabIndex + 1
         switchToTab(next)
     }
 
-    @objc private func selectPreviousTab() {
+    @objc func selectPreviousTab() {
         let maxIndex = workspaceManager.tabs.count
         let prev = activeTabIndex - 1 < 0 ? maxIndex : activeTabIndex - 1
         switchToTab(prev)
     }
 
-    @objc private func showKeyboardShortcuts() {
+    @objc func showKeyboardShortcuts() {
         let alert = NSAlert()
         alert.messageText = "Keyboard Shortcuts"
         alert.informativeText = """
@@ -467,25 +331,25 @@ class MainWindowController: NSWindowController {
         alert.runModal()
     }
 
-    @objc private func openDocumentation() {
+    @objc func openDocumentation() {
         if let url = URL(string: "https://github.com/nicematt/pmux") {
             NSWorkspace.shared.open(url)
         }
     }
 
-    @objc private func dashboardZoomIn() {
+    @objc func dashboardZoomIn() {
         dashboardVC?.zoomIn()
         config.zoomIndex = dashboardVC?.zoomIndex ?? GridLayout.defaultZoomIndex
         config.save()
     }
 
-    @objc private func dashboardZoomOut() {
+    @objc func dashboardZoomOut() {
         dashboardVC?.zoomOut()
         config.zoomIndex = dashboardVC?.zoomIndex ?? GridLayout.defaultZoomIndex
         config.save()
     }
 
-    @objc private func showDiffOverlay() {
+    @objc func showDiffOverlay() {
         var worktreePath: String?
         if activeTabIndex > 0 {
             let repoIndex = activeTabIndex - 1
@@ -742,7 +606,8 @@ class MainWindowController: NSWindowController {
                 lastMessage: agent.lastMessage.isEmpty ? "No active task." : agent.lastMessage,
                 totalDuration: AgentDisplayHelpers.formatDuration(agent.totalDuration),
                 roundDuration: AgentDisplayHelpers.formatDuration(agent.roundDuration),
-                surface: surface
+                surface: surface,
+                worktreePath: agent.worktreePath
             )
         }
     }
@@ -790,7 +655,7 @@ class MainWindowController: NSWindowController {
         }
 
         for info in effectiveWorktrees {
-            let surface = createSurface(for: info)
+            let surface = surfaceManager.surface(for: info, backend: runtimeBackend)
             allWorktrees.append((info: info, surface: surface))
         }
 
@@ -803,15 +668,15 @@ class MainWindowController: NSWindowController {
             if config.worktreeStartedAt[info.path] == nil {
                 config.worktreeStartedAt[info.path] = now
             }
-            let surface = createSurface(for: info)
+            let surface = surfaceManager.surface(for: info, backend: runtimeBackend)
             let started = config.worktreeStartedAt[info.path].flatMap { MainWindowController.iso8601.date(from: $0) }
-            let sessionName = runtimeBackend == "local" ? nil : Self.persistentSessionName(for: info.path)
+            let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
             AgentHead.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: projectName, startedAt: started, tmuxSessionName: sessionName, backend: runtimeBackend)
         }
         config.save()
 
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
-        statusPublisher.updateSurfaces(surfaces)
+        statusPublisher.updateSurfaces(surfaceManager.all)
         updateTitleBar()
         if activateTab {
             switchToTab(tabIndex + 1)
@@ -871,13 +736,13 @@ class MainWindowController: NSWindowController {
 
     private func getOrCreateRepoVC(for tab: WorkspaceTab) -> RepoViewController {
         if let existing = repoVCs[tab.repoPath] {
-            existing.configure(worktrees: tab.worktrees, surfaces: surfaces)
+            existing.configure(worktrees: tab.worktrees, surfaces: surfaceManager.all)
             return existing
         }
 
         let repoVC = RepoViewController()
         repoVC.repoDelegate = self
-        repoVC.configure(worktrees: tab.worktrees, surfaces: surfaces)
+        repoVC.configure(worktrees: tab.worktrees, surfaces: surfaceManager.all)
         repoVCs[tab.repoPath] = repoVC
         return repoVC
     }
@@ -1008,12 +873,14 @@ class MainWindowController: NSWindowController {
                             commitHash: "",
                             isMainWorktree: true
                         )
-                        let surface = self.createSurface(for: info)
+                        let surface = self.surfaceManager.surface(for: info, backend: runtimeBackend)
                         allWorktreeInfos.append((info: info, surface: surface))
+                        self.worktreeRepoCache[info.path] = repoPath
                     } else {
                         for info in worktrees {
-                            let surface = self.createSurface(for: info)
+                            let surface = self.surfaceManager.surface(for: info, backend: runtimeBackend)
                             allWorktreeInfos.append((info: info, surface: surface))
+                            self.worktreeRepoCache[info.path] = repoPath
                         }
                     }
 
@@ -1049,7 +916,7 @@ class MainWindowController: NSWindowController {
                     let proj = self.workspaceManager.tabs.first(where: { $0.repoPath == repo })?.displayName
                         ?? URL(fileURLWithPath: repo).lastPathComponent
                     let started = self.config.worktreeStartedAt[info.path].flatMap { MainWindowController.iso8601.date(from: $0) }
-                    let sessionName = self.runtimeBackend == "local" ? nil : Self.persistentSessionName(for: info.path)
+                    let sessionName = self.runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
                     AgentHead.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: started, tmuxSessionName: sessionName, backend: self.runtimeBackend)
                 }
                 if !cardOrder.isEmpty {
@@ -1064,7 +931,7 @@ class MainWindowController: NSWindowController {
                 }
 
                 // Start polling for agent status
-                self.statusPublisher.start(surfaces: self.surfaces)
+                self.statusPublisher.start(surfaces: self.surfaceManager.all)
                 self.updateStatusPollPreferences()
 
                 // Start webhook server for agent hook events
@@ -1078,19 +945,6 @@ class MainWindowController: NSWindowController {
                 }
             }
         }
-    }
-
-    private func createSurface(for info: WorktreeInfo) -> TerminalSurface {
-        if let existing = surfaces[info.path] {
-            return existing
-        }
-        let surface = TerminalSurface()
-        if runtimeBackend != "local" {
-            surface.sessionName = Self.persistentSessionName(for: info.path)
-            surface.backend = runtimeBackend
-        }
-        surfaces[info.path] = surface
-        return surface
     }
 
     // MARK: - Worktree Deletion
@@ -1131,10 +985,7 @@ class MainWindowController: NSWindowController {
     }
 
     private func performDeleteWorktree(_ info: WorktreeInfo, repoPath: String, deleteBranch: Bool, force: Bool) {
-        if let surface = surfaces[info.path] {
-            surface.destroy()
-            surfaces.removeValue(forKey: info.path)
-        }
+        surfaceManager.removeSurface(forPath: info.path)
 
         DispatchQueue.global().async { [weak self] in
             do {
@@ -1169,7 +1020,7 @@ class MainWindowController: NSWindowController {
             AgentHead.shared.unregister(terminalID: agent.id)
         }
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
-        statusPublisher.updateSurfaces(surfaces)
+        statusPublisher.updateSurfaces(surfaceManager.all)
 
         if activeTabIndex > 0 {
             let repoIndex = activeTabIndex - 1
@@ -1180,7 +1031,7 @@ class MainWindowController: NSWindowController {
                     guard let self else { return }
                     self.workspaceManager.updateWorktrees(at: repoIndex, worktrees: updatedWorktrees)
                     if let repoVC = self.repoVCs[repoPath] {
-                        repoVC.configure(worktrees: updatedWorktrees, surfaces: self.surfaces)
+                        repoVC.configure(worktrees: updatedWorktrees, surfaces: self.surfaceManager.all)
                     }
                     if updatedWorktrees.isEmpty {
                         self.performCloseRepo(projectName: displayName)
@@ -1197,17 +1048,6 @@ class MainWindowController: NSWindowController {
         NotificationCenter.default.removeObserver(self, name: .navigateToWorktree, object: nil)
     }
 
-    /// Generate a stable persistent session name from a worktree path.
-    private static func persistentSessionName(for path: String) -> String {
-        let url = URL(fileURLWithPath: path)
-        let parent = url.deletingLastPathComponent().lastPathComponent
-        let name = url.lastPathComponent
-        let sessionName = "pmux-\(parent)-\(name)"
-            .replacingOccurrences(of: ".", with: "_")
-            .replacingOccurrences(of: ":", with: "_")
-        return sessionName
-    }
-
     // MARK: - Close Repo
 
     private func performCloseRepo(projectName: String) {
@@ -1216,18 +1056,16 @@ class MainWindowController: NSWindowController {
 
         // Kill persisted sessions and destroy surfaces for this repo's worktrees
         for worktree in tab.worktrees {
-            guard let surface = surfaces[worktree.path] else { continue }
-            surface.destroy()
-            surfaces.removeValue(forKey: worktree.path)
-            
+            guard let surface = surfaceManager.removeSurface(forPath: worktree.path) else { continue }
+
             if let agent = AgentHead.shared.agent(forWorktree: worktree.path) {
                 AgentHead.shared.unregister(terminalID: agent.id)
             } else {
                 AgentHead.shared.unregister(terminalID: surface.id)
             }
             if runtimeBackend != "local" {
-                let sessionName = Self.persistentSessionName(for: worktree.path)
-                killSession(sessionName, backend: runtimeBackend)
+                let sessionName = SessionManager.persistentSessionName(for: worktree.path)
+                SessionManager.killSession(sessionName, backend: runtimeBackend)
             }
         }
 
@@ -1252,24 +1090,12 @@ class MainWindowController: NSWindowController {
 
         // Update UI
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
-        statusPublisher.updateSurfaces(surfaces)
+        statusPublisher.updateSurfaces(surfaceManager.all)
         updateTitleBar()
         switchToTab(activeTabIndex)
 
     }
 
-    private func killSession(_ name: String, backend: String) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        if backend == "tmux" {
-            process.arguments = ["tmux", "kill-session", "-t", name]
-        } else {
-            process.arguments = ["zmx", "kill", name]
-        }
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
-        try? process.run()
-    }
 }
 
 class PmuxWindow: NSWindow {
@@ -1308,10 +1134,14 @@ extension MainWindowController: NSWindowDelegate {
         statusPublisher.stop()
         webhookServer?.stop()
         webhookServer = nil
-        for (_, surface) in surfaces {
-            surface.destroy()
-        }
-        surfaces.removeAll()
+        surfaceManager.removeAll()
+    }
+
+    func cleanupBeforeTermination() {
+        statusPublisher.stop()
+        webhookServer?.stop()
+        webhookServer = nil
+        surfaceManager.removeAll()
     }
 }
 
@@ -1472,7 +1302,7 @@ extension MainWindowController: AIPanelDelegate {
 
 extension MainWindowController: NewBranchDialogDelegate {
     func newBranchDialog(_ dialog: NewBranchDialog, didCreateWorktree info: WorktreeInfo, inRepo repoPath: String) {
-        let surface = createSurface(for: info)
+        let surface = surfaceManager.surface(for: info, backend: runtimeBackend)
         allWorktrees.append((info: info, surface: surface))
 
         // Record startedAt for the new worktree
@@ -1482,10 +1312,21 @@ extension MainWindowController: NewBranchDialogDelegate {
         }
 
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
-        statusPublisher.updateSurfaces(surfaces)
+        statusPublisher.updateSurfaces(surfaceManager.all)
 
-        if activeTabIndex != 0 {
-            switchToTab(0)
+        // If we're on a repo tab for the same repo, stay there and update its sidebar
+        if activeTabIndex > 0 {
+            let repoIndex = activeTabIndex - 1
+            if let tab = workspaceManager.tab(at: repoIndex),
+               tab.repoPath == repoPath,
+               let repoVC = repoVCs[repoPath] {
+                // Add new worktree to the workspace tab and repo view
+                var updatedWorktrees = tab.worktrees
+                updatedWorktrees.append(info)
+                workspaceManager.updateWorktrees(at: repoIndex, worktrees: updatedWorktrees)
+                repoVC.addWorktree(info, surface: surface)
+                return
+            }
         }
     }
 }

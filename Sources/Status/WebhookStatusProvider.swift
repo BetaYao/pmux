@@ -127,7 +127,10 @@ class WebhookStatusProvider {
     }
 
     private func canonicalize(_ path: String) -> String {
-        var cleaned = path
+        // Resolve symlinks (e.g. /var → /private/var on macOS) so that
+        // worktree paths and webhook cwd values match reliably.
+        let resolved = (path as NSString).resolvingSymlinksInPath
+        var cleaned = resolved
         while cleaned.hasSuffix("/") && cleaned.count > 1 {
             cleaned = String(cleaned.dropLast())
         }

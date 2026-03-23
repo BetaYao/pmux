@@ -61,6 +61,20 @@ final class AgentHeadTests: XCTestCase {
         XCTAssertNil(AgentHead.shared.agent(forWorktree: "/tmp/repo/main"))
     }
 
+    func testUnregisterCleansUpBackendsByPath() {
+        let surface = TerminalSurface()
+        AgentHead.shared.register(
+            surface: surface, worktreePath: "/tmp/test-repo/main",
+            branch: "main", project: "test", startedAt: nil,
+            tmuxSessionName: "pmux-test-main", backend: "zmx"
+        )
+
+        AgentHead.shared.unregister(terminalID: surface.id)
+
+        XCTAssertNil(AgentHead.shared.agent(for: surface.id))
+        XCTAssertNil(AgentHead.shared.agent(forWorktree: "/tmp/test-repo/main"))
+    }
+
     // MARK: - Status Updates
 
     func testUpdateStatus() {

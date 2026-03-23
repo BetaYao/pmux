@@ -28,6 +28,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        mainWindowController?.cleanupBeforeTermination()
         GhosttyBridge.shared.shutdown()
     }
 }

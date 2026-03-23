@@ -7,9 +7,6 @@ struct WorktreeInfo {
     let isMainWorktree: Bool
 
     var displayName: String {
-        if isMainWorktree {
-            return URL(fileURLWithPath: path).lastPathComponent
-        }
         return branch.isEmpty ? URL(fileURLWithPath: path).lastPathComponent : branch
     }
 }

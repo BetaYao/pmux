@@ -2,7 +2,8 @@ import Foundation
 import Network
 
 class WebhookServer {
-    private var listener: NWListener?
+    private var listener4: NWListener?  // IPv4 loopback
+    private var listener6: NWListener?  // IPv6 loopback
     private let port: UInt16
     private let onEvent: (WebhookEvent) -> Void
     private let queue = DispatchQueue(label: "pmux.webhook-server")
@@ -13,37 +14,55 @@ class WebhookServer {
     }
 
     func start() {
+        // Listen on both IPv4 and IPv6 loopback to handle clients
+        // that resolve "localhost" to either ::1 or 127.0.0.1.
+        listener4 = createListener(host: .ipv4(.loopback), label: "IPv4")
+        listener6 = createListener(host: .ipv6(.loopback), label: "IPv6")
+
+        if listener4 == nil, listener6 == nil {
+            NSLog("[WebhookServer] Failed to create any listener on port \(port)")
+        }
+    }
+
+    private func createListener(host: NWEndpoint.Host, label: String) -> NWListener? {
+        let params = NWParameters.tcp
+        params.requiredLocalEndpoint = NWEndpoint.hostPort(host: host, port: NWEndpoint.Port(rawValue: port)!)
+
+        let listener: NWListener
         do {
-            let params = NWParameters.tcp
-            params.requiredLocalEndpoint = NWEndpoint.hostPort(host: .ipv4(.loopback), port: NWEndpoint.Port(rawValue: port)!)
-            listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
+            // Port is already set in requiredLocalEndpoint; passing it again
+            // to NWListener(using:on:) causes "cannot override" error.
+            listener = try NWListener(using: params)
         } catch {
-            NSLog("[WebhookServer] Failed to create listener: \(error)")
-            return
+            NSLog("[WebhookServer] Failed to create \(label) listener: \(error)")
+            return nil
         }
 
-        listener?.newConnectionHandler = { [weak self] connection in
+        listener.newConnectionHandler = { [weak self] connection in
             self?.handleConnection(connection)
         }
 
-        listener?.stateUpdateHandler = { [weak self] state in
+        listener.stateUpdateHandler = { [weak self] state in
             guard let self = self else { return }
             switch state {
             case .ready:
-                NSLog("[WebhookServer] Listening on port \(self.port)")
+                NSLog("[WebhookServer] Listening on \(label) port \(self.port)")
             case .failed(let error):
-                NSLog("[WebhookServer] Failed: \(error)")
+                NSLog("[WebhookServer] \(label) listener failed: \(error)")
             default:
                 break
             }
         }
 
-        listener?.start(queue: queue)
+        listener.start(queue: queue)
+        return listener
     }
 
     func stop() {
-        listener?.cancel()
-        listener = nil
+        listener4?.cancel()
+        listener4 = nil
+        listener6?.cancel()
+        listener6 = nil
     }
 
     private func handleConnection(_ connection: NWConnection) {

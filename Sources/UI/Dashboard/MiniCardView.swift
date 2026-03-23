@@ -2,27 +2,28 @@ import AppKit
 
 final class MiniCardView: NSView {
     enum Typography {
-        static let primaryPointSize: CGFloat = 13
-        static let bodyPointSize: CGFloat = 12
-        static let secondaryPointSize: CGFloat = 11
+        static let primaryPointSize: CGFloat = 12
+        static let bodyPointSize: CGFloat = 11
+        static let secondaryPointSize: CGFloat = 10
     }
 
     weak var delegate: AgentCardDelegate?
     private(set) var agentId: String = ""
     var isSelected: Bool = false { didSet { updateAppearance() } }
 
-    // Line 1: status dot + project / branch
+    // Line 1: status dot + branch
     private let statusDot = NSView()
-    private let projectLabel = NSTextField(labelWithString: "")
-    private let separatorLabel = NSTextField(labelWithString: "/")
     private let branchLabel = NSTextField(labelWithString: "")
 
-    // Line 2: duration + relative time + status text
+    // Line 2: duration
     private let durationLabel = NSTextField(labelWithString: "")
-    private let statusTextLabel = NSTextField(labelWithString: "")
 
     // Message area
     private let messageLabel = NSTextField(labelWithString: "")
+
+    // Bottom line: project (left) + status (right)
+    private let projectLabel = NSTextField(labelWithString: "")
+    private let statusTextLabel = NSTextField(labelWithString: "")
 
     private var isHovered = false
     private var currentStatus: String = ""
@@ -68,39 +69,22 @@ final class MiniCardView: NSView {
         aspectConstraint.priority = .defaultHigh
         aspectConstraint.isActive = true
 
-        // Status dot (6px circle)
+        // Line 1: status dot
         statusDot.wantsLayer = true
         statusDot.layer?.cornerRadius = 3
         statusDot.translatesAutoresizingMaskIntoConstraints = false
         addSubview(statusDot)
 
-        // Project label
-        projectLabel.font = NSFont.systemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
-        projectLabel.textColor = SemanticColors.muted
-        projectLabel.lineBreakMode = .byTruncatingTail
-        projectLabel.maximumNumberOfLines = 1
-        projectLabel.translatesAutoresizingMaskIntoConstraints = false
-        projectLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        addSubview(projectLabel)
-
-        // Separator
-        separatorLabel.font = NSFont.systemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
-        separatorLabel.textColor = SemanticColors.muted
-        separatorLabel.translatesAutoresizingMaskIntoConstraints = false
-        separatorLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        separatorLabel.setContentHuggingPriority(.required, for: .horizontal)
-        addSubview(separatorLabel)
-
-        // Branch label
+        // Line 1: branch label
         branchLabel.font = NSFont.systemFont(ofSize: Typography.primaryPointSize, weight: .semibold)
         branchLabel.textColor = SemanticColors.text
         branchLabel.lineBreakMode = .byTruncatingTail
         branchLabel.maximumNumberOfLines = 1
         branchLabel.translatesAutoresizingMaskIntoConstraints = false
-        branchLabel.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
+        branchLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         addSubview(branchLabel)
 
-        // Duration label (line 2 left)
+        // Line 2: duration
         durationLabel.font = NSFont.systemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
         durationLabel.textColor = SemanticColors.muted
         durationLabel.lineBreakMode = .byTruncatingTail
@@ -108,16 +92,6 @@ final class MiniCardView: NSView {
         durationLabel.translatesAutoresizingMaskIntoConstraints = false
         durationLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         addSubview(durationLabel)
-
-        // Status text label (line 2 right)
-        statusTextLabel.font = NSFont.systemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
-        statusTextLabel.lineBreakMode = .byTruncatingTail
-        statusTextLabel.maximumNumberOfLines = 1
-        statusTextLabel.alignment = .right
-        statusTextLabel.translatesAutoresizingMaskIntoConstraints = false
-        statusTextLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-        statusTextLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-        addSubview(statusTextLabel)
 
         // Message area
         messageLabel.font = NSFont.monospacedSystemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
@@ -131,42 +105,60 @@ final class MiniCardView: NSView {
         messageLabel.setContentHuggingPriority(.defaultLow, for: .vertical)
         addSubview(messageLabel)
 
+        // Bottom line: project (left)
+        projectLabel.font = NSFont.systemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
+        projectLabel.textColor = SemanticColors.muted
+        projectLabel.lineBreakMode = .byTruncatingTail
+        projectLabel.maximumNumberOfLines = 1
+        projectLabel.translatesAutoresizingMaskIntoConstraints = false
+        projectLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        addSubview(projectLabel)
+
+        // Bottom line: status (right)
+        statusTextLabel.font = NSFont.systemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
+        statusTextLabel.lineBreakMode = .byTruncatingTail
+        statusTextLabel.maximumNumberOfLines = 1
+        statusTextLabel.alignment = .right
+        statusTextLabel.translatesAutoresizingMaskIntoConstraints = false
+        statusTextLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        statusTextLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        addSubview(statusTextLabel)
+
         let padding: CGFloat = 8
 
         NSLayoutConstraint.activate([
             // Line 1: status dot
             statusDot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
-            statusDot.topAnchor.constraint(equalTo: topAnchor, constant: padding),
+            statusDot.topAnchor.constraint(equalTo: topAnchor, constant: padding + 2),
             statusDot.widthAnchor.constraint(equalToConstant: 6),
             statusDot.heightAnchor.constraint(equalToConstant: 6),
 
-            // Line 1: project name
-            projectLabel.leadingAnchor.constraint(equalTo: statusDot.trailingAnchor, constant: 4),
-            projectLabel.centerYAnchor.constraint(equalTo: statusDot.centerYAnchor),
-
-            // Line 1: separator
-            separatorLabel.leadingAnchor.constraint(equalTo: projectLabel.trailingAnchor, constant: 2),
-            separatorLabel.centerYAnchor.constraint(equalTo: statusDot.centerYAnchor),
-
             // Line 1: branch name
-            branchLabel.leadingAnchor.constraint(equalTo: separatorLabel.trailingAnchor, constant: 2),
+            branchLabel.leadingAnchor.constraint(equalTo: statusDot.trailingAnchor, constant: 5),
             branchLabel.centerYAnchor.constraint(equalTo: statusDot.centerYAnchor),
             branchLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -padding),
 
             // Line 2: duration
-            durationLabel.topAnchor.constraint(equalTo: statusDot.bottomAnchor, constant: 4),
+            durationLabel.topAnchor.constraint(equalTo: branchLabel.bottomAnchor, constant: 3),
             durationLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
-
-            // Line 2: status text (right-aligned)
-            statusTextLabel.centerYAnchor.constraint(equalTo: durationLabel.centerYAnchor),
-            statusTextLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padding),
-            statusTextLabel.leadingAnchor.constraint(greaterThanOrEqualTo: durationLabel.trailingAnchor, constant: 4),
+            durationLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -padding),
 
             // Message area
             messageLabel.topAnchor.constraint(equalTo: durationLabel.bottomAnchor, constant: 4),
             messageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
             messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padding),
-            messageLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -padding),
+
+            // Bottom line: project (left)
+            projectLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
+            projectLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -padding),
+            projectLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusTextLabel.leadingAnchor, constant: -4),
+
+            // Bottom line: status (right)
+            statusTextLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padding),
+            statusTextLabel.centerYAnchor.constraint(equalTo: projectLabel.centerYAnchor),
+
+            // Message bottom connects to project top
+            messageLabel.bottomAnchor.constraint(lessThanOrEqualTo: projectLabel.topAnchor, constant: -4),
         ])
 
         // Click handler
