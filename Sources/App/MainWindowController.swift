@@ -284,8 +284,8 @@ class MainWindowController: NSWindowController {
     }
 
     private func normalizeBackendAvailabilityIfNeeded() {
-        let zmxAvailable = Self.commandExists("zmx")
-        let tmuxAvailable = Self.commandExists("tmux")
+        let zmxAvailable = ProcessRunner.commandExists("zmx")
+        let tmuxAvailable = ProcessRunner.commandExists("tmux")
 
         var targetBackend = Self.resolvePreferredBackend(
             preferred: config.backend,
@@ -297,7 +297,7 @@ class MainWindowController: NSWindowController {
         if config.backend == "zmx" {
             if !zmxAvailable {
                 warningMessage = "zmx is not installed. Install with `brew install neurosnap/tap/zmx`."
-            } else if let version = Self.commandOutput(["zmx", "version"]), !Self.isSupportedZmxVersion(version) {
+            } else if let version = ProcessRunner.output(["zmx", "version"]), !Self.isSupportedZmxVersion(version) {
                 warningMessage = "zmx version is too old. Please upgrade to zmx 0.4.2+ for stability."
             }
         }
@@ -334,40 +334,6 @@ class MainWindowController: NSWindowController {
                 alert.addButton(withTitle: "OK")
                 alert.runModal()
             }
-        }
-    }
-
-    private static func commandExists(_ command: String) -> Bool {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["bash", "-lc", "command -v \(command)"]
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
-        do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
-        } catch {
-            return false
-        }
-    }
-
-    private static func commandOutput(_ args: [String]) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = args
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-        do {
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return nil }
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            guard let output = String(data: data, encoding: .utf8) else { return nil }
-            return output.trimmingCharacters(in: .whitespacesAndNewlines)
-        } catch {
-            return nil
         }
     }
 
