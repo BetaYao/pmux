@@ -55,6 +55,18 @@ class StatusDetector {
 // MARK: - AgentDef status detection
 
 extension AgentDef {
+    /// Get pre-lowercased rules (computed inline for efficiency)
+    private var lowercasedRules: [(status: String, patterns: [String])] {
+        rules.map { rule in
+            (status: rule.status, patterns: rule.patterns.map { $0.lowercased() })
+        }
+    }
+
+    /// Get pre-lowercased messageSkipPatterns (computed inline for efficiency)
+    private var lowercasedSkipPatterns: [String] {
+        messageSkipPatterns.map { $0.lowercased() }
+    }
+
     /// Apply rules in order; first match wins
     func detectStatus(from content: String) -> AgentStatus {
         return detectStatus(fromLowercased: content.lowercased())
@@ -62,11 +74,10 @@ extension AgentDef {
 
     /// Apply rules using pre-lowercased content to avoid redundant lowercasing
     func detectStatus(fromLowercased lower: String) -> AgentStatus {
-        for rule in rules {
-            for pattern in rule.patterns {
-                // Patterns are typically short (3-10 chars), lowercasing is cheap
-                if lower.contains(pattern.lowercased()) {
-                    return AgentStatus(rawValue: rule.status) ?? .unknown
+        for (status, patterns) in lowercasedRules {
+            for pattern in patterns {
+                if lower.contains(pattern) {
+                    return AgentStatus(rawValue: status) ?? .unknown
                 }
             }
         }
@@ -88,7 +99,7 @@ extension AgentDef {
 
             if !trimmed.isEmpty && !isChromeLine(trimmed) {
                 let trimmedLower = trimmed.lowercased()
-                if !messageSkipPatterns.contains(where: { trimmedLower.contains($0.lowercased()) }) {
+                if !lowercasedSkipPatterns.contains(where: { trimmedLower.contains($0) }) {
                     if trimmed.count > maxLen {
                         return String(trimmed.prefix(maxLen - 3)) + "..."
                     }
