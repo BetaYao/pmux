@@ -191,12 +191,11 @@ class TerminalSurface {
 
     /// Sync the surface size with the current container bounds
     func syncSize() {
-        guard let surface, let view else { return }
-        let size = view.bounds.size
-        guard size.width > 0, size.height > 0 else { return }
-        let scale = view.window?.backingScaleFactor ?? 2.0
-        ghostty_surface_set_size(surface, UInt32(size.width * scale), UInt32(size.height * scale))
-        ghostty_surface_refresh(surface)
+        guard let view else { return }
+        // Reset the debounce so syncSurfaceSize() will run even if the
+        // same size was already synced through setFrameSize.
+        view.resetLastSyncedSize()
+        view.syncSurfaceSize()
     }
 
     /// Sync the content scale (Retina vs non-Retina)
@@ -345,6 +344,11 @@ class GhosttyNSView: NSView, NSTextInputClient {
 
     private(set) var lastSyncedSize: NSSize = .zero
 
+    /// Reset the debounce guard so the next syncSurfaceSize() runs unconditionally.
+    func resetLastSyncedSize() {
+        lastSyncedSize = .zero
+    }
+
     /// Test accessor for lastSyncedSize
     var lastSyncedSizeForTesting: NSSize { lastSyncedSize }
 
@@ -372,7 +376,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
         syncSurfaceSize()
     }
 
-    private func syncSurfaceSize() {
+    func syncSurfaceSize() {
         let size = bounds.size
         guard size.width > 0, size.height > 0 else { return }
         guard size != lastSyncedSize else { return }

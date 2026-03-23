@@ -72,16 +72,35 @@ extension AgentDef {
         return detectStatus(fromLowercased: content.lowercased())
     }
 
-    /// Apply rules using pre-lowercased content to avoid redundant lowercasing
+    /// Apply rules using pre-lowercased content to avoid redundant lowercasing.
+    /// Only scans the last ~10 lines to avoid false positives from old command output
+    /// (e.g. "0 errors" from a successful cargo build triggering Error status).
     func detectStatus(fromLowercased lower: String) -> AgentStatus {
+        let tail = Self.lastLines(of: lower, count: 10)
         for (status, patterns) in lowercasedRules {
             for pattern in patterns {
-                if lower.contains(pattern) {
+                if tail.contains(pattern) {
                     return AgentStatus(rawValue: status) ?? .unknown
                 }
             }
         }
         return AgentStatus(rawValue: defaultStatus) ?? .idle
+    }
+
+    /// Extract the last N lines from a string efficiently (no array allocation).
+    private static func lastLines(of text: String, count: Int) -> Substring {
+        var newlinesSeen = 0
+        var idx = text.endIndex
+        while idx > text.startIndex {
+            idx = text.index(before: idx)
+            if text[idx] == "\n" {
+                newlinesSeen += 1
+                if newlinesSeen == count {
+                    return text[text.index(after: idx)...]
+                }
+            }
+        }
+        return text[...]
     }
 
     func extractLastMessage(from content: String, maxLen: Int) -> String {

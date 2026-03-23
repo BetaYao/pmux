@@ -606,7 +606,8 @@ class MainWindowController: NSWindowController {
                 lastMessage: agent.lastMessage.isEmpty ? "No active task." : agent.lastMessage,
                 totalDuration: AgentDisplayHelpers.formatDuration(agent.totalDuration),
                 roundDuration: AgentDisplayHelpers.formatDuration(agent.roundDuration),
-                surface: surface
+                surface: surface,
+                worktreePath: agent.worktreePath
             )
         }
     }
@@ -874,10 +875,12 @@ class MainWindowController: NSWindowController {
                         )
                         let surface = self.surfaceManager.surface(for: info, backend: runtimeBackend)
                         allWorktreeInfos.append((info: info, surface: surface))
+                        self.worktreeRepoCache[info.path] = repoPath
                     } else {
                         for info in worktrees {
                             let surface = self.surfaceManager.surface(for: info, backend: runtimeBackend)
                             allWorktreeInfos.append((info: info, surface: surface))
+                            self.worktreeRepoCache[info.path] = repoPath
                         }
                     }
 
@@ -1311,8 +1314,19 @@ extension MainWindowController: NewBranchDialogDelegate {
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
         statusPublisher.updateSurfaces(surfaceManager.all)
 
-        if activeTabIndex != 0 {
-            switchToTab(0)
+        // If we're on a repo tab for the same repo, stay there and update its sidebar
+        if activeTabIndex > 0 {
+            let repoIndex = activeTabIndex - 1
+            if let tab = workspaceManager.tab(at: repoIndex),
+               tab.repoPath == repoPath,
+               let repoVC = repoVCs[repoPath] {
+                // Add new worktree to the workspace tab and repo view
+                var updatedWorktrees = tab.worktrees
+                updatedWorktrees.append(info)
+                workspaceManager.updateWorktrees(at: repoIndex, worktrees: updatedWorktrees)
+                repoVC.addWorktree(info, surface: surface)
+                return
+            }
         }
     }
 }

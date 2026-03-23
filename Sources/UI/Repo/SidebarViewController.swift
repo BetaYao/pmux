@@ -65,26 +65,28 @@ class SidebarViewController: NSViewController {
         addButton.translatesAutoresizingMaskIntoConstraints = false
         addButton.title = ""
         addButton.bezelStyle = .texturedRounded
-        addButton.isBordered = true
+        addButton.isBordered = false
         addButton.image = NSImage(named: NSImage.addTemplateName)
         addButton.imagePosition = .imageOnly
-        addButton.contentTintColor = SemanticColors.muted
+        addButton.contentTintColor = .white
         addButton.target = self
         addButton.action = #selector(addThreadClicked)
         addButton.setAccessibilityIdentifier("sidebar.addThread")
+        configureHoverButton(addButton)
         headerBar.addSubview(addButton)
 
         diffButton.translatesAutoresizingMaskIntoConstraints = false
         diffButton.title = ""
         diffButton.bezelStyle = .texturedRounded
-        diffButton.isBordered = true
+        diffButton.isBordered = false
         diffButton.image = NSImage(systemSymbolName: "doc.text.magnifyingglass", accessibilityDescription: "Show diff")
         diffButton.imagePosition = .imageOnly
-        diffButton.contentTintColor = SemanticColors.muted
+        diffButton.contentTintColor = .white
         diffButton.isEnabled = false
         diffButton.target = self
         diffButton.action = #selector(showDiffClicked)
         diffButton.setAccessibilityIdentifier("sidebar.showDiff")
+        configureHoverButton(diffButton)
         headerBar.addSubview(diffButton)
 
         headerBorder.translatesAutoresizingMaskIntoConstraints = false
@@ -149,11 +151,12 @@ class SidebarViewController: NSViewController {
 
             addButton.centerYAnchor.constraint(equalTo: headerBar.centerYAnchor),
             addButton.trailingAnchor.constraint(equalTo: headerBar.trailingAnchor, constant: -8),
-            addButton.widthAnchor.constraint(equalToConstant: 24),
+            addButton.widthAnchor.constraint(equalToConstant: 28),
             addButton.heightAnchor.constraint(equalToConstant: 24),
 
             diffButton.centerYAnchor.constraint(equalTo: headerBar.centerYAnchor),
-            diffButton.trailingAnchor.constraint(equalTo: addButton.leadingAnchor, constant: -6),
+            diffButton.trailingAnchor.constraint(equalTo: addButton.leadingAnchor, constant: -4),
+            diffButton.widthAnchor.constraint(equalToConstant: 28),
             diffButton.heightAnchor.constraint(equalToConstant: 24),
 
             headerBorder.leadingAnchor.constraint(equalTo: headerBar.leadingAnchor),
@@ -172,6 +175,28 @@ class SidebarViewController: NSViewController {
             emptyStateLabel.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 16),
             emptyStateLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -16),
         ])
+    }
+
+    private func configureHoverButton(_ button: NSButton) {
+        button.wantsLayer = true
+        button.layer?.cornerRadius = 4
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self,
+            userInfo: ["button": button]
+        )
+        button.addTrackingArea(area)
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard let button = event.trackingArea?.userInfo?["button"] as? NSButton else { return }
+        button.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.1).cgColor
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        guard let button = event.trackingArea?.userInfo?["button"] as? NSButton else { return }
+        button.layer?.backgroundColor = nil
     }
 
     @objc private func addThreadClicked() {
@@ -262,6 +287,10 @@ extension SidebarViewController: NSTableViewDelegate {
         return cell
     }
 
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        return AlwaysEmphasizedRowView()
+    }
+
     func tableViewSelectionDidChange(_ notification: Notification) {
         guard !suppressSelectionNotification else { return }
         let row = tableView.selectedRow
@@ -284,7 +313,7 @@ extension SidebarViewController: NSTableViewDelegate {
 
 private final class SidebarCellView: NSTableCellView {
     private let nameLabel = NSTextField(labelWithString: "")
-    private let dotImageView = NSImageView()
+    private let statusDot = NSView()
     private let messageLabel = NSTextField(labelWithString: "")
 
     override init(frame frameRect: NSRect) {
@@ -297,9 +326,11 @@ private final class SidebarCellView: NSTableCellView {
     }
 
     private func setupViews() {
-        dotImageView.translatesAutoresizingMaskIntoConstraints = false
-        dotImageView.imageScaling = .scaleProportionallyDown
-        addSubview(dotImageView)
+        // Layer-backed dot — immune to NSTableView selection tinting
+        statusDot.wantsLayer = true
+        statusDot.layer?.cornerRadius = 4
+        statusDot.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(statusDot)
 
         nameLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         nameLabel.textColor = SemanticColors.text
@@ -322,17 +353,17 @@ private final class SidebarCellView: NSTableCellView {
         addSubview(messageLabel)
 
         NSLayoutConstraint.activate([
-            dotImageView.widthAnchor.constraint(equalToConstant: 10),
-            dotImageView.heightAnchor.constraint(equalToConstant: 10),
-            dotImageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: SidebarViewController.Layout.cellLeadingInset),
-            dotImageView.centerYAnchor.constraint(equalTo: nameLabel.centerYAnchor),
+            statusDot.widthAnchor.constraint(equalToConstant: 8),
+            statusDot.heightAnchor.constraint(equalToConstant: 8),
+            statusDot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: SidebarViewController.Layout.cellLeadingInset),
+            statusDot.centerYAnchor.constraint(equalTo: nameLabel.centerYAnchor),
 
             nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 9),
-            nameLabel.leadingAnchor.constraint(equalTo: dotImageView.trailingAnchor, constant: 6),
+            nameLabel.leadingAnchor.constraint(equalTo: statusDot.trailingAnchor, constant: 6),
             nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -SidebarViewController.Layout.cellTrailingInset),
 
             messageLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 2),
-            messageLabel.leadingAnchor.constraint(equalTo: dotImageView.trailingAnchor, constant: 6),
+            messageLabel.leadingAnchor.constraint(equalTo: statusDot.trailingAnchor, constant: 6),
             messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -SidebarViewController.Layout.cellTrailingInset),
             messageLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -9),
         ])
@@ -340,9 +371,7 @@ private final class SidebarCellView: NSTableCellView {
 
     func update(name: String, status: AgentStatus, message: String) {
         nameLabel.stringValue = name
-        let symbolConfig = NSImage.SymbolConfiguration(pointSize: 8, weight: .bold)
-        dotImageView.image = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: nil)?.withSymbolConfiguration(symbolConfig)
-        dotImageView.contentTintColor = status.color
+        statusDot.layer?.backgroundColor = status.color.cgColor
         messageLabel.stringValue = message.isEmpty ? status.rawValue : message
         setAccessibilityIdentifier("sidebar.row.\(name)")
     }
@@ -366,5 +395,16 @@ extension SidebarViewController: NSMenuDelegate {
 
     @objc private func deleteClicked(_ sender: NSMenuItem) {
         sidebarDelegate?.sidebar(self, didRequestDeleteWorktreeAt: sender.tag)
+    }
+}
+
+// MARK: - Always-emphasized row view
+
+/// NSTableRowView subclass that keeps the accent-colored selection highlight
+/// even when the table is not the first responder (e.g. terminal has focus).
+private final class AlwaysEmphasizedRowView: NSTableRowView {
+    override var isEmphasized: Bool {
+        get { true }
+        set { /* ignored */ }
     }
 }
