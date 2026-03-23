@@ -29,7 +29,7 @@ class StatusPublisher {
     private var pollCycle: Int = 0
 
     // Cache: skip detection when viewport text hasn't changed
-    private var lastViewportHashes: [String: Int] = [:]           // keyed by terminal ID
+    private var lastViewportHashes: [String: UInt64] = [:]           // keyed by terminal ID
     // Pre-lowercased agent names for faster matching
     private var lowercasedAgentNames: [(name: String, def: AgentDef)] = []
 
@@ -123,7 +123,7 @@ class StatusPublisher {
             let content = surface.readViewportText() ?? ""
 
             // Skip expensive text analysis if viewport hasn't changed
-            let contentHash = content.hashValue
+            let contentHash = content.stableHash
 
             lock.lock()
             let lastHash = lastViewportHashes[terminalID]
@@ -234,5 +234,16 @@ class StatusPublisher {
 
     deinit {
         stop()
+    }
+}
+
+private extension String {
+    /// Simple stable hash (djb2) for change detection.
+    var stableHash: UInt64 {
+        var hash: UInt64 = 5381
+        for byte in self.utf8 {
+            hash = ((hash &<< 5) &+ hash) &+ UInt64(byte)
+        }
+        return hash
     }
 }
