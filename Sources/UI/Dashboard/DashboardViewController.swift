@@ -75,21 +75,21 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     private let leftRightFocusPanel = FocusPanelView()
     private let leftRightSidebarScroll = NSScrollView()
     private let leftRightSidebarStack = FlippedStackView()
-    private var leftRightMiniCards: [MiniCardView] = []
+    private var leftRightMiniCards: [StackedMiniCardContainerView] = []
 
     // Top-Small layout
     private let topSmallContainer = NSView()
     private let topSmallFocusPanel = FocusPanelView()
     private let topSmallTopScroll = NSScrollView()
     private let topSmallTopStack = NSStackView()
-    private var topSmallMiniCards: [MiniCardView] = []
+    private var topSmallMiniCards: [StackedMiniCardContainerView] = []
 
     // Top-Large layout
     private let topLargeContainer = NSView()
     private let topLargeFocusPanel = FocusPanelView()
     private let topLargeBottomScroll = NSScrollView()
     private let topLargeBottomStack = NSStackView()
-    private var topLargeMiniCards: [MiniCardView] = []
+    private var topLargeMiniCards: [StackedMiniCardContainerView] = []
 
     // Empty state
     private let emptyStateView = NSView()
@@ -187,18 +187,18 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         }
     }
 
-    private func updateFocusLayoutInPlace(_ sorted: [AgentDisplayInfo], miniCards: [MiniCardView], focusPanel: FocusPanelView) {
+    private func updateFocusLayoutInPlace(_ sorted: [AgentDisplayInfo], miniCards: [StackedMiniCardContainerView], focusPanel: FocusPanelView) {
         guard sorted.count == miniCards.count else {
             rebuildCurrentLayout()
             return
         }
-        // Update focus panel
         if let selected = sorted.first(where: { $0.id == selectedAgentId }) ?? sorted.first {
             configureFocusPanel(focusPanel, with: selected)
         }
-        // Update mini cards
         for (index, agent) in sorted.enumerated() {
-            miniCards[index].configure(
+            miniCards[index].configure(paneCount: agent.paneCount)
+            miniCards[index].layoutChildren()
+            miniCards[index].miniCardView.configure(
                 id: agent.id,
                 project: agent.project,
                 thread: agent.thread,
@@ -611,9 +611,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         // Build sidebar mini cards for non-selected agents
         let sidebarWidth = leftRightSidebarScroll.bounds.width > 0 ? leftRightSidebarScroll.bounds.width : 240
         for agent in sorted {
-            let card = MiniCardView()
-            card.delegate = self
-            card.configure(
+            let container = StackedMiniCardContainerView()
+            container.delegate = self
+            container.configure(paneCount: agent.paneCount)
+            container.miniCardView.configure(
                 id: agent.id,
                 project: agent.project,
                 thread: agent.thread,
@@ -622,13 +623,13 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
                 totalDuration: agent.totalDuration,
                 roundDuration: agent.roundDuration
             )
-            card.isSelected = (agent.id == selectedAgentId)
-            card.translatesAutoresizingMaskIntoConstraints = false
-            leftRightMiniCards.append(card)
-            leftRightSidebarStack.addArrangedSubview(card)
-
+            container.isSelected = (agent.id == selectedAgentId)
+            container.translatesAutoresizingMaskIntoConstraints = false
+            leftRightMiniCards.append(container)
+            leftRightSidebarStack.addArrangedSubview(container)
             NSLayoutConstraint.activate([
-                card.widthAnchor.constraint(equalToConstant: sidebarWidth),
+                container.widthAnchor.constraint(equalToConstant: sidebarWidth),
+                container.heightAnchor.constraint(equalTo: container.widthAnchor, multiplier: 9.0 / 16.0),
             ])
         }
     }
@@ -652,9 +653,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
 
         // Build horizontal mini cards
         for agent in sorted {
-            let card = MiniCardView()
-            card.delegate = self
-            card.configure(
+            let container = StackedMiniCardContainerView()
+            container.delegate = self
+            container.configure(paneCount: agent.paneCount)
+            container.miniCardView.configure(
                 id: agent.id,
                 project: agent.project,
                 thread: agent.thread,
@@ -663,17 +665,17 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
                 totalDuration: agent.totalDuration,
                 roundDuration: agent.roundDuration
             )
-            card.isSelected = (agent.id == selectedAgentId)
-            card.translatesAutoresizingMaskIntoConstraints = false
-            topSmallMiniCards.append(card)
-            topSmallTopStack.addArrangedSubview(card)
+            container.isSelected = (agent.id == selectedAgentId)
+            container.translatesAutoresizingMaskIntoConstraints = false
+            topSmallMiniCards.append(container)
+            topSmallTopStack.addArrangedSubview(container)
 
-            // Clamp width 180-260
-            let widthConstraint = card.widthAnchor.constraint(equalToConstant: 220)
+            let widthConstraint = container.widthAnchor.constraint(equalToConstant: 220)
             widthConstraint.priority = .defaultHigh
-            let minWidth = card.widthAnchor.constraint(greaterThanOrEqualToConstant: 180)
-            let maxWidth = card.widthAnchor.constraint(lessThanOrEqualToConstant: 260)
-            NSLayoutConstraint.activate([widthConstraint, minWidth, maxWidth])
+            let minWidth = container.widthAnchor.constraint(greaterThanOrEqualToConstant: 180)
+            let maxWidth = container.widthAnchor.constraint(lessThanOrEqualToConstant: 260)
+            let heightConstraint = container.heightAnchor.constraint(equalTo: container.widthAnchor, multiplier: 9.0 / 16.0)
+            NSLayoutConstraint.activate([widthConstraint, minWidth, maxWidth, heightConstraint])
         }
     }
 
@@ -696,9 +698,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
 
         // Build horizontal mini cards at bottom
         for agent in sorted {
-            let card = MiniCardView()
-            card.delegate = self
-            card.configure(
+            let container = StackedMiniCardContainerView()
+            container.delegate = self
+            container.configure(paneCount: agent.paneCount)
+            container.miniCardView.configure(
                 id: agent.id,
                 project: agent.project,
                 thread: agent.thread,
@@ -707,17 +710,17 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
                 totalDuration: agent.totalDuration,
                 roundDuration: agent.roundDuration
             )
-            card.isSelected = (agent.id == selectedAgentId)
-            card.translatesAutoresizingMaskIntoConstraints = false
-            topLargeMiniCards.append(card)
-            topLargeBottomStack.addArrangedSubview(card)
+            container.isSelected = (agent.id == selectedAgentId)
+            container.translatesAutoresizingMaskIntoConstraints = false
+            topLargeMiniCards.append(container)
+            topLargeBottomStack.addArrangedSubview(container)
 
-            // Clamp width 180-260
-            let widthConstraint = card.widthAnchor.constraint(equalToConstant: 220)
+            let widthConstraint = container.widthAnchor.constraint(equalToConstant: 220)
             widthConstraint.priority = .defaultHigh
-            let minWidth = card.widthAnchor.constraint(greaterThanOrEqualToConstant: 180)
-            let maxWidth = card.widthAnchor.constraint(lessThanOrEqualToConstant: 260)
-            NSLayoutConstraint.activate([widthConstraint, minWidth, maxWidth])
+            let minWidth = container.widthAnchor.constraint(greaterThanOrEqualToConstant: 180)
+            let maxWidth = container.widthAnchor.constraint(lessThanOrEqualToConstant: 260)
+            let heightConstraint = container.heightAnchor.constraint(equalTo: container.widthAnchor, multiplier: 9.0 / 16.0)
+            NSLayoutConstraint.activate([widthConstraint, minWidth, maxWidth, heightConstraint])
         }
     }
 
@@ -732,6 +735,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
             total: agent.totalDuration,
             round: agent.roundDuration
         )
+        let sorted = sortedAgents()
+        if let index = sorted.firstIndex(where: { $0.id == agent.id }) {
+            panel.configureNavigation(currentIndex: index, total: sorted.count)
+        }
     }
 
     /// Embed a terminal surface into a container, creating it if needed.
@@ -781,6 +788,77 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
 
     func focusPanelDidRequestEnterProject(_ projectName: String) {
         dashboardDelegate?.dashboardDidRequestEnterProject(projectName)
+    }
+
+    func focusPanelDidRequestNavigate(_ panel: FocusPanelView, direction: NavigationDirection) {
+        let sorted = sortedAgents()
+        guard sorted.count > 1 else { return }
+
+        guard let currentIndex = sorted.firstIndex(where: { $0.id == selectedAgentId }) else { return }
+
+        let newIndex: Int
+        switch direction {
+        case .next:
+            newIndex = min(currentIndex + 1, sorted.count - 1)
+        case .previous:
+            newIndex = max(currentIndex - 1, 0)
+        }
+        guard newIndex != currentIndex else { return }
+
+        let newAgent = sorted[newIndex]
+
+        let focusPanel: FocusPanelView
+        switch currentLayout {
+        case .leftRight: focusPanel = leftRightFocusPanel
+        case .topSmall: focusPanel = topSmallFocusPanel
+        case .topLarge: focusPanel = topLargeFocusPanel
+        case .grid: return
+        }
+
+        // Add slide transition
+        let transition = CATransition()
+        transition.type = .push
+        transition.duration = 0.25
+        transition.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        transition.subtype = slideSubtype(for: currentLayout, direction: direction)
+        focusPanel.terminalContainer.layer?.add(transition, forKey: "slideTransition")
+
+        // Swap terminal
+        detachTerminals()
+        selectedAgentId = newAgent.id
+        configureFocusPanel(focusPanel, with: newAgent)
+        focusPanel.configureNavigation(currentIndex: newIndex, total: sorted.count)
+        embedSurface(newAgent, in: focusPanel.terminalContainer)
+
+        // Update mini card selection
+        updateMiniCardSelection()
+    }
+
+    private func slideSubtype(for layout: DashboardLayout, direction: NavigationDirection) -> CATransitionSubtype {
+        switch layout {
+        case .leftRight:
+            return direction == .next ? .fromRight : .fromLeft
+        case .topSmall:
+            return direction == .next ? .fromBottom : .fromTop
+        case .topLarge:
+            return direction == .next ? .fromTop : .fromBottom
+        case .grid:
+            return .fromRight
+        }
+    }
+
+    private func updateMiniCardSelection() {
+        let updateCards: ([StackedMiniCardContainerView]) -> Void = { cards in
+            for card in cards {
+                card.isSelected = (card.agentId == self.selectedAgentId)
+            }
+        }
+        switch currentLayout {
+        case .leftRight: updateCards(leftRightMiniCards)
+        case .topSmall: updateCards(topSmallMiniCards)
+        case .topLarge: updateCards(topLargeMiniCards)
+        case .grid: break
+        }
     }
 
     // MARK: - DraggableGridDelegate
