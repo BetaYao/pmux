@@ -47,6 +47,7 @@ class SplitTree {
 - First pane keeps original name: `pmux-<parent>-<name>` (backward compatible).
 - Additional panes append index: `pmux-<parent>-<name>-1`, `pmux-<parent>-<name>-2`, etc.
 - Index is monotonically increasing per worktree (never reused within a session).
+- No persistent counter needed: on split, derive next index by scanning existing session names in the SplitTree (max index + 1). On restart, indices are restored from persisted layout.
 
 ## Layout Engine
 
