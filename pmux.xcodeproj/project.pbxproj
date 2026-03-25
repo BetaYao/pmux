@@ -85,6 +85,7 @@
 		BC2163AECF13737DDEB5802B /* StatusPublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60E67A393334BDBEDDD4CF28 /* StatusPublisher.swift */; };
 		BDC6D6D9057C6650D5F87B8F /* PasteRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37ED7FB1ACB355C9A54B0A38 /* PasteRegressionTests.swift */; };
 		BFD42F1E88E7E7357011AA44 /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = D789C39B920D21F7CC6153BF /* UpdateChecker.swift */; };
+		C13D2A00E7593371A0415ADF /* SplitTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DAC204D612A0B1E58C55957 /* SplitTree.swift */; };
 		C2FD40FCBDA6DB1ED12B1D77 /* NewBranchDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DC0645F3E76444270272B40 /* NewBranchDialog.swift */; };
 		C365198BF2E40B6FC37C692F /* AgentTypeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08DDD9848A72A6676EE8C53 /* AgentTypeTests.swift */; };
 		CBE87C7B12B63A5A1F121469 /* WebhookStatusProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51C11ACB7BD467F1B268E437 /* WebhookStatusProviderTests.swift */; };
@@ -184,6 +185,7 @@
 		717B331C5968FFF9C4CD4C4B /* TitleBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitleBarView.swift; sourceTree = "<group>"; };
 		75352E99A112855A0E137D7D /* TaskProgressParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskProgressParserTests.swift; sourceTree = "<group>"; };
 		775FFC41426A242F2A4754A4 /* UpdateCheckerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCheckerTests.swift; sourceTree = "<group>"; };
+		7DAC204D612A0B1E58C55957 /* SplitTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitTree.swift; sourceTree = "<group>"; };
 		7E03E31357AAE4FB9F6D1A71 /* AgentType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentType.swift; sourceTree = "<group>"; };
 		7FE920B04BA43448FB39479C /* SessionManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManagerTests.swift; sourceTree = "<group>"; };
 		7FF70596F66D6407538CD7D4 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
@@ -345,6 +347,7 @@
 			children = (
 				5870CEFD75BAF5C5CD693AF3 /* GhosttyBridge.swift */,
 				3EB87F1655E6846A886A0BD2 /* SplitNode.swift */,
+				7DAC204D612A0B1E58C55957 /* SplitTree.swift */,
 				F997F7C822F3D4747C9F6D09 /* TerminalSurface.swift */,
 			);
 			path = Terminal;
@@ -756,6 +759,7 @@
 				5ED4D3ECCE888CAC3E7B6056 /* SettingsViewController.swift in Sources */,
 				D416574A62F4391A82CB8B31 /* SidebarViewController.swift in Sources */,
 				D06F93FF3E5838AB6521B20C /* SplitNode.swift in Sources */,
+				C13D2A00E7593371A0415ADF /* SplitTree.swift in Sources */,
 				4AA669F5C78D8F447172DC06 /* StatusBadge.swift in Sources */,
 				1CC51D6AFB2CFD4EC3A3A215 /* StatusDetector.swift in Sources */,
 				BC2163AECF13737DDEB5802B /* StatusPublisher.swift in Sources */,
