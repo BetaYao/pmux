@@ -207,10 +207,14 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
                 NSApp.mainWindow?.deminiaturize(nil)
 
                 if let path = userInfo["worktreePath"] as? String {
+                    var info: [String: Any] = ["worktreePath": path]
+                    if let paneIndex = userInfo["paneIndex"] as? Int {
+                        info["paneIndex"] = paneIndex
+                    }
                     NotificationCenter.default.post(
                         name: .navigateToWorktree,
                         object: nil,
-                        userInfo: ["worktreePath": path]
+                        userInfo: info
                     )
                 }
             }
