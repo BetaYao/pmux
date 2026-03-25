@@ -2,6 +2,11 @@ import AppKit
 
 protocol AgentCardDelegate: AnyObject {
     func agentCardClicked(agentId: String)
+    func agentCardDoubleClicked(agentId: String)
+}
+
+extension AgentCardDelegate {
+    func agentCardDoubleClicked(agentId: String) {}
 }
 
 final class AgentCardView: NSView {
@@ -28,6 +33,7 @@ final class AgentCardView: NSView {
     private let paneCountLabel = NSTextField(labelWithString: "")
     private var isHovered = false
     private var currentStatus: String = ""
+    private(set) var clickRecognizer: NSClickGestureRecognizer!
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -152,9 +158,9 @@ final class AgentCardView: NSView {
             statusLabel.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
         ])
 
-        // Click handler
-        let click = NSClickGestureRecognizer(target: self, action: #selector(handleClick))
-        addGestureRecognizer(click)
+        // Click handler — stored so container can wire require(toFail:)
+        clickRecognizer = NSClickGestureRecognizer(target: self, action: #selector(handleClick))
+        addGestureRecognizer(clickRecognizer)
 
         // Hover tracking
         let trackingArea = NSTrackingArea(
