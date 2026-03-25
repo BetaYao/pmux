@@ -300,6 +300,17 @@ class MainWindowController: NSWindowController {
         showCloseProjectModal(tab.displayName)
     }
 
+    /// Cmd+W: close focused pane if multiple panes, otherwise close tab.
+    @objc func closePaneOrTab() {
+        if let repoVC = currentRepoVC,
+           let tree = repoVC.activeSplitContainer?.tree,
+           tree.leafCount > 1 {
+            closeFocusedPane()
+        } else {
+            closeCurrentTab()
+        }
+    }
+
     @objc func selectNextTab() {
         let maxIndex = workspaceManager.tabs.count // 0=dashboard, 1..N=projects
         let next = activeTabIndex + 1 > maxIndex ? 0 : activeTabIndex + 1
@@ -1279,15 +1290,6 @@ class PmuxWindow: NSWindow {
             if flags == [.command, .shift] && event.charactersIgnoringModifiers == "d" {
                 mwc.splitFocusedPane(axis: .vertical)
                 return true
-            }
-
-            // Cmd+Shift+W: close pane (only when more than 1 pane)
-            if flags == [.command, .shift] && event.charactersIgnoringModifiers == "w" {
-                if let tree = mwc.currentRepoVC?.activeSplitContainer?.tree, tree.leafCount > 1 {
-                    mwc.closeFocusedPane()
-                    return true
-                }
-                // Fall through to menu handling (Close Tab) when only 1 pane
             }
 
             // Cmd+Option+Arrows: focus navigation
