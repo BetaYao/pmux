@@ -64,7 +64,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     // Grid layout
     private let gridScrollView = NSScrollView()
     private let gridContainer = DraggableGridView()
-    private var gridCards: [AgentCardView] = []
+    private var gridCards: [StackedCardContainerView] = []
 
     private let gridSpacing: CGFloat = 3
     private let aspectRatio: CGFloat = 0.5625
@@ -171,7 +171,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
             return
         }
         for (index, agent) in sorted.enumerated() {
-            gridCards[index].configure(
+            gridCards[index].configure(paneCount: agent.paneCount)
+            gridCards[index].cardView.configure(
                 id: agent.id,
                 project: agent.project,
                 thread: agent.thread,
@@ -181,6 +182,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
                 roundDuration: agent.roundDuration,
                 paneCount: agent.paneCount
             )
+            gridCards[index].isSelected = (agent.id == selectedAgentId)
         }
     }
 
@@ -540,9 +542,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         guard !sorted.isEmpty else { return }
 
         for agent in sorted {
-            let card = AgentCardView()
-            card.delegate = self
-            card.configure(
+            let container = StackedCardContainerView()
+            container.delegate = self
+            container.configure(paneCount: agent.paneCount)
+            container.cardView.configure(
                 id: agent.id,
                 project: agent.project,
                 thread: agent.thread,
@@ -552,9 +555,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
                 roundDuration: agent.roundDuration,
                 paneCount: agent.paneCount
             )
-            card.translatesAutoresizingMaskIntoConstraints = true
-            gridCards.append(card)
-            gridContainer.addSubview(card)
+            container.isSelected = (agent.id == selectedAgentId)
+            container.translatesAutoresizingMaskIntoConstraints = true
+            gridCards.append(container)
+            gridContainer.addSubview(container)
         }
 
         layoutGridFrames()
@@ -579,8 +583,9 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         let availableWidth = gridScrollView.contentView.bounds.width
         gridContainer.frame = NSRect(x: 0, y: 0, width: availableWidth, height: layout.scrollContentHeight)
 
-        for (index, card) in gridCards.enumerated() {
-            card.frame = layout.cardFrame(at: index)
+        for (index, container) in gridCards.enumerated() {
+            container.frame = layout.cardFrame(at: index)
+            container.layoutChildren()
         }
     }
 
@@ -836,8 +841,8 @@ extension DashboardViewController: TerminalSurfaceDelegate {
         // Find the agent whose surface recovered and re-embed it
         guard let agent = agents.first(where: { $0.surface === surface }) else { return }
         // Try grid card first
-        if let card = gridCards.first(where: { $0.agentId == agent.id }) {
-            embedSurface(agent, in: card.terminalContainer)
+        if let container = gridCards.first(where: { $0.agentId == agent.id }) {
+            embedSurface(agent, in: container.cardView.terminalContainer)
             return
         }
         // Try focus panels
