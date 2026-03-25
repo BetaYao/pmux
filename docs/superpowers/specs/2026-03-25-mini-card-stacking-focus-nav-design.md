@@ -18,6 +18,9 @@ Same pattern as `StackedCardContainerView` but scaled for compact mini cards:
 - Reuses `GhostCardView` styling from `StackedCardContainerView` (same semantic colors, 1px border, 4px corner radius)
 - API: `configure(paneCount:)` — creates/removes ghost views as needed
 - Contains a `MiniCardView` as the front card (same relationship as `StackedCardContainerView` has with `AgentCardView`)
+- **Click handling**: The container owns click handling via its own `NSClickGestureRecognizer` (same as `StackedCardContainerView`). The inner `MiniCardView.delegate` must be set to `nil` to prevent double-firing. The container exposes its own `delegate: AgentCardDelegate?` and forwards clicks.
+- **Layout**: Uses frame-based layout internally (`layoutChildren()`). The `MiniCardView`'s Auto Layout aspect ratio constraint (16:9) should be deactivated when embedded — the container manages sizing via frames, and the parent stack/scroll provides the external size.
+- Ghosts only appear when `paneCount > 1`; single-pane agents show the mini card at full size with no ghosts.
 
 ### Integration
 
@@ -48,12 +51,18 @@ New layout: `[status dot] [name] [project · thread] [duration] ... [◀] [1/4] 
 ### New API
 
 ```swift
+enum NavigationDirection {
+    case next, previous
+}
+
 // FocusPanelView
 func configureNavigation(currentIndex: Int, total: Int)
 
 // FocusPanelDelegate (new method)
-func focusPanelDidRequestNavigate(_ panel: FocusPanelView, direction: Int)  // +1 next, -1 prev
+func focusPanelDidRequestNavigate(_ panel: FocusPanelView, direction: NavigationDirection)
 ```
+
+Navigation controls have lower compression resistance than the enter button. When the header is too narrow, duration label truncates first, then meta label.
 
 ### DashboardViewController Handling
 
@@ -70,9 +79,9 @@ On `focusPanelDidRequestNavigate`:
 
 | Layout | Slide Direction |
 |--------|----------------|
-| left-right | Horizontal (left/right) |
-| top-small | Vertical (up/down) |
-| top-large | Vertical (up/down) |
+| left-right | Horizontal: next = `.fromRight`, previous = `.fromLeft` |
+| top-small | Vertical: next = `.fromBottom`, previous = `.fromTop` (sidebar is above, so "next" comes from below) |
+| top-large | Vertical: next = `.fromTop`, previous = `.fromBottom` (sidebar is below, so "next" comes from above) |
 
 ### Implementation
 
@@ -88,6 +97,8 @@ focusPanel.terminalContainer.layer?.add(transition, forKey: "slideTransition")
 ```
 
 The animation triggers when the old terminal surface is removed and the new one is added to `terminalContainer`.
+
+Rapid clicks: `CATransition` with the same `forKey` replaces the previous transition automatically. The `selectedAgentId` update is synchronous, so rapid clicks simply jump to the final target — no queuing needed.
 
 ## 4. File Changes
 
