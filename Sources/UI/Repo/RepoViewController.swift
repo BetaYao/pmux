@@ -26,7 +26,7 @@ class RepoViewController: NSViewController {
     private var trees: [String: SplitTree] = [:]
     private var activeWorktreeIndex: Int = 0
     private var splitContainers: [String: SplitContainerView] = [:]
-    private var activeSplitContainer: SplitContainerView?
+    var activeSplitContainer: SplitContainerView?
     private var needsTerminalOnLayout = false
 
     private func applyTerminalAppearanceStyle() {

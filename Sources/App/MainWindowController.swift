@@ -1119,13 +1119,191 @@ class MainWindowController: NSWindowController {
 
     }
 
+    // MARK: - Current Repo VC Helper
+
+    private var currentRepoVC: RepoViewController? {
+        guard activeTabIndex > 0 else { return nil }
+        let repoIndex = activeTabIndex - 1
+        guard let tab = workspaceManager.tab(at: repoIndex) else { return nil }
+        return repoVCs[tab.repoPath]
+    }
+
+    // MARK: - Split Pane Actions
+
+    func splitFocusedPane(axis: SplitAxis) {
+        guard let repoVC = currentRepoVC,
+              let container = repoVC.activeSplitContainer,
+              let tree = container.tree else { return }
+
+        let sessionName = tree.nextSessionName()
+        let surface = TerminalSurface()
+        surface.sessionName = sessionName
+        surface.backend = config.backend
+        SurfaceRegistry.shared.register(surface)
+
+        let leafId = UUID().uuidString
+        tree.splitFocusedLeaf(axis: axis, newLeafId: leafId, newSurfaceId: surface.id, newSessionName: sessionName)
+
+        // Create the terminal
+        _ = surface.create(in: container, workingDirectory: tree.worktreePath, sessionName: sessionName)
+
+        // Register view and re-layout
+        container.surfaceViews[surface.id] = surface.view
+        container.layoutTree()
+
+        // Update status publisher
+        statusPublisher.updateSurfaces(surfaceManager.all)
+
+        // Persist layout
+        saveSplitLayout(tree)
+    }
+
+    func closeFocusedPane() {
+        guard let repoVC = currentRepoVC,
+              let container = repoVC.activeSplitContainer,
+              let tree = container.tree else { return }
+
+        guard let closed = tree.closeFocusedLeaf() else { return }
+
+        // Kill zmx session
+        SessionManager.killSession(closed.sessionName, backend: config.backend)
+
+        // Remove surface
+        if let surface = SurfaceRegistry.shared.surface(forId: closed.surfaceId) {
+            surface.view?.removeFromSuperview()
+            surface.destroy()
+        }
+        SurfaceRegistry.shared.unregister(closed.surfaceId)
+        container.surfaceViews.removeValue(forKey: closed.surfaceId)
+        container.layoutTree()
+
+        // Focus new leaf
+        if let focusedLeaf = tree.allLeaves.first(where: { $0.id == tree.focusedId }),
+           let focusSurface = SurfaceRegistry.shared.surface(forId: focusedLeaf.surfaceId),
+           let terminalView = focusSurface.view {
+            container.window?.makeFirstResponder(terminalView)
+        }
+
+        statusPublisher.updateSurfaces(surfaceManager.all)
+        saveSplitLayout(tree)
+    }
+
+    func moveFocus(_ axis: SplitAxis, positive: Bool) {
+        guard let repoVC = currentRepoVC,
+              let container = repoVC.activeSplitContainer else { return }
+        if let newFocusId = container.focusLeaf(direction: axis, positive: positive) {
+            // Update first responder
+            if let tree = container.tree,
+               let leaf = tree.root.findLeaf(id: newFocusId),
+               let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId),
+               let view = surface.view {
+                container.window?.makeFirstResponder(view)
+            }
+        }
+    }
+
+    func resizeSplit(_ axis: SplitAxis, delta: CGFloat) {
+        guard let repoVC = currentRepoVC,
+              let container = repoVC.activeSplitContainer,
+              let tree = container.tree else { return }
+        guard let splitId = tree.nearestAncestorSplit(axis: axis) else { return }
+        func findRatio(in node: SplitNode) -> CGFloat? {
+            if node.id == splitId, case .split(_, _, let ratio, _, _) = node { return ratio }
+            if case .split(_, _, _, let first, let second) = node {
+                return findRatio(in: first) ?? findRatio(in: second)
+            }
+            return nil
+        }
+        if let currentRatio = findRatio(in: tree.root) {
+            tree.updateRatio(splitId: splitId, newRatio: currentRatio + delta)
+            container.layoutTree()
+            saveSplitLayout(tree)
+        }
+    }
+
+    func resetSplitRatio() {
+        guard let repoVC = currentRepoVC,
+              let container = repoVC.activeSplitContainer,
+              let tree = container.tree else { return }
+        for axis in [SplitAxis.horizontal, .vertical] {
+            if let splitId = tree.nearestAncestorSplit(axis: axis) {
+                tree.updateRatio(splitId: splitId, newRatio: 0.5)
+            }
+        }
+        container.layoutTree()
+        saveSplitLayout(tree)
+    }
+
+    private func saveSplitLayout(_ tree: SplitTree) {
+        config.splitLayouts[tree.worktreePath] = tree.toCodable()
+        config.save()
+    }
+
 }
 
 class PmuxWindow: NSWindow {
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown {
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+            // Escape: exit spotlight (existing)
             if event.keyCode == 53, MainWindowController.shouldHandleEscShortcut() {
                 return
+            }
+
+            // Cmd+D: horizontal split
+            if flags == .command && event.charactersIgnoringModifiers == "d" {
+                if let mwc = windowController as? MainWindowController {
+                    mwc.splitFocusedPane(axis: .horizontal)
+                    return
+                }
+            }
+
+            // Cmd+Shift+D: vertical split
+            if flags == [.command, .shift] && event.charactersIgnoringModifiers == "d" {
+                if let mwc = windowController as? MainWindowController {
+                    mwc.splitFocusedPane(axis: .vertical)
+                    return
+                }
+            }
+
+            // Cmd+Shift+W: close pane
+            if flags == [.command, .shift] && event.charactersIgnoringModifiers == "w" {
+                if let mwc = windowController as? MainWindowController {
+                    mwc.closeFocusedPane()
+                    return
+                }
+            }
+
+            // Cmd+Option+Arrows: focus navigation
+            if flags == [.command, .option] {
+                switch event.keyCode {
+                case 123: // left
+                    (windowController as? MainWindowController)?.moveFocus(.horizontal, positive: false); return
+                case 124: // right
+                    (windowController as? MainWindowController)?.moveFocus(.horizontal, positive: true); return
+                case 125: // down
+                    (windowController as? MainWindowController)?.moveFocus(.vertical, positive: true); return
+                case 126: // up
+                    (windowController as? MainWindowController)?.moveFocus(.vertical, positive: false); return
+                default: break
+                }
+            }
+
+            // Cmd+Ctrl+Arrows: resize
+            if flags == [.command, .control] {
+                switch event.keyCode {
+                case 123: (windowController as? MainWindowController)?.resizeSplit(.horizontal, delta: -0.05); return
+                case 124: (windowController as? MainWindowController)?.resizeSplit(.horizontal, delta: 0.05); return
+                case 125: (windowController as? MainWindowController)?.resizeSplit(.vertical, delta: 0.05); return
+                case 126: (windowController as? MainWindowController)?.resizeSplit(.vertical, delta: -0.05); return
+                default: break
+                }
+            }
+
+            // Cmd+Ctrl+=: reset ratio
+            if flags == [.command, .control] && event.charactersIgnoringModifiers == "=" {
+                (windowController as? MainWindowController)?.resetSplitRatio(); return
             }
         }
         super.sendEvent(event)
