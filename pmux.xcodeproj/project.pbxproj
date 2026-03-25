@@ -17,6 +17,7 @@
 		212BA7569BA2AAFE056F13A8 /* SemVer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2384EDD65D54C9A6D4971FEA /* SemVer.swift */; };
 		21CCFDD7EE576445346409A5 /* AgentDisplayHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08CDA11CCBF55DC4073FC13 /* AgentDisplayHelpers.swift */; };
 		2556DB2489BE4A7566E1F516 /* RepoPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 440A4772C0C9F3A0C6146943 /* RepoPage.swift */; };
+		2632F462CB4392719D450571 /* SplitContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D056595C81F90536C2628477 /* SplitContainerView.swift */; };
 		282213D6B0B2BB9C447673DC /* MainWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF00FDE4C61CF4A5B53653B4 /* MainWindowController.swift */; };
 		28523B1BA65A35CC29A3FACF /* SemanticColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99E89445321A270D7EB7BACF /* SemanticColors.swift */; };
 		2A0629AFA6E01C998879B2CD /* AgentHeadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2C2EB17847BCD154B8BDB3 /* AgentHeadTests.swift */; };
@@ -63,6 +64,7 @@
 		866C5ADAFF42DD60F0035AFF /* PanelBackdropView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E56CC79181D10B235559C7E5 /* PanelBackdropView.swift */; };
 		8A6B5B861C4143B2E920C8EF /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3B0220151909C4154BD755 /* NotificationManager.swift */; };
 		8B264CAEC54420B6E9ED79C7 /* MiniCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9A08D6353BB2E4926BE168E /* MiniCardView.swift */; };
+		91D2733D895C716AB0883A36 /* SplitContainerLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E4BE6DC1A7E0848AF906595 /* SplitContainerLayoutTests.swift */; };
 		925DF0288E39F74C063814A2 /* AgentCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21910C94882E5A917AF529EE /* AgentCardView.swift */; };
 		9270DDED37FCDAF556ADF0E6 /* UpdateError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43A984E0EA23D865CBD20EBF /* UpdateError.swift */; };
 		94B1A81898639BA14DFFCBE0 /* HooksChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7D298575FB388BE35E523E0 /* HooksChannel.swift */; };
@@ -189,6 +191,7 @@
 		775FFC41426A242F2A4754A4 /* UpdateCheckerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCheckerTests.swift; sourceTree = "<group>"; };
 		7DAC204D612A0B1E58C55957 /* SplitTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitTree.swift; sourceTree = "<group>"; };
 		7E03E31357AAE4FB9F6D1A71 /* AgentType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentType.swift; sourceTree = "<group>"; };
+		7E4BE6DC1A7E0848AF906595 /* SplitContainerLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitContainerLayoutTests.swift; sourceTree = "<group>"; };
 		7FE920B04BA43448FB39479C /* SessionManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManagerTests.swift; sourceTree = "<group>"; };
 		7FF70596F66D6407538CD7D4 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		8AAD1684AC3AA6D79A59F8E1 /* SidebarPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarPage.swift; sourceTree = "<group>"; };
@@ -222,6 +225,7 @@
 		C9A08D6353BB2E4926BE168E /* MiniCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniCardView.swift; sourceTree = "<group>"; };
 		CA43E5DDFECA4ED4B53F4306 /* WorktreeDiscoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeDiscoveryTests.swift; sourceTree = "<group>"; };
 		CF7728215FABC3279DD56BC0 /* SidebarViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarViewController.swift; sourceTree = "<group>"; };
+		D056595C81F90536C2628477 /* SplitContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitContainerView.swift; sourceTree = "<group>"; };
 		D4F7656A28D73AED5F839290 /* WebhookEventTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookEventTests.swift; sourceTree = "<group>"; };
 		D789C39B920D21F7CC6153BF /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
 		D973EE0658C900545268AB40 /* DiffOverlayViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffOverlayViewController.swift; sourceTree = "<group>"; };
@@ -288,6 +292,7 @@
 				3DD7A08F54D23BC2EEA9E9BD /* ProcessRunnerTests.swift */,
 				DD0B78C6BCFF989EA91143A7 /* SemVerTests.swift */,
 				7FE920B04BA43448FB39479C /* SessionManagerTests.swift */,
+				7E4BE6DC1A7E0848AF906595 /* SplitContainerLayoutTests.swift */,
 				9A2A27A1A20964D323435154 /* SplitNodeTests.swift */,
 				8FB8EE102BA233C405EDFE8E /* StatusDetectorTests.swift */,
 				4E73F70BC5F0D6B7C46124B2 /* StatusPublisherThreadTests.swift */,
@@ -503,6 +508,7 @@
 			isa = PBXGroup;
 			children = (
 				70353A508814DEFA658F70CC /* DividerView.swift */,
+				D056595C81F90536C2628477 /* SplitContainerView.swift */,
 			);
 			path = Split;
 			sourceTree = "<group>";
@@ -711,6 +717,7 @@
 				3AA64C23DA9C1477409C20E8 /* ProcessRunnerTests.swift in Sources */,
 				9B4B369D03F0053FD72D2B4D /* SemVerTests.swift in Sources */,
 				B7BEE4E9A2718F357B77BE26 /* SessionManagerTests.swift in Sources */,
+				91D2733D895C716AB0883A36 /* SplitContainerLayoutTests.swift in Sources */,
 				75E38783336AF75D873C0E3B /* SplitNodeTests.swift in Sources */,
 				F55F11B2C86D8D969EEC038F /* StatusDetectorTests.swift in Sources */,
 				5406AFFDB6D6EF3D194C2F9D /* StatusPublisherThreadTests.swift in Sources */,
@@ -770,6 +777,7 @@
 				F3CE919C1C0DA29E47F87EA1 /* SessionManager.swift in Sources */,
 				5ED4D3ECCE888CAC3E7B6056 /* SettingsViewController.swift in Sources */,
 				D416574A62F4391A82CB8B31 /* SidebarViewController.swift in Sources */,
+				2632F462CB4392719D450571 /* SplitContainerView.swift in Sources */,
 				D06F93FF3E5838AB6521B20C /* SplitNode.swift in Sources */,
 				C13D2A00E7593371A0415ADF /* SplitTree.swift in Sources */,
 				4AA669F5C78D8F447172DC06 /* StatusBadge.swift in Sources */,
