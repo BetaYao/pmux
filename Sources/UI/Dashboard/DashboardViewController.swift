@@ -200,7 +200,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
                 lastMessage: agent.lastMessage,
                 totalDuration: agent.totalDuration,
                 roundDuration: agent.roundDuration,
-                paneCount: agent.paneCount
+                paneCount: agent.paneCount,
+                paneStatuses: agent.paneStatuses
             )
             gridCards[index].isSelected = (agent.id == selectedAgentId)
         }
@@ -228,7 +229,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
                 status: agent.status,
                 lastMessage: agent.lastMessage,
                 totalDuration: agent.totalDuration,
-                roundDuration: agent.roundDuration
+                roundDuration: agent.roundDuration,
+                paneStatuses: agent.paneStatuses
             )
             miniCards[index].isSelected = (agent.id == selectedAgentId)
         }
@@ -644,7 +646,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
                 status: agent.status,
                 lastMessage: agent.lastMessage,
                 totalDuration: agent.totalDuration,
-                roundDuration: agent.roundDuration
+                roundDuration: agent.roundDuration,
+                paneStatuses: agent.paneStatuses
             )
             container.isSelected = (agent.id == selectedAgentId)
             container.translatesAutoresizingMaskIntoConstraints = false
@@ -686,7 +689,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
                 status: agent.status,
                 lastMessage: agent.lastMessage,
                 totalDuration: agent.totalDuration,
-                roundDuration: agent.roundDuration
+                roundDuration: agent.roundDuration,
+                paneStatuses: agent.paneStatuses
             )
             container.isSelected = (agent.id == selectedAgentId)
             container.translatesAutoresizingMaskIntoConstraints = false
@@ -731,7 +735,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
                 status: agent.status,
                 lastMessage: agent.lastMessage,
                 totalDuration: agent.totalDuration,
-                roundDuration: agent.roundDuration
+                roundDuration: agent.roundDuration,
+                paneStatuses: agent.paneStatuses
             )
             container.isSelected = (agent.id == selectedAgentId)
             container.translatesAutoresizingMaskIntoConstraints = false
@@ -756,7 +761,9 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
             thread: agent.thread,
             status: agent.status,
             total: agent.totalDuration,
-            round: agent.roundDuration
+            round: agent.roundDuration,
+            paneStatuses: agent.paneStatuses,
+            activePaneIndex: selectedPaneIndex + 1
         )
         // Navigation shows panes within the selected group, not groups
         panel.configureNavigation(currentIndex: selectedPaneIndex, total: agent.paneCount)
