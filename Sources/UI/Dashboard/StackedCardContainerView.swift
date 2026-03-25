@@ -67,15 +67,21 @@ final class StackedCardContainerView: NSView {
         let w = bounds.width
         let h = bounds.height
 
-        // Main card fills the container's own bounds
-        cardView.frame = NSRect(x: 0, y: 0, width: w, height: h)
+        // All cards (main + ghosts) share the same size, shrunken by maxOffset so the
+        // entire stack fits within the container bounds without overflowing into
+        // adjacent grid cells. Single-pane cards (no ghosts) fill the full cell.
+        //
+        // In AppKit Y-up coordinates, "visually top-left" = (x:0, y:maxOffset).
+        // Each ghost shifts right (+dx) and down on screen (-dy in AppKit).
+        let maxOffset = CGFloat(ghostViews.count * 6)  // 0, 6, or 12
+        let cardW = w - maxOffset
+        let cardH = h - maxOffset
 
-        // Ghost offsets: in AppKit (Y-up), down on screen = negative Y
-        // ghost at index 0 = closest (offset 6,6), index 1 = farthest (offset 12,12)
-        let offsets: [(CGFloat, CGFloat)] = [(6, -6), (12, -12)]
+        cardView.frame = NSRect(x: 0, y: maxOffset, width: cardW, height: cardH)
+
         for (i, ghost) in ghostViews.enumerated() {
-            let (dx, dy) = offsets[i]
-            ghost.frame = NSRect(x: dx, y: dy, width: w, height: h)
+            let offset = CGFloat((i + 1) * 6)
+            ghost.frame = NSRect(x: offset, y: maxOffset - offset, width: cardW, height: cardH)
         }
     }
 
