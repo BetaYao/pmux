@@ -24,6 +24,7 @@
 		2F12BBC742482E4FAC10BDF0 /* NotificationHistoryViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 453211D5B206B5E071DA0DEE /* NotificationHistoryViewController.swift */; };
 		32380B3024DDD3D12003DA35 /* UpdateCheckerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775FFC41426A242F2A4754A4 /* UpdateCheckerTests.swift */; };
 		332DF77CD5F8403C6A1C746D /* TitleBarPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DE5D0AB94CE35AF35035817 /* TitleBarPage.swift */; };
+		3356BF4B1BBD4085A425D33B /* DividerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70353A508814DEFA658F70CC /* DividerView.swift */; };
 		33B0C273D08D985D6CE702D3 /* TerminalSurfaceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17C9DD0712AB9D3C27656CD /* TerminalSurfaceManager.swift */; };
 		34699E6B6C74E95AA60DEF56 /* RepoViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3EBF78E376304D8F476EE59 /* RepoViewController.swift */; };
 		3611C15BCF49C71B8C3E4263 /* NotificationPanelPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAFB8C5CF1EEBC208E9A9EF9 /* NotificationPanelPage.swift */; };
@@ -182,6 +183,7 @@
 		6A9CF27FE3D892BF9938D96E /* pmux.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = pmux.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6AE64E9301722FAD9592FA2B /* pmuxUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = pmuxUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		6F9FFEA8DCA0DE251857F1A9 /* LayoutPopoverPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutPopoverPage.swift; sourceTree = "<group>"; };
+		70353A508814DEFA658F70CC /* DividerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DividerView.swift; sourceTree = "<group>"; };
 		717B331C5968FFF9C4CD4C4B /* TitleBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitleBarView.swift; sourceTree = "<group>"; };
 		75352E99A112855A0E137D7D /* TaskProgressParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskProgressParserTests.swift; sourceTree = "<group>"; };
 		775FFC41426A242F2A4754A4 /* UpdateCheckerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCheckerTests.swift; sourceTree = "<group>"; };
@@ -408,6 +410,7 @@
 				CACE37DA2DE9B9DC02514AD7 /* Repo */,
 				24B2FA2EC62423185B6677F7 /* Settings */,
 				B41EA3D30A0A8F4764F188ED /* Shared */,
+				B713D81A9578F438A5899707 /* Split */,
 				B80BC8F27191209B357A779C /* TitleBar */,
 				11F9299B5FD16D091A731141 /* Update */,
 			);
@@ -494,6 +497,14 @@
 				E1FE3D0F0630064FC882E582 /* Theme.swift */,
 			);
 			path = Shared;
+			sourceTree = "<group>";
+		};
+		B713D81A9578F438A5899707 /* Split */ = {
+			isa = PBXGroup;
+			children = (
+				70353A508814DEFA658F70CC /* DividerView.swift */,
+			);
+			path = Split;
 			sourceTree = "<group>";
 		};
 		B80BC8F27191209B357A779C /* TitleBar */ = {
@@ -732,6 +743,7 @@
 				6FD79D72C951209C51211464 /* Config.swift in Sources */,
 				A64BED7E816CBDA7FC1BF839 /* DashboardViewController.swift in Sources */,
 				DD7B3E20208412867CF4D9BD /* DiffOverlayViewController.swift in Sources */,
+				3356BF4B1BBD4085A425D33B /* DividerView.swift in Sources */,
 				F90B7A7C9191757A5EFAAA06 /* DraggableGridView.swift in Sources */,
 				7B8D95F137FDF201E7248AAE /* FocusPanelView.swift in Sources */,
 				74123E4320B6EA8E66744F8D /* FuzzyMatch.swift in Sources */,
