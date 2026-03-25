@@ -51,19 +51,31 @@ class GhosttyBridge {
             GhosttyBridge.readClipboard(userData: userData, clipboard: clipboard, state: state)
         }
         runtimeConfig.confirm_read_clipboard_cb = { userData, text, state, request in
-            // Auto-confirm clipboard reads
-            guard let userData, let state else { return }
-            // Find the surface for this clipboard state — for now just confirm
-            // The state is passed back to complete_clipboard_request
+            GhosttyBridge.confirmReadClipboard(userData: userData, text: text, state: state)
         }
         runtimeConfig.write_clipboard_cb = { userData, clipboard, content, contentLen, confirm in
             guard let content, contentLen > 0 else { return }
-            let item = content.pointee
-            if let data = item.data {
+            let items = UnsafeBufferPointer(start: content, count: Int(contentLen))
+
+            // Prefer text/plain MIME type, fall back to first item with data
+            var bestText: String?
+            var fallbackText: String?
+            for item in items {
+                guard let data = item.data else { continue }
                 let str = String(cString: data)
+                if let mime = item.mime {
+                    if String(cString: mime) == "text/plain" {
+                        bestText = str
+                        break
+                    }
+                }
+                if fallbackText == nil { fallbackText = str }
+            }
+
+            if let text = bestText ?? fallbackText {
                 let pasteboard = NSPasteboard.general
                 pasteboard.clearContents()
-                pasteboard.setString(str, forType: .string)
+                pasteboard.setString(text, forType: .string)
             }
         }
         runtimeConfig.close_surface_cb = { userData, processAlive in
@@ -136,21 +148,28 @@ class GhosttyBridge {
     }
 
     private static func readClipboard(userData: UnsafeMutableRawPointer?, clipboard: ghostty_clipboard_e, state: UnsafeMutableRawPointer?) {
-        // For clipboard reads, we need to complete the request with the clipboard content
-        // The state pointer needs to be passed back to ghostty_surface_complete_clipboard_request
-        // For now, we don't have a clean way to get the surface, so skip clipboard reads
-    }
+        // Called by Ghostty core when a terminal app requests clipboard content
+        // (e.g., via OSC 52). Find the focused surface and return clipboard data.
+        guard let view = NSApp.keyWindow?.firstResponder as? GhosttyNSView,
+              let surface = view.surface else { return }
 
-    private static func writeClipboard(content: UnsafePointer<ghostty_clipboard_content_s>?, count: Int, confirm: Bool) {
-        guard let content, count > 0 else { return }
-        let item = content.pointee
-        if let data = item.data {
-            let str = String(cString: data)
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.setString(str, forType: .string)
+        let pasteboard = NSPasteboard.general
+        guard let str = pasteboard.string(forType: .string), !str.isEmpty else { return }
+
+        str.withCString { ptr in
+            ghostty_surface_complete_clipboard_request(surface, ptr, state, false)
         }
     }
+
+    private static func confirmReadClipboard(userData: UnsafeMutableRawPointer?, text: UnsafePointer<CChar>?, state: UnsafeMutableRawPointer?) {
+        // Auto-confirm clipboard read requests
+        guard let text,
+              let view = NSApp.keyWindow?.firstResponder as? GhosttyNSView,
+              let surface = view.surface else { return }
+
+        ghostty_surface_complete_clipboard_request(surface, text, state, true)
+    }
+
 }
 
 // MARK: - Notifications

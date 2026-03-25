@@ -156,37 +156,43 @@ final class AIPanelView: NSView, NSTextViewDelegate {
     }
 
     func addBubble(role: BubbleRole, text: String) {
-        let bubble = makeBubble(role: role, text: text)
-        messagesStack.addArrangedSubview(bubble)
+        let work = {
+            let bubble = self.makeBubble(role: role, text: text)
+            self.messagesStack.addArrangedSubview(bubble)
 
-        // Alignment
-        switch role {
-        case .user:
-            bubble.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            if let container = bubble.superview {
-                NSLayoutConstraint.activate([
-                    bubble.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
-                    bubble.widthAnchor.constraint(lessThanOrEqualTo: container.widthAnchor, multiplier: 0.92),
-                ])
+            // Alignment
+            switch role {
+            case .user:
+                bubble.setContentHuggingPriority(.defaultLow, for: .horizontal)
+                if let container = bubble.superview {
+                    NSLayoutConstraint.activate([
+                        bubble.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+                        bubble.widthAnchor.constraint(lessThanOrEqualTo: container.widthAnchor, multiplier: 0.92),
+                    ])
+                }
+            case .assistant:
+                bubble.setContentHuggingPriority(.defaultLow, for: .horizontal)
+                if let container = bubble.superview {
+                    NSLayoutConstraint.activate([
+                        bubble.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+                        bubble.widthAnchor.constraint(lessThanOrEqualTo: container.widthAnchor, multiplier: 0.92),
+                    ])
+                }
             }
-        case .assistant:
-            bubble.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            if let container = bubble.superview {
-                NSLayoutConstraint.activate([
-                    bubble.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-                    bubble.widthAnchor.constraint(lessThanOrEqualTo: container.widthAnchor, multiplier: 0.92),
-                ])
-            }
-        }
 
-        // Scroll to bottom
-        DispatchQueue.main.async {
+            // Scroll to bottom
             let clipView = self.messagesScrollView.contentView
             let docHeight = self.messagesStack.fittingSize.height
             let scrollHeight = self.messagesScrollView.bounds.height
             if docHeight > scrollHeight {
                 clipView.scroll(to: NSPoint(x: 0, y: docHeight - scrollHeight))
             }
+        }
+
+        if Thread.isMainThread {
+            work()
+        } else {
+            DispatchQueue.main.async(execute: work)
         }
     }
 
@@ -322,7 +328,7 @@ final class AIPanelView: NSView, NSTextViewDelegate {
 
         // Set bubble colors and corner radii at creation time
         if role == .user {
-            container.layer?.backgroundColor = NSColor(hex: 0x263554).cgColor
+            container.layer?.backgroundColor = resolvedCGColor(SemanticColors.aiBubbleUser)
             // cornerRadius 8/8/2/8 — use maskedCorners for per-corner radii
             container.layer?.cornerRadius = 8
             container.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMaxXMaxYCorner]
@@ -334,7 +340,7 @@ final class AIPanelView: NSView, NSTextViewDelegate {
             // Re-reading: "cornerRadius 8/8/2/8" = TL/TR/BR/BL → BR is 2
             // AppKit CALayer doesn't support per-corner radii easily; use 8 as dominant and accept approximation.
         } else {
-            container.layer?.backgroundColor = NSColor(hex: 0x222222).cgColor
+            container.layer?.backgroundColor = resolvedCGColor(SemanticColors.panel2)
             // cornerRadius 8/8/8/2 — TL/TR/BR/BL → BL is 2
             container.layer?.cornerRadius = 8
         }
@@ -368,8 +374,8 @@ final class AIPanelView: NSView, NSTextViewDelegate {
         sendButton.layer?.cornerRadius = 6
 
         // Update bubble backgrounds
-        let userBg = NSColor(hex: 0x263554).cgColor
-        let assistantBg = NSColor(hex: 0x222222).cgColor
+        let userBg = resolvedCGColor(SemanticColors.aiBubbleUser)
+        let assistantBg = resolvedCGColor(SemanticColors.panel2)
         for view in messagesStack.arrangedSubviews {
             if view.identifier?.rawValue == "bubble.user" {
                 view.layer?.backgroundColor = userBg

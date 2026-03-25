@@ -27,7 +27,7 @@ Previously, single click in grid mode switched to the leftRight (speaker) layout
 1. Navigate to the project detail tab for the clicked worktree (`dashboardDidSelectProject(project:thread:)`)
 2. That method: switches to the correct repo tab, selects the worktree in the sidebar, and calls `makeFirstResponder` on the active pane terminal (`tree.focusedId` or first leaf)
 
-The existing `dashboardDidSelectProject(project:thread:)` delegate method already handles all three steps — no new delegate methods are needed.
+The existing `dashboardDidSelectProject(project:thread:)` delegate method handles steps 1–2; step 3 (focus) is performed inside `RepoViewController.showTerminal(at:)` which is called via `repoVC.selectWorktree(branch:)`. No new delegate methods are needed.
 
 ## Architecture
 
@@ -46,9 +46,28 @@ extension AgentCardDelegate {
 }
 ```
 
+### `AgentCardView` change
+
+Expose the existing click recognizer as an internal property so callers can establish gesture recognizer dependencies:
+
+```swift
+// Change from (in setup()):
+let click = NSClickGestureRecognizer(target: self, action: #selector(handleClick))
+addGestureRecognizer(click)
+
+// To:
+let clickRecognizer = NSClickGestureRecognizer(target: self, action: #selector(handleClick))
+addGestureRecognizer(clickRecognizer)
+
+// Stored as:
+private(set) var clickRecognizer: NSClickGestureRecognizer!
+```
+
+This allows `StackedCardContainerView` to neutralize `AgentCardView`'s unrestricted single-click recognizer so it does not compete with the container's double-click recognizer.
+
 ### `StackedCardContainerView` changes
 
-Replace the single `NSClickGestureRecognizer` with two recognizers:
+Replace the single `NSClickGestureRecognizer` with two recognizers, and neutralize `cardView`'s own recognizer:
 
 ```swift
 // Double-click recognizer
@@ -60,11 +79,18 @@ let singleClick = NSClickGestureRecognizer(target: self, action: #selector(handl
 singleClick.numberOfClicksRequired = 1
 singleClick.require(toFail: doubleClick)
 
+// Neutralize AgentCardView's own unrestricted click recognizer so it does not
+// compete with the container's double-click recognizer. Since cardView.delegate
+// is nil, cardView's recognizer is already a no-op functionally, but without
+// this dependency it would still consume the first tap and could prevent the
+// container's double-click from seeing the second tap.
+cardView.clickRecognizer.require(toFail: doubleClick)
+
 addGestureRecognizer(doubleClick)
 addGestureRecognizer(singleClick)
 ```
 
-`require(toFail:)` ensures single-click fires only when a double-click is ruled out. On a double-click, only `handleDoubleClick` fires.
+`require(toFail:)` on both the container's single-click and `cardView`'s recognizer ensures only `handleDoubleClick` fires on a double-click:
 
 ```swift
 @objc private func handleDoubleClick() {

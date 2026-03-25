@@ -1175,6 +1175,19 @@ class MainWindowController: NSWindowController {
         container.surfaceViews[surface.id] = surface.view
         container.layoutTree()
 
+        // Focus the new pane. Runs deferred so it fires after _createWithCommand's own
+        // deferred async (which skips makeFirstResponder when a GhosttyNSView already has focus).
+        // This ensures resignFirstResponder fires on the old pane, clearing its visual focus state.
+        let capturedLeafId = leafId
+        DispatchQueue.main.async { [weak container] in
+            guard let container,
+                  let tree = container.tree,
+                  let newLeaf = tree.allLeaves.first(where: { $0.id == capturedLeafId }),
+                  let newSurface = SurfaceRegistry.shared.surface(forId: newLeaf.surfaceId),
+                  let termView = newSurface.view else { return }
+            container.window?.makeFirstResponder(termView)
+        }
+
         // Update status publisher
         statusPublisher.updateSurfaces(surfaceManager.all)
 
@@ -1206,6 +1219,19 @@ class MainWindowController: NSWindowController {
            let focusSurface = SurfaceRegistry.shared.surface(forId: focusedLeaf.surfaceId),
            let terminalView = focusSurface.view {
             container.window?.makeFirstResponder(terminalView)
+        }
+
+        // Re-sync session layout after Ghostty processes the pixel resize.
+        // Mirrors the two-pass async pattern in TerminalSurface.create():
+        // pass 1 re-triggers the size, pass 2 reads the new grid (after Ghostty computed it).
+        if let focusedLeaf = tree.allLeaves.first(where: { $0.id == tree.focusedId }),
+           let focusSurface = SurfaceRegistry.shared.surface(forId: focusedLeaf.surfaceId) {
+            DispatchQueue.main.async {
+                focusSurface.syncSize()
+                DispatchQueue.main.async {
+                    focusSurface.refreshSessionLayout()
+                }
+            }
         }
 
         statusPublisher.updateSurfaces(surfaceManager.all)
@@ -1287,7 +1313,7 @@ class PmuxWindow: NSWindow {
             }
 
             // Cmd+Shift+D: vertical split
-            if flags == [.command, .shift] && event.charactersIgnoringModifiers == "d" {
+            if flags == [.command, .shift] && event.charactersIgnoringModifiers?.lowercased() == "d" {
                 mwc.splitFocusedPane(axis: .vertical)
                 return true
             }

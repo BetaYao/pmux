@@ -283,16 +283,17 @@ class TerminalSurfaceReparentTests: XCTestCase {
         XCTAssertFalse(GhosttyNSView.shouldHandleControlKeyEquivalent(event))
     }
 
-    func testDoCommand_RoutesPasteSelectorToPasteAction() {
+    func testDoCommand_PasteSelectorDoesNotCallPaste() {
+        // doCommand is a no-op; paste is handled in performKeyEquivalent
         let view = PasteTrackingGhosttyNSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         view.doCommand(by: #selector(NSText.paste(_:)))
-        XCTAssertEqual(view.pasteCallCount, 1)
+        XCTAssertEqual(view.pasteCallCount, 0)
     }
 
-    func testDoCommand_RoutesPasteAsPlainTextSelectorToPasteAction() {
+    func testDoCommand_PasteAsPlainTextSelectorDoesNotCallPaste() {
         let view = PasteTrackingGhosttyNSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         view.doCommand(by: NSSelectorFromString("pasteAsPlainText:"))
-        XCTAssertEqual(view.pasteCallCount, 1)
+        XCTAssertEqual(view.pasteCallCount, 0)
     }
 
     func testPerformKeyEquivalent_CommandVInvokesPasteAction() {
@@ -389,3 +390,4 @@ private final class PasteTrackingGhosttyNSView: GhosttyNSView {
         pasteCallCount += 1
     }
 }
+

@@ -7,6 +7,16 @@ protocol SplitContainerDelegate: AnyObject {
     func splitContainerDidChangeLayout(_ view: SplitContainerView)
 }
 
+// MARK: - Dim overlay
+
+/// Transparent overlay that dims unfocused panes. Passes all mouse events through
+/// so clicks reach the terminal view underneath.
+private class DimOverlayView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+// MARK: - SplitContainerView
+
 class SplitContainerView: NSView, DividerDelegate {
     var tree: SplitTree? { didSet { layoutTree() } }
     var surfaceViews: [String: NSView] = [:]
@@ -14,6 +24,7 @@ class SplitContainerView: NSView, DividerDelegate {
 
     private var dividers: [String: DividerView] = [:]
     private var leafFrames: [String: CGRect] = [:]
+    private var dimOverlays: [String: DimOverlayView] = [:]
 
     override var isFlipped: Bool { true }
 
@@ -53,8 +64,22 @@ class SplitContainerView: NSView, DividerDelegate {
                 view.removeFromSuperview()
                 addSubview(view)
             }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
             view.frame = frame
+            CATransaction.commit()
             view.setAccessibilityIdentifier("splitPane.leaf.\(leaf.id)")
+
+            // Keep tree.focusedId in sync when user clicks a pane directly
+            if let ghosttyView = view as? GhosttyNSView {
+                let leafId = leaf.id
+                ghosttyView.onFocusAcquired = { [weak self] in
+                    guard let self else { return }
+                    self.tree?.focusedId = leafId
+                    self.delegate?.splitContainer(self, didChangeFocus: leafId)
+                    self.updateDimOverlays()
+                }
+            }
 
             // Notify Ghostty of the new size
             if let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId) {
@@ -68,7 +93,64 @@ class SplitContainerView: NSView, DividerDelegate {
             divider.removeFromSuperview()
             dividers.removeValue(forKey: id)
         }
+        updateDimOverlays()
     }
+
+    // MARK: - Dim overlays
+
+    /// Update semi-transparent overlays that dim unfocused panes.
+    /// Overlays are sibling views above terminals but below dividers, and pass mouse events through.
+    func updateDimOverlays() {
+        guard let tree = tree else {
+            dimOverlays.values.forEach { $0.removeFromSuperview() }
+            dimOverlays.removeAll()
+            return
+        }
+
+        // Single pane: no dimming needed
+        guard tree.leafCount > 1 else {
+            dimOverlays.values.forEach { $0.removeFromSuperview() }
+            dimOverlays.removeAll()
+            return
+        }
+
+        let focusedId = tree.focusedId
+        let activeLeafIds = Set(tree.allLeaves.map(\.id))
+
+        // Remove overlays for leaves that no longer exist
+        for id in dimOverlays.keys where !activeLeafIds.contains(id) {
+            dimOverlays[id]?.removeFromSuperview()
+            dimOverlays.removeValue(forKey: id)
+        }
+
+        for leaf in tree.allLeaves {
+            if leaf.id == focusedId {
+                dimOverlays[leaf.id]?.removeFromSuperview()
+                dimOverlays.removeValue(forKey: leaf.id)
+            } else {
+                let frame = leafFrames[leaf.id] ?? .zero
+                if let overlay = dimOverlays[leaf.id] {
+                    CATransaction.begin()
+                    CATransaction.setDisableActions(true)
+                    overlay.frame = frame
+                    CATransaction.commit()
+                } else {
+                    let overlay = DimOverlayView(frame: frame)
+                    overlay.wantsLayer = true
+                    overlay.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.35).cgColor
+                    // Insert above terminal views but below dividers
+                    if let firstDivider = dividers.values.first {
+                        addSubview(overlay, positioned: .below, relativeTo: firstDivider)
+                    } else {
+                        addSubview(overlay)
+                    }
+                    dimOverlays[leaf.id] = overlay
+                }
+            }
+        }
+    }
+
+    // MARK: - Frame computation
 
     static func computeFrames(node: SplitNode, in rect: CGRect) -> [String: CGRect] {
         var result: [String: CGRect] = [:]
@@ -148,6 +230,8 @@ class SplitContainerView: NSView, DividerDelegate {
         }
     }
 
+    // MARK: - Focus navigation
+
     func focusLeaf(direction: SplitAxis, positive: Bool) -> String? {
         guard let tree = tree else { return nil }
         guard let currentFrame = leafFrames[tree.focusedId] else { return nil }
@@ -187,6 +271,7 @@ class SplitContainerView: NSView, DividerDelegate {
         if let best = bestLeaf {
             tree.focusedId = best
             delegate?.splitContainer(self, didChangeFocus: best)
+            updateDimOverlays()
         }
         return bestLeaf
     }

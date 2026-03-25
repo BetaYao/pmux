@@ -1,5 +1,11 @@
 import AppKit
 
+protocol TerminalSurfaceDelegate: AnyObject {
+    /// Called when a stale session was detected and the surface was recreated.
+    /// The delegate should re-embed `surface.view` into the appropriate container.
+    func terminalSurfaceDidRecover(_ surface: TerminalSurface)
+}
+
 /// Manages a single Ghostty terminal surface (NSView + PTY + Metal renderer).
 /// Each worktree gets one TerminalSurface instance.
 class TerminalSurface {
@@ -15,6 +21,11 @@ class TerminalSurface {
     var sessionName: String?
     /// Persistence backend for the sessionName above.
     var backend: String = "zmx"
+    /// Delegate notified when a stale session is recovered.
+    weak var delegate: TerminalSurfaceDelegate?
+
+    private var recoveryTimer: DispatchWorkItem?
+    private static let recoveryDelay: TimeInterval = 3.0
 
     /// Create the terminal surface and add it to the given container view.
     /// If sessionName is provided, the surface runs inside a persistent backend session.
@@ -43,6 +54,9 @@ class TerminalSurface {
             if backend == "zmx" {
                 let zmxCommand = "zmx attach \(sessionName)"
                 _createWithCommand(app: app, container: container, workingDirectory: workingDirectory, command: zmxCommand)
+                if surface != nil {
+                    scheduleZmxHealthCheck(sessionName: sessionName, container: container, workingDirectory: workingDirectory)
+                }
                 return surface != nil
             }
         }
@@ -106,7 +120,7 @@ class TerminalSurface {
         let scale = container.window?.backingScaleFactor ?? 2.0
         ghostty_surface_set_content_scale(s, Double(scale), Double(scale))
         ghostty_surface_set_size(s, UInt32(size.width * scale), UInt32(size.height * scale))
-        ghostty_surface_set_focus(s, true)
+        ghostty_surface_set_focus(s, false)  // Start unfocused; focus set via makeFirstResponder
     }
 
     /// Check if a tmux session with given name exists (async, avoids blocking main thread)
@@ -159,7 +173,12 @@ class TerminalSurface {
             guard let self, let view = self.view, let surface = self.surface else { return }
             self.syncContentScale()
             self.syncSize()
-            ghostty_surface_set_focus(surface, true)
+            // Restore AppKit first responder so keyboard events reach the terminal.
+            // Only grab focus if no other terminal already has it (e.g. in a split pane
+            // where showTerminal() already focused the correct leaf).
+            if !(view.window?.firstResponder is GhosttyNSView) {
+                view.window?.makeFirstResponder(view)
+            }
             view.needsDisplay = true
             // Third pass: read the grid size AFTER Ghostty has processed the resize
             DispatchQueue.main.async { [weak self] in
@@ -298,8 +317,98 @@ class TerminalSurface {
         }
     }
 
+    // MARK: - Zmx Session Recovery
+
+    /// Schedule a health check after zmx attach. If the surface has no content
+    /// after the delay, the session is presumed stale — kill it and recreate.
+    private func scheduleZmxHealthCheck(sessionName: String, container: NSView, workingDirectory: String?) {
+        recoveryTimer?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.checkZmxHealth(sessionName: sessionName, container: container, workingDirectory: workingDirectory)
+        }
+        recoveryTimer = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.recoveryDelay, execute: work)
+    }
+
+    private func checkZmxHealth(sessionName: String, container: NSView, workingDirectory: String?) {
+        // If the surface was already destroyed or has content, nothing to do
+        guard let _ = surface else { return }
+        let text = readViewportText() ?? ""
+        if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return }
+
+        NSLog("TerminalSurface: zmx session '%@' appears stale — recovering", sessionName)
+        recoverZmxSession(sessionName: sessionName, container: container, workingDirectory: workingDirectory)
+    }
+
+    private func recoverZmxSession(sessionName: String, container: NSView, workingDirectory: String?) {
+        // 1. Kill the stale session in the background
+        DispatchQueue.global(qos: .utility).async {
+            Self.forceKillZmxSession(sessionName)
+
+            // 2. Recreate on main thread
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                guard let app = GhosttyBridge.shared.app else { return }
+
+                // Tear down old surface
+                self.destroy()
+
+                // Recreate with a fresh zmx attach
+                let zmxCommand = "zmx attach \(sessionName)"
+                self._createWithCommand(app: app, container: container, workingDirectory: workingDirectory, command: zmxCommand)
+                self.delegate?.terminalSurfaceDidRecover(self)
+            }
+        }
+    }
+
+    /// Kill a zmx session, force-killing the daemon process and removing the
+    /// socket file if the graceful `zmx kill` fails (e.g. unreachable session).
+    static func forceKillZmxSession(_ sessionName: String) {
+        // Try graceful kill first
+        ProcessRunner.runSync(["zmx", "kill", sessionName])
+
+        // Check if session is still alive by parsing `zmx list`
+        guard let listOutput = ProcessRunner.output(["zmx", "list"]) else { return }
+        let stillAlive = listOutput
+            .components(separatedBy: "\n")
+            .contains { $0.contains("name=\(sessionName)") }
+        guard stillAlive else { return }
+
+        NSLog("TerminalSurface: zmx session '%@' still alive after kill — force cleaning", sessionName)
+
+        // Find and kill the daemon process via its socket
+        if let socketDir = Self.zmxSocketDir() {
+            let socketPath = (socketDir as NSString).appendingPathComponent(sessionName)
+            // Use lsof to find the PID holding the socket
+            if let lsofOutput = ProcessRunner.output(["lsof", "-t", socketPath]),
+               let pid = Int32(lsofOutput.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                kill(pid, SIGKILL)
+                NSLog("TerminalSurface: sent SIGKILL to zmx daemon pid %d", pid)
+                // Brief wait for process to exit
+                usleep(100_000) // 100ms
+            }
+            // Remove the stale socket file
+            try? FileManager.default.removeItem(atPath: socketPath)
+        }
+    }
+
+    /// Parse the zmx socket directory from `zmx version` output.
+    private static func zmxSocketDir() -> String? {
+        guard let versionOutput = ProcessRunner.output(["zmx", "version"]) else { return nil }
+        for line in versionOutput.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("socket_dir") {
+                let parts = trimmed.components(separatedBy: CharacterSet.whitespaces)
+                return parts.last
+            }
+        }
+        return nil
+    }
+
     /// Destroy the surface and clean up
     func destroy() {
+        recoveryTimer?.cancel()
+        recoveryTimer = nil
         if let surface {
             ghostty_surface_request_close(surface)
         }
@@ -323,6 +432,8 @@ class GhosttyNSView: NSView, NSTextInputClient {
     weak var terminalSurface: TerminalSurface?
     private var markedText = NSMutableAttributedString()
     private var keyTextAccumulator: [String]?
+    /// Called when this view becomes first responder (e.g. on mouse click).
+    var onFocusAcquired: (() -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -404,6 +515,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
         if let surface {
             ghostty_surface_set_focus(surface, true)
         }
+        onFocusAcquired?()
         return super.becomeFirstResponder()
     }
 
@@ -457,22 +569,24 @@ class GhosttyNSView: NSView, NSTextInputClient {
     }
 
     override func doCommand(by selector: Selector) {
-        if selector == #selector(NSText.paste(_:)) || selector == NSSelectorFromString("pasteAsPlainText:") {
-            paste(nil)
-            return
-        }
-
-        // Prevent AppKit from beeping for unhandled selector commands.
+        // No-op: prevents AppKit from beeping for unhandled selector commands.
+        // Paste is handled in performKeyEquivalent via isPasteShortcut.
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // performKeyEquivalent is called on every view in the hierarchy, not just the
+        // first responder. Only the focused GhosttyNSView should handle events to
+        // prevent multi-pane routing bugs (paste going to pane 1, etc.).
         guard event.type == .keyDown else { return false }
-        if Self.isPasteShortcut(event) {
-            paste(nil)
-            return true
-        }
-        if Self.shouldHandleControlKeyEquivalent(event) {
-            keyDown(with: event)
+        guard window?.firstResponder === self else { return false }
+
+        if Self.isPasteShortcut(event) || Self.shouldHandleControlKeyEquivalent(event) {
+            // Delegate to Ghostty's native key handling. This preserves:
+            //  - Image paste support (Ghostty reads clipboard natively, not just .string)
+            //  - Correct Ctrl+C behavior per the session's keyboard protocol level
+            if let surface {
+                sendKey(surface: surface, action: GHOSTTY_ACTION_PRESS, event: event, text: nil)
+            }
             return true
         }
         return super.performKeyEquivalent(with: event)
@@ -480,9 +594,9 @@ class GhosttyNSView: NSView, NSTextInputClient {
 
     @IBAction func paste(_ sender: Any?) {
         guard let surface else { return }
-        let action = "paste_from_clipboard"
-        action.withCString { cstr in
-            _ = ghostty_surface_binding_action(surface, cstr, UInt(strlen(cstr)))
+        guard let str = NSPasteboard.general.string(forType: .string), !str.isEmpty else { return }
+        str.withCString { ptr in
+            ghostty_surface_text(surface, ptr, UInt(strlen(ptr)))
         }
     }
 
@@ -614,7 +728,6 @@ class GhosttyNSView: NSView, NSTextInputClient {
         if flags.contains(.control) { mods |= GHOSTTY_MODS_CTRL.rawValue }
         if flags.contains(.option) { mods |= GHOSTTY_MODS_ALT.rawValue }
         if flags.contains(.command) { mods |= GHOSTTY_MODS_SUPER.rawValue }
-        if flags.contains(.capsLock) { mods |= GHOSTTY_MODS_CAPS.rawValue }
         return ghostty_input_mods_e(rawValue: mods)
     }
 
@@ -626,9 +739,25 @@ class GhosttyNSView: NSView, NSTextInputClient {
     ) {
         var keyInput = ghostty_input_key_s()
         keyInput.action = action
+        keyInput.composing = hasMarkedText()
+
         if let event {
             keyInput.keycode = UInt32(event.keyCode)
-            keyInput.mods = modsFromEvent(event)
+            keyInput.mods = ghostty_surface_key_translation_mods(surface, modsFromEvent(event))
+
+            // consumed_mods: Shift and Option are "consumed" by text generation
+            // (they change the character produced). Ctrl and Cmd are not consumed.
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            var consumed: UInt32 = 0
+            if flags.contains(.shift) { consumed |= GHOSTTY_MODS_SHIFT.rawValue }
+            if flags.contains(.option) { consumed |= GHOSTTY_MODS_ALT.rawValue }
+            keyInput.consumed_mods = ghostty_input_mods_e(rawValue: consumed)
+
+            // unshifted_codepoint: Unicode scalar with no modifiers applied
+            if #available(macOS 13.0, *),
+               let unshifted = event.characters(byApplyingModifiers: [])?.first {
+                keyInput.unshifted_codepoint = unshifted.unicodeScalars.first.map { UInt32($0.value) } ?? 0
+            }
         } else {
             keyInput.keycode = 0
             keyInput.mods = GHOSTTY_MODS_NONE

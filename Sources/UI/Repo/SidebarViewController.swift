@@ -48,7 +48,7 @@ class SidebarViewController: NSViewController {
 
         threadsLabel.translatesAutoresizingMaskIntoConstraints = false
         threadsLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        threadsLabel.textColor = NSColor(white: 0.667, alpha: 1) // #aaa
+        threadsLabel.textColor = SemanticColors.muted
         threadsLabel.drawsBackground = false
         threadsLabel.isBezeled = false
         threadsLabel.isEditable = false
@@ -56,7 +56,7 @@ class SidebarViewController: NSViewController {
 
         countLabel.translatesAutoresizingMaskIntoConstraints = false
         countLabel.font = NSFont.systemFont(ofSize: 11)
-        countLabel.textColor = NSColor(white: 0.333, alpha: 1) // #555
+        countLabel.textColor = SemanticColors.subtle
         countLabel.drawsBackground = false
         countLabel.isBezeled = false
         countLabel.isEditable = false
@@ -227,6 +227,28 @@ class SidebarViewController: NSViewController {
             suppressSelectionNotification = true
             tableView.selectRowIndexes(IndexSet(integer: selectedIndex), byExtendingSelection: false)
             suppressSelectionNotification = false
+        }
+    }
+
+    /// Replace worktree infos (e.g. after branch change) without resetting selection state.
+    /// Only reloads rows whose display name actually changed.
+    func updateWorktreeInfos(_ newWorktrees: [WorktreeInfo]) {
+        let oldWorktrees = worktrees
+        worktrees = newWorktrees
+        countLabel.stringValue = "\(newWorktrees.count)"
+
+        // Reload only rows where the display name changed
+        var changedRows = IndexSet()
+        for i in 0..<min(oldWorktrees.count, newWorktrees.count) {
+            if oldWorktrees[i].displayName != newWorktrees[i].displayName {
+                changedRows.insert(i)
+            }
+        }
+        if oldWorktrees.count != newWorktrees.count {
+            // Structural change — full reload
+            tableView.reloadData()
+        } else if !changedRows.isEmpty {
+            tableView.reloadData(forRowIndexes: changedRows, columnIndexes: IndexSet(integer: 0))
         }
     }
 

@@ -163,8 +163,6 @@ final class FocusPanelView: NSView {
             enterButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
             enterButton.widthAnchor.constraint(equalToConstant: 26),
             enterButton.heightAnchor.constraint(equalToConstant: 24),
-
-            durationLabel.trailingAnchor.constraint(lessThanOrEqualTo: prevButton.leadingAnchor, constant: -8),
         ])
 
         // Compression resistance so labels don't fight
@@ -205,6 +203,8 @@ final class FocusPanelView: NSView {
         headerView.addSubview(nextButton)
 
         NSLayoutConstraint.activate([
+            durationLabel.trailingAnchor.constraint(lessThanOrEqualTo: prevButton.leadingAnchor, constant: -8),
+
             prevButton.trailingAnchor.constraint(equalTo: counterLabel.leadingAnchor, constant: -2),
             prevButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
             prevButton.widthAnchor.constraint(equalToConstant: 26),
