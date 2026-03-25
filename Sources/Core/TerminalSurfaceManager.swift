@@ -1,51 +1,87 @@
 import Foundation
 
-/// Manages the lifecycle of TerminalSurface instances, keyed by worktree path.
+/// Manages the lifecycle of SplitTree instances, keyed by worktree path.
 class TerminalSurfaceManager {
-    private var surfaces: [String: TerminalSurface] = [:]
+    private var trees: [String: SplitTree] = [:]
 
-    /// Get or create a surface for the given worktree info.
-    func surface(for info: WorktreeInfo, backend: String) -> TerminalSurface {
-        if let existing = surfaces[info.path] {
+    /// Get or create a SplitTree for the given worktree info.
+    /// Creates a single-leaf tree and registers the surface in SurfaceRegistry.
+    func tree(for info: WorktreeInfo, backend: String) -> SplitTree {
+        if let existing = trees[info.path] {
             return existing
         }
         let surface = TerminalSurface()
+        let sessionName = backend != "local" ? SessionManager.persistentSessionName(for: info.path) : ""
         if backend != "local" {
-            surface.sessionName = SessionManager.persistentSessionName(for: info.path)
+            surface.sessionName = sessionName
             surface.backend = backend
         }
-        surfaces[info.path] = surface
-        return surface
+        SurfaceRegistry.shared.register(surface)
+        let leafId = UUID().uuidString
+        let splitTree = SplitTree(
+            worktreePath: info.path,
+            rootLeafId: leafId,
+            surfaceId: surface.id,
+            sessionName: sessionName
+        )
+        trees[info.path] = splitTree
+        return splitTree
     }
 
-    /// Look up an existing surface by worktree path.
-    func surface(forPath path: String) -> TerminalSurface? {
-        surfaces[path]
+    /// Look up an existing tree by worktree path.
+    func tree(forPath path: String) -> SplitTree? {
+        trees[path]
     }
 
-    /// Remove and destroy a surface for the given path.
+    /// Register a pre-built tree (e.g. restored from config) for the given path.
+    /// Does nothing if a tree already exists for that path.
+    func registerTree(_ tree: SplitTree, forPath path: String) {
+        guard trees[path] == nil else { return }
+        trees[path] = tree
+    }
+
+    /// Remove and destroy a tree for the given path.
     @discardableResult
-    func removeSurface(forPath path: String) -> TerminalSurface? {
-        guard let surface = surfaces.removeValue(forKey: path) else { return nil }
-        surface.destroy()
-        return surface
-    }
-
-    /// Remove all surfaces, destroying each.
-    func removeAll() {
-        for (_, surface) in surfaces {
-            surface.destroy()
+    func removeTree(forPath path: String) -> SplitTree? {
+        guard let tree = trees.removeValue(forKey: path) else { return nil }
+        for leaf in tree.allLeaves {
+            if let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId) {
+                surface.destroy()
+            }
+            SurfaceRegistry.shared.unregister(leaf.surfaceId)
         }
-        surfaces.removeAll()
+        return tree
     }
 
-    /// All current surface entries.
-    var all: [String: TerminalSurface] {
-        surfaces
+    /// Remove all trees, destroying each surface.
+    func removeAll() {
+        for (_, tree) in trees {
+            for leaf in tree.allLeaves {
+                if let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId) {
+                    surface.destroy()
+                }
+                SurfaceRegistry.shared.unregister(leaf.surfaceId)
+            }
+        }
+        trees.removeAll()
     }
 
-    /// Number of managed surfaces.
+    /// All current tree entries.
+    var all: [String: SplitTree] {
+        trees
+    }
+
+    /// Number of managed trees.
     var count: Int {
-        surfaces.count
+        trees.count
+    }
+
+    // MARK: - Legacy surface accessors (for AgentHead / backward compat)
+
+    /// Returns the primary (first) surface for the given worktree path, if any.
+    func primarySurface(forPath path: String) -> TerminalSurface? {
+        guard let tree = trees[path],
+              let firstLeaf = tree.allLeaves.first else { return nil }
+        return SurfaceRegistry.shared.surface(forId: firstLeaf.surfaceId)
     }
 }

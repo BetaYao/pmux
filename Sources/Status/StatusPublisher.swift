@@ -42,14 +42,18 @@ class StatusPublisher {
         lowercasedAgentNames = agentConfig.agents.map { ($0.name.lowercased(), $0) }
     }
 
-    func start(surfaces: [String: TerminalSurface]) {
-        let inputWorktreePaths = Array(surfaces.keys)
+    func start(trees: [String: SplitTree]) {
+        let inputWorktreePaths = Array(trees.keys)
         lock.lock()
         self.surfaces = [:]
         self.worktreePaths = [:]
-        for (worktreePath, surface) in surfaces {
-            self.surfaces[surface.id] = surface
-            self.worktreePaths[surface.id] = worktreePath
+        for (worktreePath, tree) in trees {
+            for leaf in tree.allLeaves {
+                if let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId) {
+                    self.surfaces[surface.id] = surface
+                    self.worktreePaths[surface.id] = worktreePath
+                }
+            }
         }
         // Create trackers for each surface
         for terminalID in self.surfaces.keys {
@@ -74,14 +78,18 @@ class StatusPublisher {
         timer = nil
     }
 
-    func updateSurfaces(_ surfaces: [String: TerminalSurface]) {
-        let inputWorktreePaths = Array(surfaces.keys)
+    func updateSurfaces(_ trees: [String: SplitTree]) {
+        let inputWorktreePaths = Array(trees.keys)
         lock.lock()
         self.surfaces = [:]
         self.worktreePaths = [:]
-        for (worktreePath, surface) in surfaces {
-            self.surfaces[surface.id] = surface
-            self.worktreePaths[surface.id] = worktreePath
+        for (worktreePath, tree) in trees {
+            for leaf in tree.allLeaves {
+                if let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId) {
+                    self.surfaces[surface.id] = surface
+                    self.worktreePaths[surface.id] = worktreePath
+                }
+            }
         }
         // Add trackers for new surfaces
         for terminalID in self.surfaces.keys {

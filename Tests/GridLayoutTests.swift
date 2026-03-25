@@ -445,7 +445,10 @@ final class GridLayoutTests: XCTestCase {
         repoVC.loadViewIfNeeded()
 
         let info = WorktreeInfo(path: NSHomeDirectory(), branch: "main", commitHash: "abc", isMainWorktree: true)
-        repoVC.configure(worktrees: [info], surfaces: [info.path: TerminalSurface()])
+        let surface = TerminalSurface()
+        SurfaceRegistry.shared.register(surface)
+        let splitTree = SplitTree(worktreePath: info.path, rootLeafId: UUID().uuidString, surfaceId: surface.id, sessionName: "")
+        repoVC.configure(worktrees: [info], trees: [info.path: splitTree])
 
         RunLoop.main.run(until: Date().addingTimeInterval(0.01))
         window.makeFirstResponderCallCount = 0

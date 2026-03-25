@@ -1,7 +1,16 @@
 import AppKit
 
+enum NavigationDirection {
+    case next, previous
+}
+
 protocol FocusPanelDelegate: AnyObject {
     func focusPanelDidRequestEnterProject(_ projectName: String)
+    func focusPanelDidRequestNavigate(_ panel: FocusPanelView, direction: NavigationDirection)
+}
+
+extension FocusPanelDelegate {
+    func focusPanelDidRequestNavigate(_ panel: FocusPanelView, direction: NavigationDirection) {}
 }
 
 final class FocusPanelView: NSView {
@@ -29,6 +38,10 @@ final class FocusPanelView: NSView {
     private let durationLabel = NSTextField(labelWithString: "")
     private let enterButton = NSButton()
     private var projectName: String = ""
+
+    let prevButton = NSButton()
+    let nextButton = NSButton()
+    let counterLabel = NSTextField(labelWithString: "")
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -62,6 +75,7 @@ final class FocusPanelView: NSView {
         setAccessibilityIdentifier("dashboard.focusPanel")
 
         setupHeader()
+        setupNavigation()
         setupTerminalContainer()
     }
 
@@ -150,7 +164,7 @@ final class FocusPanelView: NSView {
             enterButton.widthAnchor.constraint(equalToConstant: 26),
             enterButton.heightAnchor.constraint(equalToConstant: 24),
 
-            durationLabel.trailingAnchor.constraint(lessThanOrEqualTo: enterButton.leadingAnchor, constant: -8),
+            durationLabel.trailingAnchor.constraint(lessThanOrEqualTo: prevButton.leadingAnchor, constant: -8),
         ])
 
         // Compression resistance so labels don't fight
@@ -158,6 +172,75 @@ final class FocusPanelView: NSView {
         metaLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         durationLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         nameLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+    }
+
+    private func setupNavigation() {
+        prevButton.bezelStyle = .texturedRounded
+        prevButton.isBordered = false
+        prevButton.image = NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Previous")
+        prevButton.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        prevButton.target = self
+        prevButton.action = #selector(prevClicked)
+        prevButton.setAccessibilityIdentifier("dashboard.focusPanel.prev")
+        prevButton.translatesAutoresizingMaskIntoConstraints = false
+        prevButton.isHidden = true
+        headerView.addSubview(prevButton)
+
+        counterLabel.font = NSFont.monospacedDigitSystemFont(ofSize: Typography.secondaryPointSize, weight: .medium)
+        counterLabel.textColor = SemanticColors.muted
+        counterLabel.alignment = .center
+        counterLabel.translatesAutoresizingMaskIntoConstraints = false
+        counterLabel.isHidden = true
+        headerView.addSubview(counterLabel)
+
+        nextButton.bezelStyle = .texturedRounded
+        nextButton.isBordered = false
+        nextButton.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Next")
+        nextButton.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        nextButton.target = self
+        nextButton.action = #selector(nextClicked)
+        nextButton.setAccessibilityIdentifier("dashboard.focusPanel.next")
+        nextButton.translatesAutoresizingMaskIntoConstraints = false
+        nextButton.isHidden = true
+        headerView.addSubview(nextButton)
+
+        NSLayoutConstraint.activate([
+            prevButton.trailingAnchor.constraint(equalTo: counterLabel.leadingAnchor, constant: -2),
+            prevButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+            prevButton.widthAnchor.constraint(equalToConstant: 26),
+            prevButton.heightAnchor.constraint(equalToConstant: 24),
+
+            counterLabel.trailingAnchor.constraint(equalTo: nextButton.leadingAnchor, constant: -2),
+            counterLabel.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+
+            nextButton.trailingAnchor.constraint(equalTo: enterButton.leadingAnchor, constant: -8),
+            nextButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+            nextButton.widthAnchor.constraint(equalToConstant: 26),
+            nextButton.heightAnchor.constraint(equalToConstant: 24),
+        ])
+    }
+
+    @objc private func prevClicked() {
+        delegate?.focusPanelDidRequestNavigate(self, direction: .previous)
+    }
+
+    @objc private func nextClicked() {
+        delegate?.focusPanelDidRequestNavigate(self, direction: .next)
+    }
+
+    func configureNavigation(currentIndex: Int, total: Int) {
+        let showNav = total > 1
+        prevButton.isHidden = !showNav
+        nextButton.isHidden = !showNav
+        counterLabel.isHidden = !showNav
+
+        guard showNav else { return }
+
+        counterLabel.stringValue = "\(currentIndex + 1)/\(total)"
+        prevButton.isEnabled = currentIndex > 0
+        prevButton.alphaValue = currentIndex > 0 ? 1.0 : 0.3
+        nextButton.isEnabled = currentIndex < total - 1
+        nextButton.alphaValue = currentIndex < total - 1 ? 1.0 : 0.3
     }
 
     private func setupTerminalContainer() {

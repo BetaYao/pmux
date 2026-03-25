@@ -59,10 +59,10 @@ enum MenuBuilder {
         dashItem.target = target
         viewMenu.addItem(dashItem)
 
-        let closeTabItem = NSMenuItem(title: "Close Tab", action: #selector(MainWindowController.closeCurrentTab), keyEquivalent: "w")
-        closeTabItem.keyEquivalentModifierMask = .command
-        closeTabItem.target = target
-        viewMenu.addItem(closeTabItem)
+        let closePaneItem = NSMenuItem(title: "Close Pane", action: #selector(MainWindowController.closePaneOrTab), keyEquivalent: "w")
+        closePaneItem.keyEquivalentModifierMask = .command
+        closePaneItem.target = target
+        viewMenu.addItem(closePaneItem)
 
         let diffItem = NSMenuItem(title: "Show Diff...", action: #selector(MainWindowController.showDiffOverlay), keyEquivalent: "")
         diffItem.target = target

@@ -23,9 +23,10 @@ class RepoViewController: NSViewController {
     private var isStacked = false
 
     private var worktrees: [WorktreeInfo] = []
-    private var surfaces: [String: TerminalSurface] = [:]
+    private var trees: [String: SplitTree] = [:]
     private var activeWorktreeIndex: Int = 0
-    private var activeSurface: TerminalSurface?
+    private var splitContainers: [String: SplitContainerView] = [:]
+    var activeSplitContainer: SplitContainerView?
     private var needsTerminalOnLayout = false
 
     private func applyTerminalAppearanceStyle() {
@@ -94,7 +95,7 @@ class RepoViewController: NSViewController {
             needsTerminalOnLayout = false
             showTerminal(at: activeWorktreeIndex)
         } else {
-            activeSurface?.syncSize()
+            activeSplitContainer?.layoutTree()
         }
     }
 
@@ -149,9 +150,9 @@ class RepoViewController: NSViewController {
 
     // MARK: - Configuration
 
-    func configure(worktrees: [WorktreeInfo], surfaces: [String: TerminalSurface]) {
+    func configure(worktrees: [WorktreeInfo], trees: [String: SplitTree]) {
         self.worktrees = worktrees
-        self.surfaces = surfaces
+        self.trees = trees
         sidebarVC.setWorktrees(worktrees)
 
         if !worktrees.isEmpty {
@@ -164,9 +165,9 @@ class RepoViewController: NSViewController {
         }
     }
 
-    func addWorktree(_ info: WorktreeInfo, surface: TerminalSurface) {
+    func addWorktree(_ info: WorktreeInfo, tree: SplitTree) {
         worktrees.append(info)
-        surfaces[info.path] = surface
+        trees[info.path] = tree
         sidebarVC.setWorktrees(worktrees)
         showTerminal(at: worktrees.count - 1)
     }
@@ -185,23 +186,56 @@ class RepoViewController: NSViewController {
         activeWorktreeIndex = index
 
         let info = worktrees[index]
-        guard let surface = surfaces[info.path] else { return }
+        guard let tree = trees[info.path] else { return }
 
-        // Detach previous surface
-        activeSurface?.view?.removeFromSuperview()
-
-        if surface.surface == nil {
-            _ = surface.create(in: terminalContainer, workingDirectory: info.path, sessionName: surface.sessionName)
+        // Get or create a SplitContainerView for this worktree
+        let container: SplitContainerView
+        if let existing = splitContainers[info.path] {
+            container = existing
         } else {
-            surface.reparent(to: terminalContainer)
+            let newContainer = SplitContainerView(frame: terminalContainer.bounds)
+            newContainer.delegate = self
+            splitContainers[info.path] = newContainer
+            container = newContainer
         }
 
-        activeSurface = surface
+        // Detach previous container only if switching to a different one
+        if let prev = activeSplitContainer, prev !== container {
+            prev.removeFromSuperview()
+        }
+
+        // Populate surfaceViews from SurfaceRegistry
+        var surfaceViews: [String: NSView] = [:]
+        for leaf in tree.allLeaves {
+            if let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId) {
+                // Ensure surface is created
+                if surface.surface == nil {
+                    _ = surface.create(in: terminalContainer, workingDirectory: info.path, sessionName: surface.sessionName)
+                }
+                if let termView = surface.view {
+                    surfaceViews[leaf.surfaceId] = termView
+                }
+            }
+        }
+        container.surfaceViews = surfaceViews
+        container.tree = tree
+        activeSplitContainer = container
+
+        // Embed the container only when it has live surface views
+        if !surfaceViews.isEmpty {
+            container.frame = terminalContainer.bounds
+            if container.superview != terminalContainer {
+                terminalContainer.addSubview(container)
+            }
+        }
+
         sidebarVC.selectWorktree(at: index)
 
-        // Focus the terminal so the user can type immediately
-        if let terminalView = surface.view {
-            view.window?.makeFirstResponder(terminalView)
+        // Focus the primary surface only if it has a live view
+        if let firstLeaf = tree.allLeaves.first,
+           let surface = SurfaceRegistry.shared.surface(forId: firstLeaf.surfaceId),
+           let termView = surface.view {
+            view.window?.makeFirstResponder(termView)
         }
     }
 
@@ -215,13 +249,18 @@ class RepoViewController: NSViewController {
         showTerminal(at: index)
     }
 
+    func updateWorktreeInfos(_ newWorktrees: [WorktreeInfo]) {
+        self.worktrees = newWorktrees
+        sidebarVC.updateWorktreeInfos(newWorktrees)
+    }
+
     func updateStatus(for path: String, status: AgentStatus, lastMessage: String = "") {
         sidebarVC.updateStatus(for: path, status: status, lastMessage: lastMessage)
     }
 
-    /// Detach the active terminal so it can be reparented elsewhere
+    /// Detach the active split container so it can be reparented elsewhere
     func detachActiveTerminal() {
-        activeSurface?.view?.removeFromSuperview()
+        activeSplitContainer?.removeFromSuperview()
     }
 }
 
@@ -260,6 +299,40 @@ extension RepoViewController: SidebarDelegate {
     func sidebar(_ sidebar: SidebarViewController, didRequestShowDiffAt index: Int) {
         guard index >= 0, index < worktrees.count else { return }
         repoDelegate?.repoView(self, didRequestShowDiffForWorktreePath: worktrees[index].path)
+    }
+}
+
+// MARK: - TerminalSurfaceDelegate
+
+extension RepoViewController: TerminalSurfaceDelegate {
+    func terminalSurfaceDidRecover(_ surface: TerminalSurface) {
+        // Find the worktree that owns this surface and re-embed it
+        guard let container = activeSplitContainer,
+              let tree = container.tree,
+              tree.allSurfaceIds.contains(surface.id),
+              let termView = surface.view else { return }
+        container.surfaceViews[surface.id] = termView
+        container.layoutTree()
+    }
+}
+
+// MARK: - SplitContainerDelegate
+
+extension RepoViewController: SplitContainerDelegate {
+    func splitContainer(_ view: SplitContainerView, didChangeFocus leafId: String) {
+        // Task 8 will wire focus management
+    }
+
+    func splitContainer(_ view: SplitContainerView, didRequestSplit axis: SplitAxis) {
+        // Task 8 will wire split creation
+    }
+
+    func splitContainer(_ view: SplitContainerView, didRequestClosePane leafId: String) {
+        // Task 8 will wire pane closing
+    }
+
+    func splitContainerDidChangeLayout(_ view: SplitContainerView) {
+        // Task 8 will persist layout changes
     }
 }
 

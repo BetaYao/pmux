@@ -13,6 +13,7 @@ struct Config: Codable {
     var dashboardLayout: String
     var themeMode: String
     var worktreeStartedAt: [String: String]
+    var splitLayouts: [String: CodableSplitNode]
 
     enum CodingKeys: String, CodingKey {
         case workspacePaths = "workspace_paths"
@@ -27,6 +28,7 @@ struct Config: Codable {
         case dashboardLayout = "dashboard_layout"
         case themeMode = "theme_mode"
         case worktreeStartedAt = "worktree_started_at"
+        case splitLayouts = "split_layouts"
     }
 
     init() {
@@ -42,6 +44,7 @@ struct Config: Codable {
         dashboardLayout = "left-right"
         themeMode = "system"
         worktreeStartedAt = [:]
+        splitLayouts = [:]
     }
 
     init(from decoder: Decoder) throws {
@@ -62,6 +65,7 @@ struct Config: Codable {
         dashboardLayout = try container.decodeIfPresent(String.self, forKey: .dashboardLayout) ?? "left-right"
         themeMode = try container.decodeIfPresent(String.self, forKey: .themeMode) ?? "system"
         worktreeStartedAt = try container.decodeIfPresent([String: String].self, forKey: .worktreeStartedAt) ?? [:]
+        splitLayouts = try container.decodeIfPresent([String: CodableSplitNode].self, forKey: .splitLayouts) ?? [:]
     }
 
     static let configDir = FileManager.default.homeDirectoryForCurrentUser
