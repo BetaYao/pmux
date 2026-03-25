@@ -24,6 +24,7 @@ struct AgentDisplayInfo {
     let roundDuration: String   // "HH:MM:SS" format
     let surface: TerminalSurface
     let worktreePath: String    // needed to lazily create the terminal
+    let paneCount: Int          // number of split panes (1 = no badge)
 }
 
 // MARK: - Pasteboard type (used by DraggableGridView)
@@ -177,7 +178,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
                 status: agent.status,
                 lastMessage: agent.lastMessage,
                 totalDuration: agent.totalDuration,
-                roundDuration: agent.roundDuration
+                roundDuration: agent.roundDuration,
+                paneCount: agent.paneCount
             )
         }
     }
@@ -547,7 +549,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
                 status: agent.status,
                 lastMessage: agent.lastMessage,
                 totalDuration: agent.totalDuration,
-                roundDuration: agent.roundDuration
+                roundDuration: agent.roundDuration,
+                paneCount: agent.paneCount
             )
             card.translatesAutoresizingMaskIntoConstraints = true
             gridCards.append(card)
@@ -728,6 +731,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     /// Embed a terminal surface into a container, creating it if needed.
     private func embedSurface(_ agent: AgentDisplayInfo, in container: NSView) {
         let surface = agent.surface
+        surface.delegate = self
         if surface.surface == nil {
             _ = surface.create(in: container, workingDirectory: agent.worktreePath, sessionName: surface.sessionName)
         } else {
@@ -824,6 +828,28 @@ private class DashboardRootView: NSView {
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         needsDisplay = true
+    }
+}
+
+extension DashboardViewController: TerminalSurfaceDelegate {
+    func terminalSurfaceDidRecover(_ surface: TerminalSurface) {
+        // Find the agent whose surface recovered and re-embed it
+        guard let agent = agents.first(where: { $0.surface === surface }) else { return }
+        // Try grid card first
+        if let card = gridCards.first(where: { $0.agentId == agent.id }) {
+            embedSurface(agent, in: card.terminalContainer)
+            return
+        }
+        // Try focus panels
+        if agent.id == selectedAgentId {
+            if !leftRightFocusPanel.isHidden {
+                embedSurface(agent, in: leftRightFocusPanel.terminalContainer)
+            } else if !topSmallFocusPanel.isHidden {
+                embedSurface(agent, in: topSmallFocusPanel.terminalContainer)
+            } else if !topLargeFocusPanel.isHidden {
+                embedSurface(agent, in: topLargeFocusPanel.terminalContainer)
+            }
+        }
     }
 }
 

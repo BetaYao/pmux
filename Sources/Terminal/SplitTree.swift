@@ -58,6 +58,45 @@ class SplitTree {
         CodableSplitNode.from(root)
     }
 
+    // MARK: - Restoration
+
+    /// Restore a SplitTree from a saved codable layout. Returns nil if restoration fails.
+    static func restore(from codable: CodableSplitNode, worktreePath: String, backend: String) -> SplitTree? {
+        let baseName = SessionManager.persistentSessionName(for: worktreePath)
+        let (node, firstLeafId) = restoreNode(from: codable, backend: backend)
+        guard let node = node, let firstLeafId = firstLeafId else { return nil }
+        let tree = SplitTree(worktreePath: worktreePath, root: node, baseSessionName: baseName)
+        tree.focusedId = firstLeafId
+        return tree
+    }
+
+    /// Private init for restoration (accepts pre-built root).
+    private init(worktreePath: String, root: SplitNode, baseSessionName: String) {
+        self.worktreePath = worktreePath
+        self.root = root
+        self.baseSessionName = baseSessionName
+        self.focusedId = root.allLeaves.first?.id ?? ""
+    }
+
+    private static func restoreNode(from codable: CodableSplitNode, backend: String) -> (SplitNode?, String?) {
+        switch codable {
+        case .leaf(let sessionName):
+            let surface = TerminalSurface()
+            surface.sessionName = sessionName
+            surface.backend = backend
+            SurfaceRegistry.shared.register(surface)
+            let leafId = UUID().uuidString
+            return (.leaf(id: leafId, surfaceId: surface.id, sessionName: sessionName), leafId)
+
+        case .split(let axisStr, let ratio, let first, let second):
+            guard let axis = SplitAxis(rawValue: axisStr) else { return (nil, nil) }
+            let (firstNode, firstLeaf) = restoreNode(from: first, backend: backend)
+            let (secondNode, _) = restoreNode(from: second, backend: backend)
+            guard let firstNode = firstNode, let secondNode = secondNode else { return (nil, nil) }
+            return (.split(id: UUID().uuidString, axis: axis, ratio: CGFloat(ratio), first: firstNode, second: secondNode), firstLeaf)
+        }
+    }
+
     private func extractSubnode(id: String) -> SplitNode {
         if case .leaf(let leafId, let surfaceId, let sessionName) = root, leafId == id {
             return .leaf(id: leafId, surfaceId: surfaceId, sessionName: sessionName)

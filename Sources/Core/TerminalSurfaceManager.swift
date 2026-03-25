@@ -33,6 +33,13 @@ class TerminalSurfaceManager {
         trees[path]
     }
 
+    /// Register a pre-built tree (e.g. restored from config) for the given path.
+    /// Does nothing if a tree already exists for that path.
+    func registerTree(_ tree: SplitTree, forPath path: String) {
+        guard trees[path] == nil else { return }
+        trees[path] = tree
+    }
+
     /// Remove and destroy a tree for the given path.
     @discardableResult
     func removeTree(forPath path: String) -> SplitTree? {

@@ -25,6 +25,7 @@ final class AgentCardView: NSView {
     private let statusDot = NSView()
     private let projectLabel = NSTextField(labelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "")
+    private let paneCountLabel = NSTextField(labelWithString: "")
     private var isHovered = false
     private var currentStatus: String = ""
 
@@ -37,7 +38,7 @@ final class AgentCardView: NSView {
         fatalError("init(coder:) not supported")
     }
 
-    func configure(id: String, project: String, thread: String, status: String, lastMessage: String, totalDuration: String, roundDuration: String) {
+    func configure(id: String, project: String, thread: String, status: String, lastMessage: String, totalDuration: String, roundDuration: String, paneCount: Int = 1) {
         agentId = id
         currentStatus = status
         setAccessibilityIdentifier("dashboard.card.\(id)")
@@ -45,6 +46,13 @@ final class AgentCardView: NSView {
         projectLabel.stringValue = project
         statusLabel.stringValue = status.capitalized
         statusDot.layer?.backgroundColor = AgentDisplayHelpers.statusColor(status).cgColor
+
+        if paneCount > 1 {
+            paneCountLabel.stringValue = "\(paneCount) panes"
+            paneCountLabel.isHidden = false
+        } else {
+            paneCountLabel.isHidden = true
+        }
 
         updateBorder()
     }
@@ -94,6 +102,17 @@ final class AgentCardView: NSView {
         statusLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         bottomBar.addSubview(statusLabel)
 
+        // Pane count badge (shown when paneCount > 1, positioned left of status label)
+        paneCountLabel.font = NSFont.systemFont(ofSize: Typography.secondaryPointSize - 1, weight: .medium)
+        paneCountLabel.textColor = SemanticColors.accent
+        paneCountLabel.lineBreakMode = .byTruncatingTail
+        paneCountLabel.maximumNumberOfLines = 1
+        paneCountLabel.alignment = .right
+        paneCountLabel.translatesAutoresizingMaskIntoConstraints = false
+        paneCountLabel.isHidden = true
+        paneCountLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        bottomBar.addSubview(paneCountLabel)
+
         NSLayoutConstraint.activate([
             // Terminal container fills top
             terminalContainer.topAnchor.constraint(equalTo: topAnchor),
@@ -122,7 +141,11 @@ final class AgentCardView: NSView {
             // Project label
             projectLabel.leadingAnchor.constraint(equalTo: statusDot.trailingAnchor, constant: 5),
             projectLabel.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
-            projectLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusLabel.leadingAnchor, constant: -6),
+            projectLabel.trailingAnchor.constraint(lessThanOrEqualTo: paneCountLabel.leadingAnchor, constant: -6),
+
+            // Pane count badge (left of status label)
+            paneCountLabel.trailingAnchor.constraint(equalTo: statusLabel.leadingAnchor, constant: -6),
+            paneCountLabel.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
 
             // Status text label (right-aligned)
             statusLabel.trailingAnchor.constraint(equalTo: bottomBar.trailingAnchor, constant: -8),
@@ -177,6 +200,7 @@ final class AgentCardView: NSView {
         statusDot.layer?.backgroundColor = resolvedCGColor(AgentDisplayHelpers.statusColor(currentStatus))
         projectLabel.textColor = SemanticColors.text
         statusLabel.textColor = SemanticColors.muted
+        paneCountLabel.textColor = SemanticColors.accent
         updateBorder()
     }
 

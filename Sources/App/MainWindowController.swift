@@ -598,6 +598,7 @@ class MainWindowController: NSWindowController {
     private func buildAgentDisplayInfos() -> [AgentDisplayInfo] {
         return AgentHead.shared.allAgents().compactMap { agent in
             guard let surface = agent.surface else { return nil }
+            let paneCount = surfaceManager.tree(forPath: agent.worktreePath)?.leafCount ?? 1
             return AgentDisplayInfo(
                 id: agent.id,
                 name: agent.branch,
@@ -608,7 +609,8 @@ class MainWindowController: NSWindowController {
                 totalDuration: AgentDisplayHelpers.formatDuration(agent.totalDuration),
                 roundDuration: AgentDisplayHelpers.formatDuration(agent.roundDuration),
                 surface: surface,
-                worktreePath: agent.worktreePath
+                worktreePath: agent.worktreePath,
+                paneCount: paneCount
             )
         }
     }
@@ -848,6 +850,17 @@ class MainWindowController: NSWindowController {
 
     // MARK: - Workspace Loading
 
+    /// Resolve a SplitTree for the given worktree info, restoring from config if a saved layout exists.
+    private func resolveTree(for info: WorktreeInfo) -> SplitTree {
+        if runtimeBackend != "local",
+           let savedLayout = config.splitLayouts[info.path],
+           let restored = SplitTree.restore(from: savedLayout, worktreePath: info.path, backend: runtimeBackend) {
+            surfaceManager.registerTree(restored, forPath: info.path)
+            return restored
+        }
+        return surfaceManager.tree(for: info, backend: runtimeBackend)
+    }
+
     private func loadWorkspaces() {
         let repoPaths = config.workspacePaths
         let cardOrder = config.cardOrder
@@ -876,12 +889,12 @@ class MainWindowController: NSWindowController {
                             commitHash: "",
                             isMainWorktree: true
                         )
-                        let tree = self.surfaceManager.tree(for: info, backend: runtimeBackend)
+                        let tree = self.resolveTree(for: info)
                         allWorktreeInfos.append((info: info, tree: tree))
                         self.worktreeRepoCache[info.path] = repoPath
                     } else {
                         for info in worktrees {
-                            let tree = self.surfaceManager.tree(for: info, backend: runtimeBackend)
+                            let tree = self.resolveTree(for: info)
                             allWorktreeInfos.append((info: info, tree: tree))
                             self.worktreeRepoCache[info.path] = repoPath
                         }
