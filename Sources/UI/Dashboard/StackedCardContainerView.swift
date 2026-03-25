@@ -4,9 +4,9 @@ final class StackedCardContainerView: NSView {
     let cardView = AgentCardView()
     private(set) var ghostViews: [NSView] = []
 
-    weak var delegate: AgentCardDelegate? {
-        didSet { /* cardView.delegate intentionally left nil */ }
-    }
+    /// The container owns click handling via its own gesture recognizer.
+    /// cardView.delegate must remain nil to prevent double-firing.
+    weak var delegate: AgentCardDelegate?
 
     var agentId: String { cardView.agentId }
 
@@ -105,8 +105,6 @@ final class StackedCardContainerView: NSView {
         let v = GhostCardView()
         v.ghostIndex = index
         v.wantsLayer = true
-        v.layer?.cornerRadius = 4
-        v.layer?.masksToBounds = true
         return v
     }
 }
@@ -120,6 +118,8 @@ private final class GhostCardView: NSView {
     override var wantsUpdateLayer: Bool { true }
 
     override func updateLayer() {
+        layer?.cornerRadius = 4
+        layer?.masksToBounds = true
         let bg = ghostIndex == 0 ? SemanticColors.tileGhost1Bg : SemanticColors.tileGhost2Bg
         layer?.backgroundColor = resolvedCGColor(bg)
         layer?.borderColor = resolvedCGColor(SemanticColors.tileGhostBorder)
