@@ -78,7 +78,7 @@ enum SemanticColors {
     }
 
     static let accent: NSColor = NSColor(name: nil) { appearance in
-        appearance.isDark ? NSColor(hex: 0x4f8cff) : NSColor(hex: 0x2563eb)
+        appearance.isDark ? NSColor(hex: 0x22d3ee) : NSColor(hex: 0x0e9bb5)
     }
 
     static let danger: NSColor = NSColor(name: nil) { appearance in
@@ -88,22 +88,22 @@ enum SemanticColors {
     // MARK: - Pre-computed derived colors
 
     static let cardBgSelected: NSColor = NSColor(name: nil) { a in
-        let acc = a.isDark ? NSColor(hex: 0x4f8cff) : NSColor(hex: 0x2563eb)
+        let acc = a.isDark ? NSColor(hex: 0x22d3ee) : NSColor(hex: 0x0e9bb5)
         let p2 = a.isDark ? NSColor(hex: 0x111111) : NSColor(hex: 0xf7f8fb)
         return acc.withAlphaComponent(0.12).blended(withFraction: 0.88, of: p2) ?? p2
     }
     static let cardBorderSelected: NSColor = NSColor(name: nil) { a in
-        let acc = a.isDark ? NSColor(hex: 0x4f8cff) : NSColor(hex: 0x2563eb)
+        let acc = a.isDark ? NSColor(hex: 0x22d3ee) : NSColor(hex: 0x0e9bb5)
         let ln = a.isDark ? NSColor(hex: 0x222222) : NSColor(hex: 0xd7dbe3)
         return acc.withAlphaComponent(0.55).blended(withFraction: 0.45, of: ln) ?? ln
     }
     static let cardBgHover: NSColor = NSColor(name: nil) { a in
-        let acc = a.isDark ? NSColor(hex: 0x4f8cff) : NSColor(hex: 0x2563eb)
+        let acc = a.isDark ? NSColor(hex: 0x22d3ee) : NSColor(hex: 0x0e9bb5)
         let p2 = a.isDark ? NSColor(hex: 0x111111) : NSColor(hex: 0xf7f8fb)
         return acc.withAlphaComponent(0.06).blended(withFraction: 0.94, of: p2) ?? p2
     }
     static let cardBorderHover: NSColor = NSColor(name: nil) { a in
-        let acc = a.isDark ? NSColor(hex: 0x4f8cff) : NSColor(hex: 0x2563eb)
+        let acc = a.isDark ? NSColor(hex: 0x22d3ee) : NSColor(hex: 0x0e9bb5)
         return acc.withAlphaComponent(0.35)
     }
     static let cardBorderDefault: NSColor = NSColor(name: nil) { a in
@@ -111,15 +111,15 @@ enum SemanticColors {
         return ln.withAlphaComponent(0.78)
     }
     static let miniCardBorderSelected: NSColor = NSColor(name: nil) { a in
-        let acc = a.isDark ? NSColor(hex: 0x4f8cff) : NSColor(hex: 0x2563eb)
+        let acc = a.isDark ? NSColor(hex: 0x22d3ee) : NSColor(hex: 0x0e9bb5)
         return acc.withAlphaComponent(0.65)
     }
     static let miniCardShadowSelected: NSColor = NSColor(name: nil) { a in
-        let acc = a.isDark ? NSColor(hex: 0x4f8cff) : NSColor(hex: 0x2563eb)
+        let acc = a.isDark ? NSColor(hex: 0x22d3ee) : NSColor(hex: 0x0e9bb5)
         return acc.withAlphaComponent(0.25)
     }
     static let miniCardBorderHover: NSColor = NSColor(name: nil) { a in
-        let acc = a.isDark ? NSColor(hex: 0x4f8cff) : NSColor(hex: 0x2563eb)
+        let acc = a.isDark ? NSColor(hex: 0x22d3ee) : NSColor(hex: 0x0e9bb5)
         return acc.withAlphaComponent(0.45)
     }
     static let miniCardBorderDefault: NSColor = NSColor(name: nil) { a in
@@ -167,11 +167,11 @@ enum SemanticColors {
         return ln.withAlphaComponent(0.60)
     }
     static let accentAlpha15: NSColor = NSColor(name: nil) { a in
-        let acc = a.isDark ? NSColor(hex: 0x4f8cff) : NSColor(hex: 0x2563eb)
+        let acc = a.isDark ? NSColor(hex: 0x22d3ee) : NSColor(hex: 0x0e9bb5)
         return acc.withAlphaComponent(0.15)
     }
     static let accentAlpha12: NSColor = NSColor(name: nil) { a in
-        let acc = a.isDark ? NSColor(hex: 0x4f8cff) : NSColor(hex: 0x2563eb)
+        let acc = a.isDark ? NSColor(hex: 0x22d3ee) : NSColor(hex: 0x0e9bb5)
         return acc.withAlphaComponent(0.12)
     }
     static let mutedAlpha50: NSColor = NSColor(name: nil) { a in
@@ -179,12 +179,12 @@ enum SemanticColors {
         return m.withAlphaComponent(0.5)
     }
     static let aiBubbleUser: NSColor = NSColor(name: nil) { a in
-        let acc = a.isDark ? NSColor(hex: 0x4f8cff) : NSColor(hex: 0x2563eb)
+        let acc = a.isDark ? NSColor(hex: 0x22d3ee) : NSColor(hex: 0x0e9bb5)
         let p2 = a.isDark ? NSColor(hex: 0x111111) : NSColor(hex: 0xf7f8fb)
         return acc.blended(withFraction: 0.82, of: p2) ?? p2
     }
     static let aiSendButtonBg: NSColor = NSColor(name: nil) { a in
-        let acc = a.isDark ? NSColor(hex: 0x4f8cff) : NSColor(hex: 0x2563eb)
+        let acc = a.isDark ? NSColor(hex: 0x22d3ee) : NSColor(hex: 0x0e9bb5)
         let p2 = a.isDark ? NSColor(hex: 0x111111) : NSColor(hex: 0xf7f8fb)
         return acc.blended(withFraction: 0.78, of: p2) ?? p2
     }
@@ -228,6 +228,20 @@ enum SemanticColors {
             ? NSColor(hex: 0x1a1a1a)
             : NSColor(srgbRed: 0xf4 / 255.0, green: 0xf7 / 255.0, blue: 0xfc / 255.0, alpha: 0.92)
     }
+    static let tileGhost1Bg: NSColor = NSColor(name: nil) { appearance in
+        appearance.isDark
+            ? NSColor(hex: 0x1a1a2e)
+            : NSColor(hex: 0xe8e8f0)
+    }
+    static let tileGhost2Bg: NSColor = NSColor(name: nil) { appearance in
+        appearance.isDark
+            ? NSColor(hex: 0x161625)
+            : NSColor(hex: 0xdcdce8)
+    }
+    static let tileGhostBorder: NSColor = NSColor(name: nil) { appearance in
+        let ln = appearance.isDark ? NSColor(hex: 0x222222) : NSColor(hex: 0xd7dbe3)
+        return ln.withAlphaComponent(0.60)
+    }
 
     static let miniCardShadowDefault: NSColor = NSColor(name: nil) { a in
         a.isDark ? NSColor.clear : NSColor.black.withAlphaComponent(0.10)
@@ -236,10 +250,10 @@ enum SemanticColors {
     // MARK: - Project tab tokens
 
     static let tabSelectedBg: NSColor = NSColor(name: nil) { a in
-        a.isDark ? NSColor(hex: 0x1a2a1a) : NSColor(hex: 0xe8f5e9)
+        a.isDark ? NSColor(hex: 0x0f2a2e) : NSColor(hex: 0xe4f7fa)
     }
     static let tabSelectedBorder: NSColor = NSColor(name: nil) { a in
-        a.isDark ? NSColor(hex: 0x33c17b) : NSColor(hex: 0x1f9d63)
+        a.isDark ? NSColor(hex: 0x22d3ee) : NSColor(hex: 0x0e9bb5)
     }
     static let tabHoverBg: NSColor = NSColor(name: nil) { a in
         a.isDark ? NSColor(hex: 0x151618) : NSColor(hex: 0xe0e2e8)
