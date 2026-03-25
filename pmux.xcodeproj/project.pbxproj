@@ -24,6 +24,7 @@
 		2A0629AFA6E01C998879B2CD /* AgentHeadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2C2EB17847BCD154B8BDB3 /* AgentHeadTests.swift */; };
 		2EF485F4A4C62E18C970A628 /* OSC133ParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBE6553B298A5AEE6F205D67 /* OSC133ParserTests.swift */; };
 		2F12BBC742482E4FAC10BDF0 /* NotificationHistoryViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 453211D5B206B5E071DA0DEE /* NotificationHistoryViewController.swift */; };
+		2FAEE41F6499B9435099E854 /* StackedCardContainerViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08DFDBE17C89268186A89489 /* StackedCardContainerViewTests.swift */; };
 		32380B3024DDD3D12003DA35 /* UpdateCheckerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775FFC41426A242F2A4754A4 /* UpdateCheckerTests.swift */; };
 		332DF77CD5F8403C6A1C746D /* TitleBarPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DE5D0AB94CE35AF35035817 /* TitleBarPage.swift */; };
 		3356BF4B1BBD4085A425D33B /* DividerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70353A508814DEFA658F70CC /* DividerView.swift */; };
@@ -108,6 +109,7 @@
 		DDEED8CE298342BC0DD98463 /* ProcessRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 093F3186717B83708B06F06F /* ProcessRunner.swift */; };
 		DE62C218A57E1260838EC7A8 /* WorktreeDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7FF2F9F3E1DECD0D905D929 /* WorktreeDiscovery.swift */; };
 		E2B2C8EB87D032DDC677F295 /* AIPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C35648A4693691BD87523F99 /* AIPanelView.swift */; };
+		E7DBCD035BB8F22EA552E78D /* StackedCardContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DE0DBB0B06F9AC72C7CFD11 /* StackedCardContainerView.swift */; };
 		E858925F04FBF9C99BD0DFC6 /* CoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5D756A9AE7084B674EC9314 /* CoreTests.swift */; };
 		EC5483D909F6DDBEC587EB23 /* GitDiffTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FAD1E506194FAF66CC6A57F /* GitDiffTests.swift */; };
 		EE0113C0527E7C4A7B3CFEB7 /* WorktreeDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA43E5DDFECA4ED4B53F4306 /* WorktreeDiscoveryTests.swift */; };
@@ -143,8 +145,10 @@
 		07122FC089163857936B1BA1 /* NotificationPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPanelView.swift; sourceTree = "<group>"; };
 		07378DF0DB8804405A28DCC5 /* SettingsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPage.swift; sourceTree = "<group>"; };
 		079B4C9EB16FC26ACDF4D3DA /* WorktreeDeleter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeDeleter.swift; sourceTree = "<group>"; };
+		08DFDBE17C89268186A89489 /* StackedCardContainerViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StackedCardContainerViewTests.swift; sourceTree = "<group>"; };
 		093F3186717B83708B06F06F /* ProcessRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessRunner.swift; sourceTree = "<group>"; };
 		0DC0F4B17429A591BDDF7B01 /* TerminalSurfaceReparentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSurfaceReparentTests.swift; sourceTree = "<group>"; };
+		0DE0DBB0B06F9AC72C7CFD11 /* StackedCardContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StackedCardContainerView.swift; sourceTree = "<group>"; };
 		0FAED36C7B1716B96A3F73B4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		177BDDD38D542E2731B8C45C /* SplitPanePage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitPanePage.swift; sourceTree = "<group>"; };
 		19D21803E9CB8C1E169DC610 /* TaskProgressParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskProgressParser.swift; sourceTree = "<group>"; };
@@ -300,6 +304,7 @@
 				7FE920B04BA43448FB39479C /* SessionManagerTests.swift */,
 				7E4BE6DC1A7E0848AF906595 /* SplitContainerLayoutTests.swift */,
 				9A2A27A1A20964D323435154 /* SplitNodeTests.swift */,
+				08DFDBE17C89268186A89489 /* StackedCardContainerViewTests.swift */,
 				8FB8EE102BA233C405EDFE8E /* StatusDetectorTests.swift */,
 				4E73F70BC5F0D6B7C46124B2 /* StatusPublisherThreadTests.swift */,
 				75352E99A112855A0E137D7D /* TaskProgressParserTests.swift */,
@@ -386,6 +391,7 @@
 				B31FE424B4FFCDE710E18FF2 /* FocusPanelView.swift */,
 				EFB869F9858B5DAA8D58759E /* GridLayout.swift */,
 				C9A08D6353BB2E4926BE168E /* MiniCardView.swift */,
+				0DE0DBB0B06F9AC72C7CFD11 /* StackedCardContainerView.swift */,
 			);
 			path = Dashboard;
 			sourceTree = "<group>";
@@ -730,6 +736,7 @@
 				B7BEE4E9A2718F357B77BE26 /* SessionManagerTests.swift in Sources */,
 				91D2733D895C716AB0883A36 /* SplitContainerLayoutTests.swift in Sources */,
 				75E38783336AF75D873C0E3B /* SplitNodeTests.swift in Sources */,
+				2FAEE41F6499B9435099E854 /* StackedCardContainerViewTests.swift in Sources */,
 				F55F11B2C86D8D969EEC038F /* StatusDetectorTests.swift in Sources */,
 				5406AFFDB6D6EF3D194C2F9D /* StatusPublisherThreadTests.swift in Sources */,
 				ACD9C6AB30216786478DB0DA /* TaskProgressParserTests.swift in Sources */,
@@ -791,6 +798,7 @@
 				2632F462CB4392719D450571 /* SplitContainerView.swift in Sources */,
 				D06F93FF3E5838AB6521B20C /* SplitNode.swift in Sources */,
 				C13D2A00E7593371A0415ADF /* SplitTree.swift in Sources */,
+				E7DBCD035BB8F22EA552E78D /* StackedCardContainerView.swift in Sources */,
 				4AA669F5C78D8F447172DC06 /* StatusBadge.swift in Sources */,
 				1CC51D6AFB2CFD4EC3A3A215 /* StatusDetector.swift in Sources */,
 				BC2163AECF13737DDEB5802B /* StatusPublisher.swift in Sources */,
