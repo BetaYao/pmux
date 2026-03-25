@@ -11,8 +11,8 @@ final class MiniCardView: NSView {
     private(set) var agentId: String = ""
     var isSelected: Bool = false { didSet { updateAppearance() } }
 
-    // Line 1: status dot + branch
-    private let statusDot = NSView()
+    // Line 1: status dots + branch
+    private var statusDots: [NSView] = []
     private let branchLabel = NSTextField(labelWithString: "")
 
     // Line 2: duration
@@ -27,6 +27,8 @@ final class MiniCardView: NSView {
 
     private var isHovered = false
     private var currentStatus: String = ""
+    private var currentPaneStatuses: [AgentStatus] = []
+    private var branchLeadingConstraint: NSLayoutConstraint?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -37,7 +39,7 @@ final class MiniCardView: NSView {
         fatalError("init(coder:) not supported")
     }
 
-    func configure(id: String, project: String, thread: String, status: String, lastMessage: String, totalDuration: String, roundDuration: String) {
+    func configure(id: String, project: String, thread: String, status: String, lastMessage: String, totalDuration: String, roundDuration: String, paneStatuses: [AgentStatus] = []) {
         agentId = id
         currentStatus = status
         setAccessibilityIdentifier("dashboard.miniCard.\(id)")
@@ -46,7 +48,38 @@ final class MiniCardView: NSView {
         branchLabel.stringValue = thread
         messageLabel.stringValue = lastMessage
 
-        statusDot.layer?.backgroundColor = AgentDisplayHelpers.statusColor(status).cgColor
+        // Rebuild status dots
+        statusDots.forEach { $0.removeFromSuperview() }
+        statusDots.removeAll()
+        branchLeadingConstraint?.isActive = false
+
+        let statuses = paneStatuses.isEmpty ? [AgentStatus(rawValue: status) ?? .unknown] : paneStatuses
+        currentPaneStatuses = statuses
+        var previousDot: NSView? = nil
+        for agentStatus in statuses {
+            let dot = NSView()
+            dot.wantsLayer = true
+            dot.layer?.cornerRadius = 3
+            dot.layer?.backgroundColor = agentStatus.color.cgColor
+            dot.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(dot)
+
+            NSLayoutConstraint.activate([
+                dot.widthAnchor.constraint(equalToConstant: 6),
+                dot.heightAnchor.constraint(equalToConstant: 6),
+                dot.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+                dot.leadingAnchor.constraint(equalTo: previousDot?.trailingAnchor ?? leadingAnchor,
+                                             constant: previousDot != nil ? 3 : 8),
+            ])
+            statusDots.append(dot)
+            previousDot = dot
+        }
+
+        // Anchor branch label to the last dot
+        if let lastDot = statusDots.last {
+            branchLeadingConstraint = branchLabel.leadingAnchor.constraint(equalTo: lastDot.trailingAnchor, constant: 5)
+            branchLeadingConstraint?.isActive = true
+        }
 
         // Line 2: duration + relative time
         let compactTotal = AgentDisplayHelpers.compactDuration(totalDuration)
@@ -68,12 +101,6 @@ final class MiniCardView: NSView {
         let aspectConstraint = widthAnchor.constraint(equalTo: heightAnchor, multiplier: 16.0 / 9.0)
         aspectConstraint.priority = .defaultHigh
         aspectConstraint.isActive = true
-
-        // Line 1: status dot
-        statusDot.wantsLayer = true
-        statusDot.layer?.cornerRadius = 3
-        statusDot.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(statusDot)
 
         // Line 1: branch label
         branchLabel.font = NSFont.systemFont(ofSize: Typography.primaryPointSize, weight: .semibold)
@@ -127,15 +154,8 @@ final class MiniCardView: NSView {
         let padding: CGFloat = 8
 
         NSLayoutConstraint.activate([
-            // Line 1: status dot
-            statusDot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
-            statusDot.topAnchor.constraint(equalTo: topAnchor, constant: padding + 2),
-            statusDot.widthAnchor.constraint(equalToConstant: 6),
-            statusDot.heightAnchor.constraint(equalToConstant: 6),
-
-            // Line 1: branch name
-            branchLabel.leadingAnchor.constraint(equalTo: statusDot.trailingAnchor, constant: 5),
-            branchLabel.centerYAnchor.constraint(equalTo: statusDot.centerYAnchor),
+            // Line 1: branch name (leading constraint set dynamically in configure())
+            branchLabel.topAnchor.constraint(equalTo: topAnchor, constant: padding + 2),
             branchLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -padding),
 
             // Line 2: duration
