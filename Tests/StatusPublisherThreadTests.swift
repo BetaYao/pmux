@@ -9,7 +9,7 @@ class StatusPublisherThreadTests: XCTestCase {
 
         for _ in 0..<10 {
             DispatchQueue.global().async {
-                publisher.updateSurfaces([:])
+                publisher.updateSurfaces([String: SplitTree]())
                 expectation.fulfill()
             }
         }

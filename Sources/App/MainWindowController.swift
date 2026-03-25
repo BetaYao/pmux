@@ -29,9 +29,9 @@ class MainWindowController: NSWindowController {
     private var runtimeBackend: String = "zmx"
     private let workspaceManager = WorkspaceManager()
 
-    // All terminal surfaces, keyed by worktree path
+    // All terminal trees, keyed by worktree path
     private let surfaceManager = TerminalSurfaceManager()
-    private var allWorktrees: [(info: WorktreeInfo, surface: TerminalSurface)] = []
+    private var allWorktrees: [(info: WorktreeInfo, tree: SplitTree)] = []
 
     private static let iso8601: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -56,6 +56,7 @@ class MainWindowController: NSWindowController {
         return pub
     }()
     private var webhookServer: WebhookServer?
+    private var branchRefreshTimer: Timer?
 
     static func shouldUseWindowFrameAutosave(
         environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -655,8 +656,8 @@ class MainWindowController: NSWindowController {
         }
 
         for info in effectiveWorktrees {
-            let surface = surfaceManager.surface(for: info, backend: runtimeBackend)
-            allWorktrees.append((info: info, surface: surface))
+            let tree = surfaceManager.tree(for: info, backend: runtimeBackend)
+            allWorktrees.append((info: info, tree: tree))
         }
 
         let tabIndex = workspaceManager.addTab(repoPath: repoPath, worktrees: worktrees.isEmpty ? [] : worktrees)
@@ -668,10 +669,11 @@ class MainWindowController: NSWindowController {
             if config.worktreeStartedAt[info.path] == nil {
                 config.worktreeStartedAt[info.path] = now
             }
-            let surface = surfaceManager.surface(for: info, backend: runtimeBackend)
-            let started = config.worktreeStartedAt[info.path].flatMap { MainWindowController.iso8601.date(from: $0) }
-            let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
-            AgentHead.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: projectName, startedAt: started, tmuxSessionName: sessionName, backend: runtimeBackend)
+            if let surface = surfaceManager.primarySurface(forPath: info.path) {
+                let started = config.worktreeStartedAt[info.path].flatMap { MainWindowController.iso8601.date(from: $0) }
+                let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
+                AgentHead.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: projectName, startedAt: started, tmuxSessionName: sessionName, backend: runtimeBackend)
+            }
         }
         config.save()
 
@@ -736,21 +738,22 @@ class MainWindowController: NSWindowController {
 
     private func getOrCreateRepoVC(for tab: WorkspaceTab) -> RepoViewController {
         if let existing = repoVCs[tab.repoPath] {
-            existing.configure(worktrees: tab.worktrees, surfaces: surfaceManager.all)
+            existing.configure(worktrees: tab.worktrees, trees: surfaceManager.all)
             return existing
         }
 
         let repoVC = RepoViewController()
         repoVC.repoDelegate = self
-        repoVC.configure(worktrees: tab.worktrees, surfaces: surfaceManager.all)
+        repoVC.configure(worktrees: tab.worktrees, trees: surfaceManager.all)
         repoVCs[tab.repoPath] = repoVC
         return repoVC
     }
 
-    private func openRepoTab(repoPath: String) {
+    private func openRepoTab(repoPath: String, completion: (() -> Void)? = nil) {
         WorktreeDiscovery.discoverAsync(repoPath: repoPath) { [weak self] worktrees in
             guard let self else { return }
             _ = self.integrateDiscoveredRepoForTesting(repoPath: repoPath, worktrees: worktrees)
+            completion?()
         }
     }
 
@@ -863,7 +866,7 @@ class MainWindowController: NSWindowController {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
 
-                var allWorktreeInfos: [(info: WorktreeInfo, surface: TerminalSurface)] = []
+                var allWorktreeInfos: [(info: WorktreeInfo, tree: SplitTree)] = []
 
                 for (repoPath, worktrees) in discoveredWorktrees {
                     if worktrees.isEmpty {
@@ -873,13 +876,13 @@ class MainWindowController: NSWindowController {
                             commitHash: "",
                             isMainWorktree: true
                         )
-                        let surface = self.surfaceManager.surface(for: info, backend: runtimeBackend)
-                        allWorktreeInfos.append((info: info, surface: surface))
+                        let tree = self.surfaceManager.tree(for: info, backend: runtimeBackend)
+                        allWorktreeInfos.append((info: info, tree: tree))
                         self.worktreeRepoCache[info.path] = repoPath
                     } else {
                         for info in worktrees {
-                            let surface = self.surfaceManager.surface(for: info, backend: runtimeBackend)
-                            allWorktreeInfos.append((info: info, surface: surface))
+                            let tree = self.surfaceManager.tree(for: info, backend: runtimeBackend)
+                            allWorktreeInfos.append((info: info, tree: tree))
                             self.worktreeRepoCache[info.path] = repoPath
                         }
                     }
@@ -911,13 +914,15 @@ class MainWindowController: NSWindowController {
                 self.allWorktrees = allWorktreeInfos
 
                 // Register all agents with AgentHead
-                for (info, surface) in allWorktreeInfos {
+                for (info, _) in allWorktreeInfos {
                     let repo = self.worktreeRepoCache[info.path] ?? WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
                     let proj = self.workspaceManager.tabs.first(where: { $0.repoPath == repo })?.displayName
                         ?? URL(fileURLWithPath: repo).lastPathComponent
                     let started = self.config.worktreeStartedAt[info.path].flatMap { MainWindowController.iso8601.date(from: $0) }
                     let sessionName = self.runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
-                    AgentHead.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: started, tmuxSessionName: sessionName, backend: self.runtimeBackend)
+                    if let surface = self.surfaceManager.primarySurface(forPath: info.path) {
+                        AgentHead.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: started, tmuxSessionName: sessionName, backend: self.runtimeBackend)
+                    }
                 }
                 if !cardOrder.isEmpty {
                     AgentHead.shared.reorder(paths: cardOrder)
@@ -931,8 +936,11 @@ class MainWindowController: NSWindowController {
                 }
 
                 // Start polling for agent status
-                self.statusPublisher.start(surfaces: self.surfaceManager.all)
+                self.statusPublisher.start(trees: self.surfaceManager.all)
                 self.updateStatusPollPreferences()
+
+                // Start periodic branch name refresh
+                self.startBranchRefreshTimer()
 
                 // Start webhook server for agent hook events
                 if self.config.webhook.enabled {
@@ -985,7 +993,7 @@ class MainWindowController: NSWindowController {
     }
 
     private func performDeleteWorktree(_ info: WorktreeInfo, repoPath: String, deleteBranch: Bool, force: Bool) {
-        surfaceManager.removeSurface(forPath: info.path)
+        surfaceManager.removeTree(forPath: info.path)
 
         DispatchQueue.global().async { [weak self] in
             do {
@@ -1031,7 +1039,7 @@ class MainWindowController: NSWindowController {
                     guard let self else { return }
                     self.workspaceManager.updateWorktrees(at: repoIndex, worktrees: updatedWorktrees)
                     if let repoVC = self.repoVCs[repoPath] {
-                        repoVC.configure(worktrees: updatedWorktrees, surfaces: self.surfaceManager.all)
+                        repoVC.configure(worktrees: updatedWorktrees, trees: self.surfaceManager.all)
                     }
                     if updatedWorktrees.isEmpty {
                         self.performCloseRepo(projectName: displayName)
@@ -1056,13 +1064,15 @@ class MainWindowController: NSWindowController {
 
         // Kill persisted sessions and destroy surfaces for this repo's worktrees
         for worktree in tab.worktrees {
-            guard let surface = surfaceManager.removeSurface(forPath: worktree.path) else { continue }
+            let primarySurface = surfaceManager.primarySurface(forPath: worktree.path)
+            surfaceManager.removeTree(forPath: worktree.path)
 
             if let agent = AgentHead.shared.agent(forWorktree: worktree.path) {
                 AgentHead.shared.unregister(terminalID: agent.id)
-            } else {
-                AgentHead.shared.unregister(terminalID: surface.id)
+            } else if let primarySurface {
+                AgentHead.shared.unregister(terminalID: primarySurface.id)
             }
+            // Always kill the backend session regardless of whether a surface existed
             if runtimeBackend != "local" {
                 let sessionName = SessionManager.persistentSessionName(for: worktree.path)
                 SessionManager.killSession(sessionName, backend: runtimeBackend)
@@ -1082,17 +1092,30 @@ class MainWindowController: NSWindowController {
         repoVCs.removeValue(forKey: tab.repoPath)
         workspaceManager.removeTab(at: tabIndex)
 
-        // Adjust active tab index
+        // Compute the target tab index after removal
         let uiTabIndex = tabIndex + 1  // +1 because dashboard is 0
-        if activeTabIndex >= uiTabIndex {
-            activeTabIndex = max(0, activeTabIndex - 1)
+        let targetTab: Int
+        if activeTabIndex == uiTabIndex {
+            // Closing the currently active tab — switch to the previous tab
+            targetTab = max(0, uiTabIndex - 1)
+        } else if activeTabIndex > uiTabIndex {
+            targetTab = activeTabIndex - 1
+        } else {
+            targetTab = activeTabIndex
+        }
+
+        // Force view transition by setting a sentinel, then switching
+        activeTabIndex = -1
+        // Remove the old view immediately so the sidebar doesn't linger
+        for child in contentContainer.subviews {
+            child.removeFromSuperview()
         }
 
         // Update UI
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
         statusPublisher.updateSurfaces(surfaceManager.all)
         updateTitleBar()
-        switchToTab(activeTabIndex)
+        switchToTab(targetTab)
 
     }
 
@@ -1132,6 +1155,8 @@ extension MainWindowController: NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         statusPublisher.stop()
+        branchRefreshTimer?.invalidate()
+        branchRefreshTimer = nil
         webhookServer?.stop()
         webhookServer = nil
         surfaceManager.removeAll()
@@ -1139,6 +1164,8 @@ extension MainWindowController: NSWindowDelegate {
 
     func cleanupBeforeTermination() {
         statusPublisher.stop()
+        branchRefreshTimer?.invalidate()
+        branchRefreshTimer = nil
         webhookServer?.stop()
         webhookServer = nil
         surfaceManager.removeAll()
@@ -1302,8 +1329,8 @@ extension MainWindowController: AIPanelDelegate {
 
 extension MainWindowController: NewBranchDialogDelegate {
     func newBranchDialog(_ dialog: NewBranchDialog, didCreateWorktree info: WorktreeInfo, inRepo repoPath: String) {
-        let surface = surfaceManager.surface(for: info, backend: runtimeBackend)
-        allWorktrees.append((info: info, surface: surface))
+        let tree = surfaceManager.tree(for: info, backend: runtimeBackend)
+        allWorktrees.append((info: info, tree: tree))
 
         // Record startedAt for the new worktree
         if config.worktreeStartedAt[info.path] == nil {
@@ -1324,8 +1351,59 @@ extension MainWindowController: NewBranchDialogDelegate {
                 var updatedWorktrees = tab.worktrees
                 updatedWorktrees.append(info)
                 workspaceManager.updateWorktrees(at: repoIndex, worktrees: updatedWorktrees)
-                repoVC.addWorktree(info, surface: surface)
+                repoVC.addWorktree(info, tree: tree)
                 return
+            }
+        }
+    }
+}
+
+// MARK: - Branch Refresh
+
+extension MainWindowController {
+    func startBranchRefreshTimer() {
+        branchRefreshTimer?.invalidate()
+        branchRefreshTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            self?.refreshBranches()
+        }
+    }
+
+    private func refreshBranches() {
+        // Re-discover worktrees for all repos on background queue
+        let tabs = workspaceManager.tabs
+        for (tabIndex, tab) in tabs.enumerated() {
+            WorktreeDiscovery.discoverAsync(repoPath: tab.repoPath) { [weak self] freshWorktrees in
+                guard let self else { return }
+                let oldWorktrees = tab.worktrees
+
+                // Check if any branch names changed (match by path)
+                var changed = false
+                for fresh in freshWorktrees {
+                    if let old = oldWorktrees.first(where: { $0.path == fresh.path }),
+                       old.branch != fresh.branch {
+                        changed = true
+                        break
+                    }
+                }
+                guard changed else { return }
+
+                // Update workspace manager
+                self.workspaceManager.updateWorktrees(at: tabIndex, worktrees: freshWorktrees)
+
+                // Update allWorktrees cache
+                for (i, entry) in self.allWorktrees.enumerated() {
+                    if let fresh = freshWorktrees.first(where: { $0.path == entry.info.path }) {
+                        self.allWorktrees[i] = (info: fresh, tree: entry.tree)
+                    }
+                }
+
+                // Push to repo VC sidebar
+                if let repoVC = self.repoVCs[tab.repoPath] {
+                    repoVC.updateWorktreeInfos(freshWorktrees)
+                }
+
+                // Refresh dashboard cards too
+                self.dashboardVC?.updateAgents(self.buildAgentDisplayInfos())
             }
         }
     }
@@ -1366,19 +1444,27 @@ extension MainWindowController: StatusPublisherDelegate {
 
 extension MainWindowController {
     @objc private func handleNavigateToWorktree(_ notification: Notification) {
-        guard let worktreePath = notification.userInfo?["worktreePath"] as? String else { return }
+        guard let worktreePath = notification.userInfo?["worktreePath"] as? String else {
+            NSLog("navigateToWorktree: missing worktreePath in userInfo")
+            return
+        }
+        NSLog("navigateToWorktree: path=%@", worktreePath)
 
         // Check already-open tabs first (no git calls needed)
         if let tabIndex = workspaceManager.tabs.firstIndex(where: { tab in
             tab.worktrees.contains(where: { $0.path == worktreePath })
         }) {
             let repoPath = workspaceManager.tabs[tabIndex].repoPath
+            NSLog("navigateToWorktree: found tab %d, repoPath=%@", tabIndex, repoPath)
             switchToTab(tabIndex + 1)
             if let repoVC = repoVCs[repoPath] {
                 repoVC.selectWorktree(byPath: worktreePath)
+            } else {
+                NSLog("navigateToWorktree: repoVC not found for %@", repoPath)
             }
             return
         }
+        NSLog("navigateToWorktree: no tab found, falling back to async discovery")
 
         // Fall back: search workspace paths asynchronously
         let workspacePaths = config.workspacePaths
@@ -1393,9 +1479,11 @@ extension MainWindowController {
             }
             DispatchQueue.main.async {
                 guard let self, let repoPath = foundRepoPath else { return }
-                self.openRepoTab(repoPath: repoPath)
-                if let repoVC = self.repoVCs[repoPath] {
-                    repoVC.selectWorktree(byPath: worktreePath)
+                self.openRepoTab(repoPath: repoPath) { [weak self] in
+                    guard let self else { return }
+                    if let repoVC = self.repoVCs[repoPath] {
+                        repoVC.selectWorktree(byPath: worktreePath)
+                    }
                 }
             }
         }
