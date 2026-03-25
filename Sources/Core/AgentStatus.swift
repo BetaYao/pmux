@@ -10,12 +10,12 @@ enum AgentStatus: String, Codable {
 
     var color: NSColor {
         switch self {
-        case .running:  return NSColor.systemGreen
-        case .idle:     return NSColor.systemGray
-        case .waiting:  return NSColor.systemYellow
-        case .error:    return NSColor.systemRed
-        case .exited:   return NSColor(white: 0.4, alpha: 1.0)
-        case .unknown:  return NSColor(white: 0.5, alpha: 1.0)
+        case .running:  return SemanticColors.running
+        case .idle:     return SemanticColors.idle
+        case .waiting:  return SemanticColors.waiting
+        case .error:    return SemanticColors.danger
+        case .exited:   return SemanticColors.idle
+        case .unknown:  return SemanticColors.subtle
         }
     }
 

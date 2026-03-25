@@ -34,12 +34,12 @@ class UpdateBanner: NSView {
 
     private func setup() {
         wantsLayer = true
-        layer?.backgroundColor = NSColor(red: 0.15, green: 0.35, blue: 0.55, alpha: 1.0).cgColor
+        layer?.backgroundColor = NSColor(srgbRed: 0x0f / 255.0, green: 0x2a / 255.0, blue: 0x2e / 255.0, alpha: 1.0).cgColor
         setAccessibilityIdentifier("update.banner")
 
         // Status label
         statusLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        statusLabel.textColor = .white
+        statusLabel.textColor = NSColor(hex: 0x22d3ee)
         statusLabel.setAccessibilityIdentifier("update.statusLabel")
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(statusLabel)
@@ -67,7 +67,7 @@ class UpdateBanner: NSView {
         skipButton.bezelStyle = .recessed
         skipButton.isBordered = false
         skipButton.font = NSFont.systemFont(ofSize: 11)
-        skipButton.contentTintColor = NSColor.white.withAlphaComponent(0.8)
+        skipButton.contentTintColor = NSColor(hex: 0x22d3ee).withAlphaComponent(0.7)
         skipButton.target = self
         skipButton.action = #selector(skipClicked)
         skipButton.setAccessibilityIdentifier("update.skipButton")

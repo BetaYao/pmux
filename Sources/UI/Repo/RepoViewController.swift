@@ -224,6 +224,7 @@ class RepoViewController: NSViewController {
         // Embed the container only when it has live surface views
         if !surfaceViews.isEmpty {
             container.frame = terminalContainer.bounds
+            container.autoresizingMask = [.width, .height]
             if container.superview != terminalContainer {
                 terminalContainer.addSubview(container)
             }
@@ -231,9 +232,10 @@ class RepoViewController: NSViewController {
 
         sidebarVC.selectWorktree(at: index)
 
-        // Focus the primary surface only if it has a live view
-        if let firstLeaf = tree.allLeaves.first,
-           let surface = SurfaceRegistry.shared.surface(forId: firstLeaf.surfaceId),
+        // Focus the tree's focused leaf (falls back to first leaf)
+        let leafToFocus = tree.allLeaves.first(where: { $0.id == tree.focusedId }) ?? tree.allLeaves.first
+        if let leaf = leafToFocus,
+           let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId),
            let termView = surface.view {
             view.window?.makeFirstResponder(termView)
         }
