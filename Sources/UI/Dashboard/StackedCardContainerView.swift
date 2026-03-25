@@ -1,12 +1,15 @@
 import AppKit
 
-final class StackedCardContainerView: NSView {
+final class StackedCardContainerView: NSView, NSGestureRecognizerDelegate {
     let cardView = AgentCardView()
     private(set) var ghostViews: [NSView] = []
 
     /// The container owns click handling via its own gesture recognizer.
     /// cardView.delegate must remain nil to prevent double-firing.
     weak var delegate: AgentCardDelegate?
+
+    /// Stored so the NSGestureRecognizerDelegate can reference it for failure dependency.
+    private var doubleClickRecognizer: NSClickGestureRecognizer?
 
     var agentId: String { cardView.agentId }
 
@@ -31,8 +34,28 @@ final class StackedCardContainerView: NSView {
         // cardView on top; ghost views are inserted below it
         addSubview(cardView)
 
-        let click = NSClickGestureRecognizer(target: self, action: #selector(handleClick))
-        addGestureRecognizer(click)
+        // Double-click fires navigation
+        let doubleClick = NSClickGestureRecognizer(target: self, action: #selector(handleDoubleClick))
+        doubleClick.numberOfClicksRequired = 2
+        doubleClickRecognizer = doubleClick
+
+        // Single-click fires selection; waits for the double-click recognizer to fail
+        // before it fires. AppKit uses shouldRequireFailureOfGestureRecognizer (subclass
+        // override) rather than UIKit-style require(toFail:).
+        let singleClick = FailDependentClickRecognizer(
+            failTarget: doubleClick,
+            target: self,
+            action: #selector(handleClick)
+        )
+        singleClick.numberOfClicksRequired = 1
+
+        // cardView's own recognizer is functionally a no-op (delegate is nil), but without
+        // this dependency it could still consume the first tap and prevent the container's
+        // double-click from seeing the second tap. Wire it through the delegate.
+        cardView.clickRecognizer.delegate = self
+
+        addGestureRecognizer(doubleClick)
+        addGestureRecognizer(singleClick)
     }
 
     // MARK: - Configure
@@ -98,6 +121,26 @@ final class StackedCardContainerView: NSView {
         delegate?.agentCardClicked(agentId: cardView.agentId)
     }
 
+    @objc private func handleDoubleClick() {
+        delegate?.agentCardDoubleClicked(agentId: cardView.agentId)
+    }
+
+    // MARK: - Test helpers (internal for @testable access)
+
+    func simulateSingleClick() { handleClick() }
+    func simulateDoubleClick() { handleDoubleClick() }
+
+    // MARK: - NSGestureRecognizerDelegate
+
+    /// Makes cardView's click recognizer wait for the double-click recognizer to fail,
+    /// preventing it from consuming the first tap and blocking the container's double-click.
+    func gestureRecognizer(
+        _ gestureRecognizer: NSGestureRecognizer,
+        shouldRequireFailureOf otherGestureRecognizer: NSGestureRecognizer
+    ) -> Bool {
+        otherGestureRecognizer === doubleClickRecognizer
+    }
+
     // MARK: - Appearance
 
     override func viewDidChangeEffectiveAppearance() {
@@ -112,6 +155,27 @@ final class StackedCardContainerView: NSView {
         v.ghostIndex = index
         v.wantsLayer = true
         return v
+    }
+}
+
+// MARK: - FailDependentClickRecognizer
+
+/// An NSClickGestureRecognizer that requires another recognizer to fail before it fires.
+/// This replicates UIKit's `require(toFail:)` behaviour using AppKit's subclass override.
+private final class FailDependentClickRecognizer: NSClickGestureRecognizer {
+    private weak var failTarget: NSGestureRecognizer?
+
+    init(failTarget: NSGestureRecognizer, target: AnyObject?, action: Selector?) {
+        self.failTarget = failTarget
+        super.init(target: target, action: action)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) not supported")
+    }
+
+    override func shouldRequireFailure(of otherGestureRecognizer: NSGestureRecognizer) -> Bool {
+        otherGestureRecognizer === failTarget
     }
 }
 

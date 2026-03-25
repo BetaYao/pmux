@@ -38,6 +38,7 @@
 		401D6D4AFC6F267F778C0186 /* GhosttyBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5870CEFD75BAF5C5CD693AF3 /* GhosttyBridge.swift */; };
 		46A4B6CD5D83961BC1BCC025 /* FuzzyMatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D68C9D89F556E3F2BB829C5 /* FuzzyMatchTests.swift */; };
 		46C84B4776465F9C5C146BB7 /* AgentChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A8D57683DE93782BC1B9B6E /* AgentChannel.swift */; };
+		47EC32BE3E5E622F84E2EA4E /* StackedCardContainerDoubleClickTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C41952F967550081939AC228 /* StackedCardContainerDoubleClickTests.swift */; };
 		4AA669F5C78D8F447172DC06 /* StatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B67285FBB8E8F59982F0BD1 /* StatusBadge.swift */; };
 		4B3D7D8A190B2B86988A3BBF /* SidebarPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AAD1684AC3AA6D79A59F8E1 /* SidebarPage.swift */; };
 		4EF77889CD2383E034142ABD /* OSC133Parser.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB8D46E2A4A072BB5DB9B941 /* OSC133Parser.swift */; };
@@ -232,6 +233,7 @@
 		BBE6553B298A5AEE6F205D67 /* OSC133ParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSC133ParserTests.swift; sourceTree = "<group>"; };
 		BDCBD05D5CE0594C7CFBE777 /* ghostty.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ghostty.h; sourceTree = "<group>"; };
 		C35648A4693691BD87523F99 /* AIPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPanelView.swift; sourceTree = "<group>"; };
+		C41952F967550081939AC228 /* StackedCardContainerDoubleClickTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StackedCardContainerDoubleClickTests.swift; sourceTree = "<group>"; };
 		C9A08D6353BB2E4926BE168E /* MiniCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniCardView.swift; sourceTree = "<group>"; };
 		CA43E5DDFECA4ED4B53F4306 /* WorktreeDiscoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeDiscoveryTests.swift; sourceTree = "<group>"; };
 		CF7728215FABC3279DD56BC0 /* SidebarViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarViewController.swift; sourceTree = "<group>"; };
@@ -304,6 +306,7 @@
 				7FE920B04BA43448FB39479C /* SessionManagerTests.swift */,
 				7E4BE6DC1A7E0848AF906595 /* SplitContainerLayoutTests.swift */,
 				9A2A27A1A20964D323435154 /* SplitNodeTests.swift */,
+				C41952F967550081939AC228 /* StackedCardContainerDoubleClickTests.swift */,
 				08DFDBE17C89268186A89489 /* StackedCardContainerViewTests.swift */,
 				8FB8EE102BA233C405EDFE8E /* StatusDetectorTests.swift */,
 				4E73F70BC5F0D6B7C46124B2 /* StatusPublisherThreadTests.swift */,
@@ -736,6 +739,7 @@
 				B7BEE4E9A2718F357B77BE26 /* SessionManagerTests.swift in Sources */,
 				91D2733D895C716AB0883A36 /* SplitContainerLayoutTests.swift in Sources */,
 				75E38783336AF75D873C0E3B /* SplitNodeTests.swift in Sources */,
+				47EC32BE3E5E622F84E2EA4E /* StackedCardContainerDoubleClickTests.swift in Sources */,
 				2FAEE41F6499B9435099E854 /* StackedCardContainerViewTests.swift in Sources */,
 				F55F11B2C86D8D969EEC038F /* StatusDetectorTests.swift in Sources */,
 				5406AFFDB6D6EF3D194C2F9D /* StatusPublisherThreadTests.swift in Sources */,
