@@ -36,9 +36,31 @@ class SplitContainerView: NSView, DividerDelegate {
         for leaf in tree.allLeaves {
             guard let frame = leafFrames[leaf.id],
                   let view = surfaceViews[leaf.surfaceId] else { continue }
-            if view.superview != self { addSubview(view) }
+            // Deactivate any Auto Layout constraints and switch to frame-based positioning.
+            // TerminalSurface.create() sets up Auto Layout, but SplitContainerView uses frames.
+            if !view.translatesAutoresizingMaskIntoConstraints {
+                NSLayoutConstraint.deactivate(view.constraints)
+                // Also remove constraints from superview that reference this view
+                if let sv = view.superview {
+                    let related = sv.constraints.filter {
+                        $0.firstItem as? NSView === view || $0.secondItem as? NSView === view
+                    }
+                    NSLayoutConstraint.deactivate(related)
+                }
+                view.translatesAutoresizingMaskIntoConstraints = true
+            }
+            if view.superview != self {
+                view.removeFromSuperview()
+                addSubview(view)
+            }
             view.frame = frame
             view.setAccessibilityIdentifier("splitPane.leaf.\(leaf.id)")
+
+            // Notify Ghostty of the new size
+            if let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId) {
+                surface.syncContentScale()
+                surface.syncSize()
+            }
         }
         layoutDividers(node: tree.root, in: bounds)
         let activeSplitIds = collectSplitIds(tree.root)

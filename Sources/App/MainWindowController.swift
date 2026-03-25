@@ -1134,7 +1134,7 @@ class MainWindowController: NSWindowController {
 
     // MARK: - Current Repo VC Helper
 
-    private var currentRepoVC: RepoViewController? {
+    var currentRepoVC: RepoViewController? {
         guard activeTabIndex > 0 else { return nil }
         let repoIndex = activeTabIndex - 1
         guard let tab = workspaceManager.tab(at: repoIndex) else { return nil }
@@ -1255,50 +1255,48 @@ class MainWindowController: NSWindowController {
 }
 
 class PmuxWindow: NSWindow {
-    override func sendEvent(_ event: NSEvent) {
-        if event.type == .keyDown {
-            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
-            // Escape: exit spotlight (existing)
-            if event.keyCode == 53, MainWindowController.shouldHandleEscShortcut() {
-                return
-            }
+    // performKeyEquivalent runs BEFORE menu item key equivalents,
+    // so split pane shortcuts here take priority over menu bindings.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard event.type == .keyDown else { return super.performKeyEquivalent(with: event) }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard let mwc = windowController as? MainWindowController else {
+            return super.performKeyEquivalent(with: event)
+        }
 
+        // Only handle split keybindings when a repo tab is active with split panes
+        let hasSplitContext = mwc.currentRepoVC?.activeSplitContainer != nil
+
+        if hasSplitContext {
             // Cmd+D: horizontal split
             if flags == .command && event.charactersIgnoringModifiers == "d" {
-                if let mwc = windowController as? MainWindowController {
-                    mwc.splitFocusedPane(axis: .horizontal)
-                    return
-                }
+                mwc.splitFocusedPane(axis: .horizontal)
+                return true
             }
 
             // Cmd+Shift+D: vertical split
             if flags == [.command, .shift] && event.charactersIgnoringModifiers == "d" {
-                if let mwc = windowController as? MainWindowController {
-                    mwc.splitFocusedPane(axis: .vertical)
-                    return
-                }
+                mwc.splitFocusedPane(axis: .vertical)
+                return true
             }
 
-            // Cmd+Shift+W: close pane
+            // Cmd+Shift+W: close pane (only when more than 1 pane)
             if flags == [.command, .shift] && event.charactersIgnoringModifiers == "w" {
-                if let mwc = windowController as? MainWindowController {
+                if let tree = mwc.currentRepoVC?.activeSplitContainer?.tree, tree.leafCount > 1 {
                     mwc.closeFocusedPane()
-                    return
+                    return true
                 }
+                // Fall through to menu handling (Close Tab) when only 1 pane
             }
 
             // Cmd+Option+Arrows: focus navigation
             if flags == [.command, .option] {
                 switch event.keyCode {
-                case 123: // left
-                    (windowController as? MainWindowController)?.moveFocus(.horizontal, positive: false); return
-                case 124: // right
-                    (windowController as? MainWindowController)?.moveFocus(.horizontal, positive: true); return
-                case 125: // down
-                    (windowController as? MainWindowController)?.moveFocus(.vertical, positive: true); return
-                case 126: // up
-                    (windowController as? MainWindowController)?.moveFocus(.vertical, positive: false); return
+                case 123: mwc.moveFocus(.horizontal, positive: false); return true
+                case 124: mwc.moveFocus(.horizontal, positive: true); return true
+                case 125: mwc.moveFocus(.vertical, positive: true); return true
+                case 126: mwc.moveFocus(.vertical, positive: false); return true
                 default: break
                 }
             }
@@ -1306,17 +1304,29 @@ class PmuxWindow: NSWindow {
             // Cmd+Ctrl+Arrows: resize
             if flags == [.command, .control] {
                 switch event.keyCode {
-                case 123: (windowController as? MainWindowController)?.resizeSplit(.horizontal, delta: -0.05); return
-                case 124: (windowController as? MainWindowController)?.resizeSplit(.horizontal, delta: 0.05); return
-                case 125: (windowController as? MainWindowController)?.resizeSplit(.vertical, delta: 0.05); return
-                case 126: (windowController as? MainWindowController)?.resizeSplit(.vertical, delta: -0.05); return
+                case 123: mwc.resizeSplit(.horizontal, delta: -0.05); return true
+                case 124: mwc.resizeSplit(.horizontal, delta: 0.05); return true
+                case 125: mwc.resizeSplit(.vertical, delta: 0.05); return true
+                case 126: mwc.resizeSplit(.vertical, delta: -0.05); return true
                 default: break
                 }
             }
 
             // Cmd+Ctrl+=: reset ratio
             if flags == [.command, .control] && event.charactersIgnoringModifiers == "=" {
-                (windowController as? MainWindowController)?.resetSplitRatio(); return
+                mwc.resetSplitRatio()
+                return true
+            }
+        }
+
+        return super.performKeyEquivalent(with: event)
+    }
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown {
+            // Escape: exit spotlight (existing)
+            if event.keyCode == 53, MainWindowController.shouldHandleEscShortcut() {
+                return
             }
         }
         super.sendEvent(event)
