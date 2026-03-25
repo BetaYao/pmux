@@ -60,7 +60,9 @@
 		75E38783336AF75D873C0E3B /* SplitNodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A2A27A1A20964D323435154 /* SplitNodeTests.swift */; };
 		7873C02CEC680DB03B7484ED /* PmuxUITestCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1C569E5AD55D8174B15F0FE /* PmuxUITestCase.swift */; };
 		78899C72920B1210E33BFE1C /* TerminalSurfaceReparentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DC0F4B17429A591BDDF7B01 /* TerminalSurfaceReparentTests.swift */; };
+		78AE731C606BF09851D33A4B /* SplitPanePage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 177BDDD38D542E2731B8C45C /* SplitPanePage.swift */; };
 		792916DB52728582F21B6A52 /* LayoutPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25D351E067381C5F69013CC0 /* LayoutPopoverView.swift */; };
+		79C50E0974964B37598A2939 /* SplitPaneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 711655E518AE30CC4F28AAD9 /* SplitPaneTests.swift */; };
 		7B8D95F137FDF201E7248AAE /* FocusPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B31FE424B4FFCDE710E18FF2 /* FocusPanelView.swift */; };
 		866C5ADAFF42DD60F0035AFF /* PanelBackdropView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E56CC79181D10B235559C7E5 /* PanelBackdropView.swift */; };
 		8A6B5B861C4143B2E920C8EF /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3B0220151909C4154BD755 /* NotificationManager.swift */; };
@@ -144,6 +146,7 @@
 		093F3186717B83708B06F06F /* ProcessRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessRunner.swift; sourceTree = "<group>"; };
 		0DC0F4B17429A591BDDF7B01 /* TerminalSurfaceReparentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSurfaceReparentTests.swift; sourceTree = "<group>"; };
 		0FAED36C7B1716B96A3F73B4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		177BDDD38D542E2731B8C45C /* SplitPanePage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitPanePage.swift; sourceTree = "<group>"; };
 		19D21803E9CB8C1E169DC610 /* TaskProgressParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskProgressParser.swift; sourceTree = "<group>"; };
 		1A2C2EB17847BCD154B8BDB3 /* AgentHeadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentHeadTests.swift; sourceTree = "<group>"; };
 		1A57D292637AF94241500129 /* Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Config.swift; sourceTree = "<group>"; };
@@ -188,6 +191,7 @@
 		6C08E7D969505A103F2F450F /* SurfaceRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceRegistry.swift; sourceTree = "<group>"; };
 		6F9FFEA8DCA0DE251857F1A9 /* LayoutPopoverPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutPopoverPage.swift; sourceTree = "<group>"; };
 		70353A508814DEFA658F70CC /* DividerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DividerView.swift; sourceTree = "<group>"; };
+		711655E518AE30CC4F28AAD9 /* SplitPaneTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitPaneTests.swift; sourceTree = "<group>"; };
 		717B331C5968FFF9C4CD4C4B /* TitleBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitleBarView.swift; sourceTree = "<group>"; };
 		75352E99A112855A0E137D7D /* TaskProgressParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskProgressParserTests.swift; sourceTree = "<group>"; };
 		775FFC41426A242F2A4754A4 /* UpdateCheckerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCheckerTests.swift; sourceTree = "<group>"; };
@@ -437,6 +441,7 @@
 				440A4772C0C9F3A0C6146943 /* RepoPage.swift */,
 				07378DF0DB8804405A28DCC5 /* SettingsPage.swift */,
 				8AAD1684AC3AA6D79A59F8E1 /* SidebarPage.swift */,
+				177BDDD38D542E2731B8C45C /* SplitPanePage.swift */,
 				37D930D3729FC3162B5B891F /* StatusBarPage.swift */,
 				9DE5D0AB94CE35AF35035817 /* TitleBarPage.swift */,
 			);
@@ -491,6 +496,7 @@
 				37ED7FB1ACB355C9A54B0A38 /* PasteRegressionTests.swift */,
 				EE16C19617F7B844F4254505 /* RegressionTests.swift */,
 				39A5FA513A09E0CC544B64EA /* SmokeTests.swift */,
+				711655E518AE30CC4F28AAD9 /* SplitPaneTests.swift */,
 			);
 			path = Tests;
 			sourceTree = "<group>";
@@ -699,6 +705,8 @@
 				61F050623E5BC46021E055CD /* SettingsPage.swift in Sources */,
 				4B3D7D8A190B2B86988A3BBF /* SidebarPage.swift in Sources */,
 				12D67C0AEE009E494EAE4BE4 /* SmokeTests.swift in Sources */,
+				78AE731C606BF09851D33A4B /* SplitPanePage.swift in Sources */,
+				79C50E0974964B37598A2939 /* SplitPaneTests.swift in Sources */,
 				D1C6EA1AB0978ADC204B8848 /* StatusBarPage.swift in Sources */,
 				332DF77CD5F8403C6A1C746D /* TitleBarPage.swift in Sources */,
 				527EBCAD7FCE46C6593A19C1 /* XCUIElementExtensions.swift in Sources */,

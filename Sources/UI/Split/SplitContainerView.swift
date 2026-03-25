@@ -20,6 +20,7 @@ class SplitContainerView: NSView, DividerDelegate {
     override init(frame: NSRect) {
         super.init(frame: frame)
         translatesAutoresizingMaskIntoConstraints = true
+        setAccessibilityIdentifier("splitPane.container")
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -37,6 +38,7 @@ class SplitContainerView: NSView, DividerDelegate {
                   let view = surfaceViews[leaf.surfaceId] else { continue }
             if view.superview != self { addSubview(view) }
             view.frame = frame
+            view.setAccessibilityIdentifier("splitPane.leaf.\(leaf.id)")
         }
         layoutDividers(node: tree.root, in: bounds)
         let activeSplitIds = collectSplitIds(tree.root)
@@ -89,6 +91,7 @@ class SplitContainerView: NSView, DividerDelegate {
         } else {
             divider = DividerView(splitNodeId: id, axis: axis)
             divider.delegate = self
+            divider.setAccessibilityIdentifier("splitPane.divider.\(id)")
             addSubview(divider)
             dividers[id] = divider
         }
