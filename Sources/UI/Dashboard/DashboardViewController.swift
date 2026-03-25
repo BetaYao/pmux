@@ -172,6 +172,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         }
         for (index, agent) in sorted.enumerated() {
             gridCards[index].configure(paneCount: agent.paneCount)
+            gridCards[index].layoutChildren()
             gridCards[index].cardView.configure(
                 id: agent.id,
                 project: agent.project,
