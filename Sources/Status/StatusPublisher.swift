@@ -1,14 +1,9 @@
 import Foundation
 
-protocol StatusPublisherDelegate: AnyObject {
-    func statusDidChange(worktreePath: String, oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String)
-}
-
 /// Periodically polls terminal surfaces and detects agent status changes.
 /// Uses text pattern matching against visible terminal content.
 /// Polling runs on a background queue to avoid blocking the main thread.
 class StatusPublisher {
-    weak var delegate: StatusPublisherDelegate?
 
     private let detector = StatusDetector()
     private var trackers: [String: DebouncedStatusTracker] = [:]  // keyed by terminal ID
@@ -213,11 +208,6 @@ class StatusPublisher {
                 )
             }
 
-            if statusChanged {
-                DispatchQueue.main.async { [weak self] in
-                    self?.delegate?.statusDidChange(worktreePath: worktreePath, oldStatus: oldStatus, newStatus: detected, lastMessage: lastMessage)
-                }
-            }
         }
     }
 

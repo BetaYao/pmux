@@ -53,7 +53,6 @@ class MainWindowController: NSWindowController {
     private let statusAggregator = WorktreeStatusAggregator()
     private lazy var statusPublisher: StatusPublisher = {
         let pub = StatusPublisher(agentConfig: config.agentDetect)
-        pub.delegate = self
         pub.aggregator = statusAggregator
         statusAggregator.delegate = self
         return pub
@@ -1666,6 +1665,18 @@ extension MainWindowController {
 extension MainWindowController: WorktreeStatusDelegate {
     func worktreeStatusDidUpdate(_ status: WorktreeStatus) {
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
+        // Update repo VC if showing
+        if activeTabIndex > 0 {
+            let repoIndex = activeTabIndex - 1
+            if let tab = workspaceManager.tab(at: repoIndex),
+               let repoVC = repoVCs[tab.repoPath] {
+                let worktreePath = status.worktreePath
+                let aggregated = status.highestPriority
+                let message = status.mostRecentMessage
+                repoVC.updateStatus(for: worktreePath, status: aggregated, lastMessage: message)
+            }
+        }
+        updateTitleBar()
     }
 
     func paneStatusDidChange(worktreePath: String, paneIndex: Int, oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String) {
@@ -1685,37 +1696,6 @@ extension MainWindowController: WorktreeStatusDelegate {
     }
 }
 
-// MARK: - StatusPublisherDelegate
-
-extension MainWindowController: StatusPublisherDelegate {
-    func statusDidChange(worktreePath: String, oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String) {
-        let branch = allWorktrees.first(where: { $0.info.path == worktreePath })?.info.branch ?? ""
-
-        NotificationManager.shared.notify(
-            worktreePath: worktreePath,
-            branch: branch,
-            oldStatus: oldStatus,
-            newStatus: newStatus,
-            lastMessage: lastMessage
-        )
-
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            // Update dashboard with fresh agent data
-            self.dashboardVC?.updateAgents(self.buildAgentDisplayInfos())
-            // Update repo VC if showing
-            if self.activeTabIndex > 0 {
-                let repoIndex = self.activeTabIndex - 1
-                if let tab = self.workspaceManager.tab(at: repoIndex),
-                   let repoVC = self.repoVCs[tab.repoPath] {
-                    repoVC.updateStatus(for: worktreePath, status: newStatus, lastMessage: lastMessage)
-                }
-            }
-            self.updateTitleBar()
-        }
-    }
-}
-
 // MARK: - Notification Navigation
 
 extension MainWindowController {
@@ -1724,7 +1704,8 @@ extension MainWindowController {
             NSLog("navigateToWorktree: missing worktreePath in userInfo")
             return
         }
-        NSLog("navigateToWorktree: path=%@", worktreePath)
+        let paneIndex = notification.userInfo?["paneIndex"] as? Int
+        NSLog("navigateToWorktree: path=%@ paneIndex=%@", worktreePath, paneIndex.map { "\($0)" } ?? "nil")
 
         // Check already-open tabs first (no git calls needed)
         if let tabIndex = workspaceManager.tabs.firstIndex(where: { tab in
@@ -1739,6 +1720,12 @@ extension MainWindowController {
                 NSLog("navigateToWorktree: repoVC not found for %@", repoPath)
             }
             return
+        }
+
+        // If navigating to dashboard (tab 0), focus the specific pane
+        if let paneIndex, activeTabIndex == 0 {
+            // paneIndex from notification is 1-based; selectedPaneIndex is 0-based
+            dashboardVC?.selectedPaneIndex = paneIndex - 1
         }
         NSLog("navigateToWorktree: no tab found, falling back to async discovery")
 
