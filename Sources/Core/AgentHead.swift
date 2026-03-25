@@ -15,8 +15,8 @@ class AgentHead {
 
     private var agents: [String: AgentInfo] = [:]       // keyed by terminal ID
     private var orderedIDs: [String] = []
-    /// Reverse index: worktree path → terminal ID
-    private var worktreeIndex: [String: String] = [:]
+    /// Reverse index: worktree path → terminal IDs (1:N)
+    private var worktreeIndex: [String: [String]] = [:]
     /// Strong references to channels (keyed by terminal ID)
     private var channels: [String: AgentChannel] = [:]
     private var backendsByPath: [String: String] = [:]
@@ -62,7 +62,11 @@ class AgentHead {
             taskProgress: TaskProgress()
         )
         agents[terminalID] = info
-        worktreeIndex[worktreePath] = terminalID
+        var ids = worktreeIndex[worktreePath] ?? []
+        if !ids.contains(terminalID) {
+            ids.append(terminalID)
+        }
+        worktreeIndex[worktreePath] = ids
         if !orderedIDs.contains(terminalID) {
             orderedIDs.append(terminalID)
         }
@@ -73,12 +77,42 @@ class AgentHead {
         defer { lock.unlock() }
 
         if let info = agents[terminalID] {
-            worktreeIndex.removeValue(forKey: info.worktreePath)
+            worktreeIndex[info.worktreePath]?.removeAll { $0 == terminalID }
+            if worktreeIndex[info.worktreePath]?.isEmpty == true {
+                worktreeIndex.removeValue(forKey: info.worktreePath)
+            }
             backendsByPath.removeValue(forKey: info.worktreePath)
         }
         agents.removeValue(forKey: terminalID)
         channels.removeValue(forKey: terminalID)
         orderedIDs.removeAll { $0 == terminalID }
+    }
+
+    // MARK: - Worktree Index (1:N)
+
+    func registerTerminalID(_ terminalID: String, forWorktree worktreePath: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        var ids = worktreeIndex[worktreePath] ?? []
+        if !ids.contains(terminalID) {
+            ids.append(terminalID)
+        }
+        worktreeIndex[worktreePath] = ids
+    }
+
+    func unregisterTerminalID(_ terminalID: String, forWorktree worktreePath: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        worktreeIndex[worktreePath]?.removeAll { $0 == terminalID }
+        if worktreeIndex[worktreePath]?.isEmpty == true {
+            worktreeIndex.removeValue(forKey: worktreePath)
+        }
+    }
+
+    func terminalIDs(forWorktree worktreePath: String) -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return worktreeIndex[worktreePath] ?? []
     }
 
     // MARK: - Updates
@@ -143,7 +177,7 @@ class AgentHead {
             return
         }
 
-        let worktreePath = worktreeIndex[terminalID] ?? ""
+        let worktreePath = info.worktreePath
 
         // Upgrade channel for Claude Code: backend channel -> HooksChannel
         if agentType == .claudeCode {
@@ -235,10 +269,10 @@ class AgentHead {
     func handleWebhookEvent(_ event: WebhookEvent) {
         lock.lock()
         // Find the agent whose worktree path matches the event's cwd
-        let matchingTID = worktreeIndex.first { (worktreePath, _) in
+        let matchingTIDs = worktreeIndex.first { (worktreePath, _) in
             event.cwd == worktreePath || event.cwd.hasPrefix(worktreePath + "/")
         }?.value
-        guard let tid = matchingTID,
+        guard let tid = matchingTIDs?.first,
               let hooks = channels[tid] as? HooksChannel else {
             lock.unlock()
             return
@@ -287,7 +321,7 @@ class AgentHead {
         lock.lock()
         defer { lock.unlock() }
 
-        guard let tid = worktreeIndex[worktreePath] else { return nil }
+        guard let tid = worktreeIndex[worktreePath]?.first else { return nil }
         return agents[tid]
     }
 

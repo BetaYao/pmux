@@ -245,4 +245,41 @@ final class AgentHeadTests: XCTestCase {
         let agent = AgentHead.shared.agent(for: tid)!
         XCTAssertEqual(agent.totalDuration, 0)
     }
+
+    // MARK: - 1:N Worktree Index
+
+    func testWorktreeIndexStoresMultipleTerminals() {
+        let head = AgentHead.shared
+        head.registerTerminalID("test-t1", forWorktree: "/test/repo/main")
+        head.registerTerminalID("test-t2", forWorktree: "/test/repo/main")
+
+        let ids = head.terminalIDs(forWorktree: "/test/repo/main")
+        XCTAssertEqual(ids, ["test-t1", "test-t2"])
+
+        // Cleanup
+        head.unregisterTerminalID("test-t1", forWorktree: "/test/repo/main")
+        head.unregisterTerminalID("test-t2", forWorktree: "/test/repo/main")
+    }
+
+    func testUnregisterRemovesFromWorktreeIndex() {
+        let head = AgentHead.shared
+        head.registerTerminalID("test-t1", forWorktree: "/test/repo/main")
+        head.registerTerminalID("test-t2", forWorktree: "/test/repo/main")
+        head.unregisterTerminalID("test-t1", forWorktree: "/test/repo/main")
+
+        let ids = head.terminalIDs(forWorktree: "/test/repo/main")
+        XCTAssertEqual(ids, ["test-t2"])
+
+        // Cleanup
+        head.unregisterTerminalID("test-t2", forWorktree: "/test/repo/main")
+    }
+
+    func testUnregisterLastTerminalRemovesWorktreeEntry() {
+        let head = AgentHead.shared
+        head.registerTerminalID("test-t1", forWorktree: "/test/repo/main")
+        head.unregisterTerminalID("test-t1", forWorktree: "/test/repo/main")
+
+        let ids = head.terminalIDs(forWorktree: "/test/repo/main")
+        XCTAssertEqual(ids, [])
+    }
 }
