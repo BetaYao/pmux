@@ -75,21 +75,30 @@ indirect enum SplitNode {
         }
     }
 
-    /// Remove a leaf by id, promoting its sibling. Returns nil if this node IS the leaf.
+    /// Remove a leaf by id, promoting its sibling.
+    /// Returns nil if the target leaf was not found in this subtree.
+    /// When a direct child leaf matches, its sibling is promoted (returned).
+    /// When a deeper leaf matches, the modified subtree is returned.
     func removing(leafId: String) -> SplitNode? {
         switch self {
         case .leaf(let id, _, _):
-            return id == leafId ? nil : self
+            // Leaf doesn't contain the target — return nil to signal "not found here"
+            // The parent split handles the case where a direct child leaf matches (lines below)
+            return id == leafId ? nil : nil
         case .split(_, _, _, let first, let second):
+            // Direct child is the target leaf — promote its sibling
             if first.id == leafId { return second }
             if second.id == leafId { return first }
+            // Try removing from first subtree
             if let newFirst = first.removing(leafId: leafId) {
                 return .split(id: self.id, axis: axis, ratio: ratio, first: newFirst, second: second)
             }
+            // Try removing from second subtree
             if let newSecond = second.removing(leafId: leafId) {
                 return .split(id: self.id, axis: axis, ratio: ratio, first: first, second: newSecond)
             }
-            return self
+            // Target not found in either subtree
+            return nil
         }
     }
 
