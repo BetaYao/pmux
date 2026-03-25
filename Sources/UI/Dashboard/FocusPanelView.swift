@@ -7,10 +7,12 @@ enum NavigationDirection {
 protocol FocusPanelDelegate: AnyObject {
     func focusPanelDidRequestEnterProject(_ projectName: String)
     func focusPanelDidRequestNavigate(_ panel: FocusPanelView, direction: NavigationDirection)
+    func focusPanelDidSelectPane(_ panel: FocusPanelView, paneIndex: Int)
 }
 
 extension FocusPanelDelegate {
     func focusPanelDidRequestNavigate(_ panel: FocusPanelView, direction: NavigationDirection) {}
+    func focusPanelDidSelectPane(_ panel: FocusPanelView, paneIndex: Int) {}
 }
 
 final class FocusPanelView: NSView {
@@ -32,7 +34,9 @@ final class FocusPanelView: NSView {
     let terminalContainer: NSView = NSView()
 
     private let headerView = NSView()
-    private let statusDot = NSView()
+    private var statusDots: [NSView] = []
+    private var currentPaneStatuses: [AgentStatus] = []
+    private var nameLabelLeadingConstraint: NSLayoutConstraint?
     private let nameLabel = NSTextField(labelWithString: "")
     private let metaLabel = NSTextField(labelWithString: "")
     private let durationLabel = NSTextField(labelWithString: "")
@@ -52,7 +56,7 @@ final class FocusPanelView: NSView {
         fatalError("init(coder:) not supported")
     }
 
-    func configure(name: String, project: String, thread: String, status: String, total: String, round: String) {
+    func configure(name: String, project: String, thread: String, status: String, total: String, round: String, paneStatuses: [AgentStatus] = [], activePaneIndex: Int = 1) {
         projectName = project
 
         nameLabel.stringValue = name
@@ -62,7 +66,50 @@ final class FocusPanelView: NSView {
         let compactRound = AgentDisplayHelpers.compactDuration(round)
         durationLabel.stringValue = "Total \(compactTotal) / Round \(compactRound)"
 
-        statusDot.layer?.backgroundColor = AgentDisplayHelpers.statusColor(status).cgColor
+        // Rebuild status dots
+        statusDots.forEach { $0.removeFromSuperview() }
+        statusDots.removeAll()
+        nameLabelLeadingConstraint?.isActive = false
+
+        let statuses = paneStatuses.isEmpty ? [AgentStatus(rawValue: status) ?? .unknown] : paneStatuses
+        currentPaneStatuses = statuses
+        var previousDot: NSView? = nil
+        for (index, agentStatus) in statuses.enumerated() {
+            let isActive = (index + 1) == activePaneIndex
+            let size: CGFloat = isActive ? 10 : 8
+
+            let dot = NSButton()
+            dot.wantsLayer = true
+            dot.isBordered = false
+            dot.title = ""
+            dot.layer?.backgroundColor = agentStatus.color.cgColor
+            dot.layer?.cornerRadius = size / 2
+            dot.translatesAutoresizingMaskIntoConstraints = false
+            dot.tag = index + 1  // paneIndex (1-based)
+            dot.target = self
+            dot.action = #selector(dotClicked(_:))
+            headerView.addSubview(dot)
+
+            NSLayoutConstraint.activate([
+                dot.widthAnchor.constraint(equalToConstant: size),
+                dot.heightAnchor.constraint(equalToConstant: size),
+                dot.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+                dot.leadingAnchor.constraint(equalTo: previousDot?.trailingAnchor ?? headerView.leadingAnchor,
+                                             constant: previousDot != nil ? 4 : 10),
+            ])
+            statusDots.append(dot)
+            previousDot = dot
+        }
+
+        // Anchor name label to the last dot
+        if let lastDot = statusDots.last {
+            nameLabelLeadingConstraint = nameLabel.leadingAnchor.constraint(equalTo: lastDot.trailingAnchor, constant: 6)
+            nameLabelLeadingConstraint?.isActive = true
+        }
+    }
+
+    @objc private func dotClicked(_ sender: NSButton) {
+        delegate?.focusPanelDidSelectPane(self, paneIndex: sender.tag)
     }
 
     private func setup() {
@@ -95,12 +142,6 @@ final class FocusPanelView: NSView {
         headerBorder.layer?.backgroundColor = SemanticColors.lineAlpha55.cgColor
         headerBorder.translatesAutoresizingMaskIntoConstraints = false
         headerView.addSubview(headerBorder)
-
-        // Status dot
-        statusDot.wantsLayer = true
-        statusDot.layer?.cornerRadius = 4
-        statusDot.translatesAutoresizingMaskIntoConstraints = false
-        headerView.addSubview(statusDot)
 
         // Name
         nameLabel.font = NSFont.systemFont(ofSize: Typography.primaryPointSize, weight: .semibold)
@@ -145,12 +186,7 @@ final class FocusPanelView: NSView {
             headerBorder.topAnchor.constraint(equalTo: headerView.topAnchor),
             headerBorder.heightAnchor.constraint(equalToConstant: 1),
 
-            statusDot.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 10),
-            statusDot.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
-            statusDot.widthAnchor.constraint(equalToConstant: 8),
-            statusDot.heightAnchor.constraint(equalToConstant: 8),
-
-            nameLabel.leadingAnchor.constraint(equalTo: statusDot.trailingAnchor, constant: 6),
+            // nameLabel leading constraint set dynamically in configure()
             nameLabel.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
 
             metaLabel.leadingAnchor.constraint(equalTo: nameLabel.trailingAnchor, constant: 8),
