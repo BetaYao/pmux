@@ -20,6 +20,7 @@ class StatusPublisher {
     private var lastMessages: [String: String] = [:]              // keyed by terminal ID
     private var runningStartTimes: [String: Date] = [:]           // keyed by terminal ID
     private(set) var webhookProvider = WebhookStatusProvider()
+    var aggregator: WorktreeStatusAggregator?
     private let lock = NSLock()
 
     private let pollInterval: TimeInterval = 2.0
@@ -64,6 +65,13 @@ class StatusPublisher {
         lock.unlock()
         stop()
 
+        for (worktreePath, tree) in trees {
+            let leaves = tree.allLeaves
+            for (index, leaf) in leaves.enumerated() {
+                aggregator?.registerTerminal(leaf.surfaceId, worktreePath: worktreePath, leafIndex: index)
+            }
+        }
+
         webhookProvider.updateWorktrees(inputWorktreePaths)
 
         timer = Timer.scheduledTimer(withTimeInterval: pollInterval, repeats: true) { [weak self] _ in
@@ -98,6 +106,14 @@ class StatusPublisher {
             }
         }
         lock.unlock()
+
+        for (worktreePath, tree) in trees {
+            let leaves = tree.allLeaves
+            for (index, leaf) in leaves.enumerated() {
+                aggregator?.registerTerminal(leaf.surfaceId, worktreePath: worktreePath, leafIndex: index)
+            }
+        }
+
         webhookProvider.updateWorktrees(inputWorktreePaths)
     }
 
@@ -188,6 +204,14 @@ class StatusPublisher {
 
             AgentHead.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: agentType)
             AgentHead.shared.updateStatus(terminalID: terminalID, status: detected, lastMessage: lastMessage, roundDuration: roundDur)
+
+            DispatchQueue.main.async { [weak self] in
+                self?.aggregator?.agentDidUpdate(
+                    terminalID: terminalID,
+                    status: detected,
+                    lastMessage: lastMessage
+                )
+            }
 
             if statusChanged {
                 DispatchQueue.main.async { [weak self] in

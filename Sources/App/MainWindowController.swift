@@ -50,9 +50,12 @@ class MainWindowController: NSWindowController {
     private var pendingRelease: ReleaseInfo?
 
     // Status detection
+    private let statusAggregator = WorktreeStatusAggregator()
     private lazy var statusPublisher: StatusPublisher = {
         let pub = StatusPublisher(agentConfig: config.agentDetect)
         pub.delegate = self
+        pub.aggregator = statusAggregator
+        statusAggregator.delegate = self
         return pub
     }()
     private var webhookServer: WebhookServer?
@@ -607,23 +610,43 @@ class MainWindowController: NSWindowController {
 
     /// Build AgentDisplayInfo array from current worktree data
     private func buildAgentDisplayInfos() -> [AgentDisplayInfo] {
-        return AgentHead.shared.allAgents().compactMap { agent in
-            guard let surface = agent.surface else { return nil }
-            let paneCount = surfaceManager.tree(forPath: agent.worktreePath)?.leafCount ?? 1
-            return AgentDisplayInfo(
+        let agents = AgentHead.shared.allAgents()
+        var seen = Set<String>()
+        var result: [AgentDisplayInfo] = []
+
+        for agent in agents {
+            guard let surface = agent.surface else { continue }
+            guard !seen.contains(agent.worktreePath) else { continue }
+            seen.insert(agent.worktreePath)
+
+            let tree = surfaceManager.tree(forPath: agent.worktreePath)
+            let paneCount = tree?.leafCount ?? 1
+            let paneSurfaces: [TerminalSurface] = tree?.allLeaves.compactMap {
+                SurfaceRegistry.shared.surface(forId: $0.surfaceId)
+            } ?? [surface]
+
+            let ws = statusAggregator.status(for: agent.worktreePath)
+            let paneStatuses = ws?.statuses ?? [agent.status]
+            let mostRecentMessage = ws?.mostRecentMessage ?? (agent.lastMessage.isEmpty ? "No active task." : agent.lastMessage)
+            let mostRecentPaneIndex = ws?.mostRecentPaneIndex ?? 1
+
+            result.append(AgentDisplayInfo(
                 id: agent.id,
                 name: agent.branch,
                 project: agent.project,
                 thread: agent.branch,
-                status: agent.status.rawValue.lowercased(),
-                lastMessage: agent.lastMessage.isEmpty ? "No active task." : agent.lastMessage,
+                paneStatuses: paneStatuses,
+                mostRecentMessage: mostRecentMessage,
+                mostRecentPaneIndex: mostRecentPaneIndex,
                 totalDuration: AgentDisplayHelpers.formatDuration(agent.totalDuration),
                 roundDuration: AgentDisplayHelpers.formatDuration(agent.roundDuration),
                 surface: surface,
                 worktreePath: agent.worktreePath,
-                paneCount: paneCount
-            )
+                paneCount: paneCount,
+                paneSurfaces: paneSurfaces
+            ))
         }
+        return result
     }
 
     /// Add a new repo via folder picker
@@ -751,7 +774,7 @@ class MainWindowController: NSWindowController {
 
     private func getOrCreateRepoVC(for tab: WorkspaceTab) -> RepoViewController {
         if let existing = repoVCs[tab.repoPath] {
-            existing.configure(worktrees: tab.worktrees, trees: surfaceManager.all)
+            existing.reconfigurePreservingSelection(worktrees: tab.worktrees, trees: surfaceManager.all)
             return existing
         }
 
@@ -1635,6 +1658,30 @@ extension MainWindowController {
                 self.dashboardVC?.updateAgents(self.buildAgentDisplayInfos())
             }
         }
+    }
+}
+
+// MARK: - WorktreeStatusDelegate
+
+extension MainWindowController: WorktreeStatusDelegate {
+    func worktreeStatusDidUpdate(_ status: WorktreeStatus) {
+        dashboardVC?.updateAgents(buildAgentDisplayInfos())
+    }
+
+    func paneStatusDidChange(worktreePath: String, paneIndex: Int, oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String) {
+        let branch = allWorktrees.first(where: { $0.info.path == worktreePath })?.info.branch ?? ""
+        let paneCount = statusAggregator.status(for: worktreePath)?.panes.count ?? 1
+        let terminalID = statusAggregator.status(for: worktreePath)?.panes.first(where: { $0.paneIndex == paneIndex })?.terminalID ?? ""
+        NotificationManager.shared.notify(
+            terminalID: terminalID,
+            worktreePath: worktreePath,
+            branch: branch,
+            paneIndex: paneIndex,
+            paneCount: paneCount,
+            oldStatus: oldStatus,
+            newStatus: newStatus,
+            lastMessage: lastMessage
+        )
     }
 }
 
