@@ -12,13 +12,18 @@ enum SessionManager {
             .replacingOccurrences(of: ":", with: "_")
     }
 
+    /// Generate an indexed session name for an additional pane.
+    static func indexedSessionName(base: String, index: Int) -> String {
+        "\(base)-\(index)"
+    }
+
     /// Kill a persistent session (tmux or zmx)
     static func killSession(_ name: String, backend: String) {
         DispatchQueue.global(qos: .utility).async {
             if backend == "tmux" {
                 ProcessRunner.runSync(["tmux", "kill-session", "-t", name])
             } else {
-                ProcessRunner.runSync(["zmx", "kill", name])
+                TerminalSurface.forceKillZmxSession(name)
             }
         }
     }

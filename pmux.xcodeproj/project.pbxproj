@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0202996FD9599AC65D84B50A /* SurfaceRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C08E7D969505A103F2F450F /* SurfaceRegistry.swift */; };
 		08A5405DC8447F80FBB368B5 /* GridLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFB869F9858B5DAA8D58759E /* GridLayout.swift */; };
 		0F734E682967C48DAE248A67 /* RegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE16C19617F7B844F4254505 /* RegressionTests.swift */; };
 		10119E84D3FDCF1BE04A2E76 /* AIPanelPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 453DF413CD95A1FF43198216 /* AIPanelPage.swift */; };
@@ -184,6 +185,7 @@
 		6195AF42402DC460F5FED65A /* WebhookServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookServer.swift; sourceTree = "<group>"; };
 		6A9CF27FE3D892BF9938D96E /* pmux.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = pmux.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6AE64E9301722FAD9592FA2B /* pmuxUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = pmuxUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		6C08E7D969505A103F2F450F /* SurfaceRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceRegistry.swift; sourceTree = "<group>"; };
 		6F9FFEA8DCA0DE251857F1A9 /* LayoutPopoverPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutPopoverPage.swift; sourceTree = "<group>"; };
 		70353A508814DEFA658F70CC /* DividerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DividerView.swift; sourceTree = "<group>"; };
 		717B331C5968FFF9C4CD4C4B /* TitleBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitleBarView.swift; sourceTree = "<group>"; };
@@ -535,6 +537,7 @@
 				B7D298575FB388BE35E523E0 /* HooksChannel.swift */,
 				093F3186717B83708B06F06F /* ProcessRunner.swift */,
 				3E90C40D5BEFB5DF4880F087 /* SessionManager.swift */,
+				6C08E7D969505A103F2F450F /* SurfaceRegistry.swift */,
 				E17C9DD0712AB9D3C27656CD /* TerminalSurfaceManager.swift */,
 				FB1E1F8A75CC3DDE09D288F8 /* TmuxChannel.swift */,
 				46E1829BBCB67537BD9327A4 /* WorkspaceManager.swift */,
@@ -783,6 +786,7 @@
 				4AA669F5C78D8F447172DC06 /* StatusBadge.swift in Sources */,
 				1CC51D6AFB2CFD4EC3A3A215 /* StatusDetector.swift in Sources */,
 				BC2163AECF13737DDEB5802B /* StatusPublisher.swift in Sources */,
+				0202996FD9599AC65D84B50A /* SurfaceRegistry.swift in Sources */,
 				A4E761BAFD0AB77EB01F55AE /* TaskProgressParser.swift in Sources */,
 				3E9FA0F0B9528BB6976028CA /* TerminalSurface.swift in Sources */,
 				33B0C273D08D985D6CE702D3 /* TerminalSurfaceManager.swift in Sources */,
