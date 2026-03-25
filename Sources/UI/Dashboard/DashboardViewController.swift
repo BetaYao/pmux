@@ -759,16 +759,22 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     func agentCardClicked(agentId: String) {
         switch currentLayout {
         case .grid:
-            // Single click → enter Speaker View with clicked agent focused
-            detachTerminals()
+            // Single click → select in place (no layout switch)
             selectedAgentId = agentId
-            setLayout(.leftRight)
+            for container in gridCards {
+                container.isSelected = (container.agentId == agentId)
+            }
         default:
             // In other layouts, change selection and refresh focus panel
             detachTerminals()
             selectedAgentId = agentId
             rebuildCurrentLayout()
         }
+    }
+
+    func agentCardDoubleClicked(agentId: String) {
+        guard let agent = agents.first(where: { $0.id == agentId }) else { return }
+        dashboardDelegate?.dashboardDidSelectProject(agent.project, thread: agent.thread)
     }
 
     // MARK: - FocusPanelDelegate
