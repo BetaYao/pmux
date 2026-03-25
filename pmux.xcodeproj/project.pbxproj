@@ -13,6 +13,7 @@
 		10119E84D3FDCF1BE04A2E76 /* AIPanelPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 453DF413CD95A1FF43198216 /* AIPanelPage.swift */; };
 		12D67C0AEE009E494EAE4BE4 /* SmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39A5FA513A09E0CC544B64EA /* SmokeTests.swift */; };
 		13B76196C2B22786A68910DB /* AgentStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BD718C45C250DD878B00F6B /* AgentStatus.swift */; };
+		143C33F88772A5C5022E105D /* StackedMiniCardContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 957B3ECF258B0B7E82ECB2D5 /* StackedMiniCardContainerView.swift */; };
 		1C49EACD3ACCDFD8A6A63BA6 /* WorkspaceManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A4746387136AA7EAE6C78A2 /* WorkspaceManagerTests.swift */; };
 		1CC51D6AFB2CFD4EC3A3A215 /* StatusDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40C65AF8BC1451365BA6E43B /* StatusDetector.swift */; };
 		212BA7569BA2AAFE056F13A8 /* SemVer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2384EDD65D54C9A6D4971FEA /* SemVer.swift */; };
@@ -110,6 +111,7 @@
 		DDEED8CE298342BC0DD98463 /* ProcessRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 093F3186717B83708B06F06F /* ProcessRunner.swift */; };
 		DE62C218A57E1260838EC7A8 /* WorktreeDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7FF2F9F3E1DECD0D905D929 /* WorktreeDiscovery.swift */; };
 		E2B2C8EB87D032DDC677F295 /* AIPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C35648A4693691BD87523F99 /* AIPanelView.swift */; };
+		E4D7687423B5C039104EEE3C /* StackedMiniCardContainerViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F80631CA4BC484861BD11F /* StackedMiniCardContainerViewTests.swift */; };
 		E7DBCD035BB8F22EA552E78D /* StackedCardContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DE0DBB0B06F9AC72C7CFD11 /* StackedCardContainerView.swift */; };
 		E858925F04FBF9C99BD0DFC6 /* CoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5D756A9AE7084B674EC9314 /* CoreTests.swift */; };
 		EC5483D909F6DDBEC587EB23 /* GitDiffTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FAD1E506194FAF66CC6A57F /* GitDiffTests.swift */; };
@@ -151,6 +153,7 @@
 		0DC0F4B17429A591BDDF7B01 /* TerminalSurfaceReparentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSurfaceReparentTests.swift; sourceTree = "<group>"; };
 		0DE0DBB0B06F9AC72C7CFD11 /* StackedCardContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StackedCardContainerView.swift; sourceTree = "<group>"; };
 		0FAED36C7B1716B96A3F73B4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		12F80631CA4BC484861BD11F /* StackedMiniCardContainerViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StackedMiniCardContainerViewTests.swift; sourceTree = "<group>"; };
 		177BDDD38D542E2731B8C45C /* SplitPanePage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitPanePage.swift; sourceTree = "<group>"; };
 		19D21803E9CB8C1E169DC610 /* TaskProgressParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskProgressParser.swift; sourceTree = "<group>"; };
 		1A2C2EB17847BCD154B8BDB3 /* AgentHeadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentHeadTests.swift; sourceTree = "<group>"; };
@@ -211,6 +214,7 @@
 		8E1F64C007F8EB1E1453C191 /* pmuxTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = pmuxTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		8FB8EE102BA233C405EDFE8E /* StatusDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusDetectorTests.swift; sourceTree = "<group>"; };
 		937ED76E5A4460A17EC68FEB /* AgentHead.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentHead.swift; sourceTree = "<group>"; };
+		957B3ECF258B0B7E82ECB2D5 /* StackedMiniCardContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StackedMiniCardContainerView.swift; sourceTree = "<group>"; };
 		988C3307F71A295CBE3FC7A7 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		99E89445321A270D7EB7BACF /* SemanticColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SemanticColors.swift; sourceTree = "<group>"; };
 		9A2A27A1A20964D323435154 /* SplitNodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitNodeTests.swift; sourceTree = "<group>"; };
@@ -308,6 +312,7 @@
 				9A2A27A1A20964D323435154 /* SplitNodeTests.swift */,
 				C41952F967550081939AC228 /* StackedCardContainerDoubleClickTests.swift */,
 				08DFDBE17C89268186A89489 /* StackedCardContainerViewTests.swift */,
+				12F80631CA4BC484861BD11F /* StackedMiniCardContainerViewTests.swift */,
 				8FB8EE102BA233C405EDFE8E /* StatusDetectorTests.swift */,
 				4E73F70BC5F0D6B7C46124B2 /* StatusPublisherThreadTests.swift */,
 				75352E99A112855A0E137D7D /* TaskProgressParserTests.swift */,
@@ -395,6 +400,7 @@
 				EFB869F9858B5DAA8D58759E /* GridLayout.swift */,
 				C9A08D6353BB2E4926BE168E /* MiniCardView.swift */,
 				0DE0DBB0B06F9AC72C7CFD11 /* StackedCardContainerView.swift */,
+				957B3ECF258B0B7E82ECB2D5 /* StackedMiniCardContainerView.swift */,
 			);
 			path = Dashboard;
 			sourceTree = "<group>";
@@ -741,6 +747,7 @@
 				75E38783336AF75D873C0E3B /* SplitNodeTests.swift in Sources */,
 				47EC32BE3E5E622F84E2EA4E /* StackedCardContainerDoubleClickTests.swift in Sources */,
 				2FAEE41F6499B9435099E854 /* StackedCardContainerViewTests.swift in Sources */,
+				E4D7687423B5C039104EEE3C /* StackedMiniCardContainerViewTests.swift in Sources */,
 				F55F11B2C86D8D969EEC038F /* StatusDetectorTests.swift in Sources */,
 				5406AFFDB6D6EF3D194C2F9D /* StatusPublisherThreadTests.swift in Sources */,
 				ACD9C6AB30216786478DB0DA /* TaskProgressParserTests.swift in Sources */,
@@ -803,6 +810,7 @@
 				D06F93FF3E5838AB6521B20C /* SplitNode.swift in Sources */,
 				C13D2A00E7593371A0415ADF /* SplitTree.swift in Sources */,
 				E7DBCD035BB8F22EA552E78D /* StackedCardContainerView.swift in Sources */,
+				143C33F88772A5C5022E105D /* StackedMiniCardContainerView.swift in Sources */,
 				4AA669F5C78D8F447172DC06 /* StatusBadge.swift in Sources */,
 				1CC51D6AFB2CFD4EC3A3A215 /* StatusDetector.swift in Sources */,
 				BC2163AECF13737DDEB5802B /* StatusPublisher.swift in Sources */,
