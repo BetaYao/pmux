@@ -18,13 +18,25 @@ struct AgentDisplayInfo {
     let name: String        // display name like "Agent-Alpha"
     let project: String     // repo display name
     let thread: String      // branch name
-    let status: String      // "running", "waiting", "idle", "error"
-    let lastMessage: String
+    let paneStatuses: [AgentStatus]     // per-pane statuses
+    let mostRecentMessage: String       // message from most recently updated pane
+    let mostRecentPaneIndex: Int
     let totalDuration: String   // "HH:MM:SS" format
     let roundDuration: String   // "HH:MM:SS" format
     let surface: TerminalSurface
     let worktreePath: String    // needed to lazily create the terminal
     let paneCount: Int          // number of split panes (1 = no badge)
+    let paneSurfaces: [TerminalSurface]  // all pane surfaces in leaf order
+
+    /// Convenience: primary status string for display (first pane's status)
+    var status: String {
+        (paneStatuses.first ?? .unknown).rawValue.lowercased()
+    }
+
+    /// Convenience: backward-compatible lastMessage
+    var lastMessage: String {
+        mostRecentMessage
+    }
 }
 
 // MARK: - Pasteboard type (used by DraggableGridView)
@@ -56,6 +68,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
 
     var currentLayout: DashboardLayout = .leftRight
     var selectedAgentId: String = ""
+    var selectedPaneIndex: Int = 0
     private(set) var zoomIndex: Int = GridLayout.defaultZoomIndex
 
     // Data
@@ -141,6 +154,12 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         // Validate selectedAgentId
         if !agents.contains(where: { $0.id == selectedAgentId }) {
             selectedAgentId = sortedAgents().first?.id ?? ""
+            selectedPaneIndex = 0
+        }
+
+        // Clamp selectedPaneIndex to current pane count
+        if let selected = agents.first(where: { $0.id == selectedAgentId }) {
+            selectedPaneIndex = min(selectedPaneIndex, max(selected.paneCount - 1, 0))
         }
 
         if structureChanged {
@@ -194,6 +213,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         }
         if let selected = sorted.first(where: { $0.id == selectedAgentId }) ?? sorted.first {
             configureFocusPanel(focusPanel, with: selected)
+            // Re-embed terminal if it was detached (e.g. after tab switch)
+            if focusPanel.terminalContainer.subviews.isEmpty {
+                embedSurface(selected, in: focusPanel.terminalContainer)
+            }
         }
         for (index, agent) in sorted.enumerated() {
             miniCards[index].configure(paneCount: agent.paneCount)
@@ -735,18 +758,27 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
             total: agent.totalDuration,
             round: agent.roundDuration
         )
-        let sorted = sortedAgents()
-        if let index = sorted.firstIndex(where: { $0.id == agent.id }) {
-            panel.configureNavigation(currentIndex: index, total: sorted.count)
-        }
+        // Navigation shows panes within the selected group, not groups
+        panel.configureNavigation(currentIndex: selectedPaneIndex, total: agent.paneCount)
     }
 
     /// Embed a terminal surface into a container, creating it if needed.
     private func embedSurface(_ agent: AgentDisplayInfo, in container: NSView) {
-        let surface = agent.surface
+        // Use the selected pane surface when available
+        let surface: TerminalSurface
+        if selectedPaneIndex < agent.paneSurfaces.count {
+            surface = agent.paneSurfaces[selectedPaneIndex]
+        } else {
+            surface = agent.surface
+        }
+        embedPaneSurface(surface, worktreePath: agent.worktreePath, in: container)
+    }
+
+    /// Embed a specific pane surface into a container, creating it if needed.
+    private func embedPaneSurface(_ surface: TerminalSurface, worktreePath: String, in container: NSView) {
         surface.delegate = self
         if surface.surface == nil {
-            _ = surface.create(in: container, workingDirectory: agent.worktreePath, sessionName: surface.sessionName)
+            _ = surface.create(in: container, workingDirectory: worktreePath, sessionName: surface.sessionName)
         } else {
             surface.reparent(to: container)
         }
@@ -772,9 +804,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
                 container.isSelected = (container.agentId == agentId)
             }
         default:
-            // In other layouts, change selection and refresh focus panel
+            // Click selects group, resets to first pane
             detachTerminals()
             selectedAgentId = agentId
+            selectedPaneIndex = 0
             rebuildCurrentLayout()
         }
     }
@@ -792,20 +825,17 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
 
     func focusPanelDidRequestNavigate(_ panel: FocusPanelView, direction: NavigationDirection) {
         let sorted = sortedAgents()
-        guard sorted.count > 1 else { return }
-
-        guard let currentIndex = sorted.firstIndex(where: { $0.id == selectedAgentId }) else { return }
+        guard let agent = sorted.first(where: { $0.id == selectedAgentId }) else { return }
+        guard agent.paneCount > 1 else { return }
 
         let newIndex: Int
         switch direction {
         case .next:
-            newIndex = min(currentIndex + 1, sorted.count - 1)
+            newIndex = min(selectedPaneIndex + 1, agent.paneCount - 1)
         case .previous:
-            newIndex = max(currentIndex - 1, 0)
+            newIndex = max(selectedPaneIndex - 1, 0)
         }
-        guard newIndex != currentIndex else { return }
-
-        let newAgent = sorted[newIndex]
+        guard newIndex != selectedPaneIndex else { return }
 
         let focusPanel: FocusPanelView
         switch currentLayout {
@@ -823,15 +853,16 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         transition.subtype = slideSubtype(for: currentLayout, direction: direction)
         focusPanel.terminalContainer.layer?.add(transition, forKey: "slideTransition")
 
-        // Swap terminal
+        // Swap to the new pane's surface
         detachTerminals()
-        selectedAgentId = newAgent.id
-        configureFocusPanel(focusPanel, with: newAgent)
-        focusPanel.configureNavigation(currentIndex: newIndex, total: sorted.count)
-        embedSurface(newAgent, in: focusPanel.terminalContainer)
+        selectedPaneIndex = newIndex
+        configureFocusPanel(focusPanel, with: agent)
 
-        // Update mini card selection
-        updateMiniCardSelection()
+        // Embed the specific pane surface
+        if newIndex < agent.paneSurfaces.count {
+            let surface = agent.paneSurfaces[newIndex]
+            embedPaneSurface(surface, worktreePath: agent.worktreePath, in: focusPanel.terminalContainer)
+        }
     }
 
     private func slideSubtype(for layout: DashboardLayout, direction: NavigationDirection) -> CATransitionSubtype {
