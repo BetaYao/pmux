@@ -165,6 +165,28 @@ class RepoViewController: NSViewController {
         }
     }
 
+    /// Update data without resetting the active worktree selection.
+    /// Used when switching back to an already-configured tab.
+    func reconfigurePreservingSelection(worktrees: [WorktreeInfo], trees: [String: SplitTree]) {
+        self.trees = trees
+
+        // Check if worktree list changed structurally
+        let oldPaths = self.worktrees.map(\.path)
+        let newPaths = worktrees.map(\.path)
+        self.worktrees = worktrees
+
+        if oldPaths != newPaths {
+            sidebarVC.setWorktrees(worktrees)
+        }
+
+        // Clamp active index if worktrees were removed
+        if !worktrees.isEmpty {
+            activeWorktreeIndex = min(activeWorktreeIndex, worktrees.count - 1)
+            // Always defer to viewDidLayout so the view is in the window hierarchy
+            needsTerminalOnLayout = true
+        }
+    }
+
     func addWorktree(_ info: WorktreeInfo, tree: SplitTree) {
         worktrees.append(info)
         trees[info.path] = tree
@@ -239,6 +261,12 @@ class RepoViewController: NSViewController {
            let termView = surface.view {
             view.window?.makeFirstResponder(termView)
         }
+
+        NotificationCenter.default.post(
+            name: .repoViewDidChangeWorktree,
+            object: self,
+            userInfo: ["worktreePath": info.path]
+        )
     }
 
     func selectWorktree(byPath path: String) {
@@ -258,6 +286,22 @@ class RepoViewController: NSViewController {
 
     func updateStatus(for path: String, status: AgentStatus, lastMessage: String = "") {
         sidebarVC.updateStatus(for: path, status: status, lastMessage: lastMessage)
+    }
+
+    /// Focus a specific pane (1-based index) within the current worktree's split tree.
+    func focusPane(at paneIndex: Int) {
+        guard let container = activeSplitContainer,
+              let tree = container.tree else { return }
+        let leaves = tree.allLeaves
+        let zeroBasedIndex = paneIndex - 1
+        guard zeroBasedIndex >= 0, zeroBasedIndex < leaves.count else { return }
+        let leaf = leaves[zeroBasedIndex]
+        tree.focusedId = leaf.id
+        container.updateDimOverlays()
+        if let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId),
+           let termView = surface.view {
+            view.window?.makeFirstResponder(termView)
+        }
     }
 
     /// Detach the active split container so it can be reparented elsewhere
@@ -344,4 +388,8 @@ extension Collection {
     subscript(safe index: Index) -> Element? {
         indices.contains(index) ? self[index] : nil
     }
+}
+
+extension Notification.Name {
+    static let repoViewDidChangeWorktree = Notification.Name("repoViewDidChangeWorktree")
 }

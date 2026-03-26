@@ -35,6 +35,13 @@ class TabCoordinator {
 
     init(config: Config) {
         self.config = config
+        NotificationCenter.default.addObserver(forName: .repoViewDidChangeWorktree, object: nil, queue: .main) { [weak self] notification in
+            guard let self,
+                  let worktreePath = notification.userInfo?["worktreePath"] as? String,
+                  let repoPath = self.worktreeRepoCache[worktreePath] else { return }
+            self.config.activeWorktreePaths[repoPath] = worktreePath
+            self.config.save()
+        }
     }
 
     // MARK: - Current Repo VC
