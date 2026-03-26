@@ -63,6 +63,7 @@
 		61F050623E5BC46021E055CD /* SettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07378DF0DB8804405A28DCC5 /* SettingsPage.swift */; };
 		62767D5D707DB3A137EB91AB /* UnifiedModalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55F69EA38A9AFFA065D85DDA /* UnifiedModalView.swift */; };
 		642D6EFC6BFD355854937A9D /* WorktreeDeleter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 079B4C9EB16FC26ACDF4D3DA /* WorktreeDeleter.swift */; };
+		65B2AC205BDC323D702ABEE5 /* BackendResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 857989E8420BCFCC84E4A250 /* BackendResolverTests.swift */; };
 		6B25C15BED891D9441C70A5B /* DashboardPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD8A8A3032C569CDD2E101CD /* DashboardPage.swift */; };
 		6FD79D72C951209C51211464 /* Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A57D292637AF94241500129 /* Config.swift */; };
 		70D69428E880965F497645E3 /* PaneStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1CB7985BD4A1E8BB5864D95 /* PaneStatus.swift */; };
@@ -103,6 +104,7 @@
 		B8234C74B95A86C2FCDE122A /* LayoutPopoverPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F9FFEA8DCA0DE251857F1A9 /* LayoutPopoverPage.swift */; };
 		BC2163AECF13737DDEB5802B /* StatusPublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60E67A393334BDBEDDD4CF28 /* StatusPublisher.swift */; };
 		BC6A92D151FF06E241A53805 /* UpdateCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CB05DB142623AABD3F2FD99 /* UpdateCoordinator.swift */; };
+		BDC0D1224E1E703495F9D0FE /* BackendResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43C96F9EE167C8414B4C1DFB /* BackendResolver.swift */; };
 		BDC6D6D9057C6650D5F87B8F /* PasteRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37ED7FB1ACB355C9A54B0A38 /* PasteRegressionTests.swift */; };
 		BFD42F1E88E7E7357011AA44 /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = D789C39B920D21F7CC6153BF /* UpdateChecker.swift */; };
 		C13D2A00E7593371A0415ADF /* SplitTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DAC204D612A0B1E58C55957 /* SplitTree.swift */; };
@@ -196,6 +198,7 @@
 		40C65AF8BC1451365BA6E43B /* StatusDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusDetector.swift; sourceTree = "<group>"; };
 		40DFA9340D1FBE2505F5E5F1 /* WorktreeCreatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeCreatorTests.swift; sourceTree = "<group>"; };
 		43A984E0EA23D865CBD20EBF /* UpdateError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateError.swift; sourceTree = "<group>"; };
+		43C96F9EE167C8414B4C1DFB /* BackendResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendResolver.swift; sourceTree = "<group>"; };
 		440A4772C0C9F3A0C6146943 /* RepoPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoPage.swift; sourceTree = "<group>"; };
 		453211D5B206B5E071DA0DEE /* NotificationHistoryViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationHistoryViewController.swift; sourceTree = "<group>"; };
 		453DF413CD95A1FF43198216 /* AIPanelPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPanelPage.swift; sourceTree = "<group>"; };
@@ -229,6 +232,7 @@
 		7E4BE6DC1A7E0848AF906595 /* SplitContainerLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitContainerLayoutTests.swift; sourceTree = "<group>"; };
 		7FE920B04BA43448FB39479C /* SessionManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManagerTests.swift; sourceTree = "<group>"; };
 		7FF70596F66D6407538CD7D4 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		857989E8420BCFCC84E4A250 /* BackendResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendResolverTests.swift; sourceTree = "<group>"; };
 		8AAD1684AC3AA6D79A59F8E1 /* SidebarPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarPage.swift; sourceTree = "<group>"; };
 		8B67285FBB8E8F59982F0BD1 /* StatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBadge.swift; sourceTree = "<group>"; };
 		8C0F1D7B03234E96555BA541 /* WebhookEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookEvent.swift; sourceTree = "<group>"; };
@@ -307,6 +311,7 @@
 			isa = PBXGroup;
 			children = (
 				7FF70596F66D6407538CD7D4 /* AppDelegate.swift */,
+				43C96F9EE167C8414B4C1DFB /* BackendResolver.swift */,
 				988C3307F71A295CBE3FC7A7 /* main.swift */,
 				AF00FDE4C61CF4A5B53653B4 /* MainWindowController.swift */,
 				20B1DBE711516E60B6AE16E5 /* MenuBuilder.swift */,
@@ -331,6 +336,7 @@
 			children = (
 				1A2C2EB17847BCD154B8BDB3 /* AgentHeadTests.swift */,
 				E08DDD9848A72A6676EE8C53 /* AgentTypeTests.swift */,
+				857989E8420BCFCC84E4A250 /* BackendResolverTests.swift */,
 				B36343DD1B7AAC21991375B5 /* ConfigTests.swift */,
 				4A4A5FAF3E28A69FE2B6FA71 /* DashboardViewControllerClickTests.swift */,
 				CBAD95B6446C41977FC2D621 /* FocusPanelNavigationTests.swift */,
@@ -776,6 +782,7 @@
 			files = (
 				2A0629AFA6E01C998879B2CD /* AgentHeadTests.swift in Sources */,
 				C365198BF2E40B6FC37C692F /* AgentTypeTests.swift in Sources */,
+				65B2AC205BDC323D702ABEE5 /* BackendResolverTests.swift in Sources */,
 				37CF56A936EE5533A1AFF38F /* ConfigTests.swift in Sources */,
 				AFB2E41277FFEA9046F07A0B /* DashboardViewControllerClickTests.swift in Sources */,
 				1FBB12F513B351D39B315FBA /* FocusPanelNavigationTests.swift in Sources */,
@@ -826,6 +833,7 @@
 				13B76196C2B22786A68910DB /* AgentStatus.swift in Sources */,
 				FB9670E59F9661B2F8FA2922 /* AgentType.swift in Sources */,
 				DD1F5EE1A756E0DF3B90075F /* AppDelegate.swift in Sources */,
+				BDC0D1224E1E703495F9D0FE /* BackendResolver.swift in Sources */,
 				6FD79D72C951209C51211464 /* Config.swift in Sources */,
 				A64BED7E816CBDA7FC1BF839 /* DashboardViewController.swift in Sources */,
 				DD7B3E20208412867CF4D9BD /* DiffOverlayViewController.swift in Sources */,

@@ -637,31 +637,31 @@ final class GridLayoutTests: XCTestCase {
     }
 
     func testMainWindowController_ResolvePreferredBackend_UsesZmxWhenAvailable() {
-        let resolved = MainWindowController.resolvePreferredBackend(preferred: "zmx", zmxAvailable: true, tmuxAvailable: true)
+        let resolved = BackendResolver.resolvePreferredBackend(preferred: "zmx", zmxAvailable: true, tmuxAvailable: true)
         XCTAssertEqual(resolved, "zmx")
     }
 
     func testMainWindowController_ResolvePreferredBackend_FallsBackToTmuxWhenZmxMissing() {
-        let resolved = MainWindowController.resolvePreferredBackend(preferred: "zmx", zmxAvailable: false, tmuxAvailable: true)
+        let resolved = BackendResolver.resolvePreferredBackend(preferred: "zmx", zmxAvailable: false, tmuxAvailable: true)
         XCTAssertEqual(resolved, "tmux")
     }
 
     func testMainWindowController_ResolvePreferredBackend_FallsBackToLocalWhenNoBackendInstalled() {
-        let resolved = MainWindowController.resolvePreferredBackend(preferred: "zmx", zmxAvailable: false, tmuxAvailable: false)
+        let resolved = BackendResolver.resolvePreferredBackend(preferred: "zmx", zmxAvailable: false, tmuxAvailable: false)
         XCTAssertEqual(resolved, "local")
     }
 
     func testMainWindowController_ResolvePreferredBackend_LocalAutoRecoversToZmx() {
-        let resolved = MainWindowController.resolvePreferredBackend(preferred: "local", zmxAvailable: true, tmuxAvailable: true)
+        let resolved = BackendResolver.resolvePreferredBackend(preferred: "local", zmxAvailable: true, tmuxAvailable: true)
         XCTAssertEqual(resolved, "zmx")
     }
 
     func testMainWindowController_IsSupportedZmxVersion() {
-        XCTAssertTrue(MainWindowController.isSupportedZmxVersion("0.4.2"))
-        XCTAssertTrue(MainWindowController.isSupportedZmxVersion("v0.4.9"))
-        XCTAssertTrue(MainWindowController.isSupportedZmxVersion("0.5.0"))
-        XCTAssertFalse(MainWindowController.isSupportedZmxVersion("0.3.9"))
-        XCTAssertFalse(MainWindowController.isSupportedZmxVersion("bad-value"))
+        XCTAssertTrue(BackendResolver.isSupportedZmxVersion("0.4.2"))
+        XCTAssertTrue(BackendResolver.isSupportedZmxVersion("v0.4.9"))
+        XCTAssertTrue(BackendResolver.isSupportedZmxVersion("0.5.0"))
+        XCTAssertFalse(BackendResolver.isSupportedZmxVersion("0.3.9"))
+        XCTAssertFalse(BackendResolver.isSupportedZmxVersion("bad-value"))
     }
 }
 

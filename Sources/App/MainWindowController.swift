@@ -95,56 +95,6 @@ class MainWindowController: NSWindowController {
         (containerHeight / 2) + TitleBarView.Layout.arcVerticalOffset - (buttonHeight / 2)
     }
 
-    static func resolvePreferredBackend(preferred: String, zmxAvailable: Bool, tmuxAvailable: Bool) -> String {
-        switch preferred {
-        case "local":
-            if zmxAvailable { return "zmx" }
-            return tmuxAvailable ? "tmux" : "local"
-        case "tmux":
-            if zmxAvailable { return "zmx" }
-            if tmuxAvailable { return "tmux" }
-            return zmxAvailable ? "zmx" : "local"
-        case "zmx":
-            if zmxAvailable {
-                return "zmx"
-            }
-            return tmuxAvailable ? "tmux" : "local"
-        default:
-            if zmxAvailable {
-                return "zmx"
-            }
-            return tmuxAvailable ? "tmux" : "local"
-        }
-    }
-
-    static func isSupportedZmxVersion(_ rawVersion: String) -> Bool {
-        let trimmed = rawVersion.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
-
-        let semver = trimmed
-            .components(separatedBy: CharacterSet.whitespacesAndNewlines)
-            .first { token in
-                token.contains(".") && token.range(of: #"^v?\d+\.\d+\.\d+"#, options: .regularExpression) != nil
-            }
-            ?? trimmed
-
-        let normalized = semver.hasPrefix("v") ? String(semver.dropFirst()) : semver
-        let parts = normalized
-            .split(separator: ".")
-            .prefix(3)
-            .compactMap { Int($0.filter(\.isNumber)) }
-
-        guard parts.count == 3 else { return false }
-        let major = parts[0]
-        let minor = parts[1]
-        let patch = parts[2]
-
-        if major > 0 { return true }
-        if minor > 4 { return true }
-        if minor < 4 { return false }
-        return patch >= 2
-    }
-
     convenience init() {
         let window = PmuxWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
@@ -194,56 +144,15 @@ class MainWindowController: NSWindowController {
     }
 
     private func normalizeBackendAvailabilityIfNeeded() {
-        let zmxAvailable = ProcessRunner.commandExists("zmx")
-        let tmuxAvailable = ProcessRunner.commandExists("tmux")
-
-        var targetBackend = Self.resolvePreferredBackend(
-            preferred: config.backend,
-            zmxAvailable: zmxAvailable,
-            tmuxAvailable: tmuxAvailable
-        )
-
-        var warningMessage: String?
-        if config.backend == "zmx" {
-            if !zmxAvailable {
-                warningMessage = "zmx is not installed. Install with `brew install neurosnap/tap/zmx`."
-            } else if let version = ProcessRunner.output(["zmx", "version"]), !Self.isSupportedZmxVersion(version) {
-                warningMessage = "zmx version is too old. Please upgrade to zmx 0.4.2+ for stability."
+        BackendResolver.resolveAsync(preferred: config.backend) { [weak self] resolution in
+            guard let self else { return }
+            self.runtimeBackend = resolution.backend
+            self.tabCoordinator.runtimeBackend = resolution.backend
+            if resolution.warningMessage == nil, resolution.backend != self.config.backend {
+                self.config.backend = resolution.backend
+                self.config.save()
             }
-        }
-
-        if warningMessage != nil, targetBackend == "zmx" {
-            targetBackend = tmuxAvailable ? "tmux" : "local"
-        }
-
-        runtimeBackend = targetBackend
-
-        if warningMessage == nil, targetBackend != config.backend {
-            config.backend = targetBackend
-            config.save()
-        }
-
-        if let warningMessage {
-            let alert = NSAlert()
-            alert.messageText = "Backend Fallback Activated"
-            alert.informativeText = "\(warningMessage)\nCurrent backend: \(targetBackend)."
-            alert.alertStyle = .warning
-            if config.backend == "zmx" && !zmxAvailable {
-                alert.addButton(withTitle: "Copy Install Command")
-                alert.addButton(withTitle: "Open zmx Docs")
-                alert.addButton(withTitle: "OK")
-                let response = alert.runModal()
-                if response == .alertFirstButtonReturn {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString("brew install neurosnap/tap/zmx", forType: .string)
-                } else if response == .alertSecondButtonReturn,
-                          let url = URL(string: "https://zmx.sh") {
-                    NSWorkspace.shared.open(url)
-                }
-            } else {
-                alert.addButton(withTitle: "OK")
-                alert.runModal()
-            }
+            BackendResolver.showWarningIfNeeded(resolution, configBackend: self.config.backend)
         }
     }
 
