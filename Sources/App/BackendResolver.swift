@@ -14,8 +14,7 @@ enum BackendResolver {
             return tmuxAvailable ? "tmux" : "local"
         case "tmux":
             if zmxAvailable { return "zmx" }
-            if tmuxAvailable { return "tmux" }
-            return zmxAvailable ? "zmx" : "local"
+            return tmuxAvailable ? "tmux" : "local"
         case "zmx":
             if zmxAvailable {
                 return "zmx"
