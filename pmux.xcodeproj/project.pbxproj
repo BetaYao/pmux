@@ -75,6 +75,7 @@
 		792916DB52728582F21B6A52 /* LayoutPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25D351E067381C5F69013CC0 /* LayoutPopoverView.swift */; };
 		79C50E0974964B37598A2939 /* SplitPaneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 711655E518AE30CC4F28AAD9 /* SplitPaneTests.swift */; };
 		7B8D95F137FDF201E7248AAE /* FocusPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B31FE424B4FFCDE710E18FF2 /* FocusPanelView.swift */; };
+		821AE3935D6DA805429C5363 /* TabCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF741AF50CBBB77ACF6BF229 /* TabCoordinatorTests.swift */; };
 		866C5ADAFF42DD60F0035AFF /* PanelBackdropView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E56CC79181D10B235559C7E5 /* PanelBackdropView.swift */; };
 		8A6B5B861C4143B2E920C8EF /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3B0220151909C4154BD755 /* NotificationManager.swift */; };
 		8B264CAEC54420B6E9ED79C7 /* MiniCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9A08D6353BB2E4926BE168E /* MiniCardView.swift */; };
@@ -108,6 +109,7 @@
 		C2FD40FCBDA6DB1ED12B1D77 /* NewBranchDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DC0645F3E76444270272B40 /* NewBranchDialog.swift */; };
 		C365198BF2E40B6FC37C692F /* AgentTypeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08DDD9848A72A6676EE8C53 /* AgentTypeTests.swift */; };
 		C6142DED40ED7B336EF169F5 /* WorktreeStatusAggregator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9778181CA78AFFA7EE596B49 /* WorktreeStatusAggregator.swift */; };
+		C6FBF3D991FB27D26BAA35DB /* TabCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABC23B1303F0282FE985638C /* TabCoordinator.swift */; };
 		CBE87C7B12B63A5A1F121469 /* WebhookStatusProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51C11ACB7BD467F1B268E437 /* WebhookStatusProviderTests.swift */; };
 		CCB3E8B21141C29D101D1F9A /* AgentInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02FF6173ED9F079EA20FD197 /* AgentInfo.swift */; };
 		D06F93FF3E5838AB6521B20C /* SplitNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EB87F1655E6846A886A0BD2 /* SplitNode.swift */; };
@@ -246,8 +248,10 @@
 		A3EBF78E376304D8F476EE59 /* RepoViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoViewController.swift; sourceTree = "<group>"; };
 		A431E73DF3E1716A0E37522D /* WorktreeDeleterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeDeleterTests.swift; sourceTree = "<group>"; };
 		AB22188E3FF88EE095FCCE84 /* UpdateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateManager.swift; sourceTree = "<group>"; };
+		ABC23B1303F0282FE985638C /* TabCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabCoordinator.swift; sourceTree = "<group>"; };
 		AD8A8A3032C569CDD2E101CD /* DashboardPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardPage.swift; sourceTree = "<group>"; };
 		AF00FDE4C61CF4A5B53653B4 /* MainWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowController.swift; sourceTree = "<group>"; };
+		AF741AF50CBBB77ACF6BF229 /* TabCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabCoordinatorTests.swift; sourceTree = "<group>"; };
 		B03C4BA13D41FE2377B61387 /* pmux-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "pmux-Bridging-Header.h"; sourceTree = "<group>"; };
 		B2E95C5F464B8578C668BF1D /* AppPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPage.swift; sourceTree = "<group>"; };
 		B31FE424B4FFCDE710E18FF2 /* FocusPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusPanelView.swift; sourceTree = "<group>"; };
@@ -307,6 +311,7 @@
 				AF00FDE4C61CF4A5B53653B4 /* MainWindowController.swift */,
 				20B1DBE711516E60B6AE16E5 /* MenuBuilder.swift */,
 				262D0E5AD79A809EFD121831 /* PanelCoordinator.swift */,
+				ABC23B1303F0282FE985638C /* TabCoordinator.swift */,
 				408818A3039D34A75609A5BE /* TerminalCoordinator.swift */,
 				5CB05DB142623AABD3F2FD99 /* UpdateCoordinator.swift */,
 			);
@@ -346,6 +351,7 @@
 				12F80631CA4BC484861BD11F /* StackedMiniCardContainerViewTests.swift */,
 				8FB8EE102BA233C405EDFE8E /* StatusDetectorTests.swift */,
 				4E73F70BC5F0D6B7C46124B2 /* StatusPublisherThreadTests.swift */,
+				AF741AF50CBBB77ACF6BF229 /* TabCoordinatorTests.swift */,
 				75352E99A112855A0E137D7D /* TaskProgressParserTests.swift */,
 				52A9DC9DBEF235C665CAEA72 /* TerminalCoordinatorTests.swift */,
 				0DC0F4B17429A591BDDF7B01 /* TerminalSurfaceReparentTests.swift */,
@@ -790,6 +796,7 @@
 				E4D7687423B5C039104EEE3C /* StackedMiniCardContainerViewTests.swift in Sources */,
 				F55F11B2C86D8D969EEC038F /* StatusDetectorTests.swift in Sources */,
 				5406AFFDB6D6EF3D194C2F9D /* StatusPublisherThreadTests.swift in Sources */,
+				821AE3935D6DA805429C5363 /* TabCoordinatorTests.swift in Sources */,
 				ACD9C6AB30216786478DB0DA /* TaskProgressParserTests.swift in Sources */,
 				0166A6B28E29CE964F0A820B /* TerminalCoordinatorTests.swift in Sources */,
 				78899C72920B1210E33BFE1C /* TerminalSurfaceReparentTests.swift in Sources */,
@@ -860,6 +867,7 @@
 				1CC51D6AFB2CFD4EC3A3A215 /* StatusDetector.swift in Sources */,
 				BC2163AECF13737DDEB5802B /* StatusPublisher.swift in Sources */,
 				0202996FD9599AC65D84B50A /* SurfaceRegistry.swift in Sources */,
+				C6FBF3D991FB27D26BAA35DB /* TabCoordinator.swift in Sources */,
 				A4E761BAFD0AB77EB01F55AE /* TaskProgressParser.swift in Sources */,
 				25EF5F3D7DCAB9049A8209FC /* TerminalCoordinator.swift in Sources */,
 				3E9FA0F0B9528BB6976028CA /* TerminalSurface.swift in Sources */,
