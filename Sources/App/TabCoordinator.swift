@@ -46,7 +46,11 @@ class TabCoordinator {
             guard let self,
                   let worktreePath = notification.userInfo?["worktreePath"] as? String,
                   let leafId = notification.userInfo?["focusedLeafId"] as? String else { return }
-            self.config.focusedPaneIds[worktreePath] = leafId
+            // Save session name (stable across launches) instead of leaf ID
+            if let tree = self.terminalCoordinator.surfaceManager.tree(forPath: worktreePath),
+               let leaf = tree.allLeaves.first(where: { $0.id == leafId }) {
+                self.config.focusedPaneIds[worktreePath] = leaf.sessionName
+            }
             self.config.save()
         }
     }
@@ -612,14 +616,13 @@ class TabCoordinator {
             repoVC.selectWorktree(byPath: savedWorktreePath)
 
             // Restore focused pane within the worktree
-            if let savedLeafId = config.focusedPaneIds[savedWorktreePath],
+            if let savedSessionName = config.focusedPaneIds[savedWorktreePath],
                let container = repoVC.activeSplitContainer,
                let tree = container.tree,
-               tree.allLeaves.contains(where: { $0.id == savedLeafId }) {
-                tree.focusedId = savedLeafId
+               let targetLeaf = tree.allLeaves.first(where: { $0.sessionName == savedSessionName }) {
+                tree.focusedId = targetLeaf.id
                 container.updateDimOverlays()
-                if let leaf = tree.allLeaves.first(where: { $0.id == savedLeafId }),
-                   let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId),
+                if let surface = SurfaceRegistry.shared.surface(forId: targetLeaf.surfaceId),
                    let termView = surface.view {
                     repoVC.view.window?.makeFirstResponder(termView)
                 }
