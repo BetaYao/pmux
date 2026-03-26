@@ -249,14 +249,14 @@ final class GridLayoutTests: XCTestCase {
     }
 
     func testGlassBackgroundConfig_DarkModeEnabled() {
-        let config = MainWindowController.glassBackgroundConfig(isDark: true)
+        let config = WindowStyling.glassBackgroundConfig(isDark: true)
         XCTAssertTrue(config.enabled)
         XCTAssertEqual(config.material, .hudWindow)
         XCTAssertEqual(config.blendingMode, .behindWindow)
     }
 
     func testGlassBackgroundConfig_LightModeEnabled() {
-        let config = MainWindowController.glassBackgroundConfig(isDark: false)
+        let config = WindowStyling.glassBackgroundConfig(isDark: false)
         XCTAssertTrue(config.enabled)
         XCTAssertEqual(config.material, .underWindowBackground)
         XCTAssertEqual(config.blendingMode, .behindWindow)
@@ -563,12 +563,12 @@ final class GridLayoutTests: XCTestCase {
     }
 
     func testMainWindowController_TrafficLightsAlignWithCapsuleCenter() {
-        let originY = MainWindowController.trafficLightButtonOriginY(containerHeight: 52, buttonHeight: 12)
+        let originY = WindowStyling.trafficLightButtonOriginY(containerHeight: 52, buttonHeight: 12)
         XCTAssertEqual(originY, 22, accuracy: 0.001)
     }
 
     func testMainWindowController_DoesNotUseEscAsGlobalShortcut() {
-        XCTAssertFalse(MainWindowController.shouldHandleEscShortcut())
+        XCTAssertFalse(WindowStyling.shouldHandleEscShortcut())
     }
 
     func testDashboardFocusLayouts_UseEdgeFlushSpacingAndCornerMasks() {
@@ -618,19 +618,19 @@ final class GridLayoutTests: XCTestCase {
     }
 
     func testMainWindowController_WindowAutosaveDisabledInUITestEnvironment() {
-        XCTAssertFalse(MainWindowController.shouldUseWindowFrameAutosave(
+        XCTAssertFalse(WindowStyling.shouldUseWindowFrameAutosave(
             environment: ["XCTestConfigurationFilePath": "/tmp/test.xctestconfiguration"],
             arguments: []
         ))
-        XCTAssertFalse(MainWindowController.shouldUseWindowFrameAutosave(
+        XCTAssertFalse(WindowStyling.shouldUseWindowFrameAutosave(
             environment: [:],
             arguments: ["-PmuxUITesting"]
         ))
-        XCTAssertTrue(MainWindowController.shouldUseWindowFrameAutosave(environment: [:], arguments: []))
+        XCTAssertTrue(WindowStyling.shouldUseWindowFrameAutosave(environment: [:], arguments: []))
     }
 
     func testMainWindowController_LightModeUsesGlassBackground() {
-        let cfg = MainWindowController.glassBackgroundConfig(isDark: false)
+        let cfg = WindowStyling.glassBackgroundConfig(isDark: false)
         XCTAssertTrue(cfg.enabled)
         XCTAssertEqual(cfg.material, .underWindowBackground)
         XCTAssertEqual(cfg.blendingMode, .behindWindow)
