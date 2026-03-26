@@ -185,15 +185,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     /// Update existing views in-place without rebuilding the view hierarchy
     private func updateCurrentLayoutInPlace() {
         let sorted = sortedAgents()
-        switch currentLayout {
-        case .grid:
+        if currentLayout == .grid {
             updateGridInPlace(sorted)
-        case .leftRight:
-            updateFocusLayoutInPlace(sorted, miniCards: leftRightMiniCards, focusPanel: leftRightFocusPanel)
-        case .topSmall:
-            updateFocusLayoutInPlace(sorted, miniCards: topSmallMiniCards, focusPanel: topSmallFocusPanel)
-        case .topLarge:
-            updateFocusLayoutInPlace(sorted, miniCards: topLargeMiniCards, focusPanel: topLargeFocusPanel)
+        } else if let refs = focusLayoutRefs(for: currentLayout) {
+            updateFocusLayoutInPlace(sorted, miniCards: refs.miniCards, focusPanel: refs.focusPanel)
         }
     }
 
@@ -266,10 +261,9 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     }
 
     func detachTerminals() {
-        // Detach all terminal surfaces from focus panels
-        leftRightFocusPanel.terminalContainer.subviews.forEach { $0.removeFromSuperview() }
-        topSmallFocusPanel.terminalContainer.subviews.forEach { $0.removeFromSuperview() }
-        topLargeFocusPanel.terminalContainer.subviews.forEach { $0.removeFromSuperview() }
+        for layout in [DashboardLayout.leftRight, .topSmall, .topLarge] {
+            focusLayoutRefs(for: layout)?.focusPanel.terminalContainer.subviews.forEach { $0.removeFromSuperview() }
+        }
     }
 
     // MARK: - Sorting
@@ -787,13 +781,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         }
         guard newIndex != selectedPaneIndex else { return }
 
-        let focusPanel: FocusPanelView
-        switch currentLayout {
-        case .leftRight: focusPanel = leftRightFocusPanel
-        case .topSmall: focusPanel = topSmallFocusPanel
-        case .topLarge: focusPanel = topLargeFocusPanel
-        case .grid: return
-        }
+        guard let refs = focusLayoutRefs(for: currentLayout) else { return }
+        let focusPanel = refs.focusPanel
 
         // Add slide transition
         let transition = CATransition()
@@ -829,16 +818,9 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     }
 
     private func updateMiniCardSelection() {
-        let updateCards: ([StackedMiniCardContainerView]) -> Void = { cards in
-            for card in cards {
-                card.isSelected = (card.agentId == self.selectedAgentId)
-            }
-        }
-        switch currentLayout {
-        case .leftRight: updateCards(leftRightMiniCards)
-        case .topSmall: updateCards(topSmallMiniCards)
-        case .topLarge: updateCards(topLargeMiniCards)
-        case .grid: break
+        guard let refs = focusLayoutRefs(for: currentLayout) else { return }
+        for card in refs.miniCards {
+            card.isSelected = (card.agentId == selectedAgentId)
         }
     }
 
@@ -911,15 +893,9 @@ extension DashboardViewController: TerminalSurfaceDelegate {
             embedSurface(agent, in: container.cardView.terminalContainer)
             return
         }
-        // Try focus panels
-        if agent.id == selectedAgentId {
-            if !leftRightFocusPanel.isHidden {
-                embedSurface(agent, in: leftRightFocusPanel.terminalContainer)
-            } else if !topSmallFocusPanel.isHidden {
-                embedSurface(agent, in: topSmallFocusPanel.terminalContainer)
-            } else if !topLargeFocusPanel.isHidden {
-                embedSurface(agent, in: topLargeFocusPanel.terminalContainer)
-            }
+        // Try current focus panel
+        if agent.id == selectedAgentId, let refs = focusLayoutRefs(for: currentLayout) {
+            embedSurface(agent, in: refs.focusPanel.terminalContainer)
         }
     }
 }
