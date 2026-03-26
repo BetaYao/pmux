@@ -42,6 +42,13 @@ class TabCoordinator {
             self.config.activeWorktreePaths[repoPath] = worktreePath
             self.config.save()
         }
+        NotificationCenter.default.addObserver(forName: .repoViewDidChangeFocusedPane, object: nil, queue: .main) { [weak self] notification in
+            guard let self,
+                  let worktreePath = notification.userInfo?["worktreePath"] as? String,
+                  let leafId = notification.userInfo?["focusedLeafId"] as? String else { return }
+            self.config.focusedPaneIds[worktreePath] = leafId
+            self.config.save()
+        }
     }
 
     // MARK: - Current Repo VC

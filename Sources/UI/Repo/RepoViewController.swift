@@ -366,7 +366,13 @@ extension RepoViewController: TerminalSurfaceDelegate {
 
 extension RepoViewController: SplitContainerDelegate {
     func splitContainer(_ view: SplitContainerView, didChangeFocus leafId: String) {
-        // Task 8 will wire focus management
+        guard activeWorktreeIndex >= 0, activeWorktreeIndex < worktrees.count else { return }
+        let worktreePath = worktrees[activeWorktreeIndex].path
+        NotificationCenter.default.post(
+            name: .repoViewDidChangeFocusedPane,
+            object: self,
+            userInfo: ["worktreePath": worktreePath, "focusedLeafId": leafId]
+        )
     }
 
     func splitContainer(_ view: SplitContainerView, didRequestSplit axis: SplitAxis) {
@@ -392,4 +398,5 @@ extension Collection {
 
 extension Notification.Name {
     static let repoViewDidChangeWorktree = Notification.Name("repoViewDidChangeWorktree")
+    static let repoViewDidChangeFocusedPane = Notification.Name("repoViewDidChangeFocusedPane")
 }
