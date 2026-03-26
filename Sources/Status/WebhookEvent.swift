@@ -8,17 +8,25 @@ enum WebhookEventType: String {
     case notification = "notification"
     case error = "error"
     case prompt = "prompt"
+    case worktreeCreate = "worktree_create"
+    case userPrompt = "user_prompt"
+    case toolUseFailed = "tool_use_failed"
+    case stopFailure = "stop_failure"
+    case subagentStart = "subagent_start"
+    case cwdChanged = "cwd_changed"
 
     func agentStatus(data: [String: Any]?) -> AgentStatus {
         switch self {
-        case .sessionStart, .toolUseStart, .toolUseEnd:
+        case .sessionStart, .toolUseStart, .toolUseEnd, .subagentStart, .userPrompt:
             return .running
         case .agentStop:
             return .idle
-        case .error:
+        case .error, .toolUseFailed, .stopFailure:
             return .error
         case .prompt:
             return .waiting
+        case .worktreeCreate, .cwdChanged:
+            return .running
         case .notification:
             let level = data?["level"] as? String
             switch level {
@@ -37,6 +45,12 @@ enum WebhookEventType: String {
         case "PostToolUse": return .toolUseEnd
         case "Stop", "SubagentStop": return .agentStop
         case "Notification": return .notification
+        case "WorktreeCreate": return .worktreeCreate
+        case "UserPromptSubmit": return .userPrompt
+        case "PostToolUseFailure": return .toolUseFailed
+        case "StopFailure": return .stopFailure
+        case "SubagentStart": return .subagentStart
+        case "CwdChanged": return .cwdChanged
         default: return nil
         }
     }

@@ -5,6 +5,9 @@ class WebhookStatusProvider {
     private var sessions: [String: SessionState] = [:]
     private var knownWorktrees: [String] = []
 
+    /// Called when a WorktreeCreate event arrives with a path not in knownWorktrees
+    var onNewWorktreeDetected: ((String) -> Void)?
+
     struct SessionState {
         let sessionId: String
         let worktreePath: String
@@ -29,6 +32,19 @@ class WebhookStatusProvider {
     func handleEvent(_ event: WebhookEvent) {
         queue.sync {
             let canonCwd = canonicalize(event.cwd)
+
+            // WorktreeCreate / CwdChanged with unknown path → notify upstream to discover it
+            if event.event == .worktreeCreate || event.event == .cwdChanged {
+                if matchWorktree(canonCwd) == nil {
+                    NSLog("[WebhookStatusProvider] New worktree detected via hook (\(event.event.rawValue)): \(event.cwd)")
+                    DispatchQueue.main.async { [weak self] in
+                        self?.onNewWorktreeDetected?(canonCwd)
+                    }
+                }
+                if event.event == .worktreeCreate { return }
+                // CwdChanged falls through to update session status
+            }
+
             guard let worktreePath = matchWorktree(canonCwd) else {
                 NSLog("[WebhookStatusProvider] No worktree match for cwd: \(event.cwd)")
                 return
@@ -109,6 +125,21 @@ class WebhookStatusProvider {
             return nil
         case .sessionStart:
             return "Session started"
+        case .worktreeCreate:
+            return "Creating worktree"
+        case .userPrompt:
+            return "Processing prompt"
+        case .toolUseFailed:
+            if let toolName = data?["tool_name"] as? String {
+                return "Failed: \(toolName)"
+            }
+            return "Tool failed"
+        case .stopFailure:
+            return data?["error"] as? String ?? "API error"
+        case .subagentStart:
+            return "Subagent started"
+        case .cwdChanged:
+            return nil
         }
     }
 

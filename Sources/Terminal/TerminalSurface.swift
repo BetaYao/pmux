@@ -27,6 +27,11 @@ class TerminalSurface {
     private var recoveryTimer: DispatchWorkItem?
     private static let recoveryDelay: TimeInterval = 3.0
 
+    /// Serializes Ghostty C API access across threads.
+    /// Background polling (readViewportText) and main-thread input (key/mouse)
+    /// must not call into the same ghostty_surface_t concurrently.
+    let ghosttyLock = NSLock()
+
     /// Create the terminal surface and add it to the given container view.
     /// If sessionName is provided, the surface runs inside a persistent backend session.
     func create(in container: NSView, workingDirectory: String? = nil, sessionName: String? = nil) -> Bool {
@@ -233,12 +238,17 @@ class TerminalSurface {
     /// Check if the process has exited
     var processExited: Bool {
         guard let surface else { return true }
+        ghosttyLock.lock()
+        defer { ghosttyLock.unlock() }
         return ghostty_surface_process_exited(surface)
     }
 
     /// Read visible terminal text from the viewport
     func readViewportText() -> String? {
         guard let surface else { return nil }
+
+        ghosttyLock.lock()
+        defer { ghosttyLock.unlock() }
 
         let size = ghostty_surface_size(surface)
         guard size.rows > 0, size.columns > 0 else { return nil }
@@ -271,6 +281,8 @@ class TerminalSurface {
     /// Get the process status for status detection
     var processStatus: ProcessStatus {
         guard let surface else { return .unknown }
+        ghosttyLock.lock()
+        defer { ghosttyLock.unlock() }
         if ghostty_surface_process_exited(surface) {
             // We don't have the exit code from ghostty, so assume exited
             return .exited
@@ -741,7 +753,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
         keyInput.action = action
         keyInput.composing = hasMarkedText()
 
-        if let event {
+        if let event, event.type == .keyDown || event.type == .keyUp || event.type == .flagsChanged {
             keyInput.keycode = UInt32(event.keyCode)
             keyInput.mods = ghostty_surface_key_translation_mods(surface, modsFromEvent(event))
 
@@ -763,6 +775,10 @@ class GhosttyNSView: NSView, NSTextInputClient {
             keyInput.mods = GHOSTTY_MODS_NONE
         }
 
+        // Do NOT hold ghosttyLock here: ghostty_surface_key can trigger
+        // synchronous callbacks (readClipboard, wakeup, etc.) that may need
+        // the main thread or re-enter Ghostty, causing a deadlock.
+        // Ghostty's C API is internally thread-safe for key input.
         if let text, !text.isEmpty {
             text.withCString { cStr in
                 keyInput.text = cStr

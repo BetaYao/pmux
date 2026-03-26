@@ -16,6 +16,7 @@
 		12D67C0AEE009E494EAE4BE4 /* SmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39A5FA513A09E0CC544B64EA /* SmokeTests.swift */; };
 		13B76196C2B22786A68910DB /* AgentStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BD718C45C250DD878B00F6B /* AgentStatus.swift */; };
 		143C33F88772A5C5022E105D /* StackedMiniCardContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 957B3ECF258B0B7E82ECB2D5 /* StackedMiniCardContainerView.swift */; };
+		1AF3F7207EEBA418C0661B3E /* ClaudeHooksSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DEF8A26C2764CD72BCA5A25 /* ClaudeHooksSetup.swift */; };
 		1C49EACD3ACCDFD8A6A63BA6 /* WorkspaceManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A4746387136AA7EAE6C78A2 /* WorkspaceManagerTests.swift */; };
 		1CC51D6AFB2CFD4EC3A3A215 /* StatusDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40C65AF8BC1451365BA6E43B /* StatusDetector.swift */; };
 		1FBB12F513B351D39B315FBA /* FocusPanelNavigationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBAD95B6446C41977FC2D621 /* FocusPanelNavigationTests.swift */; };
@@ -217,6 +218,7 @@
 		5870CEFD75BAF5C5CD693AF3 /* GhosttyBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyBridge.swift; sourceTree = "<group>"; };
 		59CC1020D19CDF9D7333EC53 /* NotificationHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationHistory.swift; sourceTree = "<group>"; };
 		5CB05DB142623AABD3F2FD99 /* UpdateCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCoordinator.swift; sourceTree = "<group>"; };
+		5DEF8A26C2764CD72BCA5A25 /* ClaudeHooksSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeHooksSetup.swift; sourceTree = "<group>"; };
 		60E67A393334BDBEDDD4CF28 /* StatusPublisher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusPublisher.swift; sourceTree = "<group>"; };
 		6195AF42402DC460F5FED65A /* WebhookServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookServer.swift; sourceTree = "<group>"; };
 		6A9CF27FE3D892BF9938D96E /* pmux.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = pmux.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -604,6 +606,7 @@
 				02FF6173ED9F079EA20FD197 /* AgentInfo.swift */,
 				4BD718C45C250DD878B00F6B /* AgentStatus.swift */,
 				7E03E31357AAE4FB9F6D1A71 /* AgentType.swift */,
+				5DEF8A26C2764CD72BCA5A25 /* ClaudeHooksSetup.swift */,
 				1A57D292637AF94241500129 /* Config.swift */,
 				9A6CD9C31A50910885EF2E91 /* FuzzyMatch.swift */,
 				B7D298575FB388BE35E523E0 /* HooksChannel.swift */,
@@ -837,6 +840,7 @@
 				FB9670E59F9661B2F8FA2922 /* AgentType.swift in Sources */,
 				DD1F5EE1A756E0DF3B90075F /* AppDelegate.swift in Sources */,
 				BDC0D1224E1E703495F9D0FE /* BackendResolver.swift in Sources */,
+				1AF3F7207EEBA418C0661B3E /* ClaudeHooksSetup.swift in Sources */,
 				6FD79D72C951209C51211464 /* Config.swift in Sources */,
 				A64BED7E816CBDA7FC1BF839 /* DashboardViewController.swift in Sources */,
 				AB6CD9BC14EA49A6E90FD544 /* DialogPresenter.swift in Sources */,

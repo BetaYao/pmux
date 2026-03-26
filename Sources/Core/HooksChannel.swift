@@ -99,6 +99,21 @@ class HooksChannel: AgentChannel {
             return event.data?["message"] as? String ?? event.data?["title"] as? String
         case .sessionStart:
             return "Session started"
+        case .worktreeCreate:
+            return "Creating worktree"
+        case .userPrompt:
+            return "Processing prompt"
+        case .toolUseFailed:
+            if let tool = event.data?["tool_name"] as? String {
+                return "Failed: \(tool)"
+            }
+            return "Tool failed"
+        case .stopFailure:
+            return event.data?["error"] as? String ?? "API error"
+        case .subagentStart:
+            return "Subagent started"
+        case .cwdChanged:
+            return nil
         }
         return nil
     }

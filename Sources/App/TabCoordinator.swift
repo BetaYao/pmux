@@ -35,6 +35,24 @@ class TabCoordinator {
 
     init(config: Config) {
         self.config = config
+        NotificationCenter.default.addObserver(forName: .repoViewDidChangeWorktree, object: nil, queue: .main) { [weak self] notification in
+            guard let self,
+                  let worktreePath = notification.userInfo?["worktreePath"] as? String,
+                  let repoPath = self.worktreeRepoCache[worktreePath] else { return }
+            self.config.activeWorktreePaths[repoPath] = worktreePath
+            self.config.save()
+        }
+        NotificationCenter.default.addObserver(forName: .repoViewDidChangeFocusedPane, object: nil, queue: .main) { [weak self] notification in
+            guard let self,
+                  let worktreePath = notification.userInfo?["worktreePath"] as? String,
+                  let leafId = notification.userInfo?["focusedLeafId"] as? String else { return }
+            // Save session name (stable across launches) instead of leaf ID
+            if let tree = self.terminalCoordinator.surfaceManager.tree(forPath: worktreePath),
+               let leaf = tree.allLeaves.first(where: { $0.id == leafId }) {
+                self.config.focusedPaneIds[worktreePath] = leaf.sessionName
+            }
+            self.config.save()
+        }
     }
 
     // MARK: - Current Repo VC
@@ -79,6 +97,7 @@ class TabCoordinator {
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
         updateStatusPollPreferences()
         delegate?.tabCoordinatorDidSwitchTab(self)
+        saveSessionState()
     }
 
     func updateStatusPollPreferences() {
@@ -334,11 +353,17 @@ class TabCoordinator {
                 self.statusPublisher.start(trees: self.terminalCoordinator.surfaceManager.all)
                 self.updateStatusPollPreferences()
 
+                // Restore last session state (tab, worktree, pane)
+                self.restoreSessionState()
+
                 // Start periodic branch name refresh
                 self.startBranchRefreshTimer()
 
                 // Start webhook server for agent hook events
                 if self.config.webhook.enabled {
+                    self.statusPublisher.webhookProvider.onNewWorktreeDetected = { [weak self] worktreePath in
+                        self?.handleNewWorktreeFromHook(worktreePath)
+                    }
                     let server = WebhookServer(port: self.config.webhook.port) { [weak self] event in
                         self?.statusPublisher.webhookProvider.handleEvent(event)
                         AgentHead.shared.handleWebhookEvent(event)
@@ -346,6 +371,61 @@ class TabCoordinator {
                     server.start()
                     self.terminalCoordinator.webhookServer = server
                 }
+            }
+        }
+    }
+
+    // MARK: - Worktree Auto-Discovery (via Agent Hooks)
+
+    private func handleNewWorktreeFromHook(_ worktreePath: String) {
+        // Find which repo this worktree belongs to
+        WorktreeDiscovery.findRepoRootAsync(from: worktreePath) { [weak self] repoRoot in
+            guard let self, let repoRoot else {
+                NSLog("[TabCoordinator] Could not find repo root for hook-discovered worktree: \(worktreePath)")
+                return
+            }
+
+            // If repo is already tracked, re-discover its worktrees to pick up the new one
+            if self.config.workspacePaths.contains(repoRoot) {
+                WorktreeDiscovery.discoverAsync(repoPath: repoRoot) { [weak self] worktrees in
+                    guard let self else { return }
+                    // Find new worktrees not yet in allWorktrees
+                    let knownPaths = Set(self.allWorktrees.map { $0.info.path })
+                    let newWorktrees = worktrees.filter { !knownPaths.contains($0.path) }
+                    guard !newWorktrees.isEmpty else { return }
+
+                    NSLog("[TabCoordinator] Auto-discovered \(newWorktrees.count) new worktree(s) via hook")
+
+                    // Integrate new worktrees into the existing tab
+                    if let tabIndex = self.workspaceManager.tabs.firstIndex(where: { $0.repoPath == repoRoot }) {
+                        self.workspaceManager.updateWorktrees(at: tabIndex, worktrees: worktrees)
+                    }
+                    for info in newWorktrees {
+                        let tree = self.terminalCoordinator.resolveTree(for: info)
+                        self.allWorktrees.append((info: info, tree: tree))
+                        self.worktreeRepoCache[info.path] = repoRoot
+
+                        let proj = self.workspaceManager.tabs.first(where: { $0.repoPath == repoRoot })?.displayName
+                            ?? URL(fileURLWithPath: repoRoot).lastPathComponent
+                        let sessionName = self.runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
+                        if let surface = self.terminalCoordinator.surfaceManager.primarySurface(forPath: info.path) {
+                            AgentHead.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: Date(), tmuxSessionName: sessionName, backend: self.runtimeBackend)
+                        }
+                    }
+
+                    self.dashboardVC?.updateAgents(self.buildAgentDisplayInfos())
+                    self.statusPublisher.updateSurfaces(self.terminalCoordinator.surfaceManager.all)
+                    self.delegate?.tabCoordinatorRequestUpdateTitleBar(self)
+
+                    // Update repo VC sidebar if it's open
+                    if let repoVC = self.repoVCs[repoRoot] {
+                        repoVC.configure(worktrees: worktrees, trees: self.terminalCoordinator.surfaceManager.all)
+                    }
+                }
+            } else {
+                // Repo not tracked yet — add it
+                NSLog("[TabCoordinator] Auto-adding new repo via hook: \(repoRoot)")
+                self.addRepo(at: repoRoot)
             }
         }
     }
@@ -504,6 +584,56 @@ class TabCoordinator {
         }
     }
 
+    // MARK: - Session State Persistence
+
+    func saveSessionState() {
+        if activeTabIndex == 0 {
+            config.activeTabRepoPath = nil
+        } else {
+            let repoIndex = activeTabIndex - 1
+            if let tab = workspaceManager.tab(at: repoIndex) {
+                config.activeTabRepoPath = tab.repoPath
+            }
+        }
+        config.save()
+    }
+
+    func restoreSessionState() {
+        // Determine which tab to show
+        guard let savedRepoPath = config.activeTabRepoPath,
+              let tabIndex = workspaceManager.tabs.firstIndex(where: { $0.repoPath == savedRepoPath }) else {
+            // No saved state or repo no longer exists — stay on dashboard
+            return
+        }
+
+        let uiTabIndex = tabIndex + 1
+        switchToTab(uiTabIndex)
+
+        // Restore worktree selection within the repo
+        let tab = workspaceManager.tabs[tabIndex]
+        if let savedWorktreePath = config.activeWorktreePaths[savedRepoPath],
+           let repoVC = repoVCs[savedRepoPath] {
+            repoVC.selectWorktree(byPath: savedWorktreePath)
+
+            // Restore focused pane within the worktree
+            if let savedSessionName = config.focusedPaneIds[savedWorktreePath],
+               let container = repoVC.activeSplitContainer,
+               let tree = container.tree,
+               let targetLeaf = tree.allLeaves.first(where: { $0.sessionName == savedSessionName }) {
+                tree.focusedId = targetLeaf.id
+                container.updateDimOverlays()
+                if let surface = SurfaceRegistry.shared.surface(forId: targetLeaf.surfaceId),
+                   let termView = surface.view {
+                    repoVC.view.window?.makeFirstResponder(termView)
+                }
+            }
+        } else if let firstWorktree = tab.worktrees.first,
+                  let repoVC = repoVCs[savedRepoPath] {
+            // Saved worktree gone, fall back to first
+            repoVC.selectWorktree(byPath: firstWorktree.path)
+        }
+    }
+
     // MARK: - Navigation
 
     // MARK: - Dashboard Delegate Forwarding
@@ -512,6 +642,11 @@ class TabCoordinator {
         guard let tab = workspaceManager.tabs.first(where: { $0.displayName == project }) else { return }
         let tabIndex = workspaceManager.tabs.firstIndex(where: { $0.repoPath == tab.repoPath }) ?? 0
         switchToTab(tabIndex + 1)
+        // Save the selected worktree for this project
+        if let worktreePath = tab.worktrees.first(where: { $0.branch == thread })?.path {
+            config.activeWorktreePaths[tab.repoPath] = worktreePath
+            config.save()
+        }
         if let repoVC = repoVCs[tab.repoPath] {
             repoVC.selectWorktree(branch: thread)
         }
@@ -575,6 +710,10 @@ class TabCoordinator {
         let branch = allWorktrees.first(where: { $0.info.path == worktreePath })?.info.branch ?? ""
         let paneCount = statusAggregator.status(for: worktreePath)?.panes.count ?? 1
         let terminalID = statusAggregator.status(for: worktreePath)?.panes.first(where: { $0.paneIndex == paneIndex })?.terminalID ?? ""
+
+        // Determine if this pane is the currently focused one
+        let isFocused = isFocusedPane(worktreePath: worktreePath, paneIndex: paneIndex)
+
         NotificationManager.shared.notify(
             terminalID: terminalID,
             worktreePath: worktreePath,
@@ -583,8 +722,22 @@ class TabCoordinator {
             paneCount: paneCount,
             oldStatus: oldStatus,
             newStatus: newStatus,
-            lastMessage: lastMessage
+            lastMessage: lastMessage,
+            isFocusedPane: isFocused
         )
+    }
+
+    /// Check if a specific worktree + pane is the currently focused pane.
+    private func isFocusedPane(worktreePath: String, paneIndex: Int) -> Bool {
+        guard activeTabIndex > 0 else { return false }
+        guard let repoVC = currentRepoVC,
+              let container = repoVC.activeSplitContainer,
+              let tree = container.tree,
+              tree.worktreePath == worktreePath else { return false }
+        let leaves = tree.allLeaves
+        let zeroBasedIndex = paneIndex - 1
+        guard zeroBasedIndex >= 0, zeroBasedIndex < leaves.count else { return false }
+        return leaves[zeroBasedIndex].id == tree.focusedId
     }
 
     // MARK: - Navigation
@@ -598,6 +751,9 @@ class TabCoordinator {
             switchToTab(tabIndex + 1)
             if let repoVC = repoVCs[repoPath] {
                 repoVC.selectWorktree(byPath: worktreePath)
+                if let paneIndex {
+                    repoVC.focusPane(at: paneIndex)
+                }
             }
             return
         }
