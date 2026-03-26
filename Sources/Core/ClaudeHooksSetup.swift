@@ -12,7 +12,9 @@ enum ClaudeHooksSetup {
         return [
             "SessionStart": hookGroup,
             "PreToolUse": hookGroup,
+            "PostToolUse": hookGroup,
             "Stop": hookGroup,
+            "SubagentStop": hookGroup,
             "Notification": hookGroup,
             "WorktreeCreate": hookGroup,
         ]
