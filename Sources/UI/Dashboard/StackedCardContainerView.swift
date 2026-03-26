@@ -111,7 +111,8 @@ final class StackedCardContainerView: NSView, NSGestureRecognizerDelegate {
     // MARK: - Hit testing
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard cardView.frame.contains(point) else { return nil }
+        let localPoint = convert(point, from: superview)
+        guard cardView.frame.contains(localPoint) else { return nil }
         return super.hitTest(point)
     }
 

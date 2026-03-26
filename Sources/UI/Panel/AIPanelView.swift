@@ -156,7 +156,8 @@ final class AIPanelView: NSView, NSTextViewDelegate {
     }
 
     func addBubble(role: BubbleRole, text: String) {
-        let work = {
+        let addAndScroll = { [weak self] in
+            guard let self else { return }
             let bubble = self.makeBubble(role: role, text: text)
             self.messagesStack.addArrangedSubview(bubble)
 
@@ -180,19 +181,26 @@ final class AIPanelView: NSView, NSTextViewDelegate {
                 }
             }
 
-            // Scroll to bottom
-            let clipView = self.messagesScrollView.contentView
-            let docHeight = self.messagesStack.fittingSize.height
-            let scrollHeight = self.messagesScrollView.bounds.height
-            if docHeight > scrollHeight {
-                clipView.scroll(to: NSPoint(x: 0, y: docHeight - scrollHeight))
+            // Scroll to bottom after the next layout pass (avoids fittingSize
+            // which triggers a synchronous Auto Layout pass that crashes if
+            // called off the main thread).
+            self.messagesStack.needsLayout = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      let docView = self.messagesScrollView.documentView else { return }
+                let docHeight = docView.frame.height
+                let scrollHeight = self.messagesScrollView.bounds.height
+                if docHeight > scrollHeight {
+                    self.messagesScrollView.contentView.scroll(
+                        to: NSPoint(x: 0, y: docHeight - scrollHeight))
+                }
             }
         }
 
         if Thread.isMainThread {
-            work()
+            addAndScroll()
         } else {
-            DispatchQueue.main.async(execute: work)
+            DispatchQueue.main.async(execute: addAndScroll)
         }
     }
 

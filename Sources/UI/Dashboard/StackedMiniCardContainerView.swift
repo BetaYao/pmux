@@ -80,7 +80,9 @@ final class StackedMiniCardContainerView: NSView {
     // MARK: - Hit testing
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard miniCardView.frame.contains(point) else { return nil }
+        // point is in superview coordinates; convert to local before checking miniCardView.frame
+        let localPoint = convert(point, from: superview)
+        guard miniCardView.frame.contains(localPoint) else { return nil }
         return super.hitTest(point)
     }
 

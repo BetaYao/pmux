@@ -396,6 +396,29 @@ private final class SidebarCellView: NSTableCellView {
         statusDot.layer?.backgroundColor = status.color.cgColor
         messageLabel.stringValue = message.isEmpty ? status.rawValue : message
         setAccessibilityIdentifier("sidebar.row.\(name)")
+
+        if status == .running {
+            startBreathingAnimation()
+        } else {
+            stopBreathingAnimation()
+        }
+    }
+
+    private func startBreathingAnimation() {
+        guard statusDot.layer?.animation(forKey: "breathing") == nil else { return }
+        let anim = CABasicAnimation(keyPath: "opacity")
+        anim.fromValue = 1.0
+        anim.toValue = 0.3
+        anim.duration = 1.2
+        anim.autoreverses = true
+        anim.repeatCount = .infinity
+        anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        statusDot.layer?.add(anim, forKey: "breathing")
+    }
+
+    private func stopBreathingAnimation() {
+        statusDot.layer?.removeAnimation(forKey: "breathing")
+        statusDot.layer?.opacity = 1.0
     }
 }
 

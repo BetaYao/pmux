@@ -48,7 +48,7 @@ class GhosttyBridge {
             return GhosttyBridge.handleAction(app: app, target: target, action: action)
         }
         runtimeConfig.read_clipboard_cb = { userData, clipboard, state in
-            GhosttyBridge.readClipboard(userData: userData, clipboard: clipboard, state: state)
+            return GhosttyBridge.readClipboard(userData: userData, clipboard: clipboard, state: state)
         }
         runtimeConfig.confirm_read_clipboard_cb = { userData, text, state, request in
             GhosttyBridge.confirmReadClipboard(userData: userData, text: text, state: state)
@@ -147,18 +147,20 @@ class GhosttyBridge {
         }
     }
 
-    private static func readClipboard(userData: UnsafeMutableRawPointer?, clipboard: ghostty_clipboard_e, state: UnsafeMutableRawPointer?) {
+    private static func readClipboard(userData: UnsafeMutableRawPointer?, clipboard: ghostty_clipboard_e, state: UnsafeMutableRawPointer?) -> Bool {
         // Called by Ghostty core when a terminal app requests clipboard content
-        // (e.g., via OSC 52). Find the focused surface and return clipboard data.
+        // (e.g., via OSC 52 or paste keybinding). Must return true if handled,
+        // false otherwise — Ghostty uses this to manage the state pointer's lifetime.
         guard let view = NSApp.keyWindow?.firstResponder as? GhosttyNSView,
-              let surface = view.surface else { return }
+              let surface = view.surface else { return false }
 
         let pasteboard = NSPasteboard.general
-        guard let str = pasteboard.string(forType: .string), !str.isEmpty else { return }
+        guard let str = pasteboard.string(forType: .string), !str.isEmpty else { return false }
 
         str.withCString { ptr in
             ghostty_surface_complete_clipboard_request(surface, ptr, state, false)
         }
+        return true
     }
 
     private static func confirmReadClipboard(userData: UnsafeMutableRawPointer?, text: UnsafePointer<CChar>?, state: UnsafeMutableRawPointer?) {

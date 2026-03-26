@@ -125,6 +125,9 @@ class MainWindowController: NSWindowController {
 
         self.init(window: window)
 
+        // Prevent macOS from creating duplicate windows via state restoration
+        window.isRestorable = false
+
         if WindowStyling.shouldUseWindowFrameAutosave() {
             window.setFrameAutosaveName("PmuxMainWindow")
         } else if let visibleFrame = NSScreen.main?.visibleFrame {
@@ -435,11 +438,13 @@ class MainWindowController: NSWindowController {
             guard let tab = self.tabCoordinator.workspaceManager.tabs.first(where: { $0.displayName == projectName }) else { return "idle" }
             var hasError = false, hasWaiting = false, hasRunning = false
             for wt in tab.worktrees {
-                switch self.statusPublisher.status(for: wt.path) {
-                case .error: hasError = true
-                case .waiting: hasWaiting = true
-                case .running: hasRunning = true
-                default: break
+                if let ws = self.tabCoordinator.statusAggregator.status(for: wt.path) {
+                    switch ws.highestPriority {
+                    case .error: hasError = true
+                    case .waiting: hasWaiting = true
+                    case .running: hasRunning = true
+                    default: break
+                    }
                 }
             }
             if hasError { return "error" }

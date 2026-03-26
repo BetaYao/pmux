@@ -26,6 +26,9 @@ final class AgentCardView: NSView {
     /// Fixed-height bottom bar showing status dot, branch name, and status text.
     let bottomBar = NSView()
 
+    /// Message overlay shown in grid mode (no live terminal).
+    private let messageLabel = NSTextField(labelWithString: "")
+
     private let separatorLine = NSView()
     private var statusDots: [NSView] = []
     private let projectLabel = NSTextField(labelWithString: "")
@@ -53,6 +56,7 @@ final class AgentCardView: NSView {
 
         projectLabel.stringValue = project
         statusLabel.stringValue = status.capitalized
+        messageLabel.stringValue = lastMessage
 
         // Rebuild status dots
         statusDots.forEach { $0.removeFromSuperview() }
@@ -108,6 +112,16 @@ final class AgentCardView: NSView {
         terminalContainer.translatesAutoresizingMaskIntoConstraints = false
         addSubview(terminalContainer)
 
+        // Message label — shown in grid mode when no live terminal is embedded
+        messageLabel.font = NSFont.monospacedSystemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
+        messageLabel.textColor = SemanticColors.muted
+        messageLabel.lineBreakMode = .byWordWrapping
+        messageLabel.maximumNumberOfLines = 0
+        messageLabel.translatesAutoresizingMaskIntoConstraints = false
+        messageLabel.cell?.wraps = true
+        messageLabel.cell?.isScrollable = false
+        terminalContainer.addSubview(messageLabel)
+
         // Separator line
         separatorLine.wantsLayer = true
         separatorLine.translatesAutoresizingMaskIntoConstraints = false
@@ -153,6 +167,12 @@ final class AgentCardView: NSView {
             terminalContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
             terminalContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
             terminalContainer.bottomAnchor.constraint(equalTo: separatorLine.topAnchor),
+
+            // Message label inside terminal container
+            messageLabel.topAnchor.constraint(equalTo: terminalContainer.topAnchor, constant: 10),
+            messageLabel.leadingAnchor.constraint(equalTo: terminalContainer.leadingAnchor, constant: 10),
+            messageLabel.trailingAnchor.constraint(equalTo: terminalContainer.trailingAnchor, constant: -10),
+            messageLabel.bottomAnchor.constraint(lessThanOrEqualTo: terminalContainer.bottomAnchor, constant: -10),
 
             // Separator line
             separatorLine.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -232,6 +252,7 @@ final class AgentCardView: NSView {
         projectLabel.textColor = SemanticColors.text
         statusLabel.textColor = SemanticColors.muted
         paneCountLabel.textColor = SemanticColors.accent
+        messageLabel.textColor = SemanticColors.muted
         updateBorder()
     }
 

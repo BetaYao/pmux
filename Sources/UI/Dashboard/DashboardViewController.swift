@@ -222,8 +222,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         }
         if let selected = sorted.first(where: { $0.id == selectedAgentId }) ?? sorted.first {
             configureFocusPanel(focusPanel, with: selected)
-            // Re-embed terminal if it was detached (e.g. after tab switch)
-            if focusPanel.terminalContainer.subviews.isEmpty {
+            // Re-embed terminal if it was detached (e.g. after tab switch),
+            // but only when the dashboard is actually visible — otherwise we'd
+            // steal the surface from the active repo tab's split container.
+            if focusPanel.terminalContainer.subviews.isEmpty, view.window != nil {
                 embedSurface(selected, in: focusPanel.terminalContainer)
             }
         }
@@ -336,7 +338,11 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         if let selected = sorted.first(where: { $0.id == selectedAgentId }) ?? sorted.first {
             selectedAgentId = selected.id
             configureFocusPanel(refs.focusPanel, with: selected)
-            embedSurface(selected, in: refs.focusPanel.terminalContainer)
+            // Only embed when the dashboard is visible to avoid stealing
+            // surfaces from the active repo tab's split container.
+            if view.window != nil {
+                embedSurface(selected, in: refs.focusPanel.terminalContainer)
+            }
         }
 
         let fixedWidth = refs.scrollView.bounds.width > 0 ? refs.scrollView.bounds.width : 240
@@ -886,6 +892,9 @@ private class DashboardRootView: NSView {
 
 extension DashboardViewController: TerminalSurfaceDelegate {
     func terminalSurfaceDidRecover(_ surface: TerminalSurface) {
+        // Only re-embed when the dashboard is visible; otherwise the active
+        // repo tab owns the surface and will handle recovery itself.
+        guard view.window != nil else { return }
         // Find the agent whose surface recovered and re-embed it
         guard let agent = agents.first(where: { $0.surface === surface }) else { return }
         // Try grid card first
