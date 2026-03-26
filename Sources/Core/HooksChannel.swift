@@ -99,6 +99,8 @@ class HooksChannel: AgentChannel {
             return event.data?["message"] as? String ?? event.data?["title"] as? String
         case .sessionStart:
             return "Session started"
+        case .worktreeCreate:
+            return "Creating worktree"
         }
         return nil
     }

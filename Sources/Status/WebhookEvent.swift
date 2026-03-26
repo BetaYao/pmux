@@ -8,6 +8,7 @@ enum WebhookEventType: String {
     case notification = "notification"
     case error = "error"
     case prompt = "prompt"
+    case worktreeCreate = "worktree_create"
 
     func agentStatus(data: [String: Any]?) -> AgentStatus {
         switch self {
@@ -19,6 +20,8 @@ enum WebhookEventType: String {
             return .error
         case .prompt:
             return .waiting
+        case .worktreeCreate:
+            return .running
         case .notification:
             let level = data?["level"] as? String
             switch level {
@@ -37,6 +40,7 @@ enum WebhookEventType: String {
         case "PostToolUse": return .toolUseEnd
         case "Stop", "SubagentStop": return .agentStop
         case "Notification": return .notification
+        case "WorktreeCreate": return .worktreeCreate
         default: return nil
         }
     }

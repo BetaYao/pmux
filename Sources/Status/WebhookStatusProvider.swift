@@ -5,6 +5,9 @@ class WebhookStatusProvider {
     private var sessions: [String: SessionState] = [:]
     private var knownWorktrees: [String] = []
 
+    /// Called when a WorktreeCreate event arrives with a path not in knownWorktrees
+    var onNewWorktreeDetected: ((String) -> Void)?
+
     struct SessionState {
         let sessionId: String
         let worktreePath: String
@@ -29,6 +32,18 @@ class WebhookStatusProvider {
     func handleEvent(_ event: WebhookEvent) {
         queue.sync {
             let canonCwd = canonicalize(event.cwd)
+
+            // WorktreeCreate with unknown path → notify upstream to discover it
+            if event.event == .worktreeCreate {
+                if matchWorktree(canonCwd) == nil {
+                    NSLog("[WebhookStatusProvider] New worktree detected via hook: \(event.cwd)")
+                    DispatchQueue.main.async { [weak self] in
+                        self?.onNewWorktreeDetected?(canonCwd)
+                    }
+                }
+                return
+            }
+
             guard let worktreePath = matchWorktree(canonCwd) else {
                 NSLog("[WebhookStatusProvider] No worktree match for cwd: \(event.cwd)")
                 return
@@ -109,6 +124,8 @@ class WebhookStatusProvider {
             return nil
         case .sessionStart:
             return "Session started"
+        case .worktreeCreate:
+            return "Creating worktree"
         }
     }
 
