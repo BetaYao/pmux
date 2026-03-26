@@ -827,31 +827,21 @@ extension MainWindowController: TitleBarDelegate {
 
 extension MainWindowController: DashboardDelegate {
     func dashboardDidSelectProject(_ project: String, thread: String) {
-        guard let tab = tabCoordinator.workspaceManager.tabs.first(where: { $0.displayName == project }) else { return }
-        let tabIndex = tabCoordinator.workspaceManager.tabs.firstIndex(where: { $0.repoPath == tab.repoPath }) ?? 0
-        switchToTab(tabIndex + 1)
-        if let repoVC = tabCoordinator.repoVCs[tab.repoPath] {
-            repoVC.selectWorktree(branch: thread)
-        }
+        tabCoordinator.dashboardDidSelectProject(project, thread: thread)
     }
 
     func dashboardDidRequestEnterProject(_ project: String) {
-        guard let tabIndex = tabCoordinator.workspaceManager.tabs.firstIndex(where: { $0.displayName == project }) else { return }
-        switchToTab(tabIndex + 1)
+        tabCoordinator.dashboardDidRequestEnterProject(project)
     }
 
     func dashboardDidReorderCards(order: [String]) {
-        // order contains terminal IDs; map back to worktree paths for config persistence
         let paths = order.compactMap { AgentHead.shared.agent(for: $0)?.worktreePath }
         config.cardOrder = paths
         config.save()
     }
 
     func dashboardDidRequestDelete(_ terminalID: String) {
-        guard let agent = AgentHead.shared.agent(for: terminalID) else { return }
-        let worktreePath = agent.worktreePath
-        guard let item = tabCoordinator.allWorktrees.first(where: { $0.info.path == worktreePath }) else { return }
-        confirmAndDeleteWorktree(item.info)
+        tabCoordinator.dashboardDidRequestDelete(terminalID)
     }
 
     func dashboardDidRequestAddProject() {
@@ -887,29 +877,7 @@ extension MainWindowController: PanelCoordinatorDelegate {
 
 extension MainWindowController: NewBranchDialogDelegate {
     func newBranchDialog(_ dialog: NewBranchDialog, didCreateWorktree info: WorktreeInfo, inRepo repoPath: String) {
-        let tree = terminalCoordinator.surfaceManager.tree(for: info, backend: runtimeBackend)
-        tabCoordinator.allWorktrees.append((info: info, tree: tree))
-
-        if config.worktreeStartedAt[info.path] == nil {
-            config.worktreeStartedAt[info.path] = ISO8601DateFormatter().string(from: Date())
-            config.save()
-        }
-
-        dashboardVC?.updateAgents(tabCoordinator.buildAgentDisplayInfos())
-        statusPublisher.updateSurfaces(terminalCoordinator.surfaceManager.all)
-
-        if tabCoordinator.activeTabIndex > 0 {
-            let repoIndex = tabCoordinator.activeTabIndex - 1
-            if let tab = tabCoordinator.workspaceManager.tab(at: repoIndex),
-               tab.repoPath == repoPath,
-               let repoVC = tabCoordinator.repoVCs[repoPath] {
-                var updatedWorktrees = tab.worktrees
-                updatedWorktrees.append(info)
-                tabCoordinator.workspaceManager.updateWorktrees(at: repoIndex, worktrees: updatedWorktrees)
-                repoVC.addWorktree(info, tree: tree)
-                return
-            }
-        }
+        tabCoordinator.handleNewBranch(info: info, repoPath: repoPath)
     }
 }
 
@@ -917,19 +885,7 @@ extension MainWindowController: NewBranchDialogDelegate {
 
 extension MainWindowController: WorktreeStatusDelegate {
     func worktreeStatusDidUpdate(_ status: WorktreeStatus) {
-        dashboardVC?.updateAgents(tabCoordinator.buildAgentDisplayInfos())
-        // Update repo VC if showing
-        if tabCoordinator.activeTabIndex > 0 {
-            let repoIndex = tabCoordinator.activeTabIndex - 1
-            if let tab = tabCoordinator.workspaceManager.tab(at: repoIndex),
-               let repoVC = tabCoordinator.repoVCs[tab.repoPath] {
-                let worktreePath = status.worktreePath
-                let aggregated = status.highestPriority
-                let message = status.mostRecentMessage
-                repoVC.updateStatus(for: worktreePath, status: aggregated, lastMessage: message)
-            }
-        }
-        updateTitleBar()
+        tabCoordinator.handleWorktreeStatusUpdate(status)
     }
 
     func paneStatusDidChange(worktreePath: String, paneIndex: Int, oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String) {

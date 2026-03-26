@@ -506,6 +506,73 @@ class TabCoordinator {
 
     // MARK: - Navigation
 
+    // MARK: - Dashboard Delegate Forwarding
+
+    func dashboardDidSelectProject(_ project: String, thread: String) {
+        guard let tab = workspaceManager.tabs.first(where: { $0.displayName == project }) else { return }
+        let tabIndex = workspaceManager.tabs.firstIndex(where: { $0.repoPath == tab.repoPath }) ?? 0
+        switchToTab(tabIndex + 1)
+        if let repoVC = repoVCs[tab.repoPath] {
+            repoVC.selectWorktree(branch: thread)
+        }
+    }
+
+    func dashboardDidRequestEnterProject(_ project: String) {
+        guard let tabIndex = workspaceManager.tabs.firstIndex(where: { $0.displayName == project }) else { return }
+        switchToTab(tabIndex + 1)
+    }
+
+    func dashboardDidRequestDelete(_ terminalID: String) {
+        guard let agent = AgentHead.shared.agent(for: terminalID) else { return }
+        let worktreePath = agent.worktreePath
+        guard let item = allWorktrees.first(where: { $0.info.path == worktreePath }) else { return }
+        terminalCoordinator.confirmAndDeleteWorktree(item.info, window: nil)
+    }
+
+    // MARK: - New Branch Integration
+
+    func handleNewBranch(info: WorktreeInfo, repoPath: String) {
+        let tree = terminalCoordinator.surfaceManager.tree(for: info, backend: runtimeBackend)
+        allWorktrees.append((info: info, tree: tree))
+
+        if config.worktreeStartedAt[info.path] == nil {
+            config.worktreeStartedAt[info.path] = ISO8601DateFormatter().string(from: Date())
+            config.save()
+        }
+
+        dashboardVC?.updateAgents(buildAgentDisplayInfos())
+        statusPublisher.updateSurfaces(terminalCoordinator.surfaceManager.all)
+
+        if activeTabIndex > 0 {
+            let repoIndex = activeTabIndex - 1
+            if let tab = workspaceManager.tab(at: repoIndex),
+               tab.repoPath == repoPath,
+               let repoVC = repoVCs[repoPath] {
+                var updatedWorktrees = tab.worktrees
+                updatedWorktrees.append(info)
+                workspaceManager.updateWorktrees(at: repoIndex, worktrees: updatedWorktrees)
+                repoVC.addWorktree(info, tree: tree)
+                return
+            }
+        }
+    }
+
+    // MARK: - Status Update Forwarding
+
+    func handleWorktreeStatusUpdate(_ status: WorktreeStatus) {
+        dashboardVC?.updateAgents(buildAgentDisplayInfos())
+        if activeTabIndex > 0 {
+            let repoIndex = activeTabIndex - 1
+            if let tab = workspaceManager.tab(at: repoIndex),
+               let repoVC = repoVCs[tab.repoPath] {
+                repoVC.updateStatus(for: status.worktreePath, status: status.highestPriority, lastMessage: status.mostRecentMessage)
+            }
+        }
+        delegate?.tabCoordinatorRequestUpdateTitleBar(self)
+    }
+
+    // MARK: - Navigation
+
     func handleNavigateToWorktree(worktreePath: String, paneIndex: Int?) {
         // Check already-open tabs first
         if let tabIndex = workspaceManager.tabs.firstIndex(where: { tab in
