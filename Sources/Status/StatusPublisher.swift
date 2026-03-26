@@ -1,14 +1,9 @@
 import Foundation
 
-protocol StatusPublisherDelegate: AnyObject {
-    func statusDidChange(worktreePath: String, oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String)
-}
-
 /// Periodically polls terminal surfaces and detects agent status changes.
 /// Uses text pattern matching against visible terminal content.
 /// Polling runs on a background queue to avoid blocking the main thread.
 class StatusPublisher {
-    weak var delegate: StatusPublisherDelegate?
 
     private let detector = StatusDetector()
     private var trackers: [String: DebouncedStatusTracker] = [:]  // keyed by terminal ID
@@ -20,6 +15,7 @@ class StatusPublisher {
     private var lastMessages: [String: String] = [:]              // keyed by terminal ID
     private var runningStartTimes: [String: Date] = [:]           // keyed by terminal ID
     private(set) var webhookProvider = WebhookStatusProvider()
+    var aggregator: WorktreeStatusAggregator?
     private let lock = NSLock()
 
     private let pollInterval: TimeInterval = 2.0
@@ -64,6 +60,13 @@ class StatusPublisher {
         lock.unlock()
         stop()
 
+        for (worktreePath, tree) in trees {
+            let leaves = tree.allLeaves
+            for (index, leaf) in leaves.enumerated() {
+                aggregator?.registerTerminal(leaf.surfaceId, worktreePath: worktreePath, leafIndex: index)
+            }
+        }
+
         webhookProvider.updateWorktrees(inputWorktreePaths)
 
         timer = Timer.scheduledTimer(withTimeInterval: pollInterval, repeats: true) { [weak self] _ in
@@ -98,6 +101,14 @@ class StatusPublisher {
             }
         }
         lock.unlock()
+
+        for (worktreePath, tree) in trees {
+            let leaves = tree.allLeaves
+            for (index, leaf) in leaves.enumerated() {
+                aggregator?.registerTerminal(leaf.surfaceId, worktreePath: worktreePath, leafIndex: index)
+            }
+        }
+
         webhookProvider.updateWorktrees(inputWorktreePaths)
     }
 
@@ -189,11 +200,14 @@ class StatusPublisher {
             AgentHead.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: agentType)
             AgentHead.shared.updateStatus(terminalID: terminalID, status: detected, lastMessage: lastMessage, roundDuration: roundDur)
 
-            if statusChanged {
-                DispatchQueue.main.async { [weak self] in
-                    self?.delegate?.statusDidChange(worktreePath: worktreePath, oldStatus: oldStatus, newStatus: detected, lastMessage: lastMessage)
-                }
+            DispatchQueue.main.async { [weak self] in
+                self?.aggregator?.agentDidUpdate(
+                    terminalID: terminalID,
+                    status: detected,
+                    lastMessage: lastMessage
+                )
             }
+
         }
     }
 

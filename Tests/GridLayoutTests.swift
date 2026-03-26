@@ -249,14 +249,14 @@ final class GridLayoutTests: XCTestCase {
     }
 
     func testGlassBackgroundConfig_DarkModeEnabled() {
-        let config = MainWindowController.glassBackgroundConfig(isDark: true)
+        let config = WindowStyling.glassBackgroundConfig(isDark: true)
         XCTAssertTrue(config.enabled)
         XCTAssertEqual(config.material, .hudWindow)
         XCTAssertEqual(config.blendingMode, .behindWindow)
     }
 
     func testGlassBackgroundConfig_LightModeEnabled() {
-        let config = MainWindowController.glassBackgroundConfig(isDark: false)
+        let config = WindowStyling.glassBackgroundConfig(isDark: false)
         XCTAssertTrue(config.enabled)
         XCTAssertEqual(config.material, .underWindowBackground)
         XCTAssertEqual(config.blendingMode, .behindWindow)
@@ -563,12 +563,12 @@ final class GridLayoutTests: XCTestCase {
     }
 
     func testMainWindowController_TrafficLightsAlignWithCapsuleCenter() {
-        let originY = MainWindowController.trafficLightButtonOriginY(containerHeight: 52, buttonHeight: 12)
+        let originY = WindowStyling.trafficLightButtonOriginY(containerHeight: 52, buttonHeight: 12)
         XCTAssertEqual(originY, 22, accuracy: 0.001)
     }
 
     func testMainWindowController_DoesNotUseEscAsGlobalShortcut() {
-        XCTAssertFalse(MainWindowController.shouldHandleEscShortcut())
+        XCTAssertFalse(WindowStyling.shouldHandleEscShortcut())
     }
 
     func testDashboardFocusLayouts_UseEdgeFlushSpacingAndCornerMasks() {
@@ -618,50 +618,50 @@ final class GridLayoutTests: XCTestCase {
     }
 
     func testMainWindowController_WindowAutosaveDisabledInUITestEnvironment() {
-        XCTAssertFalse(MainWindowController.shouldUseWindowFrameAutosave(
+        XCTAssertFalse(WindowStyling.shouldUseWindowFrameAutosave(
             environment: ["XCTestConfigurationFilePath": "/tmp/test.xctestconfiguration"],
             arguments: []
         ))
-        XCTAssertFalse(MainWindowController.shouldUseWindowFrameAutosave(
+        XCTAssertFalse(WindowStyling.shouldUseWindowFrameAutosave(
             environment: [:],
             arguments: ["-PmuxUITesting"]
         ))
-        XCTAssertTrue(MainWindowController.shouldUseWindowFrameAutosave(environment: [:], arguments: []))
+        XCTAssertTrue(WindowStyling.shouldUseWindowFrameAutosave(environment: [:], arguments: []))
     }
 
     func testMainWindowController_LightModeUsesGlassBackground() {
-        let cfg = MainWindowController.glassBackgroundConfig(isDark: false)
+        let cfg = WindowStyling.glassBackgroundConfig(isDark: false)
         XCTAssertTrue(cfg.enabled)
         XCTAssertEqual(cfg.material, .underWindowBackground)
         XCTAssertEqual(cfg.blendingMode, .behindWindow)
     }
 
     func testMainWindowController_ResolvePreferredBackend_UsesZmxWhenAvailable() {
-        let resolved = MainWindowController.resolvePreferredBackend(preferred: "zmx", zmxAvailable: true, tmuxAvailable: true)
+        let resolved = BackendResolver.resolvePreferredBackend(preferred: "zmx", zmxAvailable: true, tmuxAvailable: true)
         XCTAssertEqual(resolved, "zmx")
     }
 
     func testMainWindowController_ResolvePreferredBackend_FallsBackToTmuxWhenZmxMissing() {
-        let resolved = MainWindowController.resolvePreferredBackend(preferred: "zmx", zmxAvailable: false, tmuxAvailable: true)
+        let resolved = BackendResolver.resolvePreferredBackend(preferred: "zmx", zmxAvailable: false, tmuxAvailable: true)
         XCTAssertEqual(resolved, "tmux")
     }
 
     func testMainWindowController_ResolvePreferredBackend_FallsBackToLocalWhenNoBackendInstalled() {
-        let resolved = MainWindowController.resolvePreferredBackend(preferred: "zmx", zmxAvailable: false, tmuxAvailable: false)
+        let resolved = BackendResolver.resolvePreferredBackend(preferred: "zmx", zmxAvailable: false, tmuxAvailable: false)
         XCTAssertEqual(resolved, "local")
     }
 
     func testMainWindowController_ResolvePreferredBackend_LocalAutoRecoversToZmx() {
-        let resolved = MainWindowController.resolvePreferredBackend(preferred: "local", zmxAvailable: true, tmuxAvailable: true)
+        let resolved = BackendResolver.resolvePreferredBackend(preferred: "local", zmxAvailable: true, tmuxAvailable: true)
         XCTAssertEqual(resolved, "zmx")
     }
 
     func testMainWindowController_IsSupportedZmxVersion() {
-        XCTAssertTrue(MainWindowController.isSupportedZmxVersion("0.4.2"))
-        XCTAssertTrue(MainWindowController.isSupportedZmxVersion("v0.4.9"))
-        XCTAssertTrue(MainWindowController.isSupportedZmxVersion("0.5.0"))
-        XCTAssertFalse(MainWindowController.isSupportedZmxVersion("0.3.9"))
-        XCTAssertFalse(MainWindowController.isSupportedZmxVersion("bad-value"))
+        XCTAssertTrue(BackendResolver.isSupportedZmxVersion("0.4.2"))
+        XCTAssertTrue(BackendResolver.isSupportedZmxVersion("v0.4.9"))
+        XCTAssertTrue(BackendResolver.isSupportedZmxVersion("0.5.0"))
+        XCTAssertFalse(BackendResolver.isSupportedZmxVersion("0.3.9"))
+        XCTAssertFalse(BackendResolver.isSupportedZmxVersion("bad-value"))
     }
 }
 

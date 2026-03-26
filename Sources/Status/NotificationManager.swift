@@ -42,6 +42,75 @@ class NotificationManager: NSObject {
         UNUserNotificationCenter.current().setNotificationCategories([category])
     }
 
+    func shouldNotify(terminalID: String, oldStatus: AgentStatus, newStatus: AgentStatus) -> Bool {
+        guard oldStatus == .running else { return false }
+        guard newStatus == .waiting || newStatus == .error || newStatus == .idle else { return false }
+        if let last = lastNotified[terminalID], Date().timeIntervalSince(last) < cooldown {
+            return false
+        }
+        lastNotified[terminalID] = Date()
+        return true
+    }
+
+    static func formatTitle(status: AgentStatus, branch: String, paneIndex: Int, paneCount: Int) -> String {
+        let base: String
+        switch status {
+        case .idle: base = "Agent finished — \(branch)"
+        case .waiting: base = "Agent needs input — \(branch)"
+        case .error: base = "Agent error — \(branch)"
+        default: base = "Agent status — \(branch)"
+        }
+        if paneCount > 1 {
+            return "\(base) [Pane \(paneIndex)]"
+        }
+        return base
+    }
+
+    /// Per-pane notification with terminalID-based cooldown
+    func notify(terminalID: String, worktreePath: String, branch: String,
+                paneIndex: Int, paneCount: Int,
+                oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String) {
+        guard shouldNotify(terminalID: terminalID, oldStatus: oldStatus, newStatus: newStatus) else { return }
+
+        let title = Self.formatTitle(status: newStatus, branch: branch, paneIndex: paneIndex, paneCount: paneCount)
+        let content = UNMutableNotificationContent()
+        content.title = title
+
+        let fallback: String
+        switch newStatus {
+        case .waiting: fallback = "\(branch) is waiting for your response"
+        case .error: fallback = "\(branch) encountered an error"
+        case .idle: fallback = "\(branch) completed its task"
+        default: fallback = ""
+        }
+        content.body = lastMessage.isEmpty ? fallback : lastMessage
+        content.sound = newStatus == .error ? .defaultCritical : .default
+
+        let historyPaneIndex: Int? = paneCount > 1 ? paneIndex : nil
+        let entry = NotificationEntry(
+            branch: branch,
+            worktreePath: worktreePath,
+            status: newStatus,
+            message: content.body,
+            paneIndex: historyPaneIndex
+        )
+        NotificationHistory.shared.add(entry)
+
+        if NSApp.isActive { return }
+
+        content.userInfo = ["worktreePath": worktreePath, "paneIndex": paneIndex]
+        content.categoryIdentifier = Self.categoryIdentifier
+
+        let request = UNNotificationRequest(
+            identifier: "pmux-\(worktreePath.hashValue)-\(paneIndex)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error { NSLog("Failed to send notification: \(error)") }
+        }
+    }
+
     /// Notify when agent transitions to a notable state
     func notify(worktreePath: String, branch: String, oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String = "") {
         // Only notify for transitions TO these states
@@ -138,10 +207,14 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
                 NSApp.mainWindow?.deminiaturize(nil)
 
                 if let path = userInfo["worktreePath"] as? String {
+                    var info: [String: Any] = ["worktreePath": path]
+                    if let paneIndex = userInfo["paneIndex"] as? Int {
+                        info["paneIndex"] = paneIndex
+                    }
                     NotificationCenter.default.post(
                         name: .navigateToWorktree,
                         object: nil,
-                        userInfo: ["worktreePath": path]
+                        userInfo: info
                     )
                 }
             }

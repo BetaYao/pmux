@@ -27,12 +27,14 @@ final class AgentCardView: NSView {
     let bottomBar = NSView()
 
     private let separatorLine = NSView()
-    private let statusDot = NSView()
+    private var statusDots: [NSView] = []
     private let projectLabel = NSTextField(labelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "")
     private let paneCountLabel = NSTextField(labelWithString: "")
     private var isHovered = false
     private var currentStatus: String = ""
+    private var currentPaneStatuses: [AgentStatus] = []
+    private var projectLeadingConstraint: NSLayoutConstraint?
     private(set) var clickRecognizer: NSClickGestureRecognizer!
 
     override init(frame frameRect: NSRect) {
@@ -44,14 +46,46 @@ final class AgentCardView: NSView {
         fatalError("init(coder:) not supported")
     }
 
-    func configure(id: String, project: String, thread: String, status: String, lastMessage: String, totalDuration: String, roundDuration: String, paneCount: Int = 1) {
+    func configure(id: String, project: String, thread: String, status: String, lastMessage: String, totalDuration: String, roundDuration: String, paneCount: Int = 1, paneStatuses: [AgentStatus] = []) {
         agentId = id
         currentStatus = status
         setAccessibilityIdentifier("dashboard.card.\(id)")
 
         projectLabel.stringValue = project
         statusLabel.stringValue = status.capitalized
-        statusDot.layer?.backgroundColor = AgentDisplayHelpers.statusColor(status).cgColor
+
+        // Rebuild status dots
+        statusDots.forEach { $0.removeFromSuperview() }
+        statusDots.removeAll()
+        projectLeadingConstraint?.isActive = false
+
+        let statuses = paneStatuses.isEmpty ? [AgentStatus(rawValue: status) ?? .unknown] : paneStatuses
+        currentPaneStatuses = statuses
+        var previousDot: NSView? = nil
+        for agentStatus in statuses {
+            let dot = NSView()
+            dot.wantsLayer = true
+            dot.layer?.cornerRadius = 3.5
+            dot.layer?.backgroundColor = agentStatus.color.cgColor
+            dot.translatesAutoresizingMaskIntoConstraints = false
+            bottomBar.addSubview(dot)
+
+            NSLayoutConstraint.activate([
+                dot.widthAnchor.constraint(equalToConstant: 7),
+                dot.heightAnchor.constraint(equalToConstant: 7),
+                dot.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
+                dot.leadingAnchor.constraint(equalTo: previousDot?.trailingAnchor ?? bottomBar.leadingAnchor,
+                                             constant: previousDot != nil ? 3 : 8),
+            ])
+            statusDots.append(dot)
+            previousDot = dot
+        }
+
+        // Anchor project label to the last dot
+        if let lastDot = statusDots.last {
+            projectLeadingConstraint = projectLabel.leadingAnchor.constraint(equalTo: lastDot.trailingAnchor, constant: 5)
+            projectLeadingConstraint?.isActive = true
+        }
 
         if paneCount > 1 {
             paneCountLabel.stringValue = "\(paneCount) panes"
@@ -83,12 +117,6 @@ final class AgentCardView: NSView {
         bottomBar.wantsLayer = true
         bottomBar.translatesAutoresizingMaskIntoConstraints = false
         addSubview(bottomBar)
-
-        // Status dot
-        statusDot.wantsLayer = true
-        statusDot.layer?.cornerRadius = 3.5
-        statusDot.translatesAutoresizingMaskIntoConstraints = false
-        bottomBar.addSubview(statusDot)
 
         // Project label
         projectLabel.font = NSFont.systemFont(ofSize: Typography.bodyPointSize, weight: .medium)
@@ -138,14 +166,7 @@ final class AgentCardView: NSView {
             bottomBar.bottomAnchor.constraint(equalTo: bottomAnchor),
             bottomBar.heightAnchor.constraint(equalToConstant: 30),
 
-            // Status dot inside bottom bar
-            statusDot.leadingAnchor.constraint(equalTo: bottomBar.leadingAnchor, constant: 8),
-            statusDot.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
-            statusDot.widthAnchor.constraint(equalToConstant: 7),
-            statusDot.heightAnchor.constraint(equalToConstant: 7),
-
-            // Project label
-            projectLabel.leadingAnchor.constraint(equalTo: statusDot.trailingAnchor, constant: 5),
+            // Project label (leading constraint set dynamically in configure())
             projectLabel.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
             projectLabel.trailingAnchor.constraint(lessThanOrEqualTo: paneCountLabel.leadingAnchor, constant: -6),
 
@@ -203,7 +224,11 @@ final class AgentCardView: NSView {
         layer?.backgroundColor = resolvedCGColor(SemanticColors.tileBg)
         bottomBar.layer?.backgroundColor = resolvedCGColor(SemanticColors.tileBarBg)
         separatorLine.layer?.backgroundColor = resolvedCGColor(SemanticColors.line)
-        statusDot.layer?.backgroundColor = resolvedCGColor(AgentDisplayHelpers.statusColor(currentStatus))
+        for (index, dot) in statusDots.enumerated() {
+            if index < currentPaneStatuses.count {
+                dot.layer?.backgroundColor = resolvedCGColor(currentPaneStatuses[index].color)
+            }
+        }
         projectLabel.textColor = SemanticColors.text
         statusLabel.textColor = SemanticColors.muted
         paneCountLabel.textColor = SemanticColors.accent

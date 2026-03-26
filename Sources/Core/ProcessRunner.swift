@@ -51,6 +51,22 @@ enum ProcessRunner {
         }
     }
 
+    /// Check if a command exists on PATH, calling back on the main queue.
+    static func commandExistsAsync(_ command: String, completion: @escaping (Bool) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = commandExists(command)
+            DispatchQueue.main.async { completion(result) }
+        }
+    }
+
+    /// Run a command and return trimmed stdout via callback on the main queue.
+    static func outputAsync(_ args: [String], completion: @escaping (String?) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = output(args)
+            DispatchQueue.main.async { completion(result) }
+        }
+    }
+
     /// Run a command synchronously, waiting for exit. Logs errors.
     static func runSync(_ args: [String]) {
         let process = Process()

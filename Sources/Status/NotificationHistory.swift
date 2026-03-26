@@ -8,8 +8,9 @@ struct NotificationEntry: Identifiable {
     let status: AgentStatus
     let message: String
     var isRead: Bool
+    let paneIndex: Int?  // nil for single-pane worktrees
 
-    init(branch: String, worktreePath: String, status: AgentStatus, message: String) {
+    init(branch: String, worktreePath: String, status: AgentStatus, message: String, paneIndex: Int? = nil) {
         self.id = UUID()
         self.timestamp = Date()
         self.branch = branch
@@ -17,6 +18,7 @@ struct NotificationEntry: Identifiable {
         self.status = status
         self.message = message
         self.isRead = false
+        self.paneIndex = paneIndex
     }
 }
 
