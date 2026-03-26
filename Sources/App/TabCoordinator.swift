@@ -642,6 +642,11 @@ class TabCoordinator {
         guard let tab = workspaceManager.tabs.first(where: { $0.displayName == project }) else { return }
         let tabIndex = workspaceManager.tabs.firstIndex(where: { $0.repoPath == tab.repoPath }) ?? 0
         switchToTab(tabIndex + 1)
+        // Save the selected worktree for this project
+        if let worktreePath = tab.worktrees.first(where: { $0.branch == thread })?.path {
+            config.activeWorktreePaths[tab.repoPath] = worktreePath
+            config.save()
+        }
         if let repoVC = repoVCs[tab.repoPath] {
             repoVC.selectWorktree(branch: thread)
         }
