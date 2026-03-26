@@ -18,10 +18,12 @@ class MainWindowController: NSWindowController {
     private let backgroundEffectView = NSVisualEffectView()
     private let contentContainer = NSView()
     private var windowTrackingArea: NSTrackingArea?
-    private let notificationPanel = NotificationPanelView()
-    private let aiPanel = AIPanelView()
-    private let notificationPopover = NSPopover()
-    private let aiPopover = NSPopover()
+    private lazy var panelCoordinator: PanelCoordinator = {
+        let pc = PanelCoordinator()
+        pc.delegate = self
+        pc.titleBar = titleBar
+        return pc
+    }()
     private let titleBarAccessory = NSTitlebarAccessoryViewController()
 
     private var dashboardVC: DashboardViewController?
@@ -433,7 +435,7 @@ class MainWindowController: NSWindowController {
         // Window hover tracking for arc block styling
         setupWindowHoverTracking(contentView: contentView)
 
-        setupPanelPopovers()
+        panelCoordinator.setupPopovers()
 
         // Create dashboard
         let savedLayout = DashboardLayout(rawValue: config.dashboardLayout) ?? .leftRight
@@ -454,23 +456,6 @@ class MainWindowController: NSWindowController {
         positionStandardWindowButtons()
     }
 
-    private func setupPanelPopovers() {
-        notificationPanel.delegate = self
-        notificationPanel.frame = NSRect(x: 0, y: 0, width: 360, height: 460)
-        notificationPopover.contentSize = notificationPanel.frame.size
-        notificationPopover.behavior = .transient
-        notificationPopover.animates = true
-        notificationPopover.delegate = self
-        notificationPopover.contentViewController = ViewHostController(hostedView: notificationPanel)
-
-        aiPanel.delegate = self
-        aiPanel.frame = NSRect(x: 0, y: 0, width: 360, height: 460)
-        aiPopover.contentSize = aiPanel.frame.size
-        aiPopover.behavior = .transient
-        aiPopover.animates = true
-        aiPopover.delegate = self
-        aiPopover.contentViewController = ViewHostController(hostedView: aiPanel)
-    }
 
     private func applyWindowBackgroundStyle() {
         guard let window else { return }
@@ -793,57 +778,11 @@ class MainWindowController: NSWindowController {
         }
     }
 
-    // MARK: - Panel Management
-
-    private func closeBothPanels() {
-        notificationPopover.performClose(nil)
-        aiPopover.performClose(nil)
-        notificationPanel.setOpen(false, animated: false)
-        aiPanel.setOpen(false, animated: false)
-    }
-
-    private func toggleNotificationPanel() {
-        if notificationPopover.isShown {
-            notificationPopover.performClose(nil)
-            notificationPanel.setOpen(false, animated: false)
-            return
-        }
-
-        aiPopover.performClose(nil)
-        aiPanel.setOpen(false, animated: false)
-
-        notificationPanel.updateNotifications(NotificationHistory.shared.entries.map {
-            (
-                title: "\($0.branch)  \($0.status.rawValue)",
-                meta: $0.message,
-                worktreePath: $0.worktreePath
-            )
-        })
-        notificationPanel.setOpen(true, animated: false)
-
-        let anchor = titleBar.notificationsAnchorView()
-        notificationPopover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
-    }
-
-    private func toggleAIPanel() {
-        if aiPopover.isShown {
-            aiPopover.performClose(nil)
-            aiPanel.setOpen(false, animated: false)
-            return
-        }
-
-        notificationPopover.performClose(nil)
-        notificationPanel.setOpen(false, animated: false)
-
-        aiPanel.setOpen(true, animated: false)
-        let anchor = titleBar.aiAnchorView()
-        aiPopover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
-    }
 
     // MARK: - Modal Helpers
 
     private func showCloseProjectModal(_ projectName: String) {
-        closeBothPanels()
+        panelCoordinator.closeBothPanels()
 
         let alert = NSAlert()
         alert.messageText = "Close \"\(projectName)\"?"
@@ -862,7 +801,7 @@ class MainWindowController: NSWindowController {
     }
 
     private func showNewThreadModal() {
-        closeBothPanels()
+        panelCoordinator.closeBothPanels()
 
         let alert = NSAlert()
         alert.messageText = "New Thread"
@@ -1456,11 +1395,11 @@ extension MainWindowController: TitleBarDelegate {
     }
 
     func titleBarDidToggleNotifications() {
-        toggleNotificationPanel()
+        panelCoordinator.toggleNotificationPanel()
     }
 
     func titleBarDidToggleAI() {
-        toggleAIPanel()
+        panelCoordinator.toggleAIPanel()
     }
 
     func titleBarDidToggleTheme() {
@@ -1550,30 +1489,11 @@ extension MainWindowController: RepoViewDelegate {
     }
 }
 
-// MARK: - NotificationPanelDelegate
+// MARK: - PanelCoordinatorDelegate
 
-extension MainWindowController: NotificationPanelDelegate {
-    func notificationPanelDidRequestClose() {
-        notificationPopover.performClose(nil)
-        notificationPanel.setOpen(false, animated: false)
-    }
-
-    func notificationPanelDidSelectItem(worktreePath: String) {
-        closeBothPanels()
-        NotificationCenter.default.post(
-            name: .navigateToWorktree,
-            object: nil,
-            userInfo: ["worktreePath": worktreePath]
-        )
-    }
-}
-
-// MARK: - AIPanelDelegate
-
-extension MainWindowController: AIPanelDelegate {
-    func aiPanelDidRequestClose() {
-        aiPopover.performClose(nil)
-        aiPanel.setOpen(false, animated: false)
+extension MainWindowController: PanelCoordinatorDelegate {
+    func panelCoordinator(_ coordinator: PanelCoordinator, navigateToWorktreePath path: String) {
+        // Navigation handled by NotificationCenter .navigateToWorktree
     }
 }
 
@@ -1805,30 +1725,8 @@ extension MainWindowController: UpdateCoordinatorDelegate {
     }
 }
 
-// MARK: - NotificationHistoryDelegate
 
-extension MainWindowController: NotificationHistoryDelegate {
-    func notificationHistory(_ vc: NotificationHistoryViewController, didSelectWorktreePath path: String) {
-        NotificationCenter.default.post(
-            name: .navigateToWorktree,
-            object: nil,
-            userInfo: ["worktreePath": path]
-        )
-    }
-}
-
-extension MainWindowController: NSPopoverDelegate {
-    func popoverDidClose(_ notification: Notification) {
-        guard let popover = notification.object as? NSPopover else { return }
-        if popover === notificationPopover {
-            notificationPanel.setOpen(false, animated: false)
-        } else if popover === aiPopover {
-            aiPanel.setOpen(false, animated: false)
-        }
-    }
-}
-
-private final class ViewHostController: NSViewController {
+final class ViewHostController: NSViewController {
     private let hostedView: NSView
 
     init(hostedView: NSView) {
