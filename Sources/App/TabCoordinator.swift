@@ -349,6 +349,9 @@ class TabCoordinator {
                 self.statusPublisher.start(trees: self.terminalCoordinator.surfaceManager.all)
                 self.updateStatusPollPreferences()
 
+                // Restore last session state (tab, worktree, pane)
+                self.restoreSessionState()
+
                 // Start periodic branch name refresh
                 self.startBranchRefreshTimer()
 
@@ -589,6 +592,43 @@ class TabCoordinator {
             }
         }
         config.save()
+    }
+
+    func restoreSessionState() {
+        // Determine which tab to show
+        guard let savedRepoPath = config.activeTabRepoPath,
+              let tabIndex = workspaceManager.tabs.firstIndex(where: { $0.repoPath == savedRepoPath }) else {
+            // No saved state or repo no longer exists — stay on dashboard
+            return
+        }
+
+        let uiTabIndex = tabIndex + 1
+        switchToTab(uiTabIndex)
+
+        // Restore worktree selection within the repo
+        let tab = workspaceManager.tabs[tabIndex]
+        if let savedWorktreePath = config.activeWorktreePaths[savedRepoPath],
+           let repoVC = repoVCs[savedRepoPath] {
+            repoVC.selectWorktree(byPath: savedWorktreePath)
+
+            // Restore focused pane within the worktree
+            if let savedLeafId = config.focusedPaneIds[savedWorktreePath],
+               let container = repoVC.activeSplitContainer,
+               let tree = container.tree,
+               tree.allLeaves.contains(where: { $0.id == savedLeafId }) {
+                tree.focusedId = savedLeafId
+                container.updateDimOverlays()
+                if let leaf = tree.allLeaves.first(where: { $0.id == savedLeafId }),
+                   let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId),
+                   let termView = surface.view {
+                    repoVC.view.window?.makeFirstResponder(termView)
+                }
+            }
+        } else if let firstWorktree = tab.worktrees.first,
+                  let repoVC = repoVCs[savedRepoPath] {
+            // Saved worktree gone, fall back to first
+            repoVC.selectWorktree(byPath: firstWorktree.path)
+        }
     }
 
     // MARK: - Navigation
