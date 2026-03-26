@@ -79,6 +79,7 @@ class TabCoordinator {
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
         updateStatusPollPreferences()
         delegate?.tabCoordinatorDidSwitchTab(self)
+        saveSessionState()
     }
 
     func updateStatusPollPreferences() {
@@ -560,6 +561,20 @@ class TabCoordinator {
                 self.dashboardVC?.updateAgents(self.buildAgentDisplayInfos())
             }
         }
+    }
+
+    // MARK: - Session State Persistence
+
+    func saveSessionState() {
+        if activeTabIndex == 0 {
+            config.activeTabRepoPath = nil
+        } else {
+            let repoIndex = activeTabIndex - 1
+            if let tab = workspaceManager.tab(at: repoIndex) {
+                config.activeTabRepoPath = tab.repoPath
+            }
+        }
+        config.save()
     }
 
     // MARK: - Navigation
