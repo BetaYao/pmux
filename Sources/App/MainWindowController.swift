@@ -31,8 +31,14 @@ class MainWindowController: NSWindowController {
     private var runtimeBackend: String = "zmx"
     private let workspaceManager = WorkspaceManager()
 
-    // All terminal trees, keyed by worktree path
-    private let surfaceManager = TerminalSurfaceManager()
+    // Terminal management
+    private lazy var terminalCoordinator: TerminalCoordinator = {
+        let tc = TerminalCoordinator(config: config, currentRepoVC: { [weak self] in
+            self?.currentRepoVC
+        })
+        tc.delegate = self
+        return tc
+    }()
     private var allWorktrees: [(info: WorktreeInfo, tree: SplitTree)] = []
 
     private static let iso8601: ISO8601DateFormatter = {
@@ -61,7 +67,6 @@ class MainWindowController: NSWindowController {
         statusAggregator.delegate = self
         return pub
     }()
-    private var webhookServer: WebhookServer?
     private var branchRefreshTimer: Timer?
 
     static func shouldUseWindowFrameAutosave(
@@ -249,7 +254,7 @@ class MainWindowController: NSWindowController {
     @objc func showQuickSwitcher() {
         let worktreeInfos = allWorktrees.map { $0.info }
         var statuses: [String: AgentStatus] = [:]
-        for (path, _) in surfaceManager.all {
+        for (path, _) in terminalCoordinator.surfaceManager.all {
             statuses[path] = statusPublisher.status(for: path)
         }
         let switcher = QuickSwitcherViewController(worktrees: worktreeInfos, statuses: statuses)
@@ -604,7 +609,7 @@ class MainWindowController: NSWindowController {
             guard !seen.contains(agent.worktreePath) else { continue }
             seen.insert(agent.worktreePath)
 
-            let tree = surfaceManager.tree(forPath: agent.worktreePath)
+            let tree = terminalCoordinator.surfaceManager.tree(forPath: agent.worktreePath)
             let paneCount = tree?.leafCount ?? 1
             let paneSurfaces: [TerminalSurface] = tree?.allLeaves.compactMap {
                 SurfaceRegistry.shared.surface(forId: $0.surfaceId)
@@ -677,7 +682,7 @@ class MainWindowController: NSWindowController {
         }
 
         for info in effectiveWorktrees {
-            let tree = surfaceManager.tree(for: info, backend: runtimeBackend)
+            let tree = terminalCoordinator.surfaceManager.tree(for: info, backend: runtimeBackend)
             allWorktrees.append((info: info, tree: tree))
         }
 
@@ -690,7 +695,7 @@ class MainWindowController: NSWindowController {
             if config.worktreeStartedAt[info.path] == nil {
                 config.worktreeStartedAt[info.path] = now
             }
-            if let surface = surfaceManager.primarySurface(forPath: info.path) {
+            if let surface = terminalCoordinator.surfaceManager.primarySurface(forPath: info.path) {
                 let started = config.worktreeStartedAt[info.path].flatMap { MainWindowController.iso8601.date(from: $0) }
                 let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
                 AgentHead.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: projectName, startedAt: started, tmuxSessionName: sessionName, backend: runtimeBackend)
@@ -699,7 +704,7 @@ class MainWindowController: NSWindowController {
         config.save()
 
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
-        statusPublisher.updateSurfaces(surfaceManager.all)
+        statusPublisher.updateSurfaces(terminalCoordinator.surfaceManager.all)
         updateTitleBar()
         if activateTab {
             switchToTab(tabIndex + 1)
@@ -759,13 +764,13 @@ class MainWindowController: NSWindowController {
 
     private func getOrCreateRepoVC(for tab: WorkspaceTab) -> RepoViewController {
         if let existing = repoVCs[tab.repoPath] {
-            existing.reconfigurePreservingSelection(worktrees: tab.worktrees, trees: surfaceManager.all)
+            existing.reconfigurePreservingSelection(worktrees: tab.worktrees, trees: terminalCoordinator.surfaceManager.all)
             return existing
         }
 
         let repoVC = RepoViewController()
         repoVC.repoDelegate = self
-        repoVC.configure(worktrees: tab.worktrees, trees: surfaceManager.all)
+        repoVC.configure(worktrees: tab.worktrees, trees: terminalCoordinator.surfaceManager.all)
         repoVCs[tab.repoPath] = repoVC
         return repoVC
     }
@@ -823,16 +828,6 @@ class MainWindowController: NSWindowController {
 
     // MARK: - Workspace Loading
 
-    /// Resolve a SplitTree for the given worktree info, restoring from config if a saved layout exists.
-    private func resolveTree(for info: WorktreeInfo) -> SplitTree {
-        if runtimeBackend != "local",
-           let savedLayout = config.splitLayouts[info.path],
-           let restored = SplitTree.restore(from: savedLayout, worktreePath: info.path, backend: runtimeBackend) {
-            surfaceManager.registerTree(restored, forPath: info.path)
-            return restored
-        }
-        return surfaceManager.tree(for: info, backend: runtimeBackend)
-    }
 
     private func loadWorkspaces() {
         let repoPaths = config.workspacePaths
@@ -862,12 +857,12 @@ class MainWindowController: NSWindowController {
                             commitHash: "",
                             isMainWorktree: true
                         )
-                        let tree = self.resolveTree(for: info)
+                        let tree = self.terminalCoordinator.resolveTree(for: info)
                         allWorktreeInfos.append((info: info, tree: tree))
                         self.worktreeRepoCache[info.path] = repoPath
                     } else {
                         for info in worktrees {
-                            let tree = self.resolveTree(for: info)
+                            let tree = self.terminalCoordinator.resolveTree(for: info)
                             allWorktreeInfos.append((info: info, tree: tree))
                             self.worktreeRepoCache[info.path] = repoPath
                         }
@@ -906,7 +901,7 @@ class MainWindowController: NSWindowController {
                         ?? URL(fileURLWithPath: repo).lastPathComponent
                     let started = self.config.worktreeStartedAt[info.path].flatMap { MainWindowController.iso8601.date(from: $0) }
                     let sessionName = self.runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
-                    if let surface = self.surfaceManager.primarySurface(forPath: info.path) {
+                    if let surface = self.terminalCoordinator.surfaceManager.primarySurface(forPath: info.path) {
                         AgentHead.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: started, tmuxSessionName: sessionName, backend: self.runtimeBackend)
                     }
                 }
@@ -922,7 +917,7 @@ class MainWindowController: NSWindowController {
                 }
 
                 // Start polling for agent status
-                self.statusPublisher.start(trees: self.surfaceManager.all)
+                self.statusPublisher.start(trees: self.terminalCoordinator.surfaceManager.all)
                 self.updateStatusPollPreferences()
 
                 // Start periodic branch name refresh
@@ -935,76 +930,16 @@ class MainWindowController: NSWindowController {
                         AgentHead.shared.handleWebhookEvent(event)
                     }
                     server.start()
-                    self.webhookServer = server
+                    self.terminalCoordinator.webhookServer = server
                 }
             }
         }
     }
 
-    // MARK: - Worktree Deletion
+    // MARK: - Worktree Deletion (forwarded to TerminalCoordinator)
 
     private func confirmAndDeleteWorktree(_ info: WorktreeInfo) {
-        guard !info.isMainWorktree else { return }
-
-        let hasChanges = WorktreeDeleter.hasUncommittedChanges(worktreePath: info.path)
-        let repoPath = WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
-
-        let alert = NSAlert()
-        alert.alertStyle = hasChanges ? .critical : .warning
-        alert.messageText = "Delete worktree \"\(info.branch)\"?"
-        if hasChanges {
-            alert.informativeText = "This worktree has uncommitted changes that will be lost."
-        } else {
-            alert.informativeText = "The worktree directory will be removed."
-        }
-        alert.addButton(withTitle: "Delete")
-        alert.addButton(withTitle: "Delete + Branch")
-        alert.addButton(withTitle: "Cancel")
-
-        alert.buttons[0].hasDestructiveAction = true
-        alert.buttons[1].hasDestructiveAction = true
-
-        guard let window else { return }
-        alert.beginSheetModal(for: window) { [weak self] response in
-            guard let self else { return }
-            switch response {
-            case .alertFirstButtonReturn:
-                self.performDeleteWorktree(info, repoPath: repoPath, deleteBranch: false, force: hasChanges)
-            case .alertSecondButtonReturn:
-                self.performDeleteWorktree(info, repoPath: repoPath, deleteBranch: true, force: hasChanges)
-            default:
-                break
-            }
-        }
-    }
-
-    private func performDeleteWorktree(_ info: WorktreeInfo, repoPath: String, deleteBranch: Bool, force: Bool) {
-        surfaceManager.removeTree(forPath: info.path)
-
-        DispatchQueue.global().async { [weak self] in
-            do {
-                try WorktreeDeleter.deleteWorktree(
-                    worktreePath: info.path,
-                    repoPath: repoPath,
-                    branchName: info.branch,
-                    deleteBranch: deleteBranch,
-                    force: force
-                )
-                DispatchQueue.main.async {
-                    self?.worktreeDidDelete(info)
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    let errAlert = NSAlert()
-                    errAlert.alertStyle = .critical
-                    errAlert.messageText = "Failed to delete worktree"
-                    errAlert.informativeText = error.localizedDescription
-                    if let window = self?.window {
-                        errAlert.beginSheetModal(for: window)
-                    }
-                }
-            }
-        }
+        terminalCoordinator.confirmAndDeleteWorktree(info, window: window)
     }
 
     private func worktreeDidDelete(_ info: WorktreeInfo) {
@@ -1014,7 +949,7 @@ class MainWindowController: NSWindowController {
             AgentHead.shared.unregister(terminalID: agent.id)
         }
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
-        statusPublisher.updateSurfaces(surfaceManager.all)
+        statusPublisher.updateSurfaces(terminalCoordinator.surfaceManager.all)
 
         if activeTabIndex > 0 {
             let repoIndex = activeTabIndex - 1
@@ -1025,7 +960,7 @@ class MainWindowController: NSWindowController {
                     guard let self else { return }
                     self.workspaceManager.updateWorktrees(at: repoIndex, worktrees: updatedWorktrees)
                     if let repoVC = self.repoVCs[repoPath] {
-                        repoVC.configure(worktrees: updatedWorktrees, trees: self.surfaceManager.all)
+                        repoVC.configure(worktrees: updatedWorktrees, trees: self.terminalCoordinator.surfaceManager.all)
                     }
                     if updatedWorktrees.isEmpty {
                         self.performCloseRepo(projectName: displayName)
@@ -1050,8 +985,8 @@ class MainWindowController: NSWindowController {
 
         // Kill persisted sessions and destroy surfaces for this repo's worktrees
         for worktree in tab.worktrees {
-            let primarySurface = surfaceManager.primarySurface(forPath: worktree.path)
-            surfaceManager.removeTree(forPath: worktree.path)
+            let primarySurface = terminalCoordinator.surfaceManager.primarySurface(forPath: worktree.path)
+            terminalCoordinator.surfaceManager.removeTree(forPath: worktree.path)
 
             if let agent = AgentHead.shared.agent(forWorktree: worktree.path) {
                 AgentHead.shared.unregister(terminalID: agent.id)
@@ -1099,7 +1034,7 @@ class MainWindowController: NSWindowController {
 
         // Update UI
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
-        statusPublisher.updateSurfaces(surfaceManager.all)
+        statusPublisher.updateSurfaces(terminalCoordinator.surfaceManager.all)
         updateTitleBar()
         switchToTab(targetTab)
 
@@ -1114,141 +1049,26 @@ class MainWindowController: NSWindowController {
         return repoVCs[tab.repoPath]
     }
 
-    // MARK: - Split Pane Actions
+    // MARK: - Split Pane Actions (forwarded to TerminalCoordinator)
 
     func splitFocusedPane(axis: SplitAxis) {
-        guard let repoVC = currentRepoVC,
-              let container = repoVC.activeSplitContainer,
-              let tree = container.tree else { return }
-
-        let sessionName = tree.nextSessionName()
-        let surface = TerminalSurface()
-        surface.sessionName = sessionName
-        surface.backend = config.backend
-        SurfaceRegistry.shared.register(surface)
-
-        let leafId = UUID().uuidString
-        tree.splitFocusedLeaf(axis: axis, newLeafId: leafId, newSurfaceId: surface.id, newSessionName: sessionName)
-
-        // Create the terminal
-        _ = surface.create(in: container, workingDirectory: tree.worktreePath, sessionName: sessionName)
-
-        // Register view and re-layout
-        container.surfaceViews[surface.id] = surface.view
-        container.layoutTree()
-
-        // Focus the new pane. Runs deferred so it fires after _createWithCommand's own
-        // deferred async (which skips makeFirstResponder when a GhosttyNSView already has focus).
-        // This ensures resignFirstResponder fires on the old pane, clearing its visual focus state.
-        let capturedLeafId = leafId
-        DispatchQueue.main.async { [weak container] in
-            guard let container,
-                  let tree = container.tree,
-                  let newLeaf = tree.allLeaves.first(where: { $0.id == capturedLeafId }),
-                  let newSurface = SurfaceRegistry.shared.surface(forId: newLeaf.surfaceId),
-                  let termView = newSurface.view else { return }
-            container.window?.makeFirstResponder(termView)
-        }
-
-        // Update status publisher
-        statusPublisher.updateSurfaces(surfaceManager.all)
-
-        // Persist layout
-        saveSplitLayout(tree)
+        terminalCoordinator.splitFocusedPane(axis: axis)
     }
 
     func closeFocusedPane() {
-        guard let repoVC = currentRepoVC,
-              let container = repoVC.activeSplitContainer,
-              let tree = container.tree else { return }
-
-        guard let closed = tree.closeFocusedLeaf() else { return }
-
-        // Kill zmx session
-        SessionManager.killSession(closed.sessionName, backend: config.backend)
-
-        // Remove surface
-        if let surface = SurfaceRegistry.shared.surface(forId: closed.surfaceId) {
-            surface.view?.removeFromSuperview()
-            surface.destroy()
-        }
-        SurfaceRegistry.shared.unregister(closed.surfaceId)
-        container.surfaceViews.removeValue(forKey: closed.surfaceId)
-        container.layoutTree()
-
-        // Focus new leaf
-        if let focusedLeaf = tree.allLeaves.first(where: { $0.id == tree.focusedId }),
-           let focusSurface = SurfaceRegistry.shared.surface(forId: focusedLeaf.surfaceId),
-           let terminalView = focusSurface.view {
-            container.window?.makeFirstResponder(terminalView)
-        }
-
-        // Re-sync session layout after Ghostty processes the pixel resize.
-        // Mirrors the two-pass async pattern in TerminalSurface.create():
-        // pass 1 re-triggers the size, pass 2 reads the new grid (after Ghostty computed it).
-        if let focusedLeaf = tree.allLeaves.first(where: { $0.id == tree.focusedId }),
-           let focusSurface = SurfaceRegistry.shared.surface(forId: focusedLeaf.surfaceId) {
-            DispatchQueue.main.async {
-                focusSurface.syncSize()
-                DispatchQueue.main.async {
-                    focusSurface.refreshSessionLayout()
-                }
-            }
-        }
-
-        statusPublisher.updateSurfaces(surfaceManager.all)
-        saveSplitLayout(tree)
+        terminalCoordinator.closeFocusedPane()
     }
 
     func moveFocus(_ axis: SplitAxis, positive: Bool) {
-        guard let repoVC = currentRepoVC,
-              let container = repoVC.activeSplitContainer else { return }
-        if let newFocusId = container.focusLeaf(direction: axis, positive: positive) {
-            // Update first responder
-            if let tree = container.tree,
-               let leaf = tree.root.findLeaf(id: newFocusId),
-               let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId),
-               let view = surface.view {
-                container.window?.makeFirstResponder(view)
-            }
-        }
+        terminalCoordinator.moveFocus(axis, positive: positive)
     }
 
     func resizeSplit(_ axis: SplitAxis, delta: CGFloat) {
-        guard let repoVC = currentRepoVC,
-              let container = repoVC.activeSplitContainer,
-              let tree = container.tree else { return }
-        guard let splitId = tree.nearestAncestorSplit(axis: axis) else { return }
-        func findRatio(in node: SplitNode) -> CGFloat? {
-            if node.id == splitId, case .split(_, _, let ratio, _, _) = node { return ratio }
-            if case .split(_, _, _, let first, let second) = node {
-                return findRatio(in: first) ?? findRatio(in: second)
-            }
-            return nil
-        }
-        if let currentRatio = findRatio(in: tree.root) {
-            tree.updateRatio(splitId: splitId, newRatio: currentRatio + delta)
-            container.layoutTree()
-            saveSplitLayout(tree)
-        }
+        terminalCoordinator.resizeSplit(axis, delta: delta)
     }
 
     func resetSplitRatio() {
-        guard let repoVC = currentRepoVC,
-              let container = repoVC.activeSplitContainer,
-              let tree = container.tree else { return }
-        for axis in [SplitAxis.horizontal, .vertical] {
-            if let splitId = tree.nearestAncestorSplit(axis: axis) {
-                tree.updateRatio(splitId: splitId, newRatio: 0.5)
-            }
-        }
-        container.layoutTree()
-        saveSplitLayout(tree)
-    }
-
-    private func saveSplitLayout(_ tree: SplitTree) {
-        config.splitLayouts[tree.worktreePath] = tree.toCodable()
-        config.save()
+        terminalCoordinator.resetSplitRatio()
     }
 
 }
@@ -1348,18 +1168,14 @@ extension MainWindowController: NSWindowDelegate {
         statusPublisher.stop()
         branchRefreshTimer?.invalidate()
         branchRefreshTimer = nil
-        webhookServer?.stop()
-        webhookServer = nil
-        surfaceManager.removeAll()
+        terminalCoordinator.cleanup()
     }
 
     func cleanupBeforeTermination() {
         statusPublisher.stop()
         branchRefreshTimer?.invalidate()
         branchRefreshTimer = nil
-        webhookServer?.stop()
-        webhookServer = nil
-        surfaceManager.removeAll()
+        terminalCoordinator.cleanup()
     }
 }
 
@@ -1501,7 +1317,7 @@ extension MainWindowController: PanelCoordinatorDelegate {
 
 extension MainWindowController: NewBranchDialogDelegate {
     func newBranchDialog(_ dialog: NewBranchDialog, didCreateWorktree info: WorktreeInfo, inRepo repoPath: String) {
-        let tree = surfaceManager.tree(for: info, backend: runtimeBackend)
+        let tree = terminalCoordinator.surfaceManager.tree(for: info, backend: runtimeBackend)
         allWorktrees.append((info: info, tree: tree))
 
         // Record startedAt for the new worktree
@@ -1511,7 +1327,7 @@ extension MainWindowController: NewBranchDialogDelegate {
         }
 
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
-        statusPublisher.updateSurfaces(surfaceManager.all)
+        statusPublisher.updateSurfaces(terminalCoordinator.surfaceManager.all)
 
         // If we're on a repo tab for the same repo, stay there and update its sidebar
         if activeTabIndex > 0 {
@@ -1725,6 +1541,18 @@ extension MainWindowController: UpdateCoordinatorDelegate {
     }
 }
 
+
+// MARK: - TerminalCoordinatorDelegate
+
+extension MainWindowController: TerminalCoordinatorDelegate {
+    func terminalCoordinatorDidUpdateSurfaces(_ coordinator: TerminalCoordinator) {
+        statusPublisher.updateSurfaces(coordinator.surfaceManager.all)
+    }
+
+    func terminalCoordinator(_ coordinator: TerminalCoordinator, didDeleteWorktree info: WorktreeInfo) {
+        worktreeDidDelete(info)
+    }
+}
 
 final class ViewHostController: NSViewController {
     private let hostedView: NSView
