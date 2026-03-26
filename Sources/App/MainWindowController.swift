@@ -44,10 +44,12 @@ class MainWindowController: NSWindowController {
     private var activeTabIndex: Int = 0  // 0 = Dashboard
 
     // Auto-update
-    private let updateChecker = UpdateChecker()
-    private let updateManager = UpdateManager()
-    private let updateBanner = UpdateBanner()
-    private var pendingRelease: ReleaseInfo?
+    private lazy var updateCoordinator: UpdateCoordinator = {
+        let uc = UpdateCoordinator(config: config)
+        uc.delegate = self
+        uc.banner.delegate = uc
+        return uc
+    }()
 
     // Status detection
     private let statusAggregator = WorktreeStatusAggregator()
@@ -168,7 +170,7 @@ class MainWindowController: NSWindowController {
 
         setupMenuShortcuts()
         setupLayout()
-        setupAutoUpdate()
+        updateCoordinator.setup(config: config)
         normalizeBackendAvailabilityIfNeeded()
         loadWorkspaces()
 
@@ -399,10 +401,9 @@ class MainWindowController: NSWindowController {
         setupNativeTitleBar()
 
         // Update banner (above title bar, hidden by default)
-        updateBanner.translatesAutoresizingMaskIntoConstraints = false
-        updateBanner.isHidden = true
-        updateBanner.delegate = self
-        contentView.addSubview(updateBanner)
+        updateCoordinator.banner.translatesAutoresizingMaskIntoConstraints = false
+        updateCoordinator.banner.isHidden = true
+        contentView.addSubview(updateCoordinator.banner)
 
         backgroundEffectView.translatesAutoresizingMaskIntoConstraints = false
         backgroundEffectView.state = .followsWindowActiveState
@@ -419,11 +420,11 @@ class MainWindowController: NSWindowController {
             backgroundEffectView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             backgroundEffectView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
 
-            updateBanner.topAnchor.constraint(equalTo: contentView.topAnchor),
-            updateBanner.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            updateBanner.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            updateCoordinator.banner.topAnchor.constraint(equalTo: contentView.topAnchor),
+            updateCoordinator.banner.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            updateCoordinator.banner.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
 
-            contentContainer.topAnchor.constraint(equalTo: updateBanner.bottomAnchor),
+            contentContainer.topAnchor.constraint(equalTo: updateCoordinator.banner.bottomAnchor),
             contentContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             contentContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             contentContainer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
@@ -1791,48 +1792,16 @@ extension MainWindowController: QuickSwitcherDelegate {
 // MARK: - Auto-Update
 
 extension MainWindowController {
-    func setupAutoUpdate() {
-        guard config.autoUpdate.enabled else { return }
-        updateChecker.delegate = self
-        updateChecker.skippedVersion = config.autoUpdate.skippedVersion
-        updateManager.delegate = self
-        updateChecker.startPolling(intervalHours: config.autoUpdate.checkIntervalHours)
-    }
-
     @objc func checkForUpdates() {
-        Task {
-            do {
-                if let release = try await updateChecker.checkNow() {
-                    pendingRelease = release
-                    updateBanner.showNewVersion(release.version)
-                } else {
-                    let alert = NSAlert()
-                    alert.messageText = "Already up to date"
-                    alert.informativeText = "Current version v\(updateChecker.currentVersion) is the latest."
-                    alert.alertStyle = .informational
-                    alert.runModal()
-                }
-            } catch {
-                NSLog("Update check failed: \(error)")
-            }
-        }
+        updateCoordinator.checkForUpdates()
     }
 }
 
-// MARK: - UpdateCheckerDelegate
+// MARK: - UpdateCoordinatorDelegate
 
-extension MainWindowController: UpdateCheckerDelegate {
-    func updateChecker(_ checker: UpdateChecker, didFindRelease release: ReleaseInfo) {
-        pendingRelease = release
-        updateBanner.showNewVersion(release.version)
-    }
-}
-
-// MARK: - UpdateManagerDelegate
-
-extension MainWindowController: UpdateManagerDelegate {
-    func updateManager(_ manager: UpdateManager, didChangeState state: UpdateManager.State) {
-        updateBanner.update(state: state)
+extension MainWindowController: UpdateCoordinatorDelegate {
+    func updateCoordinator(_ coordinator: UpdateCoordinator, showBanner banner: UpdateBanner) {
+        // Banner display handled by coordinator's banner property
     }
 }
 
@@ -1845,32 +1814,6 @@ extension MainWindowController: NotificationHistoryDelegate {
             object: nil,
             userInfo: ["worktreePath": path]
         )
-    }
-}
-
-// MARK: - UpdateBannerDelegate
-
-extension MainWindowController: UpdateBannerDelegate {
-    func updateBannerDidClickInstall(_ banner: UpdateBanner) {
-        guard let release = pendingRelease else { return }
-        updateManager.download(release: release)
-    }
-
-    func updateBannerDidClickSkip(_ banner: UpdateBanner) {
-        config.autoUpdate.skippedVersion = banner.version
-        config.save()
-        updateChecker.skippedVersion = banner.version
-        updateBanner.dismiss()
-        pendingRelease = nil
-    }
-
-    func updateBannerDidClickRestart(_ banner: UpdateBanner) {
-        updateManager.installAndRestart()
-    }
-
-    func updateBannerDidClickRetry(_ banner: UpdateBanner) {
-        guard let release = pendingRelease else { return }
-        updateManager.download(release: release)
     }
 }
 
