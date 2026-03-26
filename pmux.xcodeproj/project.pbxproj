@@ -97,6 +97,7 @@
 		AABB9A1BC321A6D4017A44ED /* WebhookStatusProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 568696E724BCC3EF9912CDA9 /* WebhookStatusProvider.swift */; };
 		AADD36DAD911DF47B4AA2E9E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0FAED36C7B1716B96A3F73B4 /* Assets.xcassets */; };
 		AB1BA7210EA6888AC27ACA0F /* TitleBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 717B331C5968FFF9C4CD4C4B /* TitleBarView.swift */; };
+		AB6CD9BC14EA49A6E90FD544 /* DialogPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C949BC853DF8CA91A2521E8B /* DialogPresenter.swift */; };
 		ACD9C6AB30216786478DB0DA /* TaskProgressParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75352E99A112855A0E137D7D /* TaskProgressParserTests.swift */; };
 		AD0D7B6CA672F155FFEE198F /* UpdateBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FF8EDDF9980A95624D70EBF /* UpdateBanner.swift */; };
 		AFB2E41277FFEA9046F07A0B /* DashboardViewControllerClickTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A4A5FAF3E28A69FE2B6FA71 /* DashboardViewControllerClickTests.swift */; };
@@ -268,6 +269,7 @@
 		C35648A4693691BD87523F99 /* AIPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPanelView.swift; sourceTree = "<group>"; };
 		C3ADAA2473E4DE983CF6AC53 /* UpdateCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCoordinatorTests.swift; sourceTree = "<group>"; };
 		C41952F967550081939AC228 /* StackedCardContainerDoubleClickTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StackedCardContainerDoubleClickTests.swift; sourceTree = "<group>"; };
+		C949BC853DF8CA91A2521E8B /* DialogPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialogPresenter.swift; sourceTree = "<group>"; };
 		C9A08D6353BB2E4926BE168E /* MiniCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniCardView.swift; sourceTree = "<group>"; };
 		CA43E5DDFECA4ED4B53F4306 /* WorktreeDiscoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeDiscoveryTests.swift; sourceTree = "<group>"; };
 		CBAD95B6446C41977FC2D621 /* FocusPanelNavigationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusPanelNavigationTests.swift; sourceTree = "<group>"; };
@@ -312,6 +314,7 @@
 			children = (
 				7FF70596F66D6407538CD7D4 /* AppDelegate.swift */,
 				43C96F9EE167C8414B4C1DFB /* BackendResolver.swift */,
+				C949BC853DF8CA91A2521E8B /* DialogPresenter.swift */,
 				988C3307F71A295CBE3FC7A7 /* main.swift */,
 				AF00FDE4C61CF4A5B53653B4 /* MainWindowController.swift */,
 				20B1DBE711516E60B6AE16E5 /* MenuBuilder.swift */,
@@ -836,6 +839,7 @@
 				BDC0D1224E1E703495F9D0FE /* BackendResolver.swift in Sources */,
 				6FD79D72C951209C51211464 /* Config.swift in Sources */,
 				A64BED7E816CBDA7FC1BF839 /* DashboardViewController.swift in Sources */,
+				AB6CD9BC14EA49A6E90FD544 /* DialogPresenter.swift in Sources */,
 				DD7B3E20208412867CF4D9BD /* DiffOverlayViewController.swift in Sources */,
 				3356BF4B1BBD4085A425D33B /* DividerView.swift in Sources */,
 				F90B7A7C9191757A5EFAAA06 /* DraggableGridView.swift in Sources */,

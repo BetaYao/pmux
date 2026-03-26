@@ -52,6 +52,15 @@ class MainWindowController: NSWindowController {
         return tc
     }()
 
+    // Dialog presentation
+    private lazy var dialogPresenter: DialogPresenter = {
+        DialogPresenter(
+            tabCoordinator: tabCoordinator,
+            terminalCoordinator: terminalCoordinator,
+            statusPublisher: statusPublisher
+        )
+    }()
+
     // Auto-update
     private lazy var updateCoordinator: UpdateCoordinator = {
         let uc = UpdateCoordinator(config: config)
@@ -160,36 +169,19 @@ class MainWindowController: NSWindowController {
         switchToTab(0)
     }
 
-    /// Present a view controller as a sheet on the currently active tab's VC.
-    private func presentSheetOnActiveVC(_ vc: NSViewController) {
-        if let activeVC = tabCoordinator.currentRepoVC {
-            activeVC.presentAsSheet(vc)
-        } else {
-            dashboardVC?.presentAsSheet(vc)
-        }
-    }
-
     @objc func showQuickSwitcher() {
-        let worktreeInfos = tabCoordinator.allWorktrees.map { $0.info }
-        var statuses: [String: AgentStatus] = [:]
-        for (path, _) in terminalCoordinator.surfaceManager.all {
-            statuses[path] = statusPublisher.status(for: path)
-        }
-        let switcher = QuickSwitcherViewController(worktrees: worktreeInfos, statuses: statuses)
-        switcher.quickSwitcherDelegate = self
-        presentSheetOnActiveVC(switcher)
+        let switcher = dialogPresenter.makeQuickSwitcher(quickSwitcherDelegate: self)
+        dialogPresenter.presentSheetOnActiveVC(switcher, tabCoordinator: tabCoordinator, dashboardVC: dashboardVC)
     }
 
     @objc func showSettings() {
-        let settingsVC = SettingsViewController(config: config)
-        settingsVC.settingsDelegate = self
-        presentSheetOnActiveVC(settingsVC)
+        let settingsVC = dialogPresenter.makeSettings(config: config, settingsDelegate: self)
+        dialogPresenter.presentSheetOnActiveVC(settingsVC, tabCoordinator: tabCoordinator, dashboardVC: dashboardVC)
     }
 
     @objc func showNewBranchDialog() {
-        let dialog = NewBranchDialog(repoPaths: config.workspacePaths)
-        dialog.dialogDelegate = self
-        presentSheetOnActiveVC(dialog)
+        let dialog = dialogPresenter.makeNewBranchDialog(repoPaths: config.workspacePaths, dialogDelegate: self)
+        dialogPresenter.presentSheetOnActiveVC(dialog, tabCoordinator: tabCoordinator, dashboardVC: dashboardVC)
     }
 
     @objc func closeCurrentTab() {
@@ -223,23 +215,7 @@ class MainWindowController: NSWindowController {
     }
 
     @objc func showKeyboardShortcuts() {
-        let alert = NSAlert()
-        alert.messageText = "Keyboard Shortcuts"
-        alert.informativeText = """
-        ⌘N  New Branch
-        ⌘P  Quick Switch
-        ⌘W  Close Tab
-        ⌘0  Dashboard
-        ⌘,  Settings
-        ⌘}  Next Tab
-        ⌘{  Previous Tab
-        ⌘-  Zoom In (Smaller Cards)
-        ⌘=  Zoom Out (Larger Cards)
-        Esc  Close Dialog / Exit Spotlight
-        """
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
+        DialogPresenter.showKeyboardShortcuts()
     }
 
     @objc func openDocumentation() {
@@ -275,7 +251,7 @@ class MainWindowController: NSWindowController {
 
     private func presentDiffOverlay(for worktreePath: String) {
         let diffVC = DiffOverlayViewController(worktreePath: worktreePath)
-        presentSheetOnActiveVC(diffVC)
+        dialogPresenter.presentSheetOnActiveVC(diffVC, tabCoordinator: tabCoordinator, dashboardVC: dashboardVC)
     }
 
     // MARK: - Layout
