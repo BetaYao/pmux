@@ -14,6 +14,9 @@ struct Config: Codable {
     var themeMode: String
     var worktreeStartedAt: [String: String]
     var splitLayouts: [String: CodableSplitNode]
+    var activeTabRepoPath: String?
+    var activeWorktreePaths: [String: String]
+    var focusedPaneIds: [String: String]
 
     enum CodingKeys: String, CodingKey {
         case workspacePaths = "workspace_paths"
@@ -29,6 +32,9 @@ struct Config: Codable {
         case themeMode = "theme_mode"
         case worktreeStartedAt = "worktree_started_at"
         case splitLayouts = "split_layouts"
+        case activeTabRepoPath = "active_tab_repo_path"
+        case activeWorktreePaths = "active_worktree_paths"
+        case focusedPaneIds = "focused_pane_ids"
     }
 
     init() {
@@ -45,6 +51,9 @@ struct Config: Codable {
         themeMode = "system"
         worktreeStartedAt = [:]
         splitLayouts = [:]
+        activeTabRepoPath = nil
+        activeWorktreePaths = [:]
+        focusedPaneIds = [:]
     }
 
     init(from decoder: Decoder) throws {
@@ -66,6 +75,9 @@ struct Config: Codable {
         themeMode = try container.decodeIfPresent(String.self, forKey: .themeMode) ?? "system"
         worktreeStartedAt = try container.decodeIfPresent([String: String].self, forKey: .worktreeStartedAt) ?? [:]
         splitLayouts = try container.decodeIfPresent([String: CodableSplitNode].self, forKey: .splitLayouts) ?? [:]
+        activeTabRepoPath = try container.decodeIfPresent(String.self, forKey: .activeTabRepoPath)
+        activeWorktreePaths = try container.decodeIfPresent([String: String].self, forKey: .activeWorktreePaths) ?? [:]
+        focusedPaneIds = try container.decodeIfPresent([String: String].self, forKey: .focusedPaneIds) ?? [:]
     }
 
     static let configDir = FileManager.default.homeDirectoryForCurrentUser
