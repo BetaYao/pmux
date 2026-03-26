@@ -251,6 +251,15 @@ class MainWindowController: NSWindowController {
         switchToTab(0)
     }
 
+    /// Present a view controller as a sheet on the currently active tab's VC.
+    private func presentSheetOnActiveVC(_ vc: NSViewController) {
+        if let activeVC = tabCoordinator.currentRepoVC {
+            activeVC.presentAsSheet(vc)
+        } else {
+            dashboardVC?.presentAsSheet(vc)
+        }
+    }
+
     @objc func showQuickSwitcher() {
         let worktreeInfos = tabCoordinator.allWorktrees.map { $0.info }
         var statuses: [String: AgentStatus] = [:]
@@ -259,49 +268,19 @@ class MainWindowController: NSWindowController {
         }
         let switcher = QuickSwitcherViewController(worktrees: worktreeInfos, statuses: statuses)
         switcher.quickSwitcherDelegate = self
-        if tabCoordinator.activeTabIndex == 0 {
-            dashboardVC?.presentAsSheet(switcher)
-        } else {
-            let repoIndex = tabCoordinator.activeTabIndex - 1
-            if let tab = tabCoordinator.workspaceManager.tab(at: repoIndex),
-               let repoVC = tabCoordinator.repoVCs[tab.repoPath] {
-                repoVC.presentAsSheet(switcher)
-            } else {
-                dashboardVC?.presentAsSheet(switcher)
-            }
-        }
+        presentSheetOnActiveVC(switcher)
     }
 
     @objc func showSettings() {
         let settingsVC = SettingsViewController(config: config)
         settingsVC.settingsDelegate = self
-        if tabCoordinator.activeTabIndex == 0 {
-            dashboardVC?.presentAsSheet(settingsVC)
-        } else {
-            let repoIndex = tabCoordinator.activeTabIndex - 1
-            if let tab = tabCoordinator.workspaceManager.tab(at: repoIndex),
-               let repoVC = tabCoordinator.repoVCs[tab.repoPath] {
-                repoVC.presentAsSheet(settingsVC)
-            } else {
-                dashboardVC?.presentAsSheet(settingsVC)
-            }
-        }
+        presentSheetOnActiveVC(settingsVC)
     }
 
     @objc func showNewBranchDialog() {
         let dialog = NewBranchDialog(repoPaths: config.workspacePaths)
         dialog.dialogDelegate = self
-        if tabCoordinator.activeTabIndex == 0 {
-            dashboardVC?.presentAsSheet(dialog)
-        } else {
-            let repoIndex = tabCoordinator.activeTabIndex - 1
-            if let tab = tabCoordinator.workspaceManager.tab(at: repoIndex),
-               let repoVC = tabCoordinator.repoVCs[tab.repoPath] {
-                repoVC.presentAsSheet(dialog)
-            } else {
-                dashboardVC?.presentAsSheet(dialog)
-            }
-        }
+        presentSheetOnActiveVC(dialog)
     }
 
     @objc func closeCurrentTab() {
@@ -387,17 +366,7 @@ class MainWindowController: NSWindowController {
 
     private func presentDiffOverlay(for worktreePath: String) {
         let diffVC = DiffOverlayViewController(worktreePath: worktreePath)
-        if tabCoordinator.activeTabIndex == 0 {
-            dashboardVC?.presentAsSheet(diffVC)
-        } else {
-            let repoIndex = tabCoordinator.activeTabIndex - 1
-            if let tab = tabCoordinator.workspaceManager.tab(at: repoIndex),
-               let repoVC = tabCoordinator.repoVCs[tab.repoPath] {
-                repoVC.presentAsSheet(diffVC)
-            } else {
-                dashboardVC?.presentAsSheet(diffVC)
-            }
-        }
+        presentSheetOnActiveVC(diffVC)
     }
 
     // MARK: - Layout
@@ -889,19 +858,7 @@ extension MainWindowController: WorktreeStatusDelegate {
     }
 
     func paneStatusDidChange(worktreePath: String, paneIndex: Int, oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String) {
-        let branch = tabCoordinator.allWorktrees.first(where: { $0.info.path == worktreePath })?.info.branch ?? ""
-        let paneCount = statusAggregator.status(for: worktreePath)?.panes.count ?? 1
-        let terminalID = statusAggregator.status(for: worktreePath)?.panes.first(where: { $0.paneIndex == paneIndex })?.terminalID ?? ""
-        NotificationManager.shared.notify(
-            terminalID: terminalID,
-            worktreePath: worktreePath,
-            branch: branch,
-            paneIndex: paneIndex,
-            paneCount: paneCount,
-            oldStatus: oldStatus,
-            newStatus: newStatus,
-            lastMessage: lastMessage
-        )
+        tabCoordinator.handlePaneStatusChange(worktreePath: worktreePath, paneIndex: paneIndex, oldStatus: oldStatus, newStatus: newStatus, lastMessage: lastMessage)
     }
 }
 

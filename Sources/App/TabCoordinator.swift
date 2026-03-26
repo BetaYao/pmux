@@ -571,6 +571,22 @@ class TabCoordinator {
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }
 
+    func handlePaneStatusChange(worktreePath: String, paneIndex: Int, oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String) {
+        let branch = allWorktrees.first(where: { $0.info.path == worktreePath })?.info.branch ?? ""
+        let paneCount = statusAggregator.status(for: worktreePath)?.panes.count ?? 1
+        let terminalID = statusAggregator.status(for: worktreePath)?.panes.first(where: { $0.paneIndex == paneIndex })?.terminalID ?? ""
+        NotificationManager.shared.notify(
+            terminalID: terminalID,
+            worktreePath: worktreePath,
+            branch: branch,
+            paneIndex: paneIndex,
+            paneCount: paneCount,
+            oldStatus: oldStatus,
+            newStatus: newStatus,
+            lastMessage: lastMessage
+        )
+    }
+
     // MARK: - Navigation
 
     func handleNavigateToWorktree(worktreePath: String, paneIndex: Int?) {
