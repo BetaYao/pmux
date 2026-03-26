@@ -551,6 +551,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
     // MARK: - Keyboard
 
     override func keyDown(with event: NSEvent) {
+        guard event.type == .keyDown else { return }
         guard let surface else { return }
 
         let action = event.isARepeat ? GHOSTTY_ACTION_REPEAT : GHOSTTY_ACTION_PRESS
@@ -641,6 +642,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
     }
 
     override func keyUp(with event: NSEvent) {
+        guard event.type == .keyUp else { return }
         guard let surface else { return }
         var keyInput = ghostty_input_key_s()
         keyInput.action = GHOSTTY_ACTION_RELEASE
@@ -650,6 +652,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
     }
 
     override func flagsChanged(with event: NSEvent) {
+        guard event.type == .flagsChanged else { return }
         guard let surface else { return }
         var keyInput = ghostty_input_key_s()
         keyInput.action = GHOSTTY_ACTION_PRESS  // Ghostty handles press/release internally for modifiers

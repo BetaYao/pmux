@@ -1,7 +1,7 @@
 import AppKit
 
 class AppDelegate: NSObject, NSApplicationDelegate {
-    private var mainWindowController: MainWindowController?
+    private(set) var mainWindowController: MainWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Force dark appearance globally BEFORE any views are created.
@@ -26,6 +26,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Create and show main window
         mainWindowController = MainWindowController()
         mainWindowController?.showWindow(nil)
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // Prevent macOS from creating a new window on reactivation (e.g. notification click)
+        if let window = mainWindowController?.window {
+            window.deminiaturize(nil)
+            window.makeKeyAndOrderFront(nil)
+        }
+        return false
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

@@ -96,6 +96,25 @@ final class SplitTreeTests: XCTestCase {
         XCTAssertEqual(tree.leafCount, 1)
     }
 
+    func testCloseLeaf_ThreePanes_PromotesSibling() {
+        // A | (B | C) — split A first, then split B to create C
+        let tree = SplitTree(worktreePath: "/repo/main", rootLeafId: "a", surfaceId: "s1", sessionName: "pmux-repo-main")
+        _ = tree.splitFocusedLeaf(axis: .horizontal, newLeafId: "b", newSurfaceId: "s2", newSessionName: "pmux-repo-main-1")
+        // Focus is on B, split again to get C
+        _ = tree.splitFocusedLeaf(axis: .horizontal, newLeafId: "c", newSurfaceId: "s3", newSessionName: "pmux-repo-main-2")
+        XCTAssertEqual(tree.leafCount, 3)
+        // Focus is on C, close it — should leave A | B
+        let closed = tree.closeFocusedLeaf()
+        XCTAssertEqual(closed?.id, "c")
+        XCTAssertEqual(tree.leafCount, 2)
+        // Now focus B, close it — should leave just A
+        tree.focusedId = "b"
+        let closed2 = tree.closeFocusedLeaf()
+        XCTAssertEqual(closed2?.id, "b")
+        XCTAssertEqual(tree.leafCount, 1)
+        XCTAssertEqual(tree.focusedId, "a")
+    }
+
     func testCloseLeaf_LastPaneCannotClose() {
         let tree = SplitTree(worktreePath: "/repo/main", rootLeafId: "a", surfaceId: "s1", sessionName: "pmux-repo-main")
         let closed = tree.closeFocusedLeaf()

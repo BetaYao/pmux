@@ -66,10 +66,12 @@ class NotificationManager: NSObject {
         return base
     }
 
-    /// Per-pane notification with terminalID-based cooldown
+    /// Per-pane notification with terminalID-based cooldown.
+    /// `isFocusedPane`: true when this pane is the currently focused pane — suppresses system notification.
     func notify(terminalID: String, worktreePath: String, branch: String,
                 paneIndex: Int, paneCount: Int,
-                oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String) {
+                oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String,
+                isFocusedPane: Bool) {
         guard shouldNotify(terminalID: terminalID, oldStatus: oldStatus, newStatus: newStatus) else { return }
 
         let title = Self.formatTitle(status: newStatus, branch: branch, paneIndex: paneIndex, paneCount: paneCount)
@@ -96,7 +98,8 @@ class NotificationManager: NSObject {
         )
         NotificationHistory.shared.add(entry)
 
-        if NSApp.isActive { return }
+        // Only suppress system notification for the currently focused pane
+        if isFocusedPane { return }
 
         content.userInfo = ["worktreePath": worktreePath, "paneIndex": paneIndex]
         content.categoryIdentifier = Self.categoryIdentifier
@@ -201,22 +204,19 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
         let shouldNavigate = response.actionIdentifier == UNNotificationDefaultActionIdentifier
             || response.actionIdentifier == Self.openTerminalAction
 
-        if shouldNavigate {
+        if shouldNavigate, let path = userInfo["worktreePath"] as? String {
+            let paneIndex = userInfo["paneIndex"] as? Int
             DispatchQueue.main.async {
-                NSApp.activate(ignoringOtherApps: true)
-                NSApp.mainWindow?.deminiaturize(nil)
+                guard let appDelegate = NSApp.delegate as? AppDelegate,
+                      let mwc = appDelegate.mainWindowController else { return }
 
-                if let path = userInfo["worktreePath"] as? String {
-                    var info: [String: Any] = ["worktreePath": path]
-                    if let paneIndex = userInfo["paneIndex"] as? Int {
-                        info["paneIndex"] = paneIndex
-                    }
-                    NotificationCenter.default.post(
-                        name: .navigateToWorktree,
-                        object: nil,
-                        userInfo: info
-                    )
-                }
+                // Bring existing window to front without creating a new one
+                mwc.window?.deminiaturize(nil)
+                mwc.window?.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+
+                // Navigate directly — no NotificationCenter broadcast
+                mwc.tabCoordinator.handleNavigateToWorktree(worktreePath: path, paneIndex: paneIndex)
             }
         }
 
