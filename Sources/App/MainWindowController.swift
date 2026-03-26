@@ -1,6 +1,6 @@
 import AppKit
 
-class MainWindowController: NSWindowController {
+enum WindowStyling {
     struct GlassBackgroundConfig {
         let enabled: Bool
         let material: NSVisualEffectView.Material
@@ -14,6 +14,34 @@ class MainWindowController: NSWindowController {
         return GlassBackgroundConfig(enabled: true, material: .underWindowBackground, blendingMode: .behindWindow)
     }
 
+    static func shouldUseWindowFrameAutosave(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        arguments: [String] = ProcessInfo.processInfo.arguments
+    ) -> Bool {
+        if environment["XCTestConfigurationFilePath"] != nil {
+            return false
+        }
+        if arguments.contains("-PmuxUITesting") {
+            return false
+        }
+        if let idx = arguments.firstIndex(of: "-ApplePersistenceIgnoreState"),
+           arguments.indices.contains(idx + 1),
+           arguments[idx + 1].caseInsensitiveCompare("YES") == .orderedSame {
+            return false
+        }
+        return true
+    }
+
+    static func shouldHandleEscShortcut() -> Bool {
+        false
+    }
+
+    static func trafficLightButtonOriginY(containerHeight: CGFloat, buttonHeight: CGFloat) -> CGFloat {
+        (containerHeight / 2) + TitleBarView.Layout.arcVerticalOffset - (buttonHeight / 2)
+    }
+}
+
+class MainWindowController: NSWindowController {
     private let titleBar = TitleBarView()
     private let backgroundEffectView = NSVisualEffectView()
     private let contentContainer = NSView()
@@ -78,32 +106,6 @@ class MainWindowController: NSWindowController {
         return pub
     }()
 
-    static func shouldUseWindowFrameAutosave(
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-        arguments: [String] = ProcessInfo.processInfo.arguments
-    ) -> Bool {
-        if environment["XCTestConfigurationFilePath"] != nil {
-            return false
-        }
-        if arguments.contains("-PmuxUITesting") {
-            return false
-        }
-        if let idx = arguments.firstIndex(of: "-ApplePersistenceIgnoreState"),
-           arguments.indices.contains(idx + 1),
-           arguments[idx + 1].caseInsensitiveCompare("YES") == .orderedSame {
-            return false
-        }
-        return true
-    }
-
-    static func shouldHandleEscShortcut() -> Bool {
-        false
-    }
-
-    static func trafficLightButtonOriginY(containerHeight: CGFloat, buttonHeight: CGFloat) -> CGFloat {
-        (containerHeight / 2) + TitleBarView.Layout.arcVerticalOffset - (buttonHeight / 2)
-    }
-
     convenience init() {
         let window = PmuxWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
@@ -123,7 +125,7 @@ class MainWindowController: NSWindowController {
 
         self.init(window: window)
 
-        if Self.shouldUseWindowFrameAutosave() {
+        if WindowStyling.shouldUseWindowFrameAutosave() {
             window.setFrameAutosaveName("PmuxMainWindow")
         } else if let visibleFrame = NSScreen.main?.visibleFrame {
             let width = min(1200, visibleFrame.width * 0.9)
@@ -320,7 +322,7 @@ class MainWindowController: NSWindowController {
     private func applyWindowBackgroundStyle() {
         guard let window else { return }
         let isDark = window.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        let config = Self.glassBackgroundConfig(isDark: isDark)
+        let config = WindowStyling.glassBackgroundConfig(isDark: isDark)
 
         backgroundEffectView.material = config.material
         backgroundEffectView.blendingMode = config.blendingMode
@@ -378,7 +380,7 @@ class MainWindowController: NSWindowController {
         let xOffset: CGFloat = 12
         let spacing: CGFloat = 6
 
-        let y = Self.trafficLightButtonOriginY(containerHeight: container.bounds.height, buttonHeight: close.frame.height)
+        let y = WindowStyling.trafficLightButtonOriginY(containerHeight: container.bounds.height, buttonHeight: close.frame.height)
         close.setFrameOrigin(NSPoint(x: xOffset, y: y))
         mini.setFrameOrigin(NSPoint(x: xOffset + close.frame.width + spacing, y: y))
         zoom.setFrameOrigin(NSPoint(x: xOffset + (close.frame.width + spacing) * 2, y: y))
@@ -559,7 +561,7 @@ class PmuxWindow: NSWindow {
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown {
             // Escape: exit spotlight (existing)
-            if event.keyCode == 53, MainWindowController.shouldHandleEscShortcut() {
+            if event.keyCode == 53, WindowStyling.shouldHandleEscShortcut() {
                 return
             }
         }
