@@ -11,11 +11,16 @@ enum ClaudeHooksSetup {
         let hookGroup: [[String: Any]] = [["hooks": [hookEntry]]]
         return [
             "SessionStart": hookGroup,
+            "UserPromptSubmit": hookGroup,
             "PreToolUse": hookGroup,
             "PostToolUse": hookGroup,
+            "PostToolUseFailure": hookGroup,
             "Stop": hookGroup,
+            "StopFailure": hookGroup,
+            "SubagentStart": hookGroup,
             "SubagentStop": hookGroup,
             "Notification": hookGroup,
+            "CwdChanged": hookGroup,
             "WorktreeCreate": hookGroup,
         ]
     }
