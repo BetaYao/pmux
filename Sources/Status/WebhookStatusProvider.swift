@@ -8,6 +8,10 @@ class WebhookStatusProvider {
     /// Called when a WorktreeCreate event arrives with a path not in knownWorktrees
     var onNewWorktreeDetected: ((String) -> Void)?
 
+    /// Called when a WorktreeCreate event arrives, with source worktree path and worktree name.
+    /// Fires before the new worktree is discoverable (the git operation may still be in progress).
+    var onWorktreeCreateReceived: ((_ sourceWorktreePath: String, _ worktreeName: String, _ sessionId: String) -> Void)?
+
     struct SessionState {
         let sessionId: String
         let worktreePath: String
@@ -33,15 +37,27 @@ class WebhookStatusProvider {
         queue.sync {
             let canonCwd = canonicalize(event.cwd)
 
-            // WorktreeCreate / CwdChanged with unknown path → notify upstream to discover it
-            if event.event == .worktreeCreate || event.event == .cwdChanged {
+            // WorktreeCreate: record transfer intent before new worktree is discoverable
+            if event.event == .worktreeCreate {
+                let worktreeName = event.data?["worktree_name"] as? String ?? ""
+                if !worktreeName.isEmpty {
+                    let sourcePath = canonCwd
+                    NSLog("[WebhookStatusProvider] WorktreeCreate from \(sourcePath): \(worktreeName)")
+                    DispatchQueue.main.async { [weak self] in
+                        self?.onWorktreeCreateReceived?(sourcePath, worktreeName, event.sessionId)
+                    }
+                }
+                return
+            }
+
+            // CwdChanged with unknown path → notify upstream to discover it
+            if event.event == .cwdChanged {
                 if matchWorktree(canonCwd) == nil {
-                    NSLog("[WebhookStatusProvider] New worktree detected via hook (\(event.event.rawValue)): \(event.cwd)")
+                    NSLog("[WebhookStatusProvider] New worktree detected via CwdChanged: \(event.cwd)")
                     DispatchQueue.main.async { [weak self] in
                         self?.onNewWorktreeDetected?(canonCwd)
                     }
                 }
-                if event.event == .worktreeCreate { return }
                 // CwdChanged falls through to update session status
             }
 
