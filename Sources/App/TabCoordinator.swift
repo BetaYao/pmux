@@ -26,6 +26,7 @@ class TabCoordinator {
     var statusPublisher: StatusPublisher!
     var statusAggregator: WorktreeStatusAggregator!
     var runtimeBackend: String = "local"
+    private let pendingTransfers = PendingTransferTracker()
 
     private static let iso8601: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -364,6 +365,11 @@ class TabCoordinator {
                     self.statusPublisher.webhookProvider.onNewWorktreeDetected = { [weak self] worktreePath in
                         self?.handleNewWorktreeFromHook(worktreePath)
                     }
+                    self.statusPublisher.webhookProvider.onWorktreeCreateReceived = { [weak self] sourcePath, worktreeName, sessionId in
+                        guard let self else { return }
+                        NSLog("[TabCoordinator] WorktreeCreate: recording pending transfer from \(sourcePath) for \(worktreeName)")
+                        self.pendingTransfers.record(sourceWorktreePath: sourcePath, worktreeName: worktreeName, sessionId: sessionId)
+                    }
                     let server = WebhookServer(port: self.config.webhook.port) { [weak self] event in
                         self?.statusPublisher.webhookProvider.handleEvent(event)
                         AgentHead.shared.handleWebhookEvent(event)
@@ -401,15 +407,23 @@ class TabCoordinator {
                         self.workspaceManager.updateWorktrees(at: tabIndex, worktrees: worktrees)
                     }
                     for info in newWorktrees {
-                        let tree = self.terminalCoordinator.resolveTree(for: info)
-                        self.allWorktrees.append((info: info, tree: tree))
-                        self.worktreeRepoCache[info.path] = repoRoot
-
                         let proj = self.workspaceManager.tabs.first(where: { $0.repoPath == repoRoot })?.displayName
                             ?? URL(fileURLWithPath: repoRoot).lastPathComponent
-                        let sessionName = self.runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
-                        if let surface = self.terminalCoordinator.surfaceManager.primarySurface(forPath: info.path) {
-                            AgentHead.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: Date(), tmuxSessionName: sessionName, backend: self.runtimeBackend)
+
+                        // Check if this worktree has a pending transfer (created via hook from an existing pane)
+                        if let transfer = self.pendingTransfers.consume(newWorktreePath: info.path) {
+                            NSLog("[TabCoordinator] Transferring pane from \(transfer.sourceWorktreePath) to \(info.path)")
+                            self.performPaneTransfer(transfer: transfer, newInfo: info, repoRoot: repoRoot, project: proj, allDiscoveredWorktrees: worktrees)
+                        } else {
+                            // No pending transfer — create a fresh tree as before
+                            let tree = self.terminalCoordinator.resolveTree(for: info)
+                            self.allWorktrees.append((info: info, tree: tree))
+                            self.worktreeRepoCache[info.path] = repoRoot
+
+                            let sessionName = self.runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
+                            if let surface = self.terminalCoordinator.surfaceManager.primarySurface(forPath: info.path) {
+                                AgentHead.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: Date(), tmuxSessionName: sessionName, backend: self.runtimeBackend)
+                            }
                         }
                     }
 
@@ -427,6 +441,60 @@ class TabCoordinator {
                 NSLog("[TabCoordinator] Auto-adding new repo via hook: \(repoRoot)")
                 self.addRepo(at: repoRoot)
             }
+        }
+    }
+
+    private func performPaneTransfer(transfer: PendingWorktreeTransfer, newInfo: WorktreeInfo, repoRoot: String, project: String, allDiscoveredWorktrees: [WorktreeInfo]) {
+        let sourcePath = transfer.sourceWorktreePath
+
+        // 1. Transfer the SplitTree from source → new worktree path
+        guard let transferredTree = terminalCoordinator.surfaceManager.transferTree(fromPath: sourcePath, toPath: newInfo.path) else {
+            NSLog("[TabCoordinator] Transfer failed: no tree at \(sourcePath), falling back to fresh tree")
+            let tree = terminalCoordinator.resolveTree(for: newInfo)
+            allWorktrees.append((info: newInfo, tree: tree))
+            worktreeRepoCache[newInfo.path] = repoRoot
+            return
+        }
+
+        // 2. Update allWorktrees: remove old entry for source, add new entry
+        allWorktrees.removeAll { $0.info.path == sourcePath }
+        allWorktrees.append((info: newInfo, tree: transferredTree))
+        worktreeRepoCache[newInfo.path] = repoRoot
+
+        // 3. Re-register transferred surfaces in AgentHead under new worktree
+        for leaf in transferredTree.allLeaves {
+            if let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId) {
+                if let oldAgent = AgentHead.shared.agent(forWorktree: sourcePath) {
+                    AgentHead.shared.unregister(terminalID: oldAgent.id)
+                }
+                let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: newInfo.path)
+                AgentHead.shared.register(surface: surface, worktreePath: newInfo.path, branch: newInfo.branch, project: project, startedAt: Date(), tmuxSessionName: sessionName, backend: runtimeBackend)
+            }
+        }
+
+        // 4. Save the transferred tree's layout under the new path, remove old
+        terminalCoordinator.config.splitLayouts.removeValue(forKey: sourcePath)
+        terminalCoordinator.saveSplitLayout(transferredTree)
+
+        // 5. Invalidate the old split container so the UI rebuilds it
+        if let repoVC = repoVCs[repoRoot] {
+            repoVC.invalidateSplitContainer(forPath: sourcePath)
+        }
+
+        // 6. Create a fresh tree for the source worktree (e.g., main)
+        if let sourceInfo = allDiscoveredWorktrees.first(where: { $0.path == transfer.sourceWorktreePath }) {
+            let freshTree = terminalCoordinator.surfaceManager.tree(for: sourceInfo, backend: runtimeBackend)
+            if let idx = allWorktrees.firstIndex(where: { $0.info.path == sourceInfo.path }) {
+                allWorktrees[idx] = (info: sourceInfo, tree: freshTree)
+            } else {
+                allWorktrees.append((info: sourceInfo, tree: freshTree))
+            }
+            worktreeRepoCache[sourceInfo.path] = repoRoot
+            let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: sourceInfo.path)
+            if let surface = terminalCoordinator.surfaceManager.primarySurface(forPath: sourceInfo.path) {
+                AgentHead.shared.register(surface: surface, worktreePath: sourceInfo.path, branch: sourceInfo.branch, project: project, startedAt: Date(), tmuxSessionName: sessionName, backend: runtimeBackend)
+            }
+            terminalCoordinator.saveSplitLayout(freshTree)
         }
     }
 
