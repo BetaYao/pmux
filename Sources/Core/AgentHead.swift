@@ -331,4 +331,18 @@ class AgentHead {
 
         return orderedIDs.compactMap { agents[$0] }.filter { $0.project == project }
     }
+
+    // MARK: - TODO Status Updates (Future)
+
+    /// Stub for future webhook-driven TODO status updates.
+    /// Future logic: match event.cwd → worktree path → branch name → TodoItem.branch,
+    /// then update status based on event type:
+    ///   - SessionStart → "running"
+    ///   - Stop (end_turn) → "completed"
+    ///   - StopFailure → "failed"
+    ///   - SubagentStart → update progress
+    func updateTodoFromWebhook(_ event: WebhookEvent) {
+        // Not yet implemented — will be filled when AgentHead status
+        // pipeline is connected to TodoStore.
+    }
 }

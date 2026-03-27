@@ -373,6 +373,8 @@ class TabCoordinator {
                     let server = WebhookServer(port: self.config.webhook.port) { [weak self] event in
                         self?.statusPublisher.webhookProvider.handleEvent(event)
                         AgentHead.shared.handleWebhookEvent(event)
+                        // TODO: Enable when webhook→TODO matching logic is implemented
+                        // AgentHead.shared.updateTodoFromWebhook(event)
                     }
                     server.start()
                     self.terminalCoordinator.webhookServer = server
