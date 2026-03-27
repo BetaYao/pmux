@@ -201,6 +201,18 @@ class RepoViewController: NSViewController {
         }
     }
 
+    /// Remove the cached SplitContainerView for a worktree path.
+    /// Called when a surface has been transferred to a different worktree
+    /// and the old container is stale.
+    func invalidateSplitContainer(forPath path: String) {
+        if let container = splitContainers.removeValue(forKey: path) {
+            if container === activeSplitContainer {
+                container.removeFromSuperview()
+                activeSplitContainer = nil
+            }
+        }
+    }
+
     // MARK: - Terminal Display
 
     func showTerminal(at index: Int) {
