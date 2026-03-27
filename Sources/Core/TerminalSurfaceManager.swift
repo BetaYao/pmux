@@ -76,6 +76,16 @@ class TerminalSurfaceManager {
         trees.count
     }
 
+    /// Re-key an existing tree from one worktree path to another.
+    /// Used when a worktree is created and the terminal should follow the new path.
+    /// Returns the tree if found, nil if no tree exists at fromPath.
+    @discardableResult
+    func transferTree(fromPath: String, toPath: String) -> SplitTree? {
+        guard let tree = trees.removeValue(forKey: fromPath) else { return nil }
+        trees[toPath] = tree
+        return tree
+    }
+
     // MARK: - Legacy surface accessors (for AgentHead / backward compat)
 
     /// Returns the primary (first) surface for the given worktree path, if any.
