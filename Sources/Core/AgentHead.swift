@@ -118,16 +118,19 @@ class AgentHead {
     // MARK: - Updates
 
     func updateStatus(terminalID: String, status: AgentStatus,
-                      lastMessage: String, roundDuration: TimeInterval) {
+                      lastMessage: String, roundDuration: TimeInterval,
+                      tasks: [TaskItem] = []) {
         lock.lock()
         guard var info = agents[terminalID] else {
             lock.unlock()
             return
         }
         let changed = info.status != status || info.lastMessage != lastMessage
+            || info.tasks.count != tasks.count
         info.status = status
         info.lastMessage = lastMessage
         info.roundDuration = roundDuration
+        info.tasks = tasks
         agents[terminalID] = info
         lock.unlock()
 

@@ -258,7 +258,8 @@ class TabCoordinator {
                 surface: surface,
                 worktreePath: agent.worktreePath,
                 paneCount: paneCount,
-                paneSurfaces: paneSurfaces
+                paneSurfaces: paneSurfaces,
+                tasks: agent.tasks
             ))
         }
         return result

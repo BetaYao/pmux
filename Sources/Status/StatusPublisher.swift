@@ -178,6 +178,7 @@ class StatusPublisher {
             let webhookMessage = webhookProvider.lastMessage(for: worktreePath)
             let terminalMessage = agentDef?.extractLastMessage(from: content, maxLen: 80) ?? ""
             let lastMessage = webhookMessage ?? (terminalMessage.isEmpty ? nil : terminalMessage) ?? ""
+            let webhookTasks = webhookProvider.tasks(for: worktreePath)
 
             // Feed AgentHead with structured data on every poll
             let agentType = AgentType.detect(fromLowercased: lowerContent)
@@ -198,7 +199,7 @@ class StatusPublisher {
             lock.unlock()
 
             AgentHead.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: agentType)
-            AgentHead.shared.updateStatus(terminalID: terminalID, status: detected, lastMessage: lastMessage, roundDuration: roundDur)
+            AgentHead.shared.updateStatus(terminalID: terminalID, status: detected, lastMessage: lastMessage, roundDuration: roundDur, tasks: webhookTasks)
 
             DispatchQueue.main.async { [weak self] in
                 self?.aggregator?.agentDidUpdate(
