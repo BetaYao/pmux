@@ -431,9 +431,14 @@ class TabCoordinator {
                     self.statusPublisher.updateSurfaces(self.terminalCoordinator.surfaceManager.all)
                     self.delegate?.tabCoordinatorRequestUpdateTitleBar(self)
 
-                    // Update repo VC sidebar if it's open
+                    // Update repo VC sidebar and auto-navigate to the new worktree
                     if let repoVC = self.repoVCs[repoRoot] {
                         repoVC.configure(worktrees: worktrees, trees: self.terminalCoordinator.surfaceManager.all)
+                        // Find index of newly added worktree and switch to it
+                        if let firstNew = newWorktrees.first,
+                           let newIndex = worktrees.firstIndex(where: { $0.path == firstNew.path }) {
+                            repoVC.showTerminal(at: newIndex)
+                        }
                     }
                 }
             } else {
