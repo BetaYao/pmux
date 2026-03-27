@@ -1,5 +1,5 @@
 import XCTest
-@testable import pmux
+@testable import amux
 
 final class OSC133ParserTests: XCTestCase {
     var parser: OSC133Parser!

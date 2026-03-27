@@ -1,6 +1,6 @@
 import XCTest
 import AppKit
-@testable import pmux
+@testable import amux
 
 final class GridLayoutTests: XCTestCase {
 
@@ -264,7 +264,7 @@ final class GridLayoutTests: XCTestCase {
 
     func testIntegrateDiscoveredRepoForTesting_RegistersFallbackAgentWhenNoWorktrees() {
         let controller = MainWindowController()
-        let repoPath = "/tmp/pmux-test-\(UUID().uuidString)"
+        let repoPath = "/tmp/amux-test-\(UUID().uuidString)"
 
         _ = controller.integrateDiscoveredRepoForTesting(repoPath: repoPath, worktrees: [], activateTab: false)
 
@@ -624,7 +624,7 @@ final class GridLayoutTests: XCTestCase {
         ))
         XCTAssertFalse(WindowStyling.shouldUseWindowFrameAutosave(
             environment: [:],
-            arguments: ["-PmuxUITesting"]
+            arguments: ["-AmuxUITesting"]
         ))
         XCTAssertTrue(WindowStyling.shouldUseWindowFrameAutosave(environment: [:], arguments: []))
     }

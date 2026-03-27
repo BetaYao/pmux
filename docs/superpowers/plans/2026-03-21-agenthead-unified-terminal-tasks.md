@@ -41,7 +41,7 @@ class TerminalSurface {
 
 - [ ] **Step 2: Build to verify no compilation errors**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 3: Commit**
@@ -142,7 +142,7 @@ func testShellDisplayNames() {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/AgentTypeTests 2>&1 | grep -E "(error:|FAIL)" | head -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/AgentTypeTests 2>&1 | grep -E "(error:|FAIL)" | head -5`
 Expected: Compilation errors — `.brew`, `.shellCommand`, `detect(fromCommand:)`, `isAIAgent`, `isShellTask` don't exist yet.
 
 - [ ] **Step 3: Implement AgentType changes**
@@ -286,7 +286,7 @@ enum AgentType: String, Codable, CaseIterable {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/AgentTypeTests 2>&1 | tail -3`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/AgentTypeTests 2>&1 | tail -3`
 Expected: Test Suite 'AgentTypeTests' passed
 
 - [ ] **Step 5: Commit**
@@ -386,7 +386,7 @@ func testResetClearsCommandLine() {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/OSC133ParserTests 2>&1 | grep -E "(error:|FAIL)" | head -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/OSC133ParserTests 2>&1 | grep -E "(error:|FAIL)" | head -5`
 Expected: Compilation errors — `commandLine` property doesn't exist on `ParsedMarker`.
 
 - [ ] **Step 3: Update ParsedMarker, OSC133Parser, and ShellState**
@@ -524,7 +524,7 @@ Also check `tests/StatusDetectorTests.swift` — it constructs `ShellPhaseInfo` 
 
 - [ ] **Step 5: Run all tests**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/OSC133ParserTests -only-testing:pmuxTests/ShellStateTests 2>&1 | tail -3`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/OSC133ParserTests -only-testing:amuxTests/ShellStateTests 2>&1 | tail -3`
 Expected: All tests pass
 
 - [ ] **Step 6: Commit**
@@ -564,7 +564,7 @@ Full test file:
 
 ```swift
 import XCTest
-@testable import pmux
+@testable import amux
 
 final class AgentHeadTests: XCTestCase {
 
@@ -892,12 +892,12 @@ No functional code changes needed — `id` is used for identity comparison and s
 
 - [ ] **Step 7: Build the entire project**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 8: Run ALL tests**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -10`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -10`
 Expected: All test suites pass
 
 - [ ] **Step 9: Commit**
@@ -920,12 +920,12 @@ agent(forWorktree:) convenience query."
 
 - [ ] **Step 1: Clean build**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux clean && xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux clean && xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 2: Run all tests**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -10`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -10`
 Expected: All test suites pass
 
 - [ ] **Step 3: Verify no remaining worktreePath in AgentHead method parameters**

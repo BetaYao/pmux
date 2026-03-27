@@ -4,7 +4,7 @@ Recursive split-pane terminals within a single worktree in the repo detail view,
 
 ## Context
 
-Current architecture: one worktree = one TerminalSurface = one zmx session. Users need multiple terminals per worktree (e.g., AI agent + dev server + log tail). zmx has no native pane support, so pmux manages splits at the AppKit layer with independent zmx sessions per pane.
+Current architecture: one worktree = one TerminalSurface = one zmx session. Users need multiple terminals per worktree (e.g., AI agent + dev server + log tail). zmx has no native pane support, so amux manages splits at the AppKit layer with independent zmx sessions per pane.
 
 ## Data Model
 
@@ -44,8 +44,8 @@ class SplitTree {
 
 ### zmx Session Naming
 
-- First pane keeps original name: `pmux-<parent>-<name>` (backward compatible).
-- Additional panes append index: `pmux-<parent>-<name>-1`, `pmux-<parent>-<name>-2`, etc.
+- First pane keeps original name: `amux-<parent>-<name>` (backward compatible).
+- Additional panes append index: `amux-<parent>-<name>-1`, `amux-<parent>-<name>-2`, etc.
 - Index is monotonically increasing per worktree (never reused within a session).
 - No persistent counter needed: on split, derive next index by scanning existing session names in the SplitTree (max index + 1). On restart, indices are restored from persisted layout.
 
@@ -177,8 +177,8 @@ SplitNode implements `Codable`. Config stores split layouts per worktree path:
       "type": "split",
       "axis": "horizontal",
       "ratio": 0.5,
-      "first": { "type": "leaf", "sessionName": "pmux-repo-branch" },
-      "second": { "type": "leaf", "sessionName": "pmux-repo-branch-1" }
+      "first": { "type": "leaf", "sessionName": "amux-repo-branch" },
+      "second": { "type": "leaf", "sessionName": "amux-repo-branch-1" }
     }
   }
 }
@@ -207,7 +207,7 @@ SplitNode implements `Codable`. Config stores split layouts per worktree path:
 | `TerminalSurfaceManager` | Storage: `[String: TerminalSurface]` → `[String: SplitTree]`. Add tree-level APIs. |
 | `RepoViewController` | Embed SplitContainerView instead of direct surface. Forward split/close/focus key events. |
 | `StatusPublisher` | Poll all leaves per tree. Aggregate status with `highestPriority()`. |
-| `MainWindowController` / `PmuxWindow` | Intercept split keybindings (Cmd+D, Cmd+Shift+D, Cmd+Shift+W, Cmd+Opt+arrows, Cmd+Ctrl+arrows). |
+| `MainWindowController` / `AmuxWindow` | Intercept split keybindings (Cmd+D, Cmd+Shift+D, Cmd+Shift+W, Cmd+Opt+arrows, Cmd+Ctrl+arrows). |
 | `SessionManager` | Support indexed session names for additional panes. |
 | `Config` | Add `splitLayouts: [String: CodableSplitNode]` field with `decodeIfPresent` for backward compat. |
 | `DashboardViewController` | Show pane count on agent cards. |

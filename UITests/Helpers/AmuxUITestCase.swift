@@ -1,8 +1,8 @@
 import XCTest
 
-/// Base test class for all pmux UI tests.
+/// Base test class for all amux UI tests.
 /// Handles app launch/teardown and screenshot capture on failure.
-class PmuxUITestCase: XCTestCase {
+class AmuxUITestCase: XCTestCase {
     var page: AppPage!
 
     override func setUp() {

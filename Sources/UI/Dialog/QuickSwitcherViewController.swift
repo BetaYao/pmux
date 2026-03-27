@@ -28,10 +28,12 @@ class QuickSwitcherViewController: NSViewController, NSSearchFieldDelegate {
     }
 
     override func loadView() {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 450, height: 340))
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 480, height: 340))
         container.wantsLayer = true
         container.layer?.backgroundColor = SemanticColors.panel.cgColor
-        container.layer?.cornerRadius = 10
+        container.layer?.cornerRadius = 12
+        container.layer?.borderWidth = 1
+        container.layer?.borderColor = SemanticColors.line.cgColor
         container.setAccessibilityIdentifier("dialog.quickSwitcher")
         container.setAccessibilityElement(true)
         container.setAccessibilityRole(.group)
@@ -39,7 +41,7 @@ class QuickSwitcherViewController: NSViewController, NSSearchFieldDelegate {
 
         // Search field
         searchField.placeholderString = "Search worktrees..."
-        searchField.font = NSFont.systemFont(ofSize: 16)
+        searchField.font = NSFont.systemFont(ofSize: 15)
         searchField.isBordered = true
         searchField.bezelStyle = .roundedBezel
         searchField.focusRingType = .none
@@ -49,17 +51,26 @@ class QuickSwitcherViewController: NSViewController, NSSearchFieldDelegate {
         searchField.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(searchField)
 
+        // Separator under search
+        let separator = NSView()
+        separator.wantsLayer = true
+        separator.layer?.backgroundColor = SemanticColors.line.cgColor
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(separator)
+
         // Results table
         resultsScrollView.hasVerticalScroller = true
         resultsScrollView.drawsBackground = false
         resultsScrollView.borderType = .noBorder
+        resultsScrollView.scrollerStyle = .overlay
         resultsScrollView.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(resultsScrollView)
 
         resultsTableView.backgroundColor = .clear
         resultsTableView.headerView = nil
-        resultsTableView.rowHeight = 36
-        resultsTableView.intercellSpacing = NSSize(width: 0, height: 1)
+        resultsTableView.rowHeight = 40
+        resultsTableView.intercellSpacing = NSSize(width: 0, height: 0)
+        resultsTableView.selectionHighlightStyle = .none
         resultsTableView.delegate = self
         resultsTableView.dataSource = self
         resultsTableView.doubleAction = #selector(confirmSelection)
@@ -73,7 +84,7 @@ class QuickSwitcherViewController: NSViewController, NSSearchFieldDelegate {
 
         // Hint label
         let hintLabel = NSTextField(labelWithString: "↑↓ navigate  ↵ select  ⎋ cancel")
-        hintLabel.font = NSFont.systemFont(ofSize: 10)
+        hintLabel.font = NSFont.systemFont(ofSize: 11)
         hintLabel.textColor = SemanticColors.muted
         hintLabel.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(hintLabel)
@@ -82,15 +93,20 @@ class QuickSwitcherViewController: NSViewController, NSSearchFieldDelegate {
             searchField.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
             searchField.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
             searchField.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
-            searchField.heightAnchor.constraint(equalToConstant: 28),
+            searchField.heightAnchor.constraint(equalToConstant: 32),
 
-            resultsScrollView.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 8),
+            separator.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 10),
+            separator.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            separator.heightAnchor.constraint(equalToConstant: 1),
+
+            resultsScrollView.topAnchor.constraint(equalTo: separator.bottomAnchor, constant: 4),
             resultsScrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             resultsScrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             resultsScrollView.bottomAnchor.constraint(equalTo: hintLabel.topAnchor, constant: -4),
 
-            hintLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            hintLabel.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
+            hintLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 14),
+            hintLabel.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -10),
         ])
     }
 
@@ -186,6 +202,10 @@ extension QuickSwitcherViewController: NSTableViewDataSource {
 // MARK: - NSTableViewDelegate
 
 extension QuickSwitcherViewController: NSTableViewDelegate {
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        return QuickSwitcherRowView()
+    }
+
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let info = filteredWorktrees[row]
         let status = statuses[info.path] ?? .unknown
@@ -194,28 +214,47 @@ extension QuickSwitcherViewController: NSTableViewDelegate {
         cell.wantsLayer = true
 
         // Status dot
-        let dot = NSView(frame: NSRect(x: 12, y: 13, width: 10, height: 10))
+        let dot = NSView()
         dot.wantsLayer = true
-        dot.layer?.cornerRadius = 5
+        dot.layer?.cornerRadius = 4
         dot.layer?.backgroundColor = status.color.cgColor
+        dot.translatesAutoresizingMaskIntoConstraints = false
         cell.addSubview(dot)
 
         // Branch name
         let branchLabel = NSTextField(labelWithString: info.displayName)
         branchLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
         branchLabel.textColor = SemanticColors.text
-        branchLabel.frame = NSRect(x: 30, y: 10, width: 250, height: 18)
         branchLabel.lineBreakMode = .byTruncatingTail
+        branchLabel.translatesAutoresizingMaskIntoConstraints = false
+        branchLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         cell.addSubview(branchLabel)
 
         // Path (secondary)
         let pathLabel = NSTextField(labelWithString: shortenPath(info.path))
-        pathLabel.font = NSFont.systemFont(ofSize: 10)
+        pathLabel.font = NSFont.systemFont(ofSize: 11)
         pathLabel.textColor = SemanticColors.muted
-        pathLabel.frame = NSRect(x: 290, y: 12, width: 150, height: 14)
-        pathLabel.lineBreakMode = .byTruncatingHead
+        pathLabel.lineBreakMode = .byTruncatingMiddle
         pathLabel.alignment = .right
+        pathLabel.translatesAutoresizingMaskIntoConstraints = false
+        pathLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        pathLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
         cell.addSubview(pathLabel)
+
+        NSLayoutConstraint.activate([
+            dot.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 14),
+            dot.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            dot.widthAnchor.constraint(equalToConstant: 8),
+            dot.heightAnchor.constraint(equalToConstant: 8),
+
+            branchLabel.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 10),
+            branchLabel.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            branchLabel.trailingAnchor.constraint(lessThanOrEqualTo: pathLabel.leadingAnchor, constant: -12),
+
+            pathLabel.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -14),
+            pathLabel.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            pathLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 180),
+        ])
 
         return cell
     }
@@ -225,5 +264,21 @@ extension QuickSwitcherViewController: NSTableViewDelegate {
         let parent = url.deletingLastPathComponent().lastPathComponent
         let name = url.lastPathComponent
         return "\(parent)/\(name)"
+    }
+}
+
+// MARK: - Custom Row View
+
+private class QuickSwitcherRowView: NSTableRowView {
+    override func drawSelection(in dirtyRect: NSRect) {
+        guard isSelected else { return }
+        let selectionRect = bounds.insetBy(dx: 6, dy: 1)
+        let path = NSBezierPath(roundedRect: selectionRect, xRadius: 6, yRadius: 6)
+        SemanticColors.accentAlpha15.setFill()
+        path.fill()
+    }
+
+    override var interiorBackgroundStyle: NSView.BackgroundStyle {
+        return .normal  // keep text colors unchanged when selected
     }
 }

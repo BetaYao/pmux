@@ -24,7 +24,7 @@ Add tests that assert:
 
 **Step 2: Run test to verify it fails**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/GridLayoutTests/testSidebar_DiffButtonExistsAndDefaultDisabled`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/GridLayoutTests/testSidebar_DiffButtonExistsAndDefaultDisabled`
 Expected: FAIL because button identifier or state is missing.
 
 **Step 3: Write minimal implementation**
@@ -100,7 +100,7 @@ Expected: FAIL because `keyEquivalent` is still `d` and shortcut text still incl
 **Step 4: Run tests/build to verify pass**
 
 Run:
-- `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build`
+- `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build`
 - targeted tests for menu/sidebar if present.
 
 Expected: PASS.
@@ -120,8 +120,8 @@ git commit -m "refactor: remove temporary diff keyboard shortcut"
 **Step 1: Run focused verification**
 
 Run:
-- `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build`
-- `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/GridLayoutTests`
+- `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build`
+- `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/GridLayoutTests`
 
 Expected: build succeeds; grid/sidebar-related tests pass.
 

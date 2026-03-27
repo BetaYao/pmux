@@ -11,10 +11,10 @@ protocol UpdateCheckerDelegate: AnyObject {
     func updateChecker(_ checker: UpdateChecker, didFindRelease release: ReleaseInfo)
 }
 
-/// Checks GitHub Releases API for new versions of pmux.
+/// Checks GitHub Releases API for new versions of amux.
 class UpdateChecker {
     static let repoOwner = "user"   // TODO: set to real GitHub owner
-    static let repoName = "pmux"
+    static let repoName = "amux"
 
     #if arch(arm64)
     static let assetSuffix = "arm64.zip"

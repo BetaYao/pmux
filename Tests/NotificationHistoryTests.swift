@@ -1,5 +1,5 @@
 import XCTest
-@testable import pmux
+@testable import amux
 
 class NotificationHistoryTests: XCTestCase {
     var history: NotificationHistory!

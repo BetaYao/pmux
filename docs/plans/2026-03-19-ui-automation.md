@@ -2,23 +2,23 @@
 
 **Spec:** `docs/superpowers/specs/2026-03-19-ui-automation-design.md`
 
-## Task 1: Add pmuxUITests target to project.yml
+## Task 1: Add amuxUITests target to project.yml
 
 **File:** `project.yml`
 
-Add after the `pmuxTests` target block:
+Add after the `amuxTests` target block:
 
 ```yaml
-  pmuxUITests:
+  amuxUITests:
     type: bundle.ui-testing
     platform: macOS
     sources: [UITests]
     dependencies:
-      - target: pmux
+      - target: amux
     settings:
-      PRODUCT_BUNDLE_IDENTIFIER: com.pmux.uitests
+      PRODUCT_BUNDLE_IDENTIFIER: com.amux.uitests
       GENERATE_INFOPLIST_FILE: YES
-      TEST_TARGET_NAME: pmux
+      TEST_TARGET_NAME: amux
 ```
 
 Then run `xcodegen generate` to regenerate the Xcode project.
@@ -131,13 +131,13 @@ In `setup()` (~line 87-100), after creating controls:
 
 Create:
 - `UITests/Helpers/XCUIElementExtensions.swift`
-- `UITests/Helpers/PmuxUITestCase.swift`
+- `UITests/Helpers/AmuxUITestCase.swift`
 
-**PmuxUITestCase.swift:**
+**AmuxUITestCase.swift:**
 ```swift
 import XCTest
 
-class PmuxUITestCase: XCTestCase {
+class AmuxUITestCase: XCTestCase {
     var page: AppPage!
 
     override func setUp() {
@@ -202,7 +202,7 @@ See spec for exact code.
 ```swift
 import XCTest
 
-class NavigationTests: PmuxUITestCase {
+class NavigationTests: AmuxUITestCase {
     func testDashboardShowsOnLaunch() {
         XCTAssertTrue(page.dashboard.grid.waitForExistence(timeout: 5))
     }
@@ -264,7 +264,7 @@ Test all keyboard shortcuts: Cmd+,, Cmd+P, Cmd+N, Cmd+D, Cmd+Shift+D, Cmd+Shift+
 
 **File:** `run_ui_tests.sh` (at project root)
 
-Script that runs `xcodegen generate` then `xcodebuild test -only-testing:pmuxUITests` with optional filter argument. See spec for full script.
+Script that runs `xcodegen generate` then `xcodebuild test -only-testing:amuxUITests` with optional filter argument. See spec for full script.
 
 Make executable: `chmod +x run_ui_tests.sh`
 
@@ -273,7 +273,7 @@ Make executable: `chmod +x run_ui_tests.sh`
 ## Task 15: Compile and verify
 
 1. Run `xcodegen generate` to regenerate project
-2. Build: `xcodebuild build-for-testing -scheme pmux -destination 'platform=macOS'`
+2. Build: `xcodebuild build-for-testing -scheme amux -destination 'platform=macOS'`
 3. Run UI tests: `./run_ui_tests.sh`
 4. Fix any compilation or runtime issues
 

@@ -2,7 +2,7 @@
 
 ## 背景
 
-当前 `AgentHead` 只管理 AI coding agent（Claude Code、Codex、Gemini CLI 等）。但用户在 pmux 终端里也会运行传统 Shell 命令（`brew install`、`btop`、`make build`、长脚本等），这些同样是需要监控的长时任务。
+当前 `AgentHead` 只管理 AI coding agent（Claude Code、Codex、Gemini CLI 等）。但用户在 amux 终端里也会运行传统 Shell 命令（`brew install`、`btop`、`make build`、长脚本等），这些同样是需要监控的长时任务。
 
 本设计将 AgentHead 的定位从"AI Agent 管理器"扩展为"统一终端任务管理器"——AI agent 和 Shell 命令在同一个数据模型下管理，共享相同的状态查询和展示机制。
 
@@ -21,7 +21,7 @@
 新模型: terminalID   → AgentInfo → (surface, worktreePath, ...)
 ```
 
-注：当前 pmux 中每个终端都关联一个 worktree，`worktreePath` 始终有值，不需要变为 optional。
+注：当前 amux 中每个终端都关联一个 worktree，`worktreePath` 始终有值，不需要变为 optional。
 
 **迁移影响：** 这是一个破坏性的主键变更。当前 `AgentInfo.id` 就是 worktree path，所有消费者通过 `agent.id` 获取路径。改为 terminal ID 后，所有读取 `agent.id` 并期望得到路径的地方都会静默破坏。需要逐一排查以下消费者中的 `agent.id` 引用：
 

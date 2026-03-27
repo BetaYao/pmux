@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Redesign pmux's UI to match Zoom's visual language — near-black background, arc-shaped titlebar groupings, 16:9 terminal tiles with independent bottom bars, and slide-out panels.
+**Goal:** Redesign amux's UI to match Zoom's visual language — near-black background, arc-shaped titlebar groupings, 16:9 terminal tiles with independent bottom bars, and slide-out panels.
 
 **Architecture:** Replace the current SemanticColors palette with Zoom design tokens. Rebuild TitleBarView with two rounded-rect "arc blocks". Convert dashboard tiles from info-card style to terminal-preview style with independent bottom bars. Remove StatusBar entirely. Restyle panels and dialogs to match.
 
@@ -67,7 +67,7 @@ Update `Theme.swift` to set `cardCornerRadius = 4`, `cardPadding = 3` (was 12), 
 
 - [ ] **Step 4: Build and verify**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 5: Commit**
@@ -140,7 +140,7 @@ In `MainWindowController.swift`:
 
 - [ ] **Step 6: Build and verify**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build`
 
 - [ ] **Step 7: Commit**
 
@@ -207,7 +207,7 @@ func agentCardClicked(agentId: String) {
 
 - [ ] **Step 4: Build and verify**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build`
 
 - [ ] **Step 5: Commit**
 
@@ -264,7 +264,7 @@ In `rebuildTopSmall()` and `rebuildTopLarge()`, card width constraint stays `240
 
 - [ ] **Step 4: Build and verify**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build`
 
 - [ ] **Step 5: Commit**
 
@@ -293,7 +293,7 @@ In the existing bottom bar area (or the header bar), add a 22×22 button on the 
 
 - [ ] **Step 2: Build and verify**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build`
 
 - [ ] **Step 3: Commit**
 
@@ -325,7 +325,7 @@ Positioning: anchored below the view-switcher button in the right arc block.
 
 - [ ] **Step 2: Build and verify**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build`
 
 - [ ] **Step 3: Commit**
 
@@ -364,7 +364,7 @@ static let backdropBlack: NSColor = NSColor.black.withAlphaComponent(0.4)
 
 - [ ] **Step 3: Build and verify**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build`
 
 - [ ] **Step 4: Commit**
 
@@ -393,7 +393,7 @@ Update the AI slide panel with Zoom-style chat bubbles and input.
 
 - [ ] **Step 2: Build and verify**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build`
 
 - [ ] **Step 3: Commit**
 
@@ -433,7 +433,7 @@ In `RepoViewController`, forward to `MainWindowController` which presents `NewBr
 
 - [ ] **Step 4: Build and verify**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build`
 
 - [ ] **Step 5: Commit**
 
@@ -473,7 +473,7 @@ Replace `Theme.` references with matching `SemanticColors` tokens for the new pa
 
 - [ ] **Step 4: Build and verify**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build`
 
 - [ ] **Step 5: Commit**
 
@@ -518,8 +518,8 @@ Grep for `statusBar`, `StatusBarView`, `updateStatusBar` across the codebase and
 - [ ] **Step 4: Build and run full test suite**
 
 ```bash
-xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build
-xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test
+xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build
+xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test
 ```
 
 - [ ] **Step 5: Commit**

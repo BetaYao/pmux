@@ -1,3 +1,3 @@
 import XCTest
 
-class PasteRegressionTests: PmuxUITestCase {}
+class PasteRegressionTests: AmuxUITestCase {}

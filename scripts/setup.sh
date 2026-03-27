@@ -3,7 +3,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GHOSTTY_DIR="$REPO_ROOT/ghostty"
-CACHE_DIR="$HOME/.cache/pmux/ghosttykit"
+CACHE_DIR="$HOME/.cache/amux/ghosttykit"
 
 echo "==> Initializing Ghostty submodule..."
 cd "$REPO_ROOT"
@@ -55,4 +55,4 @@ if [ -d "$GHOSTTY_DIR/zig-out/share/terminfo" ]; then
 fi
 
 echo "==> Setup complete!"
-echo "    Open pmux.xcodeproj in Xcode and build."
+echo "    Open amux.xcodeproj in Xcode and build."

@@ -1,14 +1,14 @@
-# pmux 功能设计文档
+# amux 功能设计文档
 
 > 基于代码梳理，最后更新：2026-03-19
 
 ## 一、项目概述
 
-**pmux** 是一个原生 macOS 终端复用器，基于 Swift 5.10 + AppKit 开发（macOS 14.0+ Sonoma）。集成 Ghostty 终端引擎（通过 C 绑定 + Metal 渲染），使用 tmux 进行会话持久化，提供仪表板 UI 用于浏览 Git 工作树并检测 AI 代理运行状态。
+**amux** 是一个原生 macOS 终端复用器，基于 Swift 5.10 + AppKit 开发（macOS 14.0+ Sonoma）。集成 Ghostty 终端引擎（通过 C 绑定 + Metal 渲染），使用 tmux 进行会话持久化，提供仪表板 UI 用于浏览 Git 工作树并检测 AI 代理运行状态。
 
 **技术栈：**
 - Swift 5.10 + AppKit（非 SwiftUI）
-- Ghostty C API（via `pmux-Bridging-Header.h` → `ghostty.h`）
+- Ghostty C API（via `amux-Bridging-Header.h` → `ghostty.h`）
 - 链接库：Metal, QuartzCore, IOSurface, Carbon, libghostty, libc++
 - 无外部 SPM 依赖，纯系统框架
 
@@ -131,7 +131,7 @@ Cmd+D 打开：
 
 ### 4.1 配置管理（Config）
 
-- 路径：`~/.config/pmux/config.json`
+- 路径：`~/.config/amux/config.json`
 - JSON 序列化/反序列化，`decodeIfPresent()` 保证向后兼容
 
 | 字段 | 类型 | 默认值 | 说明 |
@@ -232,7 +232,7 @@ struct AgentRule {
 2. **重新父化**：切换容器时无需销毁重建，自动同步大小
 3. **销毁**：显式删除工作树或应用退出时
 
-tmux 会话命名：`pmux-<parent>-<name>`（特殊字符替换为下划线）
+tmux 会话命名：`amux-<parent>-<name>`（特殊字符替换为下划线）
 
 关键能力：
 - `readViewportText()`：读取可见文本（用于状态检测）

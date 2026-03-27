@@ -6,7 +6,7 @@ class WebhookServer {
     private var listener6: NWListener?  // IPv6 loopback
     private let port: UInt16
     private let onEvent: (WebhookEvent) -> Void
-    private let queue = DispatchQueue(label: "pmux.webhook-server")
+    private let queue = DispatchQueue(label: "amux.webhook-server")
 
     init(port: UInt16, onEvent: @escaping (WebhookEvent) -> Void) {
         self.port = port

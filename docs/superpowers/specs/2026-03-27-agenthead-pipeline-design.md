@@ -2,7 +2,7 @@
 
 ## 背景
 
-pmux 当前的 `AgentHead` 是一个被动的状态注册中心——收集各 terminal 的 agent 状态，暴露给 UI 展示。它不具备记忆能力，不能接受人类指令，也无法驱动 agent 执行任务。
+amux 当前的 `AgentHead` 是一个被动的状态注册中心——收集各 terminal 的 agent 状态，暴露给 UI 展示。它不具备记忆能力，不能接受人类指令，也无法驱动 agent 执行任务。
 
 之前的协调 Agent 设计（`2026-03-21-coordinator-agent-design.md`）提出了一个中心化的协调者来统领所有子 Agent。本设计在此基础上做了关键演进：
 
@@ -23,7 +23,7 @@ Project main agent = 大脑（做决策）
                     外部 Channels
      ┌────────┬────────┬──────────┬──────────┐
      │GitHub  │MQTT    │WebSocket │ 人类 UI  │
-     │(HTTP)  │(手机)  │(飞书/企微)│(pmux)   │
+     │(HTTP)  │(手机)  │(飞书/企微)│(amux)   │
      └───┬────┴───┬────┴────┬─────┴────┬─────┘
          └────────┴─────────┴──────────┘
                        |
@@ -106,7 +106,7 @@ main agent 通过 AgentHead 与外部系统交互。AgentHead 统一适配，mai
 
 #### 3.2 人类指令
 
-用户通过 pmux UI 输入的内容：
+用户通过 amux UI 输入的内容：
 - 项目目标设定/更新
 - 临时任务（"停掉 feat-x，优先做 fix-y"）
 - 对特定 worktree 的干预（"这个分支放弃吧"）
@@ -119,19 +119,19 @@ AgentHead 接收后路由到对应 Project 的 main agent。
 比 GitHub Issue 更轻量的输入通道。人类随时随地丢进来一句话、一个灵感、一个模糊的想法，不需要格式化。
 
 **输入来源：**
-- pmux UI（快捷输入框）
+- amux UI（快捷输入框）
 - 飞书/企微消息（随手发一句）
 - 手机 App（通勤时的灵感）
 
 **存储：**
 
 ```
-~/.config/pmux/memory/projects/<repo>/ideas.jsonl
+~/.config/amux/memory/projects/<repo>/ideas.jsonl
 ```
 
 ```jsonl
 {"ts":"2026-03-27T08:30:00Z","source":"wechat","text":"登录页能不能加个记住密码","tags":["ui","login"]}
-{"ts":"2026-03-27T12:15:00Z","source":"pmux-ui","text":"性能好像变差了，首屏加载要3秒","tags":["perf"]}
+{"ts":"2026-03-27T12:15:00Z","source":"amux-ui","text":"性能好像变差了，首屏加载要3秒","tags":["perf"]}
 {"ts":"2026-03-27T22:00:00Z","source":"mqtt","text":"考虑支持 dark mode 的自动切换","tags":[]}
 ```
 
@@ -183,7 +183,7 @@ Main → AgentHead: writeTodo(...) // idea 升级为正式任务
 存储：
 
 ```
-~/.config/pmux/memory/
+~/.config/amux/memory/
 |- global.json                  # 全局优先级、人类偏好
 '- projects/
    |- <repo-name>/
@@ -200,7 +200,7 @@ Main → AgentHead: writeTodo(...) // idea 升级为正式任务
 **goal.md 示例：**
 
 ```markdown
-# pmux-swift
+# amux-swift
 
 ## 当前目标
 完成 split pane 功能的稳定化，准备 v0.3.0 release。
@@ -264,9 +264,9 @@ AgentHead 定期生成全局状态报告，推送给人类和各 main agent。
 **Report 内容：**
 
 ```
-=== pmux 状态汇总 2026-03-27 14:00 ===
+=== amux 状态汇总 2026-03-27 14:00 ===
 
-[pmux-swift] 目标：完成 split pane 稳定化
+[amux-swift] 目标：完成 split pane 稳定化
   main: idle, 最近决策: 15 分钟前分派了 feat-resize
   feat-resize: running (12m), Claude Code, "正在修复 NSView constraints"
   feat-redraw: idle, PR #20 已创建，等待 review
@@ -280,7 +280,7 @@ AgentHead 定期生成全局状态报告，推送给人类和各 main agent。
 ```
 
 **推送目标：**
-- pmux UI（通知面板）
+- amux UI（通知面板）
 - MQTT（手机 App）
 - WebSocket（飞书/企微）
 - 各 main agent（可选，避免打断正在工作的 agent）
@@ -299,7 +299,7 @@ TODO List 是整个协调循环的**共享状态机**。只有一份，存在 Ag
 ### 数据模型
 
 ```
-~/.config/pmux/memory/projects/<repo>/todo.json
+~/.config/amux/memory/projects/<repo>/todo.json
 ```
 
 ```json
@@ -473,7 +473,7 @@ Main 收到通知，决定：
 
 main agent 不是 AgentHead 创建的特殊实体，而是**用户在 main 分支上启动的普通 Claude Code 会话**，只是它通过 AgentHead 提供的能力获得了协调者的权限。
 
-pmux 不控制 Main agent 的决策循环——它是 Main agent 自己的行为。pmux 只确保 Main agent 有足够的信息和工具来完成这个循环。
+amux 不控制 Main agent 的决策循环——它是 Main agent 自己的行为。amux 只确保 Main agent 有足够的信息和工具来完成这个循环。
 
 ### Main Agent 如何获得 AgentHead 能力（待定）
 

@@ -1,3 +1,3 @@
 import XCTest
 
-class CoreTests: PmuxUITestCase {}
+class CoreTests: AmuxUITestCase {}

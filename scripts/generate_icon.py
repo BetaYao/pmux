@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate pmux app icon: 2x2 terminal grid, cyan + deep blue."""
+"""Generate amux app icon: stacked terminal cards, cyan + deep blue."""
 
 from PIL import Image, ImageDraw, ImageFont
 import os

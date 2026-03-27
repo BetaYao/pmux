@@ -1,5 +1,5 @@
 import XCTest
-@testable import pmux
+@testable import amux
 
 /// Tests for AgentHead singleton.
 /// Note: We avoid creating TerminalSurface instances in tests because they
@@ -66,7 +66,7 @@ final class AgentHeadTests: XCTestCase {
         AgentHead.shared.register(
             surface: surface, worktreePath: "/tmp/test-repo/main",
             branch: "main", project: "test", startedAt: nil,
-            tmuxSessionName: "pmux-test-main", backend: "zmx"
+            tmuxSessionName: "amux-test-main", backend: "zmx"
         )
 
         AgentHead.shared.unregister(terminalID: surface.id)

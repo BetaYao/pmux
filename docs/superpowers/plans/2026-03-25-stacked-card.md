@@ -50,7 +50,7 @@ static let tileGhostBorder: NSColor = NSColor(name: nil) { appearance in
 - [ ] **Step 2: Build to verify no errors**
 
 ```bash
-xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5
+xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5
 ```
 Expected: `** BUILD SUCCEEDED **`
 
@@ -75,7 +75,7 @@ Create `tests/StackedCardContainerViewTests.swift`:
 
 ```swift
 import XCTest
-@testable import pmux
+@testable import amux
 
 final class StackedCardContainerViewTests: XCTestCase {
 
@@ -161,8 +161,8 @@ final class StackedCardContainerViewTests: XCTestCase {
 - [ ] **Step 2: Run tests to confirm they fail**
 
 ```bash
-xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test \
-  -only-testing:pmuxTests/StackedCardContainerViewTests 2>&1 | tail -10
+xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test \
+  -only-testing:amuxTests/StackedCardContainerViewTests 2>&1 | tail -10
 ```
 Expected: build error — `StackedCardContainerView` does not exist yet.
 
@@ -309,14 +309,14 @@ private final class GhostCardView: NSView {
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```bash
-xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test \
-  -only-testing:pmuxTests/StackedCardContainerViewTests 2>&1 | tail -15
+xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test \
+  -only-testing:amuxTests/StackedCardContainerViewTests 2>&1 | tail -15
 ```
 Expected: `** TEST SUCCEEDED **`
 
 - [ ] **Step 5: Add StackedCardContainerView.swift to project.yml**
 
-Open `project.yml`. Find the `sources` section under the main pmux target (look for the pattern `Sources/UI/Dashboard/`). Add the new file:
+Open `project.yml`. Find the `sources` section under the main amux target (look for the pattern `Sources/UI/Dashboard/`). Add the new file:
 
 ```yaml
 - Sources/UI/Dashboard/StackedCardContainerView.swift
@@ -330,7 +330,7 @@ xcodegen generate
 - [ ] **Step 6: Build to confirm no errors**
 
 ```bash
-xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5
+xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5
 ```
 Expected: `** BUILD SUCCEEDED **`
 
@@ -339,7 +339,7 @@ Expected: `** BUILD SUCCEEDED **`
 ```bash
 git add Sources/UI/Dashboard/StackedCardContainerView.swift \
         tests/StackedCardContainerViewTests.swift \
-        project.yml pmux.xcodeproj
+        project.yml amux.xcodeproj
 git commit -m "feat: add StackedCardContainerView for multi-pane card stacking"
 ```
 
@@ -483,14 +483,14 @@ if let container = gridCards.first(where: { $0.agentId == agent.id }) {
 - [ ] **Step 6: Build to confirm no compiler errors**
 
 ```bash
-xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5
+xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5
 ```
 Expected: `** BUILD SUCCEEDED **`
 
 - [ ] **Step 7: Run all unit tests**
 
 ```bash
-xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -10
+xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -10
 ```
 Expected: `** TEST SUCCEEDED **`
 

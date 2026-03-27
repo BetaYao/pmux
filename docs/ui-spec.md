@@ -1,4 +1,4 @@
-# pmux UI Specification
+# amux UI Specification
 
 > Reference: OpenAI Codex macOS Desktop App
 > Target: Native macOS (AppKit), dark-first design
@@ -231,7 +231,7 @@ Sources/
     TerminalSurface.swift      — Ghostty surface wrapper
     GhosttyBridge.swift        — Ghostty C API singleton
   Core/
-    Config.swift               — JSON config (~/.config/pmux/config.json)
+    Config.swift               — JSON config (~/.config/amux/config.json)
     WorkspaceManager.swift     — Tab/project state
   Status/
     StatusPublisher.swift      — Agent status polling

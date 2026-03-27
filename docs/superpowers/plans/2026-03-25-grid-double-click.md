@@ -71,7 +71,7 @@ addGestureRecognizer(clickRecognizer)
 - [ ] **Step 3: Build to verify no compile errors**
 
 ```bash
-xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -20
+xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -20
 ```
 
 Expected: `BUILD SUCCEEDED`
@@ -101,7 +101,7 @@ Create `tests/StackedCardContainerDoubleClickTests.swift`:
 
 ```swift
 import XCTest
-@testable import pmux
+@testable import amux
 
 final class StackedCardContainerDoubleClickTests: XCTestCase {
 
@@ -172,7 +172,7 @@ Note: `simulateSingleClick()` and `simulateDoubleClick()` are `@testable` intern
 - [ ] **Step 2: Run tests to confirm they fail**
 
 ```bash
-xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/StackedCardContainerDoubleClickTests 2>&1 | tail -30
+xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/StackedCardContainerDoubleClickTests 2>&1 | tail -30
 ```
 
 Expected: compile error or test failures (methods don't exist yet)
@@ -226,7 +226,7 @@ func simulateDoubleClick() { handleDoubleClick() }
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```bash
-xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/StackedCardContainerDoubleClickTests 2>&1 | tail -30
+xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/StackedCardContainerDoubleClickTests 2>&1 | tail -30
 ```
 
 Expected: `TEST SUCCEEDED` — all 5 tests green
@@ -234,7 +234,7 @@ Expected: `TEST SUCCEEDED` — all 5 tests green
 - [ ] **Step 5: Build the app to confirm no compile errors**
 
 ```bash
-xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -20
+xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -20
 ```
 
 Expected: `BUILD SUCCEEDED`
@@ -262,7 +262,7 @@ Create `tests/DashboardViewControllerClickTests.swift`:
 
 ```swift
 import XCTest
-@testable import pmux
+@testable import amux
 
 final class DashboardViewControllerClickTests: XCTestCase {
 
@@ -327,7 +327,7 @@ private class DashboardDelegateSpy: DashboardDelegate {
 - [ ] **Step 2: Run tests to confirm they fail**
 
 ```bash
-xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/DashboardViewControllerClickTests 2>&1 | tail -30
+xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/DashboardViewControllerClickTests 2>&1 | tail -30
 ```
 
 Expected: compile error or failures (methods not yet updated / `agentCardDoubleClicked` missing)
@@ -368,7 +368,7 @@ func agentCardDoubleClicked(agentId: String) {
 - [ ] **Step 5: Run new tests to confirm they pass**
 
 ```bash
-xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/DashboardViewControllerClickTests 2>&1 | tail -30
+xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/DashboardViewControllerClickTests 2>&1 | tail -30
 ```
 
 Expected: `TEST SUCCEEDED` — all 4 tests green
@@ -376,7 +376,7 @@ Expected: `TEST SUCCEEDED` — all 4 tests green
 - [ ] **Step 6: Run the full test suite**
 
 ```bash
-xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -30
+xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -30
 ```
 
 Expected: `TEST SUCCEEDED`

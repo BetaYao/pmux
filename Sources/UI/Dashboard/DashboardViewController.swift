@@ -42,7 +42,7 @@ struct AgentDisplayInfo {
 // MARK: - Pasteboard type (used by DraggableGridView)
 
 extension NSPasteboard.PasteboardType {
-    static let terminalCard = NSPasteboard.PasteboardType("com.pmux.terminalCard")
+    static let terminalCard = NSPasteboard.PasteboardType("com.amux.terminalCard")
 }
 
 // MARK: - DashboardViewController

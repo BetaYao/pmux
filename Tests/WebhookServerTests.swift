@@ -1,5 +1,5 @@
 import XCTest
-@testable import pmux
+@testable import amux
 
 final class WebhookServerTests: XCTestCase {
 
@@ -11,7 +11,7 @@ final class WebhookServerTests: XCTestCase {
         defer { lock.unlock() }
         return _receivedEvents
     }
-    let testPort: UInt16 = 17070  // avoid conflict with running pmux
+    let testPort: UInt16 = 17070  // avoid conflict with running amux
 
     override func setUp() {
         super.setUp()

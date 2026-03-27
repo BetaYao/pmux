@@ -12,7 +12,7 @@ struct WorktreeInfo {
 }
 
 enum WorktreeDiscovery {
-    private static let backgroundQueue = DispatchQueue(label: "com.pmux.git-discovery", qos: .userInitiated, attributes: .concurrent)
+    private static let backgroundQueue = DispatchQueue(label: "com.amux.git-discovery", qos: .userInitiated, attributes: .concurrent)
 
     /// Cache for repo root lookups (path -> repo root)
     private static var repoRootCache: [String: String] = [:]

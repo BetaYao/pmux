@@ -34,13 +34,13 @@ Add before the `NotificationManager` class definition:
 
 ```swift
 extension Notification.Name {
-    static let navigateToWorktree = Notification.Name("pmux.navigateToWorktree")
+    static let navigateToWorktree = Notification.Name("amux.navigateToWorktree")
 }
 ```
 
 - [ ] **Step 2: Build to verify it compiles**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 3: Commit**
@@ -96,7 +96,7 @@ func userNotificationCenter(_ center: UNUserNotificationCenter,
 
 - [ ] **Step 2: Build to verify it compiles**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 3: Commit**
@@ -120,7 +120,7 @@ Create `Tests/NotificationNavigationTests.swift`:
 
 ```swift
 import XCTest
-@testable import pmux
+@testable import amux
 
 class NotificationNavigationTests: XCTestCase {
 
@@ -150,7 +150,7 @@ class NotificationNavigationTests: XCTestCase {
 
 - [ ] **Step 2: Run test to verify it passes**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/NotificationNavigationTests/testWorktreePathLookup 2>&1 | tail -10`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/NotificationNavigationTests/testWorktreePathLookup 2>&1 | tail -10`
 Expected: Test Suite 'NotificationNavigationTests' passed
 
 - [ ] **Step 3: Add selectWorktree(byPath:) to RepoViewController**
@@ -166,7 +166,7 @@ func selectWorktree(byPath path: String) {
 
 - [ ] **Step 4: Build to verify it compiles**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 5: Commit**
@@ -224,7 +224,7 @@ func testTabLookupByWorktreePath() {
 
 - [ ] **Step 2: Run test to verify it passes**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/NotificationNavigationTests/testTabLookupByWorktreePath 2>&1 | tail -10`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/NotificationNavigationTests/testTabLookupByWorktreePath 2>&1 | tail -10`
 Expected: PASS
 
 - [ ] **Step 3: Register observer in MainWindowController init**
@@ -283,12 +283,12 @@ deinit {
 
 - [ ] **Step 6: Build to verify it compiles**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 7: Run all tests**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -10`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -10`
 Expected: All tests passed
 
 - [ ] **Step 8: Commit**
@@ -304,12 +304,12 @@ git commit -m "feat: navigate to worktree on notification click"
 
 - [ ] **Step 1: Run full build**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 2: Run all tests**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -10`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -10`
 Expected: All tests passed
 
 - [ ] **Step 3: Verify no unintended changes**

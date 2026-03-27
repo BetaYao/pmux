@@ -32,16 +32,16 @@ if [[ "$CLEAN_RESTART" -eq 1 ]]; then
   rm -rf "$BUILD_DIR"
 fi
 
-echo "==> Building pmux..."
-xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug \
+echo "==> Building amux..."
+xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug \
   -derivedDataPath "$BUILD_DIR" \
   build 2>&1 | tail -1
 
-APP="$BUILD_DIR/Build/Products/Debug/pmux.app"
+APP="$BUILD_DIR/Build/Products/Debug/amux.app"
 
-echo "==> Killing existing pmux..."
-killall pmux 2>/dev/null || true
+echo "==> Killing existing amux..."
+killall amux 2>/dev/null || true
 sleep 1
 
-echo "==> Launching pmux..."
+echo "==> Launching amux..."
 open -n "$APP"

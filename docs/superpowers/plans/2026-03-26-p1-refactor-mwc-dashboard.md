@@ -154,7 +154,7 @@ enum BackendResolver {
 
 - [ ] **Step 2: Build to verify BackendResolver compiles**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 3: Replace MainWindowController static methods and normalizeBackendAvailabilityIfNeeded**
@@ -188,7 +188,7 @@ Also update any remaining references to `Self.resolvePreferredBackend` or `Self.
 
 - [ ] **Step 4: Build to verify refactored MWC compiles**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 5: Write tests for BackendResolver**
@@ -197,7 +197,7 @@ Create test cases in `Tests/BackendResolverTests.swift`:
 
 ```swift
 import XCTest
-@testable import pmux
+@testable import amux
 
 final class BackendResolverTests: XCTestCase {
     // MARK: - resolvePreferredBackend
@@ -266,7 +266,7 @@ final class BackendResolverTests: XCTestCase {
 
 - [ ] **Step 6: Run tests**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/BackendResolverTests 2>&1 | tail -10`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/BackendResolverTests 2>&1 | tail -10`
 Expected: All tests pass
 
 - [ ] **Step 7: Commit**
@@ -361,7 +361,7 @@ final class DialogPresenter {
 
 - [ ] **Step 2: Build to verify DialogPresenter compiles**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 3: Wire DialogPresenter into MainWindowController**
@@ -405,7 +405,7 @@ Remove the old `presentSheetOnActiveVC(_:)` private method from MWC.
 
 - [ ] **Step 4: Build to verify**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 5: Commit**
@@ -471,11 +471,11 @@ Remove the corresponding `struct GlassBackgroundConfig`, `static func glassBackg
 
 Update all call sites from `Self.glassBackgroundConfig(...)` → `WindowStyling.glassBackgroundConfig(...)`, `Self.shouldUseWindowFrameAutosave()` → `WindowStyling.shouldUseWindowFrameAutosave()`, `Self.trafficLightButtonOriginY(...)` → `WindowStyling.trafficLightButtonOriginY(...)`.
 
-Note: `shouldHandleEscShortcut()` always returns `false` — check if `PmuxWindow` references it. If so, move it to `WindowStyling` too. If unused, delete it.
+Note: `shouldHandleEscShortcut()` always returns `false` — check if `AmuxWindow` references it. If so, move it to `WindowStyling` too. If unused, delete it.
 
 - [ ] **Step 2: Build to verify**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 3: Commit**
@@ -641,7 +641,7 @@ Update `rebuildCurrentLayout()`:
 
 - [ ] **Step 5: Build to verify**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 6: Commit**
@@ -781,7 +781,7 @@ With:
 
 - [ ] **Step 6: Build to verify**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 7: Commit**
@@ -810,18 +810,18 @@ Run: `xcodegen generate`
 
 - [ ] **Step 3: Build and verify**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 4: Run all passing tests**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/BackendResolverTests -only-testing:pmuxTests/ConfigTests -only-testing:pmuxTests/SplitNodeTests 2>&1 | tail -10`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/BackendResolverTests -only-testing:amuxTests/ConfigTests -only-testing:amuxTests/SplitNodeTests 2>&1 | tail -10`
 Expected: All tests pass
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add project.yml pmux.xcodeproj Tests/BackendResolverTests.swift
+git add project.yml amux.xcodeproj Tests/BackendResolverTests.swift
 git commit -m "chore: regenerate Xcode project with new extracted files"
 ```
 

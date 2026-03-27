@@ -2,7 +2,7 @@ import AppKit
 import UserNotifications
 
 extension Notification.Name {
-    static let navigateToWorktree = Notification.Name("pmux.navigateToWorktree")
+    static let navigateToWorktree = Notification.Name("amux.navigateToWorktree")
 }
 
 /// Sends macOS system notifications when agent status changes to actionable states.
@@ -17,7 +17,7 @@ class NotificationManager: NSObject {
         requestPermission()
     }
 
-    private static let categoryIdentifier = "pmux.agentStatus"
+    private static let categoryIdentifier = "amux.agentStatus"
     private static let openTerminalAction = "open_terminal"
 
     private func requestPermission() {
@@ -105,7 +105,7 @@ class NotificationManager: NSObject {
         content.categoryIdentifier = Self.categoryIdentifier
 
         let request = UNNotificationRequest(
-            identifier: "pmux-\(worktreePath.hashValue)-\(paneIndex)",
+            identifier: "amux-\(worktreePath.hashValue)-\(paneIndex)",
             content: content,
             trigger: nil
         )
@@ -171,7 +171,7 @@ class NotificationManager: NSObject {
         content.categoryIdentifier = Self.categoryIdentifier
 
         let request = UNNotificationRequest(
-            identifier: "pmux-\(worktreePath.hashValue)",
+            identifier: "amux-\(worktreePath.hashValue)",
             content: content,
             trigger: nil  // Deliver immediately
         )

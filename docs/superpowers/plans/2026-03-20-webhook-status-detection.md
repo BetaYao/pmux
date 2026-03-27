@@ -39,7 +39,7 @@
 ```swift
 // Tests/WebhookEventTests.swift
 import XCTest
-@testable import pmux
+@testable import amux
 
 final class WebhookEventTests: XCTestCase {
 
@@ -173,7 +173,7 @@ final class WebhookEventTests: XCTestCase {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/WebhookEventTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/WebhookEventTests 2>&1 | tail -5`
 Expected: Compilation error — `WebhookEvent` not defined
 
 - [ ] **Step 3: Implement WebhookEvent and Claude Code adapter**
@@ -302,7 +302,7 @@ enum WebhookEventError: Error {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/WebhookEventTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/WebhookEventTests 2>&1 | tail -5`
 Expected: All tests PASS
 
 - [ ] **Step 5: Commit**
@@ -325,7 +325,7 @@ git commit -m "feat: add WebhookEvent struct with Claude Code adapter"
 ```swift
 // Tests/WebhookStatusProviderTests.swift
 import XCTest
-@testable import pmux
+@testable import amux
 
 final class WebhookStatusProviderTests: XCTestCase {
 
@@ -475,7 +475,7 @@ final class WebhookStatusProviderTests: XCTestCase {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/WebhookStatusProviderTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/WebhookStatusProviderTests 2>&1 | tail -5`
 Expected: Compilation error — `WebhookStatusProvider` not defined
 
 - [ ] **Step 3: Implement WebhookStatusProvider**
@@ -485,7 +485,7 @@ Expected: Compilation error — `WebhookStatusProvider` not defined
 import Foundation
 
 class WebhookStatusProvider {
-    private let queue = DispatchQueue(label: "pmux.webhook-status")
+    private let queue = DispatchQueue(label: "amux.webhook-status")
     private var sessions: [String: SessionState] = [:]
     private var knownWorktrees: [String] = []
 
@@ -565,7 +565,7 @@ class WebhookStatusProvider {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/WebhookStatusProviderTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/WebhookStatusProviderTests 2>&1 | tail -5`
 Expected: All tests PASS
 
 - [ ] **Step 5: Commit**
@@ -588,7 +588,7 @@ git commit -m "feat: add WebhookStatusProvider with session tracking and cwd mat
 ```swift
 // Tests/WebhookServerTests.swift
 import XCTest
-@testable import pmux
+@testable import amux
 
 final class WebhookServerTests: XCTestCase {
 
@@ -600,7 +600,7 @@ final class WebhookServerTests: XCTestCase {
         defer { lock.unlock() }
         return _receivedEvents
     }
-    let testPort: UInt16 = 17070  // avoid conflict with running pmux
+    let testPort: UInt16 = 17070  // avoid conflict with running amux
 
     override func setUp() {
         super.setUp()
@@ -720,7 +720,7 @@ final class WebhookServerTests: XCTestCase {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/WebhookServerTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/WebhookServerTests 2>&1 | tail -5`
 Expected: Compilation error — `WebhookServer` not defined
 
 - [ ] **Step 3: Implement WebhookServer**
@@ -735,7 +735,7 @@ class WebhookServer {
     private var listener: NWListener?
     private let port: UInt16
     private let onEvent: (WebhookEvent) -> Void
-    private let queue = DispatchQueue(label: "pmux.webhook-server")
+    private let queue = DispatchQueue(label: "amux.webhook-server")
 
     init(port: UInt16, onEvent: @escaping (WebhookEvent) -> Void) {
         self.port = port
@@ -874,7 +874,7 @@ class WebhookServer {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/WebhookServerTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/WebhookServerTests 2>&1 | tail -5`
 Expected: All tests PASS
 
 - [ ] **Step 5: Commit**
@@ -934,7 +934,7 @@ let detected = AgentStatus.highestPriority([textStatus, hookStatus])
 
 - [ ] **Step 3: Run existing tests to verify nothing breaks**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -10`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -10`
 Expected: All existing tests PASS (webhook provider returns `.unknown` when no events, so `highestPriority` falls through to text status as before)
 
 - [ ] **Step 4: Commit**
@@ -984,7 +984,7 @@ webhookServer = nil
 
 - [ ] **Step 4: Build to verify compilation**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 5: Commit**
@@ -1000,19 +1000,19 @@ git commit -m "feat: wire WebhookServer lifecycle into MainWindowController"
 
 - [ ] **Step 1: Regenerate Xcode project**
 
-Run: `cd /Users/matt.chow/workspace/pmux-swift && xcodegen generate`
-Expected: `Generated project at pmux.xcodeproj`
+Run: `cd /Users/matt.chow/workspace/amux-swift && xcodegen generate`
+Expected: `Generated project at amux.xcodeproj`
 
 Note: `project.yml` uses `Sources` as a group source, so new files under `Sources/Status/` are automatically included. No `project.yml` changes needed.
 
 - [ ] **Step 2: Full build**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 3: Run all tests**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -10`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -10`
 Expected: All tests PASS
 
 - [ ] **Step 4: Commit if any changes needed**

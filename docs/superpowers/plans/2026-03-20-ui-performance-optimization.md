@@ -52,13 +52,13 @@ enum SemanticColors {
 
 - [ ] **Step 2: Run performance test to verify improvement**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/PerformanceTests/testSemanticColorsAllocationPerformance 2>&1 | grep measured`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/PerformanceTests/testSemanticColorsAllocationPerformance 2>&1 | grep measured`
 
 Expected: Average time should drop significantly (from ~84ms to <10ms) since NSColor instances are now reused.
 
 - [ ] **Step 3: Run full test suite to verify no regressions**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | grep -E '(Test Suite|Executed|FAILED)'`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | grep -E '(Test Suite|Executed|FAILED)'`
 
 Expected: All tests pass.
 
@@ -101,7 +101,7 @@ Remove the `refreshSubviews` method entirely (lines 37-48).
 
 - [ ] **Step 2: Run full test suite**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | grep -E '(Test Suite|Executed|FAILED)'`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | grep -E '(Test Suite|Executed|FAILED)'`
 
 Expected: All tests pass. Theme switching still works because AppKit's appearance propagation triggers `updateLayer()` on all layer-backed views.
 
@@ -161,7 +161,7 @@ class StatusBadge: NSView {
 
 - [ ] **Step 2: Run test suite**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | grep -E '(Test Suite|Executed|FAILED)'`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | grep -E '(Test Suite|Executed|FAILED)'`
 
 Expected: All tests pass.
 
@@ -201,7 +201,7 @@ class StatusPublisher {
     private(set) var webhookProvider = WebhookStatusProvider()
 
     private let pollInterval: TimeInterval = 2.0
-    private let pollQueue = DispatchQueue(label: "com.pmux.statusPoll", qos: .utility)
+    private let pollQueue = DispatchQueue(label: "com.amux.statusPoll", qos: .utility)
 
     // ... init, start, stop, updateSurfaces unchanged except pollAll body ...
 
@@ -273,13 +273,13 @@ class StatusPublisher {
 
 - [ ] **Step 2: Run performance test**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/PerformanceTests/testStatusDetectorPerformance 2>&1 | grep measured`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/PerformanceTests/testStatusDetectorPerformance 2>&1 | grep measured`
 
 Expected: Test still passes (tests the detector directly, not the publisher).
 
 - [ ] **Step 3: Run full test suite**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | grep -E '(Test Suite|Executed|FAILED)'`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | grep -E '(Test Suite|Executed|FAILED)'`
 
 - [ ] **Step 4: Commit**
 
@@ -334,7 +334,7 @@ Apply identical pattern: add `private var currentStatus: String = ""`, skip `upd
 
 - [ ] **Step 3: Run test suite**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | grep -E '(Test Suite|Executed|FAILED)'`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | grep -E '(Test Suite|Executed|FAILED)'`
 
 - [ ] **Step 4: Commit**
 
@@ -442,13 +442,13 @@ Same pattern for `rebuildTopSmall()` → `topSmallCardsByID` and `rebuildTopLarg
 
 - [ ] **Step 5: Run performance test**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/PerformanceTests/testFullRebuildCyclePerformance 2>&1 | grep measured`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/PerformanceTests/testFullRebuildCyclePerformance 2>&1 | grep measured`
 
 Expected: Test still passes (measures the rebuild path which still exists for adds/removes).
 
 - [ ] **Step 6: Run full test suite**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | grep -E '(Test Suite|Executed|FAILED)'`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | grep -E '(Test Suite|Executed|FAILED)'`
 
 - [ ] **Step 7: Commit**
 
@@ -553,7 +553,7 @@ func detachTerminals() {
 
 - [ ] **Step 6: Run full test suite**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | grep -E '(Test Suite|Executed|FAILED)'`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | grep -E '(Test Suite|Executed|FAILED)'`
 
 - [ ] **Step 7: Commit**
 
@@ -719,7 +719,7 @@ Remove `DraggableGridDelegate` from class declaration. The drag-to-reorder can b
 
 - [ ] **Step 9: Run full test suite**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | grep -E '(Test Suite|Executed|FAILED)'`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | grep -E '(Test Suite|Executed|FAILED)'`
 
 - [ ] **Step 10: Commit**
 
@@ -899,7 +899,7 @@ Note: The original `draw(_:)` used `insetBy(dx: 6)` for left/right padding. With
 
 - [ ] **Step 5: Run full test suite**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | grep -E '(Test Suite|Executed|FAILED)'`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | grep -E '(Test Suite|Executed|FAILED)'`
 
 - [ ] **Step 6: Commit**
 
@@ -948,7 +948,7 @@ Apply identical changes to `NotificationPanelView.applyShadow()` and add `layout
 
 - [ ] **Step 3: Run full test suite**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | grep -E '(Test Suite|Executed|FAILED)'`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | grep -E '(Test Suite|Executed|FAILED)'`
 
 - [ ] **Step 4: Commit**
 
@@ -968,7 +968,7 @@ Update tests to reflect the new architecture and verify improvements.
 
 - [ ] **Step 1: Run all performance tests**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/PerformanceTests 2>&1 | grep -E '(measured|FAILED)'`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/PerformanceTests 2>&1 | grep -E '(measured|FAILED)'`
 
 Verify all tests compile and run. Some tests may need adjustments if APIs changed (e.g., grid-related tests).
 
@@ -978,13 +978,13 @@ If `testFullRebuildCyclePerformance` or other tests reference removed APIs, upda
 
 - [ ] **Step 3: Run the full test suite**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | grep -E '(Test Suite|Executed|FAILED)'`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | grep -E '(Test Suite|Executed|FAILED)'`
 
 Expected: All tests pass with no regressions.
 
 - [ ] **Step 4: Build the app**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 
 Expected: Build succeeds.
 

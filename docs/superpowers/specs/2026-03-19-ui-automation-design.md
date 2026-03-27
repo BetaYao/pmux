@@ -2,7 +2,7 @@
 
 ## Overview
 
-Introduce XCUITest-based UI automation testing for pmux-swift, replacing manual click-testing after feature development. Uses Page Object pattern for maintainability.
+Introduce XCUITest-based UI automation testing for amux-swift, replacing manual click-testing after feature development. Uses Page Object pattern for maintainability.
 
 ## Decision
 
@@ -14,7 +14,7 @@ Introduce XCUITest-based UI automation testing for pmux-swift, replacing manual 
 ## Project Structure
 
 ```
-pmux-swift/
+amux-swift/
 ├── UITests/
 │   ├── Pages/                           # Page Object layer
 │   │   ├── AppPage.swift                # Top-level app entry, launch/terminate
@@ -38,16 +38,16 @@ pmux-swift/
 ### project.yml Addition
 
 ```yaml
-pmuxUITests:
+amuxUITests:
   type: bundle.ui-testing
   platform: macOS
   sources: [UITests]
   dependencies:
-    - target: pmux
+    - target: amux
   settings:
-    PRODUCT_BUNDLE_IDENTIFIER: com.pmux.uitests
+    PRODUCT_BUNDLE_IDENTIFIER: com.amux.uitests
     GENERATE_INFOPLIST_FILE: YES
-    TEST_TARGET_NAME: pmux
+    TEST_TARGET_NAME: amux
 ```
 
 ## Accessibility Identifier Specification
@@ -262,10 +262,10 @@ extension XCUIElement {
 
 ## Base Test Class
 
-All UI tests inherit from `PmuxUITestCase` which handles launch, teardown, test config, and screenshot capture on failure.
+All UI tests inherit from `AmuxUITestCase` which handles launch, teardown, test config, and screenshot capture on failure.
 
 ```swift
-class PmuxUITestCase: XCTestCase {
+class AmuxUITestCase: XCTestCase {
     var page: AppPage!
 
     override func setUp() {
@@ -345,7 +345,7 @@ Test fixture: a minimal git repo created in a temp directory by test setUp(), wi
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SCHEME="pmux"
+SCHEME="amux"
 DESTINATION="platform=macOS"
 TEST_FILTER="${1:-}"
 
@@ -354,8 +354,8 @@ if command -v xcodegen &> /dev/null; then
     echo "=== Generating Xcode project ==="
     cd "$PROJECT_DIR" && xcodegen generate
 else
-    if [ ! -d "$PROJECT_DIR/pmux.xcodeproj" ]; then
-        echo "Error: pmux.xcodeproj not found and xcodegen is not installed."
+    if [ ! -d "$PROJECT_DIR/amux.xcodeproj" ]; then
+        echo "Error: amux.xcodeproj not found and xcodegen is not installed."
         echo "Install with: brew install xcodegen"
         exit 1
     fi
@@ -365,18 +365,18 @@ mkdir -p "$PROJECT_DIR/.build"
 rm -rf "$PROJECT_DIR/.build/ui-test-results"
 
 ARGS=(
-    -project "$PROJECT_DIR/pmux.xcodeproj"
+    -project "$PROJECT_DIR/amux.xcodeproj"
     -scheme "$SCHEME"
     -destination "$DESTINATION"
-    -only-testing:pmuxUITests
+    -only-testing:amuxUITests
     -resultBundlePath "$PROJECT_DIR/.build/ui-test-results"
 )
 
 if [ -n "$TEST_FILTER" ]; then
-    ARGS=(-project "$PROJECT_DIR/pmux.xcodeproj"
+    ARGS=(-project "$PROJECT_DIR/amux.xcodeproj"
           -scheme "$SCHEME"
           -destination "$DESTINATION"
-          -only-testing:"pmuxUITests/$TEST_FILTER"
+          -only-testing:"amuxUITests/$TEST_FILTER"
           -resultBundlePath "$PROJECT_DIR/.build/ui-test-results")
 fi
 

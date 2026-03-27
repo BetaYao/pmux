@@ -1,6 +1,6 @@
-name: pmux
+name: amux
 options:
-  bundleIdPrefix: com.pmux
+  bundleIdPrefix: com.amux
   deploymentTarget:
     macOS: "14.0"
   xcodeVersion: "16.1"
@@ -8,7 +8,7 @@ options:
   defaultConfig: Debug
 
 targets:
-  pmux:
+  amux:
     type: application
     platform: macOS
     sources:
@@ -18,15 +18,15 @@ targets:
       - path: ghostty.h
         type: file
         buildPhase: none
-      - path: pmux-Bridging-Header.h
+      - path: amux-Bridging-Header.h
         type: file
         buildPhase: none
     settings:
       base:
         SWIFT_VERSION: "5.10"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
-        PRODUCT_BUNDLE_IDENTIFIER: com.pmux.app
-        PRODUCT_NAME: pmux
+        PRODUCT_BUNDLE_IDENTIFIER: com.amux.app
+        PRODUCT_NAME: amux
         INFOPLIST_FILE: ""
         GENERATE_INFOPLIST_FILE: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -34,7 +34,7 @@ targets:
         CURRENT_PROJECT_VERSION: 1
         CODE_SIGN_STYLE: Automatic
         COMBINE_HIDPI_IMAGES: YES
-        SWIFT_OBJC_BRIDGING_HEADER: "$(PROJECT_DIR)/pmux-Bridging-Header.h"
+        SWIFT_OBJC_BRIDGING_HEADER: "$(PROJECT_DIR)/amux-Bridging-Header.h"
         HEADER_SEARCH_PATHS:
           - "$(PROJECT_DIR)"
         LIBRARY_SEARCH_PATHS:
@@ -53,29 +53,29 @@ targets:
           - "-framework"
           - Carbon
 
-  pmuxTests:
+  amuxTests:
     type: bundle.unit-test
     platform: macOS
     sources:
       - path: Tests
         type: group
     dependencies:
-      - target: pmux
+      - target: amux
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.pmux.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.amux.tests
         GENERATE_INFOPLIST_FILE: YES
 
-  pmuxUITests:
+  amuxUITests:
     type: bundle.ui-testing
     platform: macOS
     sources:
       - path: UITests
         type: group
     dependencies:
-      - target: pmux
+      - target: amux
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.pmux.uitests
+        PRODUCT_BUNDLE_IDENTIFIER: com.amux.uitests
         GENERATE_INFOPLIST_FILE: YES
-        TEST_TARGET_NAME: pmux
+        TEST_TARGET_NAME: amux

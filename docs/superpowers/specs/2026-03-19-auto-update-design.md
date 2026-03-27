@@ -2,12 +2,12 @@
 
 ## Overview
 
-Add automatic update checking and one-click install to pmux-swift. Uses GitHub Releases API to detect new versions, downloads the correct architecture-specific zip, and replaces the running app via a helper script.
+Add automatic update checking and one-click install to amux-swift. Uses GitHub Releases API to detect new versions, downloads the correct architecture-specific zip, and replaces the running app via a helper script.
 
 ## Decision
 
 - **Source:** GitHub Releases API (`/repos/{owner}/{repo}/releases/latest`)
-- **Distribution:** Architecture-specific zip files (`pmux-macos-arm64.zip`, `pmux-macos-x86_64.zip`)
+- **Distribution:** Architecture-specific zip files (`amux-macos-arm64.zip`, `amux-macos-x86_64.zip`)
 - **Install method:** Helper shell script (app exits → script replaces → launches new version)
 - **No external dependencies** — pure URLSession + Foundation + Process
 
@@ -71,8 +71,8 @@ static let assetSuffix = "x86_64.zip"
 ```
 
 **Asset naming convention:**
-- `pmux-macos-arm64.zip` — Apple Silicon
-- `pmux-macos-x86_64.zip` — Intel
+- `amux-macos-arm64.zip` — Apple Silicon
+- `amux-macos-x86_64.zip` — Intel
 
 **Version comparison:**
 - Semantic versioning: compare major.minor.patch as integers
@@ -233,7 +233,7 @@ Add `skippedVersion` to persist the user's "skip" choice. When a user clicks [�
 ```swift
 class UpdateChecker {
     static let repoOwner = "user"
-    static let repoName = "pmux"
+    static let repoName = "amux"
 }
 ```
 
@@ -247,7 +247,7 @@ When GitHub API returns 403 with `X-RateLimit-Remaining: 0`, the checker backs o
 
 - **VersionComparison tests** — `"2.0.0" < "2.0.1"`, `"2.1.0" > "2.0.99"`, `"3.0.0" > "2.9.9"`, equal versions, malformed versions
 - **ReleaseInfo parsing tests** — mock GitHub API JSON, verify tag parsing, asset URL extraction, architecture matching
-- **Architecture selection tests** — arm64 selects `pmux-macos-arm64.zip`, x86_64 selects `pmux-macos-x86_64.zip`
+- **Architecture selection tests** — arm64 selects `amux-macos-arm64.zip`, x86_64 selects `amux-macos-x86_64.zip`
 - **Asset matching tests** — no matching asset returns nil, multiple assets selects correct one
 
 ### UI Tests

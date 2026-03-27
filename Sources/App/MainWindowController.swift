@@ -21,7 +21,7 @@ enum WindowStyling {
         if environment["XCTestConfigurationFilePath"] != nil {
             return false
         }
-        if arguments.contains("-PmuxUITesting") {
+        if arguments.contains("-AmuxUITesting") {
             return false
         }
         if let idx = arguments.firstIndex(of: "-ApplePersistenceIgnoreState"),
@@ -107,13 +107,13 @@ class MainWindowController: NSWindowController {
     }()
 
     convenience init() {
-        let window = PmuxWindow(
+        let window = AmuxWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
-        window.title = "pmux"
+        window.title = "amux"
         window.minSize = NSSize(width: 600, height: 400)
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
@@ -129,7 +129,7 @@ class MainWindowController: NSWindowController {
         window.isRestorable = false
 
         if WindowStyling.shouldUseWindowFrameAutosave() {
-            window.setFrameAutosaveName("PmuxMainWindow")
+            window.setFrameAutosaveName("AmuxMainWindow")
         } else if let visibleFrame = NSScreen.main?.visibleFrame {
             let width = min(1200, visibleFrame.width * 0.9)
             let height = min(800, visibleFrame.height * 0.9)
@@ -224,7 +224,7 @@ class MainWindowController: NSWindowController {
     }
 
     @objc func openDocumentation() {
-        if let url = URL(string: "https://github.com/nicematt/pmux") {
+        if let url = URL(string: "https://github.com/nicematt/amux") {
             NSWorkspace.shared.open(url)
         }
     }
@@ -338,7 +338,7 @@ class MainWindowController: NSWindowController {
     private func setupNativeTitleBar() {
         guard let window else { return }
 
-        let toolbar = NSToolbar(identifier: "pmux.mainToolbar")
+        let toolbar = NSToolbar(identifier: "amux.mainToolbar")
         toolbar.displayMode = .iconOnly
         toolbar.showsBaselineSeparator = false
         window.toolbar = toolbar
@@ -504,7 +504,7 @@ class MainWindowController: NSWindowController {
 
 }
 
-class PmuxWindow: NSWindow {
+class AmuxWindow: NSWindow {
 
     // performKeyEquivalent runs BEFORE menu item key equivalents,
     // so split pane shortcuts here take priority over menu bindings.
@@ -665,9 +665,7 @@ extension MainWindowController: TitleBarDelegate {
             window?.appearance = nil
         }
         // Update NSAppearance.current so .cgColor resolves correctly outside drawing cycles
-        if let appearance = window?.appearance {
-            NSAppearance.current = appearance
-        }
+        NSAppearance.current = window?.effectiveAppearance ?? NSApp.effectiveAppearance
         applyWindowBackgroundStyle()
     }
     

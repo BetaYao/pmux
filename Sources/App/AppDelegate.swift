@@ -16,9 +16,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if config.webhook.enabled {
             ClaudeHooksSetup.ensureHooksConfigured(port: config.webhook.port)
         }
-        if let appearance = NSApp.appearance {
-            NSAppearance.current = appearance
-        }
+        NSAppearance.current = NSApp.effectiveAppearance
 
         // Initialize GhosttyApp singleton
         GhosttyBridge.shared.initialize()

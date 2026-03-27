@@ -1,3 +1,3 @@
 import XCTest
 
-class SmokeTests: PmuxUITestCase {}
+class SmokeTests: AmuxUITestCase {}

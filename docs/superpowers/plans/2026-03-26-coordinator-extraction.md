@@ -43,7 +43,7 @@ Create `Tests/UpdateCoordinatorTests.swift`:
 
 ```swift
 import XCTest
-@testable import pmux
+@testable import amux
 
 // Mock delegates and dependencies for testing UpdateCoordinator in isolation
 private class MockUpdateCoordinatorDelegate: UpdateCoordinatorDelegate {
@@ -86,7 +86,7 @@ final class UpdateCoordinatorTests: XCTestCase {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/UpdateCoordinatorTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/UpdateCoordinatorTests 2>&1 | tail -5`
 Expected: FAIL — `UpdateCoordinator` type not found
 
 - [ ] **Step 3: Create UpdateCoordinator with delegate protocol**
@@ -192,7 +192,7 @@ extension UpdateCoordinator: UpdateBannerDelegate {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/UpdateCoordinatorTests 2>&1 | tail -20`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/UpdateCoordinatorTests 2>&1 | tail -20`
 Expected: PASS (3 tests)
 
 - [ ] **Step 5: Wire UpdateCoordinator into MainWindowController**
@@ -249,12 +249,12 @@ In `Sources/App/MainWindowController.swift`:
 
 - [ ] **Step 6: Regenerate Xcode project**
 
-Run: `cd /Users/matt.chow/workspace/pmux-swift && xcodegen generate`
-Expected: `Generated project pmux.xcodeproj`
+Run: `cd /Users/matt.chow/workspace/amux-swift && xcodegen generate`
+Expected: `Generated project amux.xcodeproj`
 
 - [ ] **Step 7: Build and run full test suite**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -20`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -20`
 Expected: All existing tests pass + 3 new UpdateCoordinator tests pass
 
 - [ ] **Step 8: Commit**
@@ -281,7 +281,7 @@ Create `Tests/PanelCoordinatorTests.swift`:
 
 ```swift
 import XCTest
-@testable import pmux
+@testable import amux
 
 private class MockPanelCoordinatorDelegate: PanelCoordinatorDelegate {
     var navigateCalled = false
@@ -318,7 +318,7 @@ final class PanelCoordinatorTests: XCTestCase {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/PanelCoordinatorTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/PanelCoordinatorTests 2>&1 | tail -5`
 Expected: FAIL — `PanelCoordinator` type not found
 
 - [ ] **Step 3: Create PanelCoordinator with delegate protocol**
@@ -461,7 +461,7 @@ extension PanelCoordinator: NSPopoverDelegate {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/PanelCoordinatorTests 2>&1 | tail -20`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/PanelCoordinatorTests 2>&1 | tail -20`
 Expected: PASS (2 tests)
 
 - [ ] **Step 5: Wire PanelCoordinator into MainWindowController**
@@ -515,7 +515,7 @@ In `Sources/App/MainWindowController.swift`:
 
 - [ ] **Step 6: Regenerate Xcode project and run full test suite**
 
-Run: `cd /Users/matt.chow/workspace/pmux-swift && xcodegen generate && xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -20`
+Run: `cd /Users/matt.chow/workspace/amux-swift && xcodegen generate && xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -20`
 Expected: All tests pass
 
 - [ ] **Step 7: Commit**
@@ -542,7 +542,7 @@ Create `Tests/TerminalCoordinatorTests.swift`:
 
 ```swift
 import XCTest
-@testable import pmux
+@testable import amux
 
 private class MockTerminalCoordinatorDelegate: TerminalCoordinatorDelegate {
     var surfacesUpdated = false
@@ -599,7 +599,7 @@ final class TerminalCoordinatorTests: XCTestCase {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/TerminalCoordinatorTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/TerminalCoordinatorTests 2>&1 | tail -5`
 Expected: FAIL — `TerminalCoordinator` type not found
 
 - [ ] **Step 3: Create TerminalCoordinator with delegate protocol**
@@ -850,7 +850,7 @@ class TerminalCoordinator {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/TerminalCoordinatorTests 2>&1 | tail -20`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/TerminalCoordinatorTests 2>&1 | tail -20`
 Expected: PASS (5 tests)
 
 - [ ] **Step 5: Wire TerminalCoordinator into MainWindowController**
@@ -870,7 +870,7 @@ In `Sources/App/MainWindowController.swift`:
    }()
    ```
 
-3. Add forwarding methods for PmuxWindow:
+3. Add forwarding methods for AmuxWindow:
    ```swift
    func splitFocusedPane(axis: SplitAxis) {
        terminalCoordinator.splitFocusedPane(axis: axis)
@@ -921,7 +921,7 @@ In `Sources/App/MainWindowController.swift`:
 
 - [ ] **Step 6: Regenerate Xcode project and run full test suite**
 
-Run: `cd /Users/matt.chow/workspace/pmux-swift && xcodegen generate && xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -20`
+Run: `cd /Users/matt.chow/workspace/amux-swift && xcodegen generate && xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -20`
 Expected: All tests pass
 
 - [ ] **Step 7: Commit**
@@ -948,7 +948,7 @@ Create `Tests/TabCoordinatorTests.swift`:
 
 ```swift
 import XCTest
-@testable import pmux
+@testable import amux
 
 private class MockTabCoordinatorDelegate: TabCoordinatorDelegate {
     var embeddedVC: NSViewController?
@@ -1010,7 +1010,7 @@ final class TabCoordinatorTests: XCTestCase {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/TabCoordinatorTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/TabCoordinatorTests 2>&1 | tail -5`
 Expected: FAIL — `TabCoordinator` type not found
 
 - [ ] **Step 3: Create TabCoordinator with delegate protocol**
@@ -1085,7 +1085,7 @@ Note: `TitleBarDelegate` stays split — tab-related callbacks route through Tab
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/TabCoordinatorTests 2>&1 | tail -20`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/TabCoordinatorTests 2>&1 | tail -20`
 Expected: PASS (4 tests)
 
 - [ ] **Step 5: Wire TabCoordinator into MainWindowController**
@@ -1199,7 +1199,7 @@ In `Sources/App/MainWindowController.swift`:
 
 - [ ] **Step 6: Regenerate Xcode project and run full test suite**
 
-Run: `cd /Users/matt.chow/workspace/pmux-swift && xcodegen generate && xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -20`
+Run: `cd /Users/matt.chow/workspace/amux-swift && xcodegen generate && xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -20`
 Expected: All tests pass
 
 - [ ] **Step 7: Commit**
@@ -1228,12 +1228,12 @@ Expected: Each < 450 lines
 
 - [ ] **Step 3: Run full test suite**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -30`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -30`
 Expected: All tests pass (existing + ~14 new coordinator tests)
 
 - [ ] **Step 4: Build and launch the app**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 5: Review for dead code**

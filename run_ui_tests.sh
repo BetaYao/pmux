@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SCHEME="pmux"
+SCHEME="amux"
 DESTINATION="platform=macOS"
 TEST_FILTER="${1:-}"
 
@@ -11,8 +11,8 @@ if command -v xcodegen &> /dev/null; then
     echo "=== Generating Xcode project ==="
     cd "$PROJECT_DIR" && xcodegen generate
 else
-    if [ ! -d "$PROJECT_DIR/pmux.xcodeproj" ]; then
-        echo "Error: pmux.xcodeproj not found and xcodegen is not installed."
+    if [ ! -d "$PROJECT_DIR/amux.xcodeproj" ]; then
+        echo "Error: amux.xcodeproj not found and xcodegen is not installed."
         echo "Install with: brew install xcodegen"
         exit 1
     fi
@@ -22,19 +22,19 @@ mkdir -p "$PROJECT_DIR/.build"
 rm -rf "$PROJECT_DIR/.build/ui-test-results"
 
 ARGS=(
-    -project "$PROJECT_DIR/pmux.xcodeproj"
+    -project "$PROJECT_DIR/amux.xcodeproj"
     -scheme "$SCHEME"
     -destination "$DESTINATION"
-    -only-testing:pmuxUITests
+    -only-testing:amuxUITests
     -resultBundlePath "$PROJECT_DIR/.build/ui-test-results"
 )
 
 if [ -n "$TEST_FILTER" ]; then
     ARGS=(
-        -project "$PROJECT_DIR/pmux.xcodeproj"
+        -project "$PROJECT_DIR/amux.xcodeproj"
         -scheme "$SCHEME"
         -destination "$DESTINATION"
-        -only-testing:"pmuxUITests/$TEST_FILTER"
+        -only-testing:"amuxUITests/$TEST_FILTER"
         -resultBundlePath "$PROJECT_DIR/.build/ui-test-results"
     )
 fi

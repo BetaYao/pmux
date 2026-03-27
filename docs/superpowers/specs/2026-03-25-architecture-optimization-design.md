@@ -63,7 +63,7 @@ MainWindowController (~700 lines)
 │  - SettingsDelegate (replaces config, triggers reload)
 │  - normalizeBackendAvailabilityIfNeeded() and runtimeBackend resolution
 │  - Coordinator assembly and inter-coordinator wiring
-│  - PmuxWindow forwarding methods (see PmuxWindow Integration below)
+│  - AmuxWindow forwarding methods (see AmuxWindow Integration below)
 │
 ├── TabCoordinator (~400 lines)
 ├── TerminalCoordinator (~350 lines)
@@ -258,14 +258,14 @@ protocol PanelCoordinatorDelegate: AnyObject {
 - All cross-coordinator operations flow through MainWindowController's delegate implementations
 - TerminalCoordinator receives a `currentRepoVC` closure (not a coordinator reference) for split pane access
 
-### PmuxWindow Integration
+### AmuxWindow Integration
 
-`PmuxWindow` (a subclass of `NSWindow` defined in the same file) overrides `performKeyEquivalent` and directly calls `MainWindowController` methods that will move to TerminalCoordinator: `splitFocusedPane`, `closeFocusedPane`, `moveFocus`, `resizeSplit`, `resetSplitRatio`.
+`AmuxWindow` (a subclass of `NSWindow` defined in the same file) overrides `performKeyEquivalent` and directly calls `MainWindowController` methods that will move to TerminalCoordinator: `splitFocusedPane`, `closeFocusedPane`, `moveFocus`, `resizeSplit`, `resetSplitRatio`.
 
 **Solution:** MainWindowController retains thin forwarding methods for these split operations:
 
 ```swift
-// MainWindowController — forwarding methods for PmuxWindow
+// MainWindowController — forwarding methods for AmuxWindow
 func splitFocusedPane(axis: SplitAxis) {
     terminalCoordinator.splitFocusedPane(axis: axis)
 }
@@ -275,7 +275,7 @@ func closeFocusedPane() {
 // ... etc
 ```
 
-This keeps PmuxWindow's code unchanged. The forwarding methods are ~15 lines total, included in the ~700 line estimate.
+This keeps AmuxWindow's code unchanged. The forwarding methods are ~15 lines total, included in the ~700 line estimate.
 
 `ViewHostController` (also in the same file, ~25 lines) is a trivial utility class. It stays in the same file — no extraction needed.
 

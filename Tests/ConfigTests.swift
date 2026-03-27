@@ -1,5 +1,5 @@
 import XCTest
-@testable import pmux
+@testable import amux
 
 final class ConfigTests: XCTestCase {
 
@@ -87,7 +87,7 @@ final class ConfigTests: XCTestCase {
 
     func testSaveAndLoadFromFile() throws {
         let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("pmux-config-test-\(UUID().uuidString)")
+            .appendingPathComponent("amux-config-test-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tempDir) }
 

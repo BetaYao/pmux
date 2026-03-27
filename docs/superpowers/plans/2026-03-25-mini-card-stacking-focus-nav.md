@@ -41,7 +41,7 @@
 ```swift
 // Tests/StackedMiniCardContainerViewTests.swift
 import XCTest
-@testable import pmux
+@testable import amux
 
 final class StackedMiniCardContainerViewTests: XCTestCase {
 
@@ -257,17 +257,17 @@ private final class MiniGhostCardView: NSView {
 
 - [ ] **Step 3: Regenerate Xcode project**
 
-Run: `cd /Users/matt.chow/workspace/pmux-swift && xcodegen generate`
+Run: `cd /Users/matt.chow/workspace/amux-swift && xcodegen generate`
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/StackedMiniCardContainerViewTests 2>&1 | tail -20`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/StackedMiniCardContainerViewTests 2>&1 | tail -20`
 Expected: All 9 tests PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/UI/Dashboard/StackedMiniCardContainerView.swift Tests/StackedMiniCardContainerViewTests.swift pmux.xcodeproj
+git add Sources/UI/Dashboard/StackedMiniCardContainerView.swift Tests/StackedMiniCardContainerViewTests.swift amux.xcodeproj
 git commit -m "feat: add StackedMiniCardContainerView with 3px ghost offset"
 ```
 
@@ -284,7 +284,7 @@ git commit -m "feat: add StackedMiniCardContainerView with 3px ghost offset"
 ```swift
 // Tests/FocusPanelNavigationTests.swift
 import XCTest
-@testable import pmux
+@testable import amux
 
 final class FocusPanelNavigationTests: XCTestCase {
 
@@ -335,7 +335,7 @@ final class FocusPanelNavigationTests: XCTestCase {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/FocusPanelNavigationTests 2>&1 | tail -20`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/FocusPanelNavigationTests 2>&1 | tail -20`
 Expected: FAIL — `prevButton`, `nextButton`, `counterLabel`, `configureNavigation` do not exist
 
 - [ ] **Step 3: Add NavigationDirection enum and nav UI to FocusPanelView**
@@ -455,17 +455,17 @@ durationLabel.trailingAnchor.constraint(lessThanOrEqualTo: prevButton.leadingAnc
 
 - [ ] **Step 4: Regenerate Xcode project**
 
-Run: `cd /Users/matt.chow/workspace/pmux-swift && xcodegen generate`
+Run: `cd /Users/matt.chow/workspace/amux-swift && xcodegen generate`
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/FocusPanelNavigationTests 2>&1 | tail -20`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/FocusPanelNavigationTests 2>&1 | tail -20`
 Expected: All 6 tests PASS
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Sources/UI/Dashboard/FocusPanelView.swift Tests/FocusPanelNavigationTests.swift pmux.xcodeproj
+git add Sources/UI/Dashboard/FocusPanelView.swift Tests/FocusPanelNavigationTests.swift amux.xcodeproj
 git commit -m "feat: add prev/next navigation to FocusPanelView"
 ```
 
@@ -630,7 +630,7 @@ private func updateFocusLayoutInPlace(_ sorted: [AgentDisplayInfo], miniCards: [
 
 - [ ] **Step 6: Build to verify compilation**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -10`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -10`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 7: Commit**
@@ -749,12 +749,12 @@ private func configureFocusPanel(_ panel: FocusPanelView, with agent: AgentDispl
 
 - [ ] **Step 3: Build and verify**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -10`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -10`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 4: Run all tests**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -20`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -20`
 Expected: All tests PASS
 
 - [ ] **Step 5: Commit**

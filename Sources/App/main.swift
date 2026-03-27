@@ -10,10 +10,12 @@ case "dark":
     app.appearance = NSAppearance(named: .darkAqua)
 case "light":
     app.appearance = NSAppearance(named: .aqua)
+case "system":
+    app.appearance = nil  // follow system setting
 default:
-    app.appearance = NSAppearance(named: .darkAqua) // default to dark
+    app.appearance = NSAppearance(named: .darkAqua)
 }
-NSAppearance.current = app.appearance ?? NSAppearance(named: .darkAqua)!
+NSAppearance.current = app.effectiveAppearance
 
 let delegate = AppDelegate()
 app.delegate = delegate

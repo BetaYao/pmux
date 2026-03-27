@@ -1,8 +1,8 @@
-# pmux Zoom-Style UI Redesign
+# amux Zoom-Style UI Redesign
 
 ## Overview
 
-Redesign pmux's UI to match Zoom's visual language: near-black background, minimal tile gaps, rounded-rect "arc" groupings in the title bar, and terminal tiles replacing video tiles. All four dashboard layout modes are retained but unified under the Zoom aesthetic.
+Redesign amux's UI to match Zoom's visual language: near-black background, minimal tile gaps, rounded-rect "arc" groupings in the title bar, and terminal tiles replacing video tiles. All four dashboard layout modes are retained but unified under the Zoom aesthetic.
 
 ## Design Tokens
 

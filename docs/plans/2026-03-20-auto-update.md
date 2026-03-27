@@ -112,7 +112,7 @@ protocol UpdateCheckerDelegate: AnyObject {
 
 class UpdateChecker {
     static let repoOwner = "user"  // TODO: set to real owner
-    static let repoName = "pmux"
+    static let repoName = "amux"
 
     #if arch(arm64)
     static let assetSuffix = "arm64.zip"
@@ -334,7 +334,7 @@ Accessibility identifiers per spec: `update.banner`, `update.installButton`, `up
 ## Task 9: Compile and run tests
 
 1. `xcodegen generate`
-2. `xcodebuild test -scheme pmux -destination 'platform=macOS' -only-testing:pmuxTests`
+2. `xcodebuild test -scheme amux -destination 'platform=macOS' -only-testing:amuxTests`
 3. Fix any issues
 
 ---

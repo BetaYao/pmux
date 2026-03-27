@@ -3,27 +3,27 @@
 set -e
 
 BUILD_DIR="$(pwd)/.build"
-APP="$BUILD_DIR/Build/Products/Debug/pmux.app"
+APP="$BUILD_DIR/Build/Products/Debug/amux.app"
 
-echo "==> Building pmux..."
-xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug \
+echo "==> Building amux..."
+xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug \
   -derivedDataPath "$BUILD_DIR" build 2>&1 | tail -1
 
-echo "==> Launching pmux..."
-pkill -f "pmux.app" 2>/dev/null || true
+echo "==> Launching amux..."
+pkill -f "amux.app" 2>/dev/null || true
 sleep 1
-"$APP/Contents/MacOS/pmux" &
+"$APP/Contents/MacOS/amux" &
 PID=$!
 sleep 5
 
 echo "==> Getting window info..."
-osascript -e 'tell application "System Events" to tell process "pmux" to set frontmost to true' 2>/dev/null
+osascript -e 'tell application "System Events" to tell process "amux" to set frontmost to true' 2>/dev/null
 sleep 1
 
 # Get repo tab position — second wide button (>50px)
 REPO_POS_X=$(osascript -e '
 tell application "System Events"
-    tell process "pmux"
+    tell process "amux"
         set allBtns to every button of window 1
         set wideCount to 0
         repeat with b in allBtns
@@ -43,7 +43,7 @@ end tell
 
 REPO_POS_Y=$(osascript -e '
 tell application "System Events"
-    tell process "pmux"
+    tell process "amux"
         set allBtns to every button of window 1
         set wideCount to 0
         repeat with b in allBtns
@@ -84,9 +84,9 @@ echo "==> Waiting for terminal to resize..."
 sleep 5
 
 # Find the tmux session with the LARGEST window (the one that was resized for repo view)
-SESSION=$(tmux list-sessions -F '#{window_width} #{session_name}' 2>/dev/null | grep 'pmux-' | sort -rn | head -1 | awk '{print $2}')
+SESSION=$(tmux list-sessions -F '#{window_width} #{session_name}' 2>/dev/null | grep 'amux-' | sort -rn | head -1 | awk '{print $2}')
 if [ -z "$SESSION" ]; then
-    echo "FAIL: No pmux tmux sessions found"
+    echo "FAIL: No amux tmux sessions found"
     kill $PID 2>/dev/null
     exit 1
 fi
@@ -136,8 +136,8 @@ else
 fi
 
 # Screenshot for visual inspection
-screencapture -x -o /tmp/pmux-visual-test.png 2>/dev/null
-echo "Screenshot: /tmp/pmux-visual-test.png"
+screencapture -x -o /tmp/amux-visual-test.png 2>/dev/null
+echo "Screenshot: /tmp/amux-visual-test.png"
 
 # Cleanup
 tmux send-keys -t "$SESSION" C-c 2>/dev/null

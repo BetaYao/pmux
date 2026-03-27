@@ -81,7 +81,7 @@ struct Config: Codable {
     }
 
     static let configDir = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".config/pmux")
+        .appendingPathComponent(".config/amux")
     static let configPath = configDir.appendingPathComponent("config.json")
 
     static func load() -> Config {
@@ -106,7 +106,7 @@ struct Config: Codable {
         }
     }
 
-    private static let saveQueue = DispatchQueue(label: "com.pmux.config-save", qos: .utility)
+    private static let saveQueue = DispatchQueue(label: "com.amux.config-save", qos: .utility)
     private static var pendingSaveWorkItem: DispatchWorkItem?
 
     func save() {

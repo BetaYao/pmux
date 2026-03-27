@@ -1,5 +1,5 @@
 import XCTest
-@testable import pmux
+@testable import amux
 
 /// Visual integration test: verifies terminal fills its container
 /// by checking tmux column count after reparent to a larger container.
@@ -11,11 +11,11 @@ class TerminalFullscreenVisualTest: XCTestCase {
     /// Test that tmux session column count updates after reparent
     /// by querying tmux for the window width.
     func testTmuxColumnsMatchContainerWidth() throws {
-        // Find any active pmux tmux session
+        // Find any active amux tmux session
         let sessions = listPmuxTmuxSessions()
         guard let session = sessions.first else {
-            // No running pmux sessions — skip (pmux not running)
-            throw XCTSkip("No pmux tmux sessions found — pmux not running")
+            // No running amux sessions — skip (amux not running)
+            throw XCTSkip("No amux tmux sessions found — amux not running")
         }
 
         // Query tmux for the window width (columns)
@@ -34,7 +34,7 @@ class TerminalFullscreenVisualTest: XCTestCase {
     func testTmuxRowsMatchContainerHeight() throws {
         let sessions = listPmuxTmuxSessions()
         guard let session = sessions.first else {
-            throw XCTSkip("No pmux tmux sessions found — pmux not running")
+            throw XCTSkip("No amux tmux sessions found — amux not running")
         }
 
         let rows = tmuxWindowHeight(session: session)
@@ -52,7 +52,7 @@ class TerminalFullscreenVisualTest: XCTestCase {
     func testTerminalTextReachesRightEdge() throws {
         let sessions = listPmuxTmuxSessions()
         guard let session = sessions.first else {
-            throw XCTSkip("No pmux tmux sessions found — pmux not running")
+            throw XCTSkip("No amux tmux sessions found — amux not running")
         }
 
         let cols = tmuxWindowWidth(session: session)
@@ -104,7 +104,7 @@ class TerminalFullscreenVisualTest: XCTestCase {
         guard let output = String(data: data, encoding: .utf8) else { return [] }
         return output.components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { $0.hasPrefix("pmux-") }
+            .filter { $0.hasPrefix("amux-") }
     }
 
     private func tmuxWindowWidth(session: String) -> Int {

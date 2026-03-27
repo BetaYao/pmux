@@ -1,11 +1,11 @@
 import Foundation
 
-/// Ensures ~/.claude/settings.json contains the hooks pmux needs.
+/// Ensures ~/.claude/settings.json contains the hooks amux needs.
 /// Merges non-destructively: existing hooks and settings are preserved.
 enum ClaudeHooksSetup {
 
-    /// Hook events pmux requires, mapped to their webhook config.
-    /// Add new hooks here as pmux gains features.
+    /// Hook events amux requires, mapped to their webhook config.
+    /// Add new hooks here as amux gains features.
     private static func requiredHooks(port: UInt16) -> [String: [[String: Any]]] {
         let hookEntry: [String: Any] = ["type": "http", "url": "http://localhost:\(port)/webhook"]
         let hookGroup: [[String: Any]] = [["hooks": [hookEntry]]]

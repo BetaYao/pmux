@@ -24,7 +24,7 @@
 | `Sources/Core/SessionManager.swift` | (modify) Add `indexedSessionName(base:index:)` for pane session naming |
 | `Sources/Core/Config.swift` | (modify) Add `splitLayouts: [String: CodableSplitNode]` field |
 | `Sources/UI/Repo/RepoViewController.swift` | (modify) Embed `SplitContainerView` instead of direct surface |
-| `Sources/App/MainWindowController.swift` | (modify) Keybindings in `PmuxWindow`, surface creation adapted for SplitTree |
+| `Sources/App/MainWindowController.swift` | (modify) Keybindings in `AmuxWindow`, surface creation adapted for SplitTree |
 | `Sources/Status/StatusPublisher.swift` | (modify) Accept `[String: SplitTree]`, poll all leaves, aggregate |
 | `Sources/Core/SurfaceRegistry.swift` | Singleton mapping `surfaceId: String` → `TerminalSurface` for cross-component lookup |
 | `Tests/SplitNodeTests.swift` | Unit tests for SplitNode and SplitTree |
@@ -47,28 +47,28 @@
 ```swift
 // Tests/SplitNodeTests.swift
 import XCTest
-@testable import pmux
+@testable import amux
 
 final class SplitNodeTests: XCTestCase {
 
     func testSingleLeaf() {
-        let node = SplitNode.leaf(id: "a", surfaceId: "s1", sessionName: "pmux-repo-main")
+        let node = SplitNode.leaf(id: "a", surfaceId: "s1", sessionName: "amux-repo-main")
         XCTAssertEqual(node.leafCount, 1)
         XCTAssertEqual(node.allLeaves.count, 1)
         XCTAssertEqual(node.allLeaves.first?.id, "a")
     }
 
     func testSplitNodeLeafCount() {
-        let left = SplitNode.leaf(id: "a", surfaceId: "s1", sessionName: "pmux-repo-main")
-        let right = SplitNode.leaf(id: "b", surfaceId: "s2", sessionName: "pmux-repo-main-1")
+        let left = SplitNode.leaf(id: "a", surfaceId: "s1", sessionName: "amux-repo-main")
+        let right = SplitNode.leaf(id: "b", surfaceId: "s2", sessionName: "amux-repo-main-1")
         let split = SplitNode.split(id: "s", axis: .horizontal, ratio: 0.5, first: left, second: right)
         XCTAssertEqual(split.leafCount, 2)
         XCTAssertEqual(split.allLeaves.count, 2)
     }
 
     func testFindLeafById() {
-        let left = SplitNode.leaf(id: "a", surfaceId: "s1", sessionName: "pmux-repo-main")
-        let right = SplitNode.leaf(id: "b", surfaceId: "s2", sessionName: "pmux-repo-main-1")
+        let left = SplitNode.leaf(id: "a", surfaceId: "s1", sessionName: "amux-repo-main")
+        let right = SplitNode.leaf(id: "b", surfaceId: "s2", sessionName: "amux-repo-main-1")
         let split = SplitNode.split(id: "s", axis: .horizontal, ratio: 0.5, first: left, second: right)
         XCTAssertNotNil(split.findLeaf(id: "a"))
         XCTAssertNotNil(split.findLeaf(id: "b"))
@@ -76,11 +76,11 @@ final class SplitNodeTests: XCTestCase {
     }
 
     func testCodableRoundTrip_Leaf() throws {
-        let node = CodableSplitNode.leaf(sessionName: "pmux-repo-main")
+        let node = CodableSplitNode.leaf(sessionName: "amux-repo-main")
         let data = try JSONEncoder().encode(node)
         let decoded = try JSONDecoder().decode(CodableSplitNode.self, from: data)
         if case .leaf(let name) = decoded {
-            XCTAssertEqual(name, "pmux-repo-main")
+            XCTAssertEqual(name, "amux-repo-main")
         } else {
             XCTFail("Expected leaf")
         }
@@ -90,8 +90,8 @@ final class SplitNodeTests: XCTestCase {
         let node = CodableSplitNode.split(
             axis: "horizontal",
             ratio: 0.6,
-            first: .leaf(sessionName: "pmux-repo-main"),
-            second: .leaf(sessionName: "pmux-repo-main-1")
+            first: .leaf(sessionName: "amux-repo-main"),
+            second: .leaf(sessionName: "amux-repo-main-1")
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
@@ -106,15 +106,15 @@ final class SplitNodeTests: XCTestCase {
     }
 
     func testNextPaneIndex_NoPanes() {
-        let node = SplitNode.leaf(id: "a", surfaceId: "s1", sessionName: "pmux-repo-main")
-        XCTAssertEqual(node.nextPaneIndex(baseName: "pmux-repo-main"), 1)
+        let node = SplitNode.leaf(id: "a", surfaceId: "s1", sessionName: "amux-repo-main")
+        XCTAssertEqual(node.nextPaneIndex(baseName: "amux-repo-main"), 1)
     }
 
     func testNextPaneIndex_WithExistingPanes() {
-        let left = SplitNode.leaf(id: "a", surfaceId: "s1", sessionName: "pmux-repo-main")
-        let right = SplitNode.leaf(id: "b", surfaceId: "s2", sessionName: "pmux-repo-main-1")
+        let left = SplitNode.leaf(id: "a", surfaceId: "s1", sessionName: "amux-repo-main")
+        let right = SplitNode.leaf(id: "b", surfaceId: "s2", sessionName: "amux-repo-main-1")
         let split = SplitNode.split(id: "s", axis: .horizontal, ratio: 0.5, first: left, second: right)
-        XCTAssertEqual(split.nextPaneIndex(baseName: "pmux-repo-main"), 2)
+        XCTAssertEqual(split.nextPaneIndex(baseName: "amux-repo-main"), 2)
     }
 }
 ```
@@ -125,7 +125,7 @@ Run: `xcodegen generate`
 
 - [ ] **Step 3: Run tests to verify they fail**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/SplitNodeTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/SplitNodeTests 2>&1 | tail -5`
 Expected: FAIL — `SplitNode` type not found
 
 - [ ] **Step 4: Implement SplitNode and CodableSplitNode**
@@ -328,14 +328,14 @@ indirect enum CodableSplitNode: Codable {
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/SplitNodeTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/SplitNodeTests 2>&1 | tail -5`
 Expected: All 7 tests PASS
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add Sources/Terminal/SplitNode.swift Tests/SplitNodeTests.swift
-xcodegen generate && git add pmux.xcodeproj
+xcodegen generate && git add amux.xcodeproj
 git commit -m "feat: add SplitNode data model with Codable persistence"
 ```
 
@@ -355,23 +355,23 @@ Add to `Tests/SplitNodeTests.swift`:
 final class SplitTreeTests: XCTestCase {
 
     func testInitialState() {
-        let tree = SplitTree(worktreePath: "/repo/main", rootLeafId: "a", surfaceId: "s1", sessionName: "pmux-repo-main")
+        let tree = SplitTree(worktreePath: "/repo/main", rootLeafId: "a", surfaceId: "s1", sessionName: "amux-repo-main")
         XCTAssertEqual(tree.focusedId, "a")
         XCTAssertEqual(tree.leafCount, 1)
         XCTAssertEqual(tree.allSurfaceIds.count, 1)
     }
 
     func testSplitFocusedLeaf() {
-        let tree = SplitTree(worktreePath: "/repo/main", rootLeafId: "a", surfaceId: "s1", sessionName: "pmux-repo-main")
-        let newLeafId = tree.splitFocusedLeaf(axis: .horizontal, newLeafId: "b", newSurfaceId: "s2", newSessionName: "pmux-repo-main-1")
+        let tree = SplitTree(worktreePath: "/repo/main", rootLeafId: "a", surfaceId: "s1", sessionName: "amux-repo-main")
+        let newLeafId = tree.splitFocusedLeaf(axis: .horizontal, newLeafId: "b", newSurfaceId: "s2", newSessionName: "amux-repo-main-1")
         XCTAssertEqual(newLeafId, "b")
         XCTAssertEqual(tree.focusedId, "b")
         XCTAssertEqual(tree.leafCount, 2)
     }
 
     func testCloseLeaf_PromotesSibling() {
-        let tree = SplitTree(worktreePath: "/repo/main", rootLeafId: "a", surfaceId: "s1", sessionName: "pmux-repo-main")
-        _ = tree.splitFocusedLeaf(axis: .horizontal, newLeafId: "b", newSurfaceId: "s2", newSessionName: "pmux-repo-main-1")
+        let tree = SplitTree(worktreePath: "/repo/main", rootLeafId: "a", surfaceId: "s1", sessionName: "amux-repo-main")
+        _ = tree.splitFocusedLeaf(axis: .horizontal, newLeafId: "b", newSurfaceId: "s2", newSessionName: "amux-repo-main-1")
         // Focus is on "b", close it
         let closed = tree.closeFocusedLeaf()
         XCTAssertEqual(closed?.id, "b")
@@ -380,22 +380,22 @@ final class SplitTreeTests: XCTestCase {
     }
 
     func testCloseLeaf_LastPaneCannotClose() {
-        let tree = SplitTree(worktreePath: "/repo/main", rootLeafId: "a", surfaceId: "s1", sessionName: "pmux-repo-main")
+        let tree = SplitTree(worktreePath: "/repo/main", rootLeafId: "a", surfaceId: "s1", sessionName: "amux-repo-main")
         let closed = tree.closeFocusedLeaf()
         XCTAssertNil(closed)
         XCTAssertEqual(tree.leafCount, 1)
     }
 
     func testNextSessionName() {
-        let tree = SplitTree(worktreePath: "/repo/main", rootLeafId: "a", surfaceId: "s1", sessionName: "pmux-repo-main")
-        XCTAssertEqual(tree.nextSessionName(), "pmux-repo-main-1")
-        _ = tree.splitFocusedLeaf(axis: .horizontal, newLeafId: "b", newSurfaceId: "s2", newSessionName: "pmux-repo-main-1")
-        XCTAssertEqual(tree.nextSessionName(), "pmux-repo-main-2")
+        let tree = SplitTree(worktreePath: "/repo/main", rootLeafId: "a", surfaceId: "s1", sessionName: "amux-repo-main")
+        XCTAssertEqual(tree.nextSessionName(), "amux-repo-main-1")
+        _ = tree.splitFocusedLeaf(axis: .horizontal, newLeafId: "b", newSurfaceId: "s2", newSessionName: "amux-repo-main-1")
+        XCTAssertEqual(tree.nextSessionName(), "amux-repo-main-2")
     }
 
     func testAllSurfaceIds() {
-        let tree = SplitTree(worktreePath: "/repo/main", rootLeafId: "a", surfaceId: "s1", sessionName: "pmux-repo-main")
-        _ = tree.splitFocusedLeaf(axis: .horizontal, newLeafId: "b", newSurfaceId: "s2", newSessionName: "pmux-repo-main-1")
+        let tree = SplitTree(worktreePath: "/repo/main", rootLeafId: "a", surfaceId: "s1", sessionName: "amux-repo-main")
+        _ = tree.splitFocusedLeaf(axis: .horizontal, newLeafId: "b", newSurfaceId: "s2", newSessionName: "amux-repo-main-1")
         let ids = tree.allSurfaceIds
         XCTAssertTrue(ids.contains("s1"))
         XCTAssertTrue(ids.contains("s2"))
@@ -405,7 +405,7 @@ final class SplitTreeTests: XCTestCase {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/SplitTreeTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/SplitTreeTests 2>&1 | tail -5`
 Expected: FAIL — `SplitTree` type not found
 
 - [ ] **Step 3: Implement SplitTree**
@@ -496,7 +496,7 @@ class SplitTree {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/SplitTreeTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/SplitTreeTests 2>&1 | tail -5`
 Expected: All 6 tests PASS
 
 - [ ] **Step 5: Regenerate Xcode project**
@@ -506,7 +506,7 @@ Run: `xcodegen generate`
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Sources/Terminal/SplitTree.swift Tests/SplitNodeTests.swift pmux.xcodeproj
+git add Sources/Terminal/SplitTree.swift Tests/SplitNodeTests.swift amux.xcodeproj
 git commit -m "feat: add SplitTree class with split/close/focus mutations"
 ```
 
@@ -609,13 +609,13 @@ class DividerView: NSView {
 
 - [ ] **Step 2: Regenerate Xcode project and verify it compiles**
 
-Run: `xcodegen generate && xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodegen generate && xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add Sources/UI/Split/DividerView.swift pmux.xcodeproj
+git add Sources/UI/Split/DividerView.swift amux.xcodeproj
 git commit -m "feat: add DividerView with drag, hover, and double-click"
 ```
 
@@ -632,7 +632,7 @@ git commit -m "feat: add DividerView with drag, hover, and double-click"
 ```swift
 // Tests/SplitContainerLayoutTests.swift
 import XCTest
-@testable import pmux
+@testable import amux
 
 final class SplitContainerLayoutTests: XCTestCase {
 
@@ -688,7 +688,7 @@ final class SplitContainerLayoutTests: XCTestCase {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/SplitContainerLayoutTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/SplitContainerLayoutTests 2>&1 | tail -5`
 Expected: FAIL
 
 - [ ] **Step 3: Implement SplitContainerView**
@@ -898,18 +898,18 @@ class SplitContainerView: NSView, DividerDelegate {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/SplitContainerLayoutTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/SplitContainerLayoutTests 2>&1 | tail -5`
 Expected: All 3 tests PASS
 
 - [ ] **Step 5: Regenerate Xcode project and verify full build**
 
-Run: `xcodegen generate && xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodegen generate && xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Sources/UI/Split/SplitContainerView.swift Tests/SplitContainerLayoutTests.swift pmux.xcodeproj
+git add Sources/UI/Split/SplitContainerView.swift Tests/SplitContainerLayoutTests.swift amux.xcodeproj
 git commit -m "feat: add SplitContainerView with frame-based recursive layout"
 ```
 
@@ -980,14 +980,14 @@ In `Sources/Core/Config.swift`, add the new field:
 
 - [ ] **Step 2: Verify build and existing tests pass**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -10`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -10`
 Expected: All tests PASS (backward compatible — `decodeIfPresent` defaults to `[:]`)
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add Sources/Core/SurfaceRegistry.swift Sources/Core/Config.swift
-xcodegen generate && git add pmux.xcodeproj
+xcodegen generate && git add amux.xcodeproj
 git commit -m "feat: add SurfaceRegistry and splitLayouts Config field"
 ```
 
@@ -1011,7 +1011,7 @@ Add to `SessionManager` enum in `Sources/Core/SessionManager.swift`:
 
 - [ ] **Step 2: Verify build**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 3: Commit**
@@ -1272,12 +1272,12 @@ In `MainWindowController`, update all calls from old API to new:
 
 - [ ] **Step 6: Verify full build**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -10`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -10`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 7: Run all tests**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -10`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -10`
 Expected: All tests PASS
 
 - [ ] **Step 8: Commit**
@@ -1292,15 +1292,15 @@ git commit -m "feat: integrate SplitTree into SurfaceManager, StatusPublisher, a
 ### Task 8: MainWindowController — Keybindings + Integration
 
 **Files:**
-- Modify: `Sources/App/MainWindowController.swift:1120-1129` (PmuxWindow)
+- Modify: `Sources/App/MainWindowController.swift:1120-1129` (AmuxWindow)
 - Modify: `Sources/App/MainWindowController.swift:880-927` (surface creation)
 
-- [ ] **Step 1: Add split keybindings to PmuxWindow**
+- [ ] **Step 1: Add split keybindings to AmuxWindow**
 
-Expand `PmuxWindow.sendEvent()` at line 1120:
+Expand `AmuxWindow.sendEvent()` at line 1120:
 
 ```swift
-class PmuxWindow: NSWindow {
+class AmuxWindow: NSWindow {
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown {
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -1479,12 +1479,12 @@ Add these methods to `MainWindowController`:
 
 - [ ] **Step 3: Verify full build**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -10`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -10`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 4: Run all tests**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -10`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -10`
 Expected: All tests PASS
 
 - [ ] **Step 5: Commit**
@@ -1509,7 +1509,7 @@ This is a minor UI addition — the exact location depends on `AgentCardView` or
 
 - [ ] **Step 2: Verify build**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 3: Commit**
@@ -1614,7 +1614,7 @@ zmx `attach` is idempotent — if the session exists it reattaches, if not it cr
 
 - [ ] **Step 3: Verify build + test**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -10`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -10`
 Expected: All tests PASS
 
 - [ ] **Step 4: Commit**
@@ -1688,7 +1688,7 @@ In `UITests/Pages/AppPage.swift`, add:
 // UITests/Tests/SplitPaneTests.swift
 import XCTest
 
-class SplitPaneTests: PmuxUITestCase {
+class SplitPaneTests: AmuxUITestCase {
 
     /// Test: Cmd+D creates a horizontal split, producing 2 panes and 1 divider.
     func testHorizontalSplit() {
@@ -1789,12 +1789,12 @@ class SplitPaneTests: PmuxUITestCase {
 
 - [ ] **Step 5: Regenerate Xcode project and verify build**
 
-Run: `xcodegen generate && xcodebuild -project pmux.xcodeproj -scheme pmuxUITests -configuration Debug build 2>&1 | tail -5`
+Run: `xcodegen generate && xcodebuild -project amux.xcodeproj -scheme amuxUITests -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add UITests/Pages/SplitPanePage.swift UITests/Tests/SplitPaneTests.swift UITests/Pages/AppPage.swift Sources/UI/Split/SplitContainerView.swift Sources/UI/Split/DividerView.swift pmux.xcodeproj
+git add UITests/Pages/SplitPanePage.swift UITests/Tests/SplitPaneTests.swift UITests/Pages/AppPage.swift Sources/UI/Split/SplitContainerView.swift Sources/UI/Split/DividerView.swift amux.xcodeproj
 git commit -m "test: add UI automation tests for split pane operations"
 ```

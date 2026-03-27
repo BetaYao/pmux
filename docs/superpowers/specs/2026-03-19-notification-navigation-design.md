@@ -43,7 +43,7 @@ MainWindowController 收到 .navigateToWorktree
 
 ```swift
 extension Notification.Name {
-    static let navigateToWorktree = Notification.Name("pmux.navigateToWorktree")
+    static let navigateToWorktree = Notification.Name("amux.navigateToWorktree")
 }
 ```
 

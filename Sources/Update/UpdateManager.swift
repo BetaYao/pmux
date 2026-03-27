@@ -51,7 +51,7 @@ class UpdateManager: NSObject {
 
             // Move to temp directory with unique name
             let tempDir = FileManager.default.temporaryDirectory
-                .appendingPathComponent("pmux-update-\(UUID().uuidString)")
+                .appendingPathComponent("amux-update-\(UUID().uuidString)")
             let zipPath = tempDir.appendingPathComponent("update.zip")
 
             do {
@@ -85,7 +85,7 @@ class UpdateManager: NSObject {
 
         // Write helper script to user-private temp directory
         let scriptPath = FileManager.default.temporaryDirectory
-            .appendingPathComponent("pmux-updater-\(UUID().uuidString).sh")
+            .appendingPathComponent("amux-updater-\(UUID().uuidString).sh")
 
         let script = """
         #!/bin/bash

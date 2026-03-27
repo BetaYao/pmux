@@ -17,7 +17,7 @@ enum MenuBuilder {
         checkUpdateItem.target = target
         appMenu.addItem(checkUpdateItem)
         appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(withTitle: "Quit pmux", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Quit amux", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenuItem.submenu = appMenu
         mainMenu.addItem(appMenuItem)
 
@@ -110,7 +110,7 @@ enum MenuBuilder {
         keyboardShortcutsItem.target = target
         helpMenu.addItem(keyboardShortcutsItem)
         helpMenu.addItem(NSMenuItem.separator())
-        let docsItem = NSMenuItem(title: "pmux Documentation", action: #selector(MainWindowController.openDocumentation), keyEquivalent: "")
+        let docsItem = NSMenuItem(title: "amux Documentation", action: #selector(MainWindowController.openDocumentation), keyEquivalent: "")
         docsItem.target = target
         helpMenu.addItem(docsItem)
         helpMenuItem.submenu = helpMenu

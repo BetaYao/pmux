@@ -21,7 +21,7 @@
 ```swift
 // In Tests/ConfigTests.swift (or a new file Tests/SessionRestoreConfigTests.swift)
 import XCTest
-@testable import pmux
+@testable import amux
 
 final class SessionRestoreConfigTests: XCTestCase {
     func testSessionFieldsDecodeFromJSON() throws {
@@ -63,7 +63,7 @@ final class SessionRestoreConfigTests: XCTestCase {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/SessionRestoreConfigTests 2>&1 | tail -20`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/SessionRestoreConfigTests 2>&1 | tail -20`
 Expected: Compile error — `activeTabRepoPath`, `activeWorktreePaths`, `focusedPaneIds` don't exist on Config
 
 - [ ] **Step 3: Add the three fields to Config**
@@ -106,7 +106,7 @@ focusedPaneIds = try container.decodeIfPresent([String: String].self, forKey: .f
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/SessionRestoreConfigTests 2>&1 | tail -20`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/SessionRestoreConfigTests 2>&1 | tail -20`
 Expected: All 3 tests PASS
 
 - [ ] **Step 5: Commit**
@@ -153,7 +153,7 @@ saveSessionState()
 
 - [ ] **Step 3: Build to verify compilation**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 4: Commit**
@@ -212,7 +212,7 @@ Add the handler in the Session State Persistence section:
 
 - [ ] **Step 3: Build to verify compilation**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 4: Commit**
@@ -274,7 +274,7 @@ Add handler:
 
 - [ ] **Step 3: Build to verify compilation**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 4: Commit**
@@ -350,7 +350,7 @@ Note: `restoreSessionState()` calls `switchToTab(0)` as its fallback, which embe
 
 - [ ] **Step 3: Build to verify compilation**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 4: Commit**
@@ -376,17 +376,17 @@ Pane leaf IDs are generated at runtime (UUIDs). When split layouts are restored 
 func testFocusedPaneIdsBySessionName() throws {
     let json = """
     {
-        "focused_pane_ids": {"/repos/proj/wt": "pmux-proj-feat-1"}
+        "focused_pane_ids": {"/repos/proj/wt": "amux-proj-feat-1"}
     }
     """.data(using: .utf8)!
     let config = try JSONDecoder().decode(Config.self, from: json)
-    XCTAssertEqual(config.focusedPaneIds["/repos/proj/wt"], "pmux-proj-feat-1")
+    XCTAssertEqual(config.focusedPaneIds["/repos/proj/wt"], "amux-proj-feat-1")
 }
 ```
 
 - [ ] **Step 2: Run test to verify it passes (field already exists)**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/SessionRestoreConfigTests/testFocusedPaneIdsBySessionName 2>&1 | tail -10`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/SessionRestoreConfigTests/testFocusedPaneIdsBySessionName 2>&1 | tail -10`
 Expected: PASS
 
 - [ ] **Step 3: Update save to store session name instead of leaf ID**
@@ -427,7 +427,7 @@ if let savedSessionName = config.focusedPaneIds[savedWorktreePath],
 
 - [ ] **Step 5: Build to verify compilation**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 6: Commit**
@@ -460,7 +460,7 @@ if let worktreePath = tab.worktrees.first(where: { $0.branch == thread })?.path 
 
 - [ ] **Step 2: Build to verify compilation**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 3: Commit**
@@ -476,11 +476,11 @@ git commit -m "feat: save worktree selection from dashboard spotlight navigation
 
 - [ ] **Step 1: Build and run the app**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5`
 
 - [ ] **Step 2: Manual verification**
 
-1. Launch pmux
+1. Launch amux
 2. Click into a project tab (not dashboard)
 3. Select a non-default worktree in the sidebar
 4. If split panes exist, click a non-first pane
@@ -490,7 +490,7 @@ Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build
 
 - [ ] **Step 3: Run all tests**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -20`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -20`
 Expected: All tests PASS
 
 - [ ] **Step 4: Final commit if any cleanup needed**

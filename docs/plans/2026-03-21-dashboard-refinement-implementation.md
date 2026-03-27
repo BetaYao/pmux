@@ -6,7 +6,7 @@
 
 **Architecture:** Centralize dashboard top spacing in `DashboardViewController` so all four layouts share one top baseline. Introduce explicit typography tokens per card component (`AgentCardView`, `MiniCardView`, `FocusPanelView`) to remove undersized text and enforce consistent hierarchy. Simplify focus-panel controls and replace hardcoded grayscale text colors with semantic tokens to reduce visual noise and improve native consistency.
 
-**Tech Stack:** Swift 5.10, AppKit, XCTest, XCUITest, existing pmux semantic color system.
+**Tech Stack:** Swift 5.10, AppKit, XCTest, XCUITest, existing amux semantic color system.
 
 ---
 
@@ -68,8 +68,8 @@ func testDashboardTypographyBaselines_AreMacReadable() {
 **Step 3: Run tests to verify failures**
 
 Run:
-- `xcodebuild -project pmux.xcodeproj -scheme pmuxUITests -configuration Debug test -only-testing:pmuxUITests/RegressionTests/testDashboardLayoutsStartBelowTitlebarWithGap`
-- `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/GridLayoutTests/testDashboardTypographyBaselines_AreMacReadable`
+- `xcodebuild -project amux.xcodeproj -scheme amuxUITests -configuration Debug test -only-testing:amuxUITests/RegressionTests/testDashboardLayoutsStartBelowTitlebarWithGap`
+- `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/GridLayoutTests/testDashboardTypographyBaselines_AreMacReadable`
 
 Expected: FAIL because gap/typography contracts are not yet implemented.
 
@@ -107,7 +107,7 @@ Ensure only titlebar-to-layout gap changes; internal layout spacing between focu
 **Step 4: Run focused UI test**
 
 Run:
-- `xcodebuild -project pmux.xcodeproj -scheme pmuxUITests -configuration Debug test -only-testing:pmuxUITests/RegressionTests/testDashboardLayoutsStartBelowTitlebarWithGap`
+- `xcodebuild -project amux.xcodeproj -scheme amuxUITests -configuration Debug test -only-testing:amuxUITests/RegressionTests/testDashboardLayoutsStartBelowTitlebarWithGap`
 
 Expected: PASS.
 
@@ -153,7 +153,7 @@ Rebalance content compression/hugging priorities only where required so larger t
 **Step 4: Run typography unit test**
 
 Run:
-- `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/GridLayoutTests/testDashboardTypographyBaselines_AreMacReadable`
+- `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/GridLayoutTests/testDashboardTypographyBaselines_AreMacReadable`
 
 Expected: PASS.
 
@@ -194,8 +194,8 @@ Ensure core test validates focus panel still has a working project-entry action 
 **Step 5: Run targeted regressions**
 
 Run:
-- `xcodebuild -project pmux.xcodeproj -scheme pmuxUITests -configuration Debug test -only-testing:pmuxUITests/CoreTests`
-- `xcodebuild -project pmux.xcodeproj -scheme pmuxUITests -configuration Debug test -only-testing:pmuxUITests/RegressionTests/testSwitchToTopSmallLayout -only-testing:pmuxUITests/RegressionTests/testSwitchToTopLargeLayout -only-testing:pmuxUITests/RegressionTests/testProjectTabRemainsAfterRepeatedDashboardSwitches`
+- `xcodebuild -project amux.xcodeproj -scheme amuxUITests -configuration Debug test -only-testing:amuxUITests/CoreTests`
+- `xcodebuild -project amux.xcodeproj -scheme amuxUITests -configuration Debug test -only-testing:amuxUITests/RegressionTests/testSwitchToTopSmallLayout -only-testing:amuxUITests/RegressionTests/testSwitchToTopLargeLayout -only-testing:amuxUITests/RegressionTests/testProjectTabRemainsAfterRepeatedDashboardSwitches`
 
 Expected: PASS.
 
@@ -216,15 +216,15 @@ git commit -m "refactor: simplify dashboard cards for native macOS feel"
 **Step 1: Run impacted unit tests**
 
 Run:
-- `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/GridLayoutTests`
+- `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/GridLayoutTests`
 
 Expected: PASS.
 
 **Step 2: Run targeted UI regression suite**
 
 Run:
-- `xcodebuild -project pmux.xcodeproj -scheme pmuxUITests -configuration Debug test -only-testing:pmuxUITests/CoreTests/testViewMenuOpensAndHasAllOptions -only-testing:pmuxUITests/CoreTests/testSwitchToGridLayout -only-testing:pmuxUITests/CoreTests/testSwitchToLeftRightLayout`
-- `xcodebuild -project pmux.xcodeproj -scheme pmuxUITests -configuration Debug test -only-testing:pmuxUITests/RegressionTests`
+- `xcodebuild -project amux.xcodeproj -scheme amuxUITests -configuration Debug test -only-testing:amuxUITests/CoreTests/testViewMenuOpensAndHasAllOptions -only-testing:amuxUITests/CoreTests/testSwitchToGridLayout -only-testing:amuxUITests/CoreTests/testSwitchToLeftRightLayout`
+- `xcodebuild -project amux.xcodeproj -scheme amuxUITests -configuration Debug test -only-testing:amuxUITests/RegressionTests`
 
 Expected: PASS.
 

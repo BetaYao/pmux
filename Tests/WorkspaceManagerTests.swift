@@ -1,5 +1,5 @@
 import XCTest
-@testable import pmux
+@testable import amux
 
 final class WorkspaceManagerTests: XCTestCase {
     var manager: WorkspaceManager!

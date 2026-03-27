@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Replace custom title bar traffic lights with native macOS window controls using `NSToolbar` + title bar accessory while preserving current pmux top-bar style and fixing first-click project-tab switching reliability.
+**Goal:** Replace custom title bar traffic lights with native macOS window controls using `NSToolbar` + title bar accessory while preserving current amux top-bar style and fixing first-click project-tab switching reliability.
 
 **Architecture:** Keep `TitleBarView` as the visual control surface for dashboard/project tabs and right-side actions, but remove custom traffic-light handling and host the bar in native titlebar infrastructure. Move to `NSToolbar`/titlebar accessory composition, use system window buttons for close/minimize/zoom, and simplify project-tab click handling through standard controls to avoid first-click event loss.
 
@@ -42,7 +42,7 @@ func testFirstProjectTabClickWorksFromColdLaunch() {
 **Step 2: Run test to verify it fails**
 
 Run:
-`xcodebuild -project pmux.xcodeproj -scheme pmuxUITests -configuration Debug test -only-testing:pmuxUITests/RegressionTests/testFirstProjectTabClickWorksFromColdLaunch`
+`xcodebuild -project amux.xcodeproj -scheme amuxUITests -configuration Debug test -only-testing:amuxUITests/RegressionTests/testFirstProjectTabClickWorksFromColdLaunch`
 
 Expected: FAIL (intermittent or deterministic) showing project view not opened on first click.
 
@@ -79,7 +79,7 @@ func testTitleBarUsesSystemWindowButtonsConfiguration() {
 **Step 2: Run test to verify it fails**
 
 Run:
-`xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/GridLayoutTests/testTitleBarUsesSystemWindowButtonsConfiguration`
+`xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/GridLayoutTests/testTitleBarUsesSystemWindowButtonsConfiguration`
 
 Expected: FAIL because current code hides standard buttons and uses custom dots.
 
@@ -97,7 +97,7 @@ Expected: FAIL because current code hides standard buttons and uses custom dots.
 **Step 4: Run tests to verify pass**
 
 Run:
-- `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/GridLayoutTests`
+- `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/GridLayoutTests`
 
 Expected: PASS with no regressions in existing title-bar tests.
 
@@ -132,7 +132,7 @@ func testTitleBarControlsRemainAccessibleAfterNativeHosting() {
 **Step 2: Run test to verify it fails**
 
 Run:
-`xcodebuild -project pmux.xcodeproj -scheme pmuxUITests -configuration Debug test -only-testing:pmuxUITests/RegressionTests/testTitleBarControlsRemainAccessibleAfterNativeHosting`
+`xcodebuild -project amux.xcodeproj -scheme amuxUITests -configuration Debug test -only-testing:amuxUITests/RegressionTests/testTitleBarControlsRemainAccessibleAfterNativeHosting`
 
 Expected: FAIL until identifiers and hosting are correctly wired.
 
@@ -147,9 +147,9 @@ Expected: FAIL until identifiers and hosting are correctly wired.
 **Step 4: Run focused UI tests**
 
 Run:
-- `xcodebuild -project pmux.xcodeproj -scheme pmuxUITests -configuration Debug test -only-testing:pmuxUITests/RegressionTests/testSwitchToTopSmallLayout`
-- `xcodebuild -project pmux.xcodeproj -scheme pmuxUITests -configuration Debug test -only-testing:pmuxUITests/RegressionTests/testSwitchToTopLargeLayout`
-- `xcodebuild -project pmux.xcodeproj -scheme pmuxUITests -configuration Debug test -only-testing:pmuxUITests/RegressionTests/testTitleBarControlsRemainAccessibleAfterNativeHosting`
+- `xcodebuild -project amux.xcodeproj -scheme amuxUITests -configuration Debug test -only-testing:amuxUITests/RegressionTests/testSwitchToTopSmallLayout`
+- `xcodebuild -project amux.xcodeproj -scheme amuxUITests -configuration Debug test -only-testing:amuxUITests/RegressionTests/testSwitchToTopLargeLayout`
+- `xcodebuild -project amux.xcodeproj -scheme amuxUITests -configuration Debug test -only-testing:amuxUITests/RegressionTests/testTitleBarControlsRemainAccessibleAfterNativeHosting`
 
 Expected: PASS.
 
@@ -157,7 +157,7 @@ Expected: PASS.
 
 ```bash
 git add Sources/App/MainWindowController.swift Sources/UI/TitleBar/TitleBarView.swift UITests/Pages/TitleBarPage.swift UITests/Tests/RegressionTests.swift
-git commit -m "refactor: host pmux top bar with native macOS titlebar components"
+git commit -m "refactor: host amux top bar with native macOS titlebar components"
 ```
 
 ---
@@ -172,7 +172,7 @@ git commit -m "refactor: host pmux top bar with native macOS titlebar components
 **Step 1: Confirm failing regression from Task 1 remains representative**
 
 Run:
-`xcodebuild -project pmux.xcodeproj -scheme pmuxUITests -configuration Debug test -only-testing:pmuxUITests/RegressionTests/testFirstProjectTabClickWorksFromColdLaunch -test-iterations 5`
+`xcodebuild -project amux.xcodeproj -scheme amuxUITests -configuration Debug test -only-testing:amuxUITests/RegressionTests/testFirstProjectTabClickWorksFromColdLaunch -test-iterations 5`
 
 Expected: at least one failing iteration before fix in affected environments.
 
@@ -185,8 +185,8 @@ Expected: at least one failing iteration before fix in affected environments.
 **Step 3: Run regression tests**
 
 Run:
-- `xcodebuild -project pmux.xcodeproj -scheme pmuxUITests -configuration Debug test -only-testing:pmuxUITests/RegressionTests/testFirstProjectTabClickWorksFromColdLaunch -test-iterations 8`
-- `xcodebuild -project pmux.xcodeproj -scheme pmuxUITests -configuration Debug test -only-testing:pmuxUITests/RegressionTests/testProjectTabRemainsAfterRepeatedDashboardSwitches -test-iterations 8`
+- `xcodebuild -project amux.xcodeproj -scheme amuxUITests -configuration Debug test -only-testing:amuxUITests/RegressionTests/testFirstProjectTabClickWorksFromColdLaunch -test-iterations 8`
+- `xcodebuild -project amux.xcodeproj -scheme amuxUITests -configuration Debug test -only-testing:amuxUITests/RegressionTests/testProjectTabRemainsAfterRepeatedDashboardSwitches -test-iterations 8`
 
 Expected: PASS all iterations.
 
@@ -207,14 +207,14 @@ git commit -m "fix: make project tabs reliably switch on first click"
 **Step 1: Run unit tests for impacted modules**
 
 Run:
-`xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/GridLayoutTests`
+`xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/GridLayoutTests`
 
 Expected: PASS.
 
 **Step 2: Run selected UI regression suite**
 
 Run:
-`xcodebuild -project pmux.xcodeproj -scheme pmuxUITests -configuration Debug test -only-testing:pmuxUITests/RegressionTests`
+`xcodebuild -project amux.xcodeproj -scheme amuxUITests -configuration Debug test -only-testing:amuxUITests/RegressionTests`
 
 Expected: PASS.
 

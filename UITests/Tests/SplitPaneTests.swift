@@ -1,6 +1,6 @@
 import XCTest
 
-class SplitPaneTests: PmuxUITestCase {
+class SplitPaneTests: AmuxUITestCase {
 
     func testHorizontalSplit() {
         guard page.repo.terminal.waitForExistence(timeout: 10) else {

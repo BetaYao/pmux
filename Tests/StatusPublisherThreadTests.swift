@@ -1,5 +1,5 @@
 import XCTest
-@testable import pmux
+@testable import amux
 
 class StatusPublisherThreadTests: XCTestCase {
     func testConcurrentUpdateAndPollDoesNotCrash() {

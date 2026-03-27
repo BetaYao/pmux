@@ -1,5 +1,5 @@
 import XCTest
-@testable import pmux
+@testable import amux
 
 final class GitDiffTests: XCTestCase {
 
@@ -151,7 +151,7 @@ final class GitDiffTests: XCTestCase {
 
     func testChangedFilesWithRealRepo() {
         let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("pmux-diff-test-\(UUID().uuidString)")
+            .appendingPathComponent("amux-diff-test-\(UUID().uuidString)")
         let repoPath = tempDir.appendingPathComponent("repo").path
 
         defer { try? FileManager.default.removeItem(at: tempDir) }
@@ -173,7 +173,7 @@ final class GitDiffTests: XCTestCase {
 
     func testDiffWithRealRepo() {
         let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("pmux-diff-test-\(UUID().uuidString)")
+            .appendingPathComponent("amux-diff-test-\(UUID().uuidString)")
         let repoPath = tempDir.appendingPathComponent("repo").path
 
         defer { try? FileManager.default.removeItem(at: tempDir) }

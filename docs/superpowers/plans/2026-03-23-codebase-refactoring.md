@@ -1,4 +1,4 @@
-# pmux Codebase Refactoring Plan
+# amux Codebase Refactoring Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -72,7 +72,7 @@ func testCreateWithCommandCallsCreateSurface() {
 
 - [ ] **Step 2: Run test to verify it passes (testing graceful failure)**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/TerminalSurfaceReparentTests/testCreateWithCommandCallsCreateSurface 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/TerminalSurfaceReparentTests/testCreateWithCommandCallsCreateSurface 2>&1 | tail -5`
 Expected: PASS
 
 - [ ] **Step 3: Refactor _createWithCommand to make pointer lifetime explicit**
@@ -113,7 +113,7 @@ private func _createWithCommand(app: ghostty_app_t, container: NSView, workingDi
 
 - [ ] **Step 4: Run existing tests to verify no regressions**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/TerminalSurfaceReparentTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/TerminalSurfaceReparentTests 2>&1 | tail -5`
 Expected: All PASS
 
 - [ ] **Step 5: Commit**
@@ -204,7 +204,7 @@ func initialize() {
 
 - [ ] **Step 2: Run build to verify compilation**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -3`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -3`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 3: Commit**
@@ -229,7 +229,7 @@ git commit -m "fix: use defer to prevent config leak on GhosttyBridge init failu
 ```swift
 // Tests/StatusPublisherThreadTests.swift
 import XCTest
-@testable import pmux
+@testable import amux
 
 class StatusPublisherThreadTests: XCTestCase {
     func testConcurrentUpdateAndPollDoesNotCrash() {
@@ -252,7 +252,7 @@ class StatusPublisherThreadTests: XCTestCase {
 
 - [ ] **Step 2: Run test — may crash or pass depending on timing**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/StatusPublisherThreadTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/StatusPublisherThreadTests 2>&1 | tail -5`
 
 - [ ] **Step 3: Add NSLock to StatusPublisher**
 
@@ -334,12 +334,12 @@ lock.unlock()
 
 - [ ] **Step 4: Run thread safety test**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/StatusPublisherThreadTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/StatusPublisherThreadTests 2>&1 | tail -5`
 Expected: PASS
 
 - [ ] **Step 5: Run all StatusPublisher-related tests**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/StatusDetectorTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/StatusDetectorTests 2>&1 | tail -5`
 Expected: All PASS
 
 - [ ] **Step 6: Commit**
@@ -369,7 +369,7 @@ func testUnregisterCleansUpBackendsByPath() {
     AgentHead.shared.register(
         surface: surface, worktreePath: "/tmp/test-repo/main",
         branch: "main", project: "test", startedAt: nil,
-        tmuxSessionName: "pmux-test-main", backend: "zmx"
+        tmuxSessionName: "amux-test-main", backend: "zmx"
     )
 
     AgentHead.shared.unregister(terminalID: surface.id)
@@ -382,7 +382,7 @@ func testUnregisterCleansUpBackendsByPath() {
 
 - [ ] **Step 2: Run test**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/AgentHeadTests/testUnregisterCleansUpBackendsByPath 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/AgentHeadTests/testUnregisterCleansUpBackendsByPath 2>&1 | tail -5`
 
 - [ ] **Step 3: Fix the unregister method**
 
@@ -409,7 +409,7 @@ func unregister(terminalID: String) {
 
 - [ ] **Step 5: Run all AgentHead tests**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/AgentHeadTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/AgentHeadTests 2>&1 | tail -5`
 Expected: All PASS
 
 - [ ] **Step 6: Commit**
@@ -457,7 +457,7 @@ func applicationWillTerminate(_ notification: Notification) {
 
 - [ ] **Step 3: Run build**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -3`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -3`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 4: Commit**
@@ -484,7 +484,7 @@ Centralize the repeated Process spawning pattern found in MainWindowController (
 ```swift
 // Tests/ProcessRunnerTests.swift
 import XCTest
-@testable import pmux
+@testable import amux
 
 class ProcessRunnerTests: XCTestCase {
     func testCommandExistsForKnownCommand() {
@@ -514,7 +514,7 @@ class ProcessRunnerTests: XCTestCase {
 
 - [ ] **Step 2: Run tests to see them fail**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/ProcessRunnerTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/ProcessRunnerTests 2>&1 | tail -5`
 Expected: FAIL (ProcessRunner not found)
 
 - [ ] **Step 3: Implement ProcessRunner**
@@ -593,7 +593,7 @@ enum ProcessRunner {
 
 - [ ] **Step 4: Run tests**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/ProcessRunnerTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/ProcessRunnerTests 2>&1 | tail -5`
 Expected: All PASS
 
 - [ ] **Step 5: Commit**
@@ -618,13 +618,13 @@ Centralize tmux/zmx session operations currently scattered across MainWindowCont
 ```swift
 // Tests/SessionManagerTests.swift
 import XCTest
-@testable import pmux
+@testable import amux
 
 class SessionManagerTests: XCTestCase {
     func testPersistentSessionNameSanitizesDots() {
         let name = SessionManager.persistentSessionName(for: "/Users/test/repos/my.project/feature-1")
         XCTAssertFalse(name.contains("."))
-        XCTAssertTrue(name.hasPrefix("pmux-"))
+        XCTAssertTrue(name.hasPrefix("amux-"))
     }
 
     func testPersistentSessionNameSanitizesColons() {
@@ -634,14 +634,14 @@ class SessionManagerTests: XCTestCase {
 
     func testPersistentSessionNameFormat() {
         let name = SessionManager.persistentSessionName(for: "/Users/test/myrepo/feature-branch")
-        XCTAssertEqual(name, "pmux-myrepo-feature-branch")
+        XCTAssertEqual(name, "amux-myrepo-feature-branch")
     }
 }
 ```
 
 - [ ] **Step 2: Run tests to see them fail**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/SessionManagerTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/SessionManagerTests 2>&1 | tail -5`
 Expected: FAIL
 
 - [ ] **Step 3: Implement SessionManager**
@@ -652,12 +652,12 @@ import Foundation
 
 enum SessionManager {
     /// Generate a stable persistent session name from a worktree path.
-    /// Format: pmux-<parent>-<name>, with dots and colons replaced by underscores.
+    /// Format: amux-<parent>-<name>, with dots and colons replaced by underscores.
     static func persistentSessionName(for path: String) -> String {
         let url = URL(fileURLWithPath: path)
         let parent = url.deletingLastPathComponent().lastPathComponent
         let name = url.lastPathComponent
-        return "pmux-\(parent)-\(name)"
+        return "amux-\(parent)-\(name)"
             .replacingOccurrences(of: ".", with: "_")
             .replacingOccurrences(of: ":", with: "_")
     }
@@ -705,7 +705,7 @@ enum SessionManager {
 
 - [ ] **Step 4: Run tests**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/SessionManagerTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/SessionManagerTests 2>&1 | tail -5`
 Expected: All PASS
 
 - [ ] **Step 5: Replace usages in MainWindowController**
@@ -724,7 +724,7 @@ In `Sources/Terminal/TerminalSurface.swift`:
 
 - [ ] **Step 7: Run full test suite**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -5`
 Expected: All PASS
 
 - [ ] **Step 8: Commit**
@@ -766,7 +766,7 @@ enum MenuBuilder {
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(NSMenuItem(title: "Check for Updates...", action: #selector(MainWindowController.checkForUpdates), keyEquivalent: "u"))
         appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(withTitle: "Quit pmux", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Quit amux", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenuItem.submenu = appMenu
         mainMenu.addItem(appMenuItem)
 
@@ -824,7 +824,7 @@ enum MenuBuilder {
         let helpMenu = NSMenu(title: "Help")
         helpMenu.addItem(NSMenuItem(title: "Keyboard Shortcuts", action: #selector(MainWindowController.showKeyboardShortcuts), keyEquivalent: ""))
         helpMenu.addItem(NSMenuItem.separator())
-        helpMenu.addItem(NSMenuItem(title: "pmux Documentation", action: #selector(MainWindowController.openDocumentation), keyEquivalent: ""))
+        helpMenu.addItem(NSMenuItem(title: "amux Documentation", action: #selector(MainWindowController.openDocumentation), keyEquivalent: ""))
         helpMenuItem.submenu = helpMenu
         mainMenu.addItem(helpMenuItem)
         NSApp.helpMenu = helpMenu
@@ -849,7 +849,7 @@ Change the `@objc` menu action methods from `private` to `internal` (remove the 
 
 - [ ] **Step 3: Run build**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -3`
+Run: `xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -3`
 Expected: BUILD SUCCEEDED
 
 - [ ] **Step 4: Commit**
@@ -931,7 +931,7 @@ Remove the private `createSurface(for:)` method.
 
 - [ ] **Step 3: Run full test suite**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -5`
 Expected: All PASS
 
 - [ ] **Step 4: Commit**
@@ -1107,7 +1107,7 @@ Replace the workspace-related properties and methods with delegation to Workspac
 
 - [ ] **Step 3: Run full test suite**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -5`
 Expected: All PASS
 
 - [ ] **Step 4: Commit**
@@ -1159,7 +1159,7 @@ Change `lastViewportHashes` type from `[String: Int]` to `[String: UInt64]`.
 
 - [ ] **Step 3: Run tests**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -5`
 Expected: All PASS
 
 - [ ] **Step 4: Commit**
@@ -1222,7 +1222,7 @@ if !lowercasedMessageSkipPatterns.contains(where: { trimmedLower.contains($0) })
 
 - [ ] **Step 4: Run tests**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/StatusDetectorTests 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/StatusDetectorTests 2>&1 | tail -5`
 Expected: All PASS
 
 - [ ] **Step 5: Commit**
@@ -1287,7 +1287,7 @@ func testIsSupportedZmxVersionHandlesPrefix() {
 
 - [ ] **Step 2: Run tests**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -5`
 Expected: All PASS
 
 - [ ] **Step 3: Commit**
@@ -1321,18 +1321,18 @@ func testCommandExistsWithPath() {
 // SessionManagerTests.swift additions:
 func testSessionNameWithNestedPath() {
     let name = SessionManager.persistentSessionName(for: "/home/user/workspace/org/repo/feature")
-    XCTAssertEqual(name, "pmux-repo-feature")
+    XCTAssertEqual(name, "amux-repo-feature")
 }
 
 func testSessionNameWithSingleComponent() {
     let name = SessionManager.persistentSessionName(for: "/repo")
-    XCTAssertEqual(name, "pmux--repo")
+    XCTAssertEqual(name, "amux--repo")
 }
 ```
 
 - [ ] **Step 2: Run tests**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -5`
 Expected: All PASS
 
 - [ ] **Step 3: Commit**
@@ -1368,7 +1368,7 @@ Lines 143-152 in GhosttyBridge.swift define a `writeClipboard` static method tha
 
 - [ ] **Step 4: Run full test suite**
 
-Run: `xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -5`
+Run: `xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -5`
 Expected: All PASS
 
 - [ ] **Step 5: Commit**

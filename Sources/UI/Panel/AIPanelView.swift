@@ -177,13 +177,14 @@ final class AIPanelView: NSView, NSTextViewDelegate {
     private let inputTextView: NSTextView = {
         let tv = NSTextView()
         tv.identifier = NSUserInterfaceItemIdentifier("panel.ai.input")
-        tv.font = NSFont.systemFont(ofSize: 12)
+        tv.font = NSFont.systemFont(ofSize: 13)
         tv.textColor = SemanticColors.text
+        tv.insertionPointColor = SemanticColors.text
         tv.isRichText = false
         tv.isAutomaticQuoteSubstitutionEnabled = false
         tv.isAutomaticDashSubstitutionEnabled = false
         tv.isAutomaticTextReplacementEnabled = false
-        tv.textContainerInset = NSSize(width: 6, height: 6)
+        tv.textContainerInset = NSSize(width: 4, height: 6)
         tv.isVerticallyResizable = true
         tv.isHorizontallyResizable = false
         tv.autoresizingMask = [.width]
@@ -191,18 +192,27 @@ final class AIPanelView: NSView, NSTextViewDelegate {
     }()
 
     private let sendButton: NSButton = {
-        let button = NSButton(image: NSImage(systemSymbolName: "arrow.up", accessibilityDescription: "Add idea")!, target: nil, action: nil)
+        let button = NSButton(image: NSImage(systemSymbolName: "arrow.up.circle.fill", accessibilityDescription: "Add idea")!, target: nil, action: nil)
         button.identifier = NSUserInterfaceItemIdentifier("panel.ai.send")
         button.isBordered = false
-        button.contentTintColor = SemanticColors.text
         button.wantsLayer = true
         button.translatesAutoresizingMaskIntoConstraints = false
+        button.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 20, weight: .medium)
         return button
+    }()
+
+    private let placeholderLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "Write an idea...")
+        label.font = NSFont.systemFont(ofSize: 13)
+        label.textColor = SemanticColors.muted
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
     }()
 
     private var inputHeightConstraint: NSLayoutConstraint!
     private var contentBottomToInput: NSLayoutConstraint!
     private var contentBottomToPanel: NSLayoutConstraint!
+    private var contentStackWidth: NSLayoutConstraint?
 
     // MARK: - Empty State
 
@@ -300,6 +310,7 @@ final class AIPanelView: NSView, NSTextViewDelegate {
         addSubview(inputContainer)
         inputContainer.addSubview(inputBorder)
         inputContainer.addSubview(inputScrollView)
+        inputContainer.addSubview(placeholderLabel)
         inputContainer.addSubview(sendButton)
 
         contentScrollView.documentView = todoStack
@@ -365,9 +376,7 @@ final class AIPanelView: NSView, NSTextViewDelegate {
             contentScrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
             contentBottomToPanel,
 
-            // Content stack width
-            todoStack.widthAnchor.constraint(equalTo: contentScrollView.widthAnchor),
-            ideasStack.widthAnchor.constraint(equalTo: contentScrollView.widthAnchor),
+            // Content stack width (set dynamically in switchToTab)
 
             // Empty label
             emptyLabel.centerXAnchor.constraint(equalTo: contentScrollView.centerXAnchor),
@@ -390,9 +399,12 @@ final class AIPanelView: NSView, NSTextViewDelegate {
             inputHeightConstraint,
 
             sendButton.trailingAnchor.constraint(equalTo: inputContainer.trailingAnchor, constant: -12),
-            sendButton.bottomAnchor.constraint(equalTo: inputContainer.bottomAnchor, constant: -12),
-            sendButton.widthAnchor.constraint(equalToConstant: 28),
-            sendButton.heightAnchor.constraint(equalToConstant: 28),
+            sendButton.bottomAnchor.constraint(equalTo: inputContainer.bottomAnchor, constant: -10),
+            sendButton.widthAnchor.constraint(equalToConstant: 24),
+            sendButton.heightAnchor.constraint(equalToConstant: 24),
+
+            placeholderLabel.leadingAnchor.constraint(equalTo: inputScrollView.leadingAnchor, constant: 9),
+            placeholderLabel.centerYAnchor.constraint(equalTo: inputScrollView.centerYAnchor),
         ])
 
         applyShadow()
@@ -422,6 +434,9 @@ final class AIPanelView: NSView, NSTextViewDelegate {
             tabIndicatorWidth.isActive = true
 
             contentScrollView.documentView = todoStack
+            contentStackWidth?.isActive = false
+            contentStackWidth = todoStack.widthAnchor.constraint(equalTo: contentScrollView.widthAnchor)
+            contentStackWidth?.isActive = true
             inputContainer.isHidden = true
             contentBottomToInput.isActive = false
             contentBottomToPanel.isActive = true
@@ -439,6 +454,9 @@ final class AIPanelView: NSView, NSTextViewDelegate {
             tabIndicatorWidth.isActive = true
 
             contentScrollView.documentView = ideasStack
+            contentStackWidth?.isActive = false
+            contentStackWidth = ideasStack.widthAnchor.constraint(equalTo: contentScrollView.widthAnchor)
+            contentStackWidth?.isActive = true
             inputContainer.isHidden = false
             contentBottomToPanel.isActive = false
             contentBottomToInput.isActive = true
@@ -677,16 +695,27 @@ final class AIPanelView: NSView, NSTextViewDelegate {
         tabBarBorder.layer?.backgroundColor = SemanticColors.line.cgColor
         tabIndicator.layer?.backgroundColor = SemanticColors.accent.cgColor
         inputBorder.layer?.backgroundColor = SemanticColors.line.cgColor
-        inputTextView.backgroundColor = SemanticColors.tileBg
+        inputTextView.backgroundColor = .clear
 
-        sendButton.layer?.backgroundColor = SemanticColors.accent.cgColor
-        sendButton.layer?.cornerRadius = 6
+        sendButton.contentTintColor = SemanticColors.muted
+        sendButton.layer?.backgroundColor = .clear
+        sendButton.layer?.cornerRadius = 12
 
         inputScrollView.wantsLayer = true
-        inputScrollView.layer?.backgroundColor = SemanticColors.tileBg.cgColor
+        inputScrollView.layer?.backgroundColor = resolvedCGColor(
+            NSColor(name: nil) { a in
+                a.isDark
+                    ? NSColor(white: 1, alpha: 0.06)
+                    : NSColor(white: 0, alpha: 0.04)
+            })
         inputScrollView.layer?.borderWidth = 1
-        inputScrollView.layer?.borderColor = SemanticColors.line.cgColor
-        inputScrollView.layer?.cornerRadius = 6
+        inputScrollView.layer?.borderColor = resolvedCGColor(
+            NSColor(name: nil) { a in
+                a.isDark
+                    ? NSColor(white: 1, alpha: 0.12)
+                    : NSColor(white: 0, alpha: 0.12)
+            })
+        inputScrollView.layer?.cornerRadius = 8
 
         // Re-apply tab colors
         switchToTab(currentTab)
@@ -722,12 +751,14 @@ final class AIPanelView: NSView, NSTextViewDelegate {
         let newIdea = IdeaDisplayItem(
             timestamp: timestamp,
             text: text,
-            source: "pmux",
+            source: "amux",
             tags: []
         )
         ideaItems.insert(newIdea, at: 0)
 
         inputTextView.string = ""
+        placeholderLabel.isHidden = false
+        sendButton.contentTintColor = SemanticColors.muted
         updateInputHeight()
         rebuildIdeasList()
 
@@ -749,6 +780,10 @@ final class AIPanelView: NSView, NSTextViewDelegate {
 
     func textDidChange(_ notification: Notification) {
         updateInputHeight()
+        placeholderLabel.isHidden = !inputTextView.string.isEmpty
+        sendButton.contentTintColor = inputTextView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? SemanticColors.muted
+            : SemanticColors.accent
     }
 
     private func updateInputHeight() {
@@ -775,7 +810,7 @@ final class AIPanelView: NSView, NSTextViewDelegate {
 
         ideaItems = [
             IdeaDisplayItem(timestamp: "08:30", text: "登录页能不能加个记住密码", source: "wechat", tags: ["ui", "login"]),
-            IdeaDisplayItem(timestamp: "12:15", text: "性能好像变差了，首屏加载要3秒", source: "pmux", tags: ["perf"]),
+            IdeaDisplayItem(timestamp: "12:15", text: "性能好像变差了，首屏加载要3秒", source: "amux", tags: ["perf"]),
             IdeaDisplayItem(timestamp: "22:00", text: "考虑支持 dark mode 的自动切换", source: "mqtt", tags: []),
         ]
     }

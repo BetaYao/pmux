@@ -1,5 +1,5 @@
 import XCTest
-@testable import pmux
+@testable import amux
 
 /// Functional tests for WorktreeDeleter using real git repos in temp directories.
 final class WorktreeDeleterTests: XCTestCase {
@@ -10,7 +10,7 @@ final class WorktreeDeleterTests: XCTestCase {
     override func setUp() {
         super.setUp()
         tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("pmux-test-\(UUID().uuidString)")
+            .appendingPathComponent("amux-test-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         repoPath = tempDir.appendingPathComponent("repo").path
         createTestRepo()

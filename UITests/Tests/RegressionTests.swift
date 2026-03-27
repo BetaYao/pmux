@@ -1,3 +1,3 @@
 import XCTest
 
-class RegressionTests: PmuxUITestCase {}
+class RegressionTests: AmuxUITestCase {}

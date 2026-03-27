@@ -5,7 +5,7 @@
 
 ## Problem
 
-pmux currently detects agent status (Running, Idle, Waiting, Error) by polling terminal viewport text every 2 seconds and matching substrings like `"to interrupt"` or `"ERROR"`. This approach is fragile — it depends on agent UI text that can change between versions, produces false positives on matching content in code output, and has inherent 2-second latency.
+amux currently detects agent status (Running, Idle, Waiting, Error) by polling terminal viewport text every 2 seconds and matching substrings like `"to interrupt"` or `"ERROR"`. This approach is fragile — it depends on agent UI text that can change between versions, produces false positives on matching content in code output, and has inherent 2-second latency.
 
 Claude Code (and potentially other agents) provide hook/webhook mechanisms that emit structured events in real time. Integrating these hooks as a primary status signal would be more accurate, lower latency, and less brittle.
 
@@ -21,14 +21,14 @@ Claude Code (and potentially other agents) provide hook/webhook mechanisms that 
 
 - Replacing process exit detection (ProcessStatus remains highest priority)
 - Implementing OSC 133 shell phase detection (separate effort)
-- Configuring Claude Code hooks from pmux (user configures `~/.claude/settings.json` manually)
-- Multi-instance pmux support (single pmux instance per machine assumed)
+- Configuring Claude Code hooks from amux (user configures `~/.claude/settings.json` manually)
+- Multi-instance amux support (single amux instance per machine assumed)
 
 ## Design
 
 ### 1. Webhook Protocol
 
-pmux runs an HTTP server on `localhost:<port>` (default 7070, configurable via `WebhookConfig.port`). It accepts `POST /webhook` with a JSON body:
+amux runs an HTTP server on `localhost:<port>` (default 7070, configurable via `WebhookConfig.port`). It accepts `POST /webhook` with a JSON body:
 
 ```json
 {
@@ -192,7 +192,7 @@ Maintains per-worktree hook status.
 
 ```swift
 class WebhookStatusProvider {
-    private let queue = DispatchQueue(label: "pmux.webhook-status")
+    private let queue = DispatchQueue(label: "amux.webhook-status")
     private var sessions: [String: SessionState] = [:]     // keyed by session_id
     private var knownWorktrees: [String] = []
 
@@ -242,7 +242,7 @@ All paths are resolved to canonical form (`URL.resolvingSymlinksInPath()`) befor
 
 **Status retention:** Session status is retained indefinitely until a new event arrives for that session. No timeout. This avoids false status changes during long agent thinking periods.
 
-**Cleanup:** When a worktree is removed from pmux, all sessions associated with that worktree are cleaned up. Stale sessions (no events for >1 hour) are pruned during `updateWorktrees()` to prevent unbounded memory growth.
+**Cleanup:** When a worktree is removed from amux, all sessions associated with that worktree are cleaned up. Stale sessions (no events for >1 hour) are pruned during `updateWorktrees()` to prevent unbounded memory growth.
 
 ### 6. Status Merge in StatusPublisher
 

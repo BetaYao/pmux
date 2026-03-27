@@ -1,6 +1,6 @@
 // Tests/FocusPanelNavigationTests.swift
 import XCTest
-@testable import pmux
+@testable import amux
 
 final class FocusPanelNavigationTests: XCTestCase {
 

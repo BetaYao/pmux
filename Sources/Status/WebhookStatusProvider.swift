@@ -1,7 +1,7 @@
 import Foundation
 
 class WebhookStatusProvider {
-    private let queue = DispatchQueue(label: "pmux.webhook-status")
+    private let queue = DispatchQueue(label: "amux.webhook-status")
     private var sessions: [String: SessionState] = [:]
     private var knownWorktrees: [String] = []
 

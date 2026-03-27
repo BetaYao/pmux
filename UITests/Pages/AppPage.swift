@@ -1,6 +1,6 @@
 import XCTest
 
-/// Top-level page object for the pmux app.
+/// Top-level page object for the amux app.
 /// Provides access to all sub-page objects.
 class AppPage {
     let app: XCUIApplication
@@ -12,7 +12,7 @@ class AppPage {
     @discardableResult
     func launch(testConfigPath: String? = nil) -> Self {
         app.launchArguments += [
-            "-PmuxUITesting",
+            "-AmuxUITesting",
             "-ApplePersistenceIgnoreState", "YES",
             "-NSQuitAlwaysKeepsWindows", "NO",
         ]

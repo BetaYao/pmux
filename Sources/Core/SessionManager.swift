@@ -2,12 +2,12 @@ import Foundation
 
 enum SessionManager {
     /// Generate a stable persistent session name from a worktree path.
-    /// Format: pmux-<parent>-<name>, with dots and colons replaced by underscores.
+    /// Format: amux-<parent>-<name>, with dots and colons replaced by underscores.
     static func persistentSessionName(for path: String) -> String {
         let url = URL(fileURLWithPath: path)
         let parent = url.deletingLastPathComponent().lastPathComponent
         let name = url.lastPathComponent
-        return "pmux-\(parent)-\(name)"
+        return "amux-\(parent)-\(name)"
             .replacingOccurrences(of: ".", with: "_")
             .replacingOccurrences(of: ":", with: "_")
     }

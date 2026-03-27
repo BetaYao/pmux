@@ -155,7 +155,7 @@ git rm Sources/Core/TmuxChannel.swift
 - [ ] **Step 4: Build to verify compilation**
 
 ```bash
-xcodegen generate && xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5
+xcodegen generate && xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5
 ```
 
 Expected: Build succeeds (may fail due to remaining tmux references — that's fine, fixed in subsequent tasks).
@@ -212,7 +212,7 @@ class HooksChannel: AgentChannel {
 - [ ] **Step 2: Build to verify**
 
 ```bash
-xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5
+xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5
 ```
 
 - [ ] **Step 3: Commit**
@@ -274,7 +274,7 @@ if type == .claudeCode, let zmx = channels[worktreePath] as? ZmxChannel {
 - [ ] **Step 4: Build to verify**
 
 ```bash
-xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5
+xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5
 ```
 
 - [ ] **Step 5: Commit**
@@ -390,7 +390,7 @@ Remove tmux references from doc comments:
 - [ ] **Step 7: Build to verify**
 
 ```bash
-xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5
+xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5
 ```
 
 - [ ] **Step 8: Commit**
@@ -436,7 +436,7 @@ private static func tmuxSessionName(for path: String) -> String {
     let url = URL(fileURLWithPath: path)
     let parent = url.deletingLastPathComponent().lastPathComponent
     let name = url.lastPathComponent
-    let sessionName = "pmux-\(parent)-\(name)"
+    let sessionName = "amux-\(parent)-\(name)"
         .replacingOccurrences(of: ".", with: "_")
         .replacingOccurrences(of: ":", with: "_")
     return sessionName
@@ -447,7 +447,7 @@ private static func zmxSessionName(for path: String) -> String {
     let url = URL(fileURLWithPath: path)
     let parent = url.deletingLastPathComponent().lastPathComponent
     let name = url.lastPathComponent
-    let sessionName = "pmux-\(parent)-\(name)"
+    let sessionName = "amux-\(parent)-\(name)"
         .replacingOccurrences(of: ".", with: "_")
         .replacingOccurrences(of: ":", with: "_")
     return sessionName
@@ -506,7 +506,7 @@ Line 686: change `"kill tmux sessions"` → `"kill terminal sessions"` in the cl
 - [ ] **Step 6: Build to verify**
 
 ```bash
-xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5
+xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5
 ```
 
 - [ ] **Step 7: Commit**
@@ -592,7 +592,7 @@ func testConfigMigration_TmuxToZmx() throws {
 - [ ] **Step 4: Run tests**
 
 ```bash
-xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -20
+xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -20
 ```
 
 Expected: All tests pass.
@@ -639,7 +639,7 @@ private func listPmuxZmxSessions() -> [String] {
     guard let output = String(data: data, encoding: .utf8) else { return [] }
     return output.components(separatedBy: "\n")
         .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-        .filter { $0.hasPrefix("pmux-") }
+        .filter { $0.hasPrefix("amux-") }
 }
 
 private func zmxCommand(_ args: [String]) -> String {
@@ -680,7 +680,7 @@ Replace all `tmux`-prefixed calls:
 - [ ] **Step 3: Build to verify**
 
 ```bash
-xcodegen generate && xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -5
+xcodegen generate && xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -5
 ```
 
 - [ ] **Step 4: Commit**
@@ -697,13 +697,13 @@ git commit -m "refactor: replace tmux with zmx in integration tests"
 - [ ] **Step 1: Clean build**
 
 ```bash
-xcodegen generate && xcodebuild -project pmux.xcodeproj -scheme pmux clean build 2>&1 | tail -10
+xcodegen generate && xcodebuild -project amux.xcodeproj -scheme amux clean build 2>&1 | tail -10
 ```
 
 - [ ] **Step 2: Run all tests**
 
 ```bash
-xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -20
+xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -20
 ```
 
 - [ ] **Step 3: Grep for any remaining tmux references**
@@ -733,7 +733,7 @@ which zmx && zmx version
 
 Replace all tmux references in the "Key Patterns" section:
 
-- `"Terminal persistence: tmux sessions named..."` → `"Terminal persistence: zmx sessions named pmux-<parent>-<name> are created per worktree..."`
+- `"Terminal persistence: tmux sessions named..."` → `"Terminal persistence: zmx sessions named amux-<parent>-<name> are created per worktree..."`
 - Remove `"Sessions are killed via tmux kill-session"` → `"Sessions are killed via zmx kill"`
 - Update any tmux-related architecture notes
 

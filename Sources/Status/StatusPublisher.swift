@@ -19,7 +19,7 @@ class StatusPublisher {
     private let lock = NSLock()
 
     private let pollInterval: TimeInterval = 2.0
-    private let pollQueue = DispatchQueue(label: "com.pmux.status-poll", qos: .utility)
+    private let pollQueue = DispatchQueue(label: "com.amux.status-poll", qos: .utility)
     private let nonPreferredPollStride: Int = 3
     private var preferredPaths: Set<String> = []
     private var pollCycle: Int = 0

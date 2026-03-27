@@ -2,14 +2,14 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Rewrite the pmux Dashboard and Project Workspace UI to match the HTML hi-fi prototype 1:1, implementing 4 dashboard layouts, Zoom-style title bar, notification/AI side panels, unified modal system, status bar, and theme system.
+**Goal:** Rewrite the amux Dashboard and Project Workspace UI to match the HTML hi-fi prototype 1:1, implementing 4 dashboard layouts, Zoom-style title bar, notification/AI side panels, unified modal system, status bar, and theme system.
 
 **Architecture:** AppKit-only, delegate-driven. Replace existing TabBarView and DashboardViewController with new components aligned to the prototype. Reuse TerminalSurface lifecycle (long-lived, reparented). Theme system uses NSAppearance + custom semantic color tokens. Grid layout retains zoom and drag-to-reorder.
 
 **Tech Stack:** Swift 5.10, AppKit, macOS 14.0+, Ghostty C interop (unchanged)
 
-**Prototype reference:** Download from `https://raw.githubusercontent.com/zhoujinliang/pmux/main/docs/dashboard-hifi-prototype.html` — open in browser for interactive reference
-**Design doc reference:** Download from `https://raw.githubusercontent.com/zhoujinliang/pmux/main/docs/2026-03-20-multi-agent-dashboard-workspace-design.md`
+**Prototype reference:** Download from `https://raw.githubusercontent.com/zhoujinliang/amux/main/docs/dashboard-hifi-prototype.html` — open in browser for interactive reference
+**Design doc reference:** Download from `https://raw.githubusercontent.com/zhoujinliang/amux/main/docs/2026-03-20-multi-agent-dashboard-workspace-design.md`
 
 **Data model mapping:**
 - "project" = repo display name (from `WorkspaceManager.WorkspaceTab.displayName`)
@@ -294,7 +294,7 @@ func testDecodeMissingNewFields() {
 
 - [ ] **Step 7: Run tests**
 
-Run: `xcodegen generate && xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test -only-testing:pmuxTests/ConfigTests 2>&1 | tail -20`
+Run: `xcodegen generate && xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/ConfigTests 2>&1 | tail -20`
 
 - [ ] **Step 8: Commit**
 
@@ -1981,7 +1981,7 @@ protocol DashboardDelegate: AnyObject {
 
 - [ ] **Step 3: Run build to verify**
 
-Run: `xcodegen generate && xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -30`
+Run: `xcodegen generate && xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -30`
 
 - [ ] **Step 4: Commit**
 
@@ -2021,7 +2021,7 @@ Delete the file and remove all references.
 
 - [ ] **Step 4: Run build**
 
-Run: `xcodegen generate && xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -30`
+Run: `xcodegen generate && xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -30`
 
 - [ ] **Step 5: Commit**
 
@@ -2093,7 +2093,7 @@ Opening notification panel closes AI panel and vice versa. Both close layout pop
 
 - [ ] **Step 7: Run full build and manual test**
 
-Run: `xcodegen generate && xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -30`
+Run: `xcodegen generate && xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -30`
 
 - [ ] **Step 8: Commit**
 
@@ -2131,14 +2131,14 @@ All views that set `layer?.backgroundColor` in `setup()` need `updateLayer()` ov
 
 ```bash
 xcodegen generate
-xcodebuild -project pmux.xcodeproj -scheme pmux clean
-xcodebuild -project pmux.xcodeproj -scheme pmux -configuration Debug build 2>&1 | tail -30
+xcodebuild -project amux.xcodeproj -scheme amux clean
+xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build 2>&1 | tail -30
 ```
 
 - [ ] **Step 4: Run tests**
 
 ```bash
-xcodebuild -project pmux.xcodeproj -scheme pmuxTests -configuration Debug test 2>&1 | tail -30
+xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test 2>&1 | tail -30
 ```
 
 - [ ] **Step 5: Commit**
@@ -2512,7 +2512,7 @@ final class AppPage {
     init(_ app: XCUIApplication) { self.app = app }
 
     func launch() {
-        app.launchArguments += ["-UITestConfig", "/tmp/pmux-uitest-config.json"]
+        app.launchArguments += ["-UITestConfig", "/tmp/amux-uitest-config.json"]
         app.launch()
     }
 
@@ -2526,7 +2526,7 @@ final class AppPage {
 // UITests/Tests/TitleBarTests.swift
 import XCTest
 
-final class TitleBarTests: PmuxUITestCase {
+final class TitleBarTests: AmuxUITestCase {
     // MARK: - Dashboard Tab
     func testDashboardTabAlwaysVisible() {
         XCTAssertTrue(page.titleBar.dashboardTab.exists)
@@ -2629,7 +2629,7 @@ final class TitleBarTests: PmuxUITestCase {
 // UITests/Tests/DashboardLayoutTests.swift
 import XCTest
 
-final class DashboardLayoutTests: PmuxUITestCase {
+final class DashboardLayoutTests: AmuxUITestCase {
     // MARK: - Default Layout
     func testDefaultLayoutIsLeftRight() {
         XCTAssertTrue(page.dashboard.leftRightLayout.waitForExistence(timeout: 5))
@@ -2736,7 +2736,7 @@ final class DashboardLayoutTests: PmuxUITestCase {
 // UITests/Tests/PanelTests.swift
 import XCTest
 
-final class PanelTests: PmuxUITestCase {
+final class PanelTests: AmuxUITestCase {
     // MARK: - Notification Panel
     func testNotifButtonOpensPanel() {
         page.titleBar.clickNotif()
@@ -2814,7 +2814,7 @@ final class PanelTests: PmuxUITestCase {
 // UITests/Tests/ModalTests.swift
 import XCTest
 
-final class ModalTests: PmuxUITestCase {
+final class ModalTests: AmuxUITestCase {
     // MARK: - Close Project Modal
     func testCloseProjectModalElements() {
         guard page.titleBar.projectTab(named: "project 1").waitForExistence(timeout: 5) else { return }
@@ -2874,7 +2874,7 @@ final class ModalTests: PmuxUITestCase {
 // UITests/Tests/ProjectWorkspaceTests.swift
 import XCTest
 
-final class ProjectWorkspaceTests: PmuxUITestCase {
+final class ProjectWorkspaceTests: AmuxUITestCase {
     private func enterProject() {
         guard page.titleBar.projectTab(named: "project 1").waitForExistence(timeout: 5) else { return }
         page.titleBar.clickProjectTab(named: "project 1")
@@ -2931,7 +2931,7 @@ final class ProjectWorkspaceTests: PmuxUITestCase {
 // UITests/Tests/ThemeTests.swift
 import XCTest
 
-final class ThemeTests: PmuxUITestCase {
+final class ThemeTests: AmuxUITestCase {
     func testThemeToggleExists() {
         XCTAssertTrue(page.titleBar.themeToggle.exists)
     }
@@ -2967,7 +2967,7 @@ Remove split pane and search shortcuts, add new shortcuts:
 // UITests/Tests/ShortcutTests.swift (updated)
 import XCTest
 
-final class ShortcutTests: PmuxUITestCase {
+final class ShortcutTests: AmuxUITestCase {
     func testCmdCommaOpensSettings() {
         page.app.typeKey(",", modifierFlags: .command)
         XCTAssertTrue(page.settings.sheet.waitForExistence(timeout: 5))
@@ -3008,7 +3008,7 @@ final class ShortcutTests: PmuxUITestCase {
 // UITests/Tests/NavigationTests.swift (updated)
 import XCTest
 
-final class NavigationTests: PmuxUITestCase {
+final class NavigationTests: AmuxUITestCase {
     func testDashboardAppearsOnLaunch() {
         XCTAssertTrue(page.dashboard.dashboardView.waitForExistence(timeout: 10))
     }
@@ -3073,7 +3073,7 @@ test: comprehensive UI automation tests for redesigned dashboard
 - [ ] **Step 11: Run UI tests**
 
 ```bash
-xcodegen generate && xcodebuild -project pmux.xcodeproj -scheme pmuxUITests -configuration Debug test 2>&1 | tail -40
+xcodegen generate && xcodebuild -project amux.xcodeproj -scheme amuxUITests -configuration Debug test 2>&1 | tail -40
 ```
 
 Fix any failures and re-run until green.
