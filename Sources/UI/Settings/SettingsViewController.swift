@@ -4,7 +4,7 @@ protocol SettingsDelegate: AnyObject {
     func settingsDidUpdateConfig(_ settings: SettingsViewController, config: Config)
 }
 
-/// Settings window with tabs: General, Agent Detection.
+/// Settings window with tabs: General, Agent Detection, WeCom Bot.
 class SettingsViewController: NSViewController {
     weak var settingsDelegate: SettingsDelegate?
 
@@ -25,6 +25,12 @@ class SettingsViewController: NSViewController {
     private let agentScrollView = NSScrollView()
     private let ruleTextView = NSTextView()
     private let ruleScrollView = NSScrollView()
+
+    // WeCom Bot tab controls
+    private let wecomBotIdField = NSTextField()
+    private let wecomSecretField = NSSecureTextField()
+    private let wecomNameField = NSTextField()
+    private let wecomAutoConnectCheckbox = NSButton()
 
     init(config: Config) {
         self.config = config
@@ -58,6 +64,12 @@ class SettingsViewController: NSViewController {
         agentTab.label = "Agent Detection"
         agentTab.view = buildAgentTab()
         tabView.addTabViewItem(agentTab)
+
+        // Tab 3: WeCom Bot
+        let wecomTab = NSTabViewItem(identifier: "wecom")
+        wecomTab.label = "WeCom Bot"
+        wecomTab.view = buildWeComTab()
+        tabView.addTabViewItem(wecomTab)
 
         // Buttons
         let saveButton = NSButton(title: "Save", target: self, action: #selector(saveClicked))
@@ -242,6 +254,100 @@ class SettingsViewController: NSViewController {
         return view
     }
 
+    // MARK: - WeCom Bot Tab
+
+    private func buildWeComTab() -> NSView {
+        let view = NSView()
+
+        let infoLabel = NSTextField(labelWithString: "企业微信智能机器人长连接配置。需要在企业微信后台创建智能机器人获取 Bot ID 和 Secret。")
+        infoLabel.font = NSFont.systemFont(ofSize: 11)
+        infoLabel.textColor = Theme.textSecondary
+        infoLabel.lineBreakMode = .byWordWrapping
+        infoLabel.maximumNumberOfLines = 2
+        infoLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(infoLabel)
+
+        let botIdLabel = NSTextField(labelWithString: "Bot ID:")
+        botIdLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        botIdLabel.textColor = Theme.textSecondary
+        botIdLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(botIdLabel)
+
+        wecomBotIdField.placeholderString = "aib-xxxxxxxx"
+        wecomBotIdField.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        wecomBotIdField.stringValue = config.wecomBot?.botId ?? ""
+        wecomBotIdField.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(wecomBotIdField)
+
+        let secretLabel = NSTextField(labelWithString: "Secret:")
+        secretLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        secretLabel.textColor = Theme.textSecondary
+        secretLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(secretLabel)
+
+        wecomSecretField.placeholderString = "认证密钥"
+        wecomSecretField.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        wecomSecretField.stringValue = config.wecomBot?.secret ?? ""
+        wecomSecretField.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(wecomSecretField)
+
+        let nameLabel = NSTextField(labelWithString: "显示名称:")
+        nameLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        nameLabel.textColor = Theme.textSecondary
+        nameLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(nameLabel)
+
+        wecomNameField.placeholderString = "AMUX Bot"
+        wecomNameField.font = NSFont.systemFont(ofSize: 12, weight: .regular)
+        wecomNameField.stringValue = config.wecomBot?.name ?? ""
+        wecomNameField.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(wecomNameField)
+
+        wecomAutoConnectCheckbox.setButtonType(.switch)
+        wecomAutoConnectCheckbox.title = "启动时自动连接"
+        wecomAutoConnectCheckbox.font = NSFont.systemFont(ofSize: 12)
+        wecomAutoConnectCheckbox.state = (config.wecomBot?.resolvedAutoConnect ?? true) ? .on : .off
+        wecomAutoConnectCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(wecomAutoConnectCheckbox)
+
+        let labelWidth: CGFloat = 90
+
+        NSLayoutConstraint.activate([
+            infoLabel.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
+            infoLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            infoLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+
+            botIdLabel.topAnchor.constraint(equalTo: infoLabel.bottomAnchor, constant: 20),
+            botIdLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            botIdLabel.widthAnchor.constraint(equalToConstant: labelWidth),
+
+            wecomBotIdField.centerYAnchor.constraint(equalTo: botIdLabel.centerYAnchor),
+            wecomBotIdField.leadingAnchor.constraint(equalTo: botIdLabel.trailingAnchor, constant: 8),
+            wecomBotIdField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+
+            secretLabel.topAnchor.constraint(equalTo: botIdLabel.bottomAnchor, constant: 16),
+            secretLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            secretLabel.widthAnchor.constraint(equalToConstant: labelWidth),
+
+            wecomSecretField.centerYAnchor.constraint(equalTo: secretLabel.centerYAnchor),
+            wecomSecretField.leadingAnchor.constraint(equalTo: secretLabel.trailingAnchor, constant: 8),
+            wecomSecretField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+
+            nameLabel.topAnchor.constraint(equalTo: secretLabel.bottomAnchor, constant: 16),
+            nameLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            nameLabel.widthAnchor.constraint(equalToConstant: labelWidth),
+
+            wecomNameField.centerYAnchor.constraint(equalTo: nameLabel.centerYAnchor),
+            wecomNameField.leadingAnchor.constraint(equalTo: nameLabel.trailingAnchor, constant: 8),
+            wecomNameField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+
+            wecomAutoConnectCheckbox.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 20),
+            wecomAutoConnectCheckbox.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+        ])
+
+        return view
+    }
+
     // MARK: - Actions
 
     @objc private func addPathClicked() {
@@ -281,6 +387,21 @@ class SettingsViewController: NSViewController {
         if let data = jsonString.data(using: .utf8),
            let agentConfig = try? JSONDecoder().decode(AgentDetectConfig.self, from: data) {
             config.agentDetect = agentConfig
+        }
+
+        // WeCom Bot config
+        let botId = wecomBotIdField.stringValue.trimmingCharacters(in: .whitespaces)
+        let secret = wecomSecretField.stringValue.trimmingCharacters(in: .whitespaces)
+        if !botId.isEmpty && !secret.isEmpty {
+            let name = wecomNameField.stringValue.trimmingCharacters(in: .whitespaces)
+            config.wecomBot = WeComBotConfig(
+                botId: botId,
+                secret: secret,
+                name: name.isEmpty ? nil : name,
+                autoConnect: wecomAutoConnectCheckbox.state == .on
+            )
+        } else {
+            config.wecomBot = nil
         }
 
         config.save()
