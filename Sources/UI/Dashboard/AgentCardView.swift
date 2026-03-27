@@ -49,14 +49,22 @@ final class AgentCardView: NSView {
         fatalError("init(coder:) not supported")
     }
 
-    func configure(id: String, project: String, thread: String, status: String, lastMessage: String, totalDuration: String, roundDuration: String, paneCount: Int = 1, paneStatuses: [AgentStatus] = []) {
+    func configure(id: String, project: String, thread: String, status: String, lastMessage: String, totalDuration: String, roundDuration: String, paneCount: Int = 1, paneStatuses: [AgentStatus] = [], tasks: [TaskItem] = []) {
         agentId = id
         currentStatus = status
         setAccessibilityIdentifier("dashboard.card.\(id)")
 
         projectLabel.stringValue = project
         statusLabel.stringValue = status.capitalized
-        messageLabel.stringValue = lastMessage
+        // Show task list when available, otherwise plain message
+        if let taskAttr = TaskListRenderer.attributedString(for: tasks) {
+            messageLabel.attributedStringValue = taskAttr
+        } else {
+            messageLabel.attributedStringValue = NSAttributedString(string: lastMessage, attributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: Typography.secondaryPointSize, weight: .regular),
+                .foregroundColor: SemanticColors.muted,
+            ])
+        }
 
         // Rebuild status dots
         statusDots.forEach { $0.removeFromSuperview() }
@@ -265,5 +273,64 @@ final class AgentCardView: NSView {
             layer.borderColor = resolvedCGColor(SemanticColors.line)
             layer.borderWidth = 1
         }
+    }
+}
+
+enum TaskListRenderer {
+    static func attributedString(for tasks: [TaskItem]) -> NSAttributedString? {
+        guard !tasks.isEmpty else { return nil }
+
+        let result = NSMutableAttributedString()
+        let font = NSFont.monospacedSystemFont(ofSize: AgentCardView.Typography.secondaryPointSize, weight: .regular)
+        let boldFont = NSFont.monospacedSystemFont(ofSize: AgentCardView.Typography.secondaryPointSize, weight: .bold)
+        let mutedColor = SemanticColors.muted
+        let textColor = SemanticColors.text
+        let successColor = SemanticColors.running
+
+        for (index, task) in tasks.enumerated() {
+            if index > 0 {
+                result.append(NSAttributedString(string: "\n"))
+            }
+
+            let icon: String
+            let iconColor: NSColor
+            let labelFont: NSFont
+            let labelColor: NSColor
+            var extraAttrs: [NSAttributedString.Key: Any] = [:]
+
+            switch task.status {
+            case .completed:
+                icon = " ✓ "
+                iconColor = successColor
+                labelFont = font
+                labelColor = mutedColor
+                extraAttrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
+                extraAttrs[.strikethroughColor] = mutedColor
+            case .inProgress:
+                icon = " ■ "
+                iconColor = textColor
+                labelFont = boldFont
+                labelColor = textColor
+            case .pending:
+                icon = " □ "
+                iconColor = mutedColor
+                labelFont = font
+                labelColor = mutedColor
+            }
+
+            result.append(NSAttributedString(string: icon, attributes: [
+                .font: font,
+                .foregroundColor: iconColor,
+            ]))
+
+            var labelAttrs: [NSAttributedString.Key: Any] = [
+                .font: labelFont,
+                .foregroundColor: labelColor,
+            ]
+            labelAttrs.merge(extraAttrs) { _, new in new }
+            result.append(NSAttributedString(string: task.subject, attributes: labelAttrs))
+        }
+
+        return result
     }
 }
