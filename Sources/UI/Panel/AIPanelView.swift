@@ -9,22 +9,38 @@ final class AIPanelView: NSView, NSTextViewDelegate {
     weak var delegate: AIPanelDelegate?
     private(set) var isOpen: Bool = false
 
-    enum BubbleRole {
-        case user
-        case assistant
+    private enum Tab {
+        case todo
+        case ideas
     }
 
-    // MARK: - Subviews
+    private var currentTab: Tab = .todo
 
-    private let sparklesIcon: NSTextField = {
-        let label = NSTextField(labelWithString: "\u{2728}")
-        label.font = NSFont.systemFont(ofSize: 13)
-        label.translatesAutoresizingMaskIntoConstraints = false
-        return label
-    }()
+    // MARK: - Data
+
+    private var todoItems: [TodoDisplayItem] = []
+    private var ideaItems: [IdeaDisplayItem] = []
+
+    struct TodoDisplayItem {
+        let id: Int
+        let task: String
+        let status: String      // pending_approval, approved, running, completed, failed, skipped
+        let issue: String?
+        let worktree: String?
+        let progress: String?
+    }
+
+    struct IdeaDisplayItem {
+        let timestamp: String
+        let text: String
+        let source: String
+        let tags: [String]
+    }
+
+    // MARK: - Header Subviews
 
     private let headerLabel: NSTextField = {
-        let label = NSTextField(labelWithString: "AI Assistant")
+        let label = NSTextField(labelWithString: "TODO")
         label.font = NSFont.boldSystemFont(ofSize: 13)
         label.textColor = SemanticColors.text
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -51,9 +67,62 @@ final class AIPanelView: NSView, NSTextViewDelegate {
         return v
     }()
 
-    private let messagesScrollView: NSScrollView = {
+    private let leftBorder: NSView = {
+        let v = NSView()
+        v.wantsLayer = true
+        v.translatesAutoresizingMaskIntoConstraints = false
+        return v
+    }()
+
+    // MARK: - Tab Bar
+
+    private let tabBar: NSView = {
+        let v = NSView()
+        v.wantsLayer = true
+        v.translatesAutoresizingMaskIntoConstraints = false
+        return v
+    }()
+
+    private let todoTabButton: NSButton = {
+        let button = NSButton(title: "TODO", target: nil, action: nil)
+        button.identifier = NSUserInterfaceItemIdentifier("panel.ai.tab.todo")
+        button.isBordered = false
+        button.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
+    }()
+
+    private let ideasTabButton: NSButton = {
+        let button = NSButton(title: "Ideas", target: nil, action: nil)
+        button.identifier = NSUserInterfaceItemIdentifier("panel.ai.tab.ideas")
+        button.isBordered = false
+        button.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
+    }()
+
+    private let tabIndicator: NSView = {
+        let v = NSView()
+        v.wantsLayer = true
+        v.translatesAutoresizingMaskIntoConstraints = false
+        return v
+    }()
+
+    private let tabBarBorder: NSView = {
+        let v = NSView()
+        v.wantsLayer = true
+        v.translatesAutoresizingMaskIntoConstraints = false
+        return v
+    }()
+
+    private var tabIndicatorLeading: NSLayoutConstraint!
+    private var tabIndicatorWidth: NSLayoutConstraint!
+
+    // MARK: - Content Area (shared scroll view, swapped content)
+
+    private let contentScrollView: NSScrollView = {
         let sv = NSScrollView()
-        sv.identifier = NSUserInterfaceItemIdentifier("panel.ai.messages")
+        sv.identifier = NSUserInterfaceItemIdentifier("panel.ai.content")
         sv.hasVerticalScroller = true
         sv.hasHorizontalScroller = false
         sv.drawsBackground = false
@@ -62,13 +131,31 @@ final class AIPanelView: NSView, NSTextViewDelegate {
         return sv
     }()
 
-    private let messagesStack: NSStackView = {
+    private let todoStack: NSStackView = {
         let stack = NSStackView()
         stack.orientation = .vertical
-        stack.spacing = 8
-        stack.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        stack.spacing = 2
+        stack.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
         stack.translatesAutoresizingMaskIntoConstraints = false
         return stack
+    }()
+
+    private let ideasStack: NSStackView = {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
+    }()
+
+    // MARK: - Input (Ideas tab only)
+
+    private let inputContainer: NSView = {
+        let v = NSView()
+        v.wantsLayer = true
+        v.translatesAutoresizingMaskIntoConstraints = false
+        return v
     }()
 
     private let inputBorder: NSView = {
@@ -104,7 +191,7 @@ final class AIPanelView: NSView, NSTextViewDelegate {
     }()
 
     private let sendButton: NSButton = {
-        let button = NSButton(image: NSImage(systemSymbolName: "arrow.up", accessibilityDescription: "Send")!, target: nil, action: nil)
+        let button = NSButton(image: NSImage(systemSymbolName: "arrow.up", accessibilityDescription: "Add idea")!, target: nil, action: nil)
         button.identifier = NSUserInterfaceItemIdentifier("panel.ai.send")
         button.isBordered = false
         button.contentTintColor = SemanticColors.text
@@ -113,14 +200,20 @@ final class AIPanelView: NSView, NSTextViewDelegate {
         return button
     }()
 
-    private let leftBorder: NSView = {
-        let v = NSView()
-        v.wantsLayer = true
-        v.translatesAutoresizingMaskIntoConstraints = false
-        return v
-    }()
-
     private var inputHeightConstraint: NSLayoutConstraint!
+    private var contentBottomToInput: NSLayoutConstraint!
+    private var contentBottomToPanel: NSLayoutConstraint!
+
+    // MARK: - Empty State
+
+    private let emptyLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "")
+        label.font = NSFont.systemFont(ofSize: 12)
+        label.textColor = SemanticColors.muted
+        label.alignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
 
     // MARK: - Init
 
@@ -155,52 +248,17 @@ final class AIPanelView: NSView, NSTextViewDelegate {
         }
     }
 
-    func addBubble(role: BubbleRole, text: String) {
-        let addAndScroll = { [weak self] in
-            guard let self else { return }
-            let bubble = self.makeBubble(role: role, text: text)
-            self.messagesStack.addArrangedSubview(bubble)
-
-            // Alignment
-            switch role {
-            case .user:
-                bubble.setContentHuggingPriority(.defaultLow, for: .horizontal)
-                if let container = bubble.superview {
-                    NSLayoutConstraint.activate([
-                        bubble.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
-                        bubble.widthAnchor.constraint(lessThanOrEqualTo: container.widthAnchor, multiplier: 0.92),
-                    ])
-                }
-            case .assistant:
-                bubble.setContentHuggingPriority(.defaultLow, for: .horizontal)
-                if let container = bubble.superview {
-                    NSLayoutConstraint.activate([
-                        bubble.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-                        bubble.widthAnchor.constraint(lessThanOrEqualTo: container.widthAnchor, multiplier: 0.92),
-                    ])
-                }
-            }
-
-            // Scroll to bottom after the next layout pass (avoids fittingSize
-            // which triggers a synchronous Auto Layout pass that crashes if
-            // called off the main thread).
-            self.messagesStack.needsLayout = true
-            DispatchQueue.main.async { [weak self] in
-                guard let self,
-                      let docView = self.messagesScrollView.documentView else { return }
-                let docHeight = docView.frame.height
-                let scrollHeight = self.messagesScrollView.bounds.height
-                if docHeight > scrollHeight {
-                    self.messagesScrollView.contentView.scroll(
-                        to: NSPoint(x: 0, y: docHeight - scrollHeight))
-                }
-            }
+    func updateTodoItems(_ items: [TodoDisplayItem]) {
+        todoItems = items
+        if currentTab == .todo {
+            rebuildTodoList()
         }
+    }
 
-        if Thread.isMainThread {
-            addAndScroll()
-        } else {
-            DispatchQueue.main.async(execute: addAndScroll)
+    func updateIdeaItems(_ items: [IdeaDisplayItem]) {
+        ideaItems = items
+        if currentTab == .ideas {
+            rebuildIdeasList()
         }
     }
 
@@ -220,24 +278,40 @@ final class AIPanelView: NSView, NSTextViewDelegate {
         closeButton.action = #selector(closeClicked)
         sendButton.target = self
         sendButton.action = #selector(sendClicked)
+        todoTabButton.target = self
+        todoTabButton.action = #selector(todoTabClicked)
+        ideasTabButton.target = self
+        ideasTabButton.action = #selector(ideasTabClicked)
 
         inputTextView.delegate = self
 
+        // Add subviews
         addSubview(leftBorder)
-        addSubview(sparklesIcon)
         addSubview(headerLabel)
         addSubview(closeButton)
         addSubview(headerBorder)
-        addSubview(messagesScrollView)
-        addSubview(inputBorder)
-        addSubview(inputScrollView)
-        addSubview(sendButton)
+        addSubview(tabBar)
+        tabBar.addSubview(todoTabButton)
+        tabBar.addSubview(ideasTabButton)
+        tabBar.addSubview(tabIndicator)
+        addSubview(tabBarBorder)
+        addSubview(contentScrollView)
+        addSubview(emptyLabel)
+        addSubview(inputContainer)
+        inputContainer.addSubview(inputBorder)
+        inputContainer.addSubview(inputScrollView)
+        inputContainer.addSubview(sendButton)
 
-        messagesScrollView.documentView = messagesStack
-
+        contentScrollView.documentView = todoStack
         inputScrollView.documentView = inputTextView
 
         inputHeightConstraint = inputScrollView.heightAnchor.constraint(equalToConstant: 36)
+
+        tabIndicatorLeading = tabIndicator.leadingAnchor.constraint(equalTo: todoTabButton.leadingAnchor)
+        tabIndicatorWidth = tabIndicator.widthAnchor.constraint(equalTo: todoTabButton.widthAnchor)
+
+        contentBottomToInput = contentScrollView.bottomAnchor.constraint(equalTo: inputContainer.topAnchor)
+        contentBottomToPanel = contentScrollView.bottomAnchor.constraint(equalTo: bottomAnchor)
 
         NSLayoutConstraint.activate([
             // Left border
@@ -246,13 +320,9 @@ final class AIPanelView: NSView, NSTextViewDelegate {
             leftBorder.bottomAnchor.constraint(equalTo: bottomAnchor),
             leftBorder.widthAnchor.constraint(equalToConstant: 1),
 
-            // Sparkles icon
-            sparklesIcon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            sparklesIcon.centerYAnchor.constraint(equalTo: topAnchor, constant: 20),
-
             // Header
-            headerLabel.leadingAnchor.constraint(equalTo: sparklesIcon.trailingAnchor, constant: 6),
-            headerLabel.centerYAnchor.constraint(equalTo: sparklesIcon.centerYAnchor),
+            headerLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            headerLabel.centerYAnchor.constraint(equalTo: topAnchor, constant: 20),
 
             // Close button
             closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
@@ -266,95 +336,316 @@ final class AIPanelView: NSView, NSTextViewDelegate {
             headerBorder.topAnchor.constraint(equalTo: topAnchor, constant: 40),
             headerBorder.heightAnchor.constraint(equalToConstant: 1),
 
-            // Messages scroll
-            messagesScrollView.topAnchor.constraint(equalTo: headerBorder.bottomAnchor),
-            messagesScrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            messagesScrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            messagesScrollView.bottomAnchor.constraint(equalTo: inputBorder.topAnchor),
+            // Tab bar
+            tabBar.topAnchor.constraint(equalTo: headerBorder.bottomAnchor),
+            tabBar.leadingAnchor.constraint(equalTo: leadingAnchor),
+            tabBar.trailingAnchor.constraint(equalTo: trailingAnchor),
+            tabBar.heightAnchor.constraint(equalToConstant: 36),
 
-            // Messages stack width
-            messagesStack.widthAnchor.constraint(equalTo: messagesScrollView.widthAnchor),
+            todoTabButton.leadingAnchor.constraint(equalTo: tabBar.leadingAnchor, constant: 12),
+            todoTabButton.centerYAnchor.constraint(equalTo: tabBar.centerYAnchor),
 
-            // Input border
-            inputBorder.leadingAnchor.constraint(equalTo: leadingAnchor),
-            inputBorder.trailingAnchor.constraint(equalTo: trailingAnchor),
-            inputBorder.bottomAnchor.constraint(equalTo: inputScrollView.topAnchor, constant: -8),
+            ideasTabButton.leadingAnchor.constraint(equalTo: todoTabButton.trailingAnchor, constant: 16),
+            ideasTabButton.centerYAnchor.constraint(equalTo: tabBar.centerYAnchor),
+
+            tabIndicator.bottomAnchor.constraint(equalTo: tabBar.bottomAnchor),
+            tabIndicator.heightAnchor.constraint(equalToConstant: 2),
+            tabIndicatorLeading,
+            tabIndicatorWidth,
+
+            // Tab bar border
+            tabBarBorder.leadingAnchor.constraint(equalTo: leadingAnchor),
+            tabBarBorder.trailingAnchor.constraint(equalTo: trailingAnchor),
+            tabBarBorder.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
+            tabBarBorder.heightAnchor.constraint(equalToConstant: 1),
+
+            // Content scroll
+            contentScrollView.topAnchor.constraint(equalTo: tabBarBorder.bottomAnchor),
+            contentScrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            contentScrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            contentBottomToPanel,
+
+            // Content stack width
+            todoStack.widthAnchor.constraint(equalTo: contentScrollView.widthAnchor),
+            ideasStack.widthAnchor.constraint(equalTo: contentScrollView.widthAnchor),
+
+            // Empty label
+            emptyLabel.centerXAnchor.constraint(equalTo: contentScrollView.centerXAnchor),
+            emptyLabel.centerYAnchor.constraint(equalTo: contentScrollView.centerYAnchor),
+
+            // Input container
+            inputContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            inputContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
+            inputContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            inputBorder.leadingAnchor.constraint(equalTo: inputContainer.leadingAnchor),
+            inputBorder.trailingAnchor.constraint(equalTo: inputContainer.trailingAnchor),
+            inputBorder.topAnchor.constraint(equalTo: inputContainer.topAnchor),
             inputBorder.heightAnchor.constraint(equalToConstant: 1),
 
-            // Input text view
-            inputScrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            inputScrollView.leadingAnchor.constraint(equalTo: inputContainer.leadingAnchor, constant: 12),
             inputScrollView.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor, constant: -8),
-            inputScrollView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+            inputScrollView.topAnchor.constraint(equalTo: inputBorder.bottomAnchor, constant: 8),
+            inputScrollView.bottomAnchor.constraint(equalTo: inputContainer.bottomAnchor, constant: -8),
             inputHeightConstraint,
 
-            // Send button
-            sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            sendButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
+            sendButton.trailingAnchor.constraint(equalTo: inputContainer.trailingAnchor, constant: -12),
+            sendButton.bottomAnchor.constraint(equalTo: inputContainer.bottomAnchor, constant: -12),
             sendButton.widthAnchor.constraint(equalToConstant: 28),
             sendButton.heightAnchor.constraint(equalToConstant: 28),
         ])
 
         applyShadow()
         applyColors()
+        switchToTab(.todo)
 
-        // Add welcome message
-        addBubble(role: .assistant, text: "Hello, I'm the workspace assistant. Ask me about this project, threads, or commands. (Prototype demo)")
+        // Load sample data for demo
+        loadSampleData()
     }
 
-    private func applyShadow() {
-        shadow = NSShadow()
-        layer?.shadowColor = NSColor.black.withAlphaComponent(0.3).cgColor
-        layer?.shadowOffset = CGSize(width: -8, height: 0)
-        layer?.shadowRadius = 24
-        layer?.shadowOpacity = 1.0
-    }
+    // MARK: - Tab Switching
 
-    private func makeBubble(role: BubbleRole, text: String) -> NSView {
-        let container = NSView()
-        container.wantsLayer = true
-        container.translatesAutoresizingMaskIntoConstraints = false
+    private func switchToTab(_ tab: Tab) {
+        currentTab = tab
 
-        let label = NSTextField(wrappingLabelWithString: text)
-        label.font = NSFont.systemFont(ofSize: 12)
-        label.textColor = SemanticColors.text
-        label.isEditable = false
-        label.isSelectable = true
-        label.drawsBackground = false
-        label.isBordered = false
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.maximumNumberOfLines = 0
-        label.preferredMaxLayoutWidth = 280
+        // Update tab button styling
+        switch tab {
+        case .todo:
+            headerLabel.stringValue = "TODO"
+            todoTabButton.contentTintColor = SemanticColors.accent
+            ideasTabButton.contentTintColor = SemanticColors.muted
+            tabIndicatorLeading.isActive = false
+            tabIndicatorWidth.isActive = false
+            tabIndicatorLeading = tabIndicator.leadingAnchor.constraint(equalTo: todoTabButton.leadingAnchor)
+            tabIndicatorWidth = tabIndicator.widthAnchor.constraint(equalTo: todoTabButton.widthAnchor)
+            tabIndicatorLeading.isActive = true
+            tabIndicatorWidth.isActive = true
 
-        container.addSubview(label)
+            contentScrollView.documentView = todoStack
+            inputContainer.isHidden = true
+            contentBottomToInput.isActive = false
+            contentBottomToPanel.isActive = true
+            rebuildTodoList()
 
-        NSLayoutConstraint.activate([
-            label.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
-            label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
-            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 10),
-            label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
-        ])
+        case .ideas:
+            headerLabel.stringValue = "Ideas"
+            todoTabButton.contentTintColor = SemanticColors.muted
+            ideasTabButton.contentTintColor = SemanticColors.accent
+            tabIndicatorLeading.isActive = false
+            tabIndicatorWidth.isActive = false
+            tabIndicatorLeading = tabIndicator.leadingAnchor.constraint(equalTo: ideasTabButton.leadingAnchor)
+            tabIndicatorWidth = tabIndicator.widthAnchor.constraint(equalTo: ideasTabButton.widthAnchor)
+            tabIndicatorLeading.isActive = true
+            tabIndicatorWidth.isActive = true
 
-        // Set bubble colors and corner radii at creation time
-        if role == .user {
-            container.layer?.backgroundColor = resolvedCGColor(SemanticColors.aiBubbleUser)
-            // cornerRadius 8/8/2/8 — use maskedCorners for per-corner radii
-            container.layer?.cornerRadius = 8
-            container.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMaxXMaxYCorner]
-            // Bottom-left gets smaller radius via a separate approach — CALayer maskedCorners
-            // only toggles corners on/off. Use uniform 8 and set bottom-right to small via mask.
-            // For simplicity, set cornerRadius to 8 and mask out bottom-left for the 2px effect.
-            // Actually maskedCorners only enables/disables, so approximate: use 8 overall.
-            // The spec says 8/8/2/8 — top-left/top-right/bottom-right/bottom-left → bottom-right = 2
-            // Re-reading: "cornerRadius 8/8/2/8" = TL/TR/BR/BL → BR is 2
-            // AppKit CALayer doesn't support per-corner radii easily; use 8 as dominant and accept approximation.
-        } else {
-            container.layer?.backgroundColor = resolvedCGColor(SemanticColors.panel2)
-            // cornerRadius 8/8/8/2 — TL/TR/BR/BL → BL is 2
-            container.layer?.cornerRadius = 8
+            contentScrollView.documentView = ideasStack
+            inputContainer.isHidden = false
+            contentBottomToPanel.isActive = false
+            contentBottomToInput.isActive = true
+            rebuildIdeasList()
         }
 
-        // Mark the role via identifier for appearance updates
-        container.identifier = NSUserInterfaceItemIdentifier(role == .user ? "bubble.user" : "bubble.assistant")
+        needsLayout = true
+    }
+
+    // MARK: - Build TODO List
+
+    private func rebuildTodoList() {
+        todoStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+
+        if todoItems.isEmpty {
+            emptyLabel.stringValue = "No tasks yet"
+            emptyLabel.isHidden = false
+            return
+        }
+        emptyLabel.isHidden = true
+
+        for item in todoItems {
+            let row = makeTodoRow(item)
+            todoStack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: todoStack.widthAnchor, constant: -24).isActive = true
+        }
+    }
+
+    private func makeTodoRow(_ item: TodoDisplayItem) -> NSView {
+        let container = NSView()
+        container.wantsLayer = true
+        container.layer?.cornerRadius = 6
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        // Status icon
+        let statusIcon = NSTextField(labelWithString: statusEmoji(item.status))
+        statusIcon.font = NSFont.systemFont(ofSize: 12)
+        statusIcon.translatesAutoresizingMaskIntoConstraints = false
+
+        // Task label
+        let taskLabel = NSTextField(wrappingLabelWithString: item.task)
+        taskLabel.font = NSFont.systemFont(ofSize: 12)
+        taskLabel.textColor = SemanticColors.text
+        taskLabel.isEditable = false
+        taskLabel.isSelectable = false
+        taskLabel.drawsBackground = false
+        taskLabel.isBordered = false
+        taskLabel.translatesAutoresizingMaskIntoConstraints = false
+        taskLabel.maximumNumberOfLines = 2
+        taskLabel.preferredMaxLayoutWidth = 260
+
+        // Issue badge
+        let issueLabel = NSTextField(labelWithString: item.issue ?? "")
+        issueLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+        issueLabel.textColor = SemanticColors.muted
+        issueLabel.translatesAutoresizingMaskIntoConstraints = false
+        issueLabel.isHidden = item.issue == nil
+
+        // Status badge
+        let statusLabel = NSTextField(labelWithString: item.status)
+        statusLabel.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+        statusLabel.textColor = statusColor(item.status)
+        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        // Progress line
+        let progressLabel = NSTextField(wrappingLabelWithString: item.progress ?? "")
+        progressLabel.font = NSFont.systemFont(ofSize: 10)
+        progressLabel.textColor = SemanticColors.muted
+        progressLabel.isEditable = false
+        progressLabel.isSelectable = false
+        progressLabel.drawsBackground = false
+        progressLabel.isBordered = false
+        progressLabel.translatesAutoresizingMaskIntoConstraints = false
+        progressLabel.maximumNumberOfLines = 1
+        progressLabel.isHidden = item.progress == nil
+
+        container.addSubview(statusIcon)
+        container.addSubview(taskLabel)
+        container.addSubview(issueLabel)
+        container.addSubview(statusLabel)
+        container.addSubview(progressLabel)
+
+        let bgColor: NSColor = item.status == "running"
+            ? SemanticColors.tileBg
+            : .clear
+
+        container.layer?.backgroundColor = bgColor.cgColor
+
+        NSLayoutConstraint.activate([
+            statusIcon.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            statusIcon.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
+            statusIcon.widthAnchor.constraint(equalToConstant: 16),
+
+            taskLabel.leadingAnchor.constraint(equalTo: statusIcon.trailingAnchor, constant: 6),
+            taskLabel.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
+            taskLabel.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -8),
+
+            issueLabel.leadingAnchor.constraint(equalTo: taskLabel.leadingAnchor),
+            issueLabel.topAnchor.constraint(equalTo: taskLabel.bottomAnchor, constant: 2),
+
+            statusLabel.leadingAnchor.constraint(equalTo: issueLabel.trailingAnchor, constant: 8),
+            statusLabel.centerYAnchor.constraint(equalTo: issueLabel.centerYAnchor),
+
+            progressLabel.leadingAnchor.constraint(equalTo: taskLabel.leadingAnchor),
+            progressLabel.topAnchor.constraint(equalTo: issueLabel.bottomAnchor, constant: 2),
+            progressLabel.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -8),
+            progressLabel.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
+        ])
+
+        return container
+    }
+
+    private func statusEmoji(_ status: String) -> String {
+        switch status {
+        case "running": return "\u{25B6}"       // play
+        case "completed": return "\u{2714}"     // check
+        case "failed": return "\u{2718}"        // cross
+        case "approved": return "\u{25CB}"      // circle
+        case "pending_approval": return "\u{23F3}" // hourglass
+        case "rejected", "skipped": return "\u{2013}" // dash
+        default: return "\u{25CB}"
+        }
+    }
+
+    private func statusColor(_ status: String) -> NSColor {
+        switch status {
+        case "running": return NSColor.systemBlue
+        case "completed": return NSColor.systemGreen
+        case "failed": return NSColor.systemRed
+        case "approved": return SemanticColors.text
+        case "pending_approval": return NSColor.systemOrange
+        case "rejected", "skipped": return SemanticColors.muted
+        default: return SemanticColors.muted
+        }
+    }
+
+    // MARK: - Build Ideas List
+
+    private func rebuildIdeasList() {
+        ideasStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+
+        if ideaItems.isEmpty {
+            emptyLabel.stringValue = "No ideas yet. Type one below!"
+            emptyLabel.isHidden = false
+            return
+        }
+        emptyLabel.isHidden = true
+
+        for item in ideaItems {
+            let row = makeIdeaRow(item)
+            ideasStack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: ideasStack.widthAnchor, constant: -24).isActive = true
+        }
+    }
+
+    private func makeIdeaRow(_ item: IdeaDisplayItem) -> NSView {
+        let container = NSView()
+        container.wantsLayer = true
+        container.layer?.backgroundColor = resolvedCGColor(SemanticColors.tileBg)
+        container.layer?.cornerRadius = 6
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let textLabel = NSTextField(wrappingLabelWithString: item.text)
+        textLabel.font = NSFont.systemFont(ofSize: 12)
+        textLabel.textColor = SemanticColors.text
+        textLabel.isEditable = false
+        textLabel.isSelectable = true
+        textLabel.drawsBackground = false
+        textLabel.isBordered = false
+        textLabel.translatesAutoresizingMaskIntoConstraints = false
+        textLabel.maximumNumberOfLines = 3
+        textLabel.preferredMaxLayoutWidth = 280
+
+        let metaLabel = NSTextField(labelWithString: "\(item.source) \u{00B7} \(item.timestamp)")
+        metaLabel.font = NSFont.systemFont(ofSize: 10)
+        metaLabel.textColor = SemanticColors.muted
+        metaLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        container.addSubview(textLabel)
+        container.addSubview(metaLabel)
+
+        // Tags
+        let tagsStr = item.tags.map { "#\($0)" }.joined(separator: " ")
+        if !tagsStr.isEmpty {
+            let tagsLabel = NSTextField(labelWithString: tagsStr)
+            tagsLabel.font = NSFont.systemFont(ofSize: 10)
+            tagsLabel.textColor = SemanticColors.accent
+            tagsLabel.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(tagsLabel)
+
+            NSLayoutConstraint.activate([
+                tagsLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 10),
+                tagsLabel.topAnchor.constraint(equalTo: metaLabel.bottomAnchor, constant: 2),
+                tagsLabel.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
+            ])
+        } else {
+            metaLabel.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8).isActive = true
+        }
+
+        NSLayoutConstraint.activate([
+            textLabel.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
+            textLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 10),
+            textLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
+
+            metaLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 10),
+            metaLabel.topAnchor.constraint(equalTo: textLabel.bottomAnchor, constant: 4),
+        ])
 
         return container
     }
@@ -371,39 +662,48 @@ final class AIPanelView: NSView, NSTextViewDelegate {
         layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: 0, cornerHeight: 0, transform: nil)
     }
 
+    private func applyShadow() {
+        shadow = NSShadow()
+        layer?.shadowColor = NSColor.black.withAlphaComponent(0.3).cgColor
+        layer?.shadowOffset = CGSize(width: -8, height: 0)
+        layer?.shadowRadius = 24
+        layer?.shadowOpacity = 1.0
+    }
+
     private func applyColors() {
         layer?.backgroundColor = SemanticColors.panel.cgColor
         leftBorder.layer?.backgroundColor = SemanticColors.line.cgColor
         headerBorder.layer?.backgroundColor = SemanticColors.line.cgColor
+        tabBarBorder.layer?.backgroundColor = SemanticColors.line.cgColor
+        tabIndicator.layer?.backgroundColor = SemanticColors.accent.cgColor
         inputBorder.layer?.backgroundColor = SemanticColors.line.cgColor
         inputTextView.backgroundColor = SemanticColors.tileBg
 
         sendButton.layer?.backgroundColor = SemanticColors.accent.cgColor
         sendButton.layer?.cornerRadius = 6
 
-        // Update bubble backgrounds
-        let userBg = resolvedCGColor(SemanticColors.aiBubbleUser)
-        let assistantBg = resolvedCGColor(SemanticColors.panel2)
-        for view in messagesStack.arrangedSubviews {
-            if view.identifier?.rawValue == "bubble.user" {
-                view.layer?.backgroundColor = userBg
-            } else {
-                view.layer?.backgroundColor = assistantBg
-            }
-        }
-
-        // Input scroll view background
         inputScrollView.wantsLayer = true
         inputScrollView.layer?.backgroundColor = SemanticColors.tileBg.cgColor
         inputScrollView.layer?.borderWidth = 1
         inputScrollView.layer?.borderColor = SemanticColors.line.cgColor
         inputScrollView.layer?.cornerRadius = 6
+
+        // Re-apply tab colors
+        switchToTab(currentTab)
     }
 
     // MARK: - Actions
 
     @objc private func closeClicked() {
         delegate?.aiPanelDidRequestClose()
+    }
+
+    @objc private func todoTabClicked() {
+        switchToTab(.todo)
+    }
+
+    @objc private func ideasTabClicked() {
+        switchToTab(.ideas)
     }
 
     @objc private func sendClicked() {
@@ -414,23 +714,30 @@ final class AIPanelView: NSView, NSTextViewDelegate {
         let text = inputTextView.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
-        addBubble(role: .user, text: text)
+        // Add to ideas list
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        let timestamp = formatter.string(from: Date())
+
+        let newIdea = IdeaDisplayItem(
+            timestamp: timestamp,
+            text: text,
+            source: "pmux",
+            tags: []
+        )
+        ideaItems.insert(newIdea, at: 0)
+
         inputTextView.string = ""
         updateInputHeight()
+        rebuildIdeasList()
 
-        // Placeholder response after ~450ms
-        let truncated = String(text.prefix(80))
-        let response = "Received: \(truncated)"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
-            self?.addBubble(role: .assistant, text: response)
-        }
+        // TODO: persist to ideas.jsonl via AgentHead/MemoryStore
     }
 
     // MARK: - NSTextViewDelegate
 
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         if commandSelector == #selector(insertNewline(_:)) {
-            // Enter without Shift → send
             let flags = NSApp.currentEvent?.modifierFlags ?? []
             if !flags.contains(.shift) {
                 sendCurrentInput()
@@ -453,5 +760,23 @@ final class AIPanelView: NSView, NSTextViewDelegate {
         let height = usedRect.height + inset.height * 2
         let clamped = min(max(height, 36), 96)
         inputHeightConstraint.constant = clamped
+    }
+
+    // MARK: - Sample Data
+
+    private func loadSampleData() {
+        todoItems = [
+            TodoDisplayItem(id: 1, task: "支付模块重构", status: "running", issue: "#42", worktree: "feat-payment", progress: "Claude Code running, 3 files created"),
+            TodoDisplayItem(id: 2, task: "修复登录 bug", status: "approved", issue: "#38", worktree: nil, progress: nil),
+            TodoDisplayItem(id: 3, task: "升级 Swift 依赖到 5.11", status: "rejected", issue: nil, worktree: nil, progress: nil),
+            TodoDisplayItem(id: 4, task: "补充 API 文档", status: "pending_approval", issue: nil, worktree: nil, progress: nil),
+            TodoDisplayItem(id: 5, task: "清理废弃代码", status: "completed", issue: "#30", worktree: nil, progress: nil),
+        ]
+
+        ideaItems = [
+            IdeaDisplayItem(timestamp: "08:30", text: "登录页能不能加个记住密码", source: "wechat", tags: ["ui", "login"]),
+            IdeaDisplayItem(timestamp: "12:15", text: "性能好像变差了，首屏加载要3秒", source: "pmux", tags: ["perf"]),
+            IdeaDisplayItem(timestamp: "22:00", text: "考虑支持 dark mode 的自动切换", source: "mqtt", tags: []),
+        ]
     }
 }

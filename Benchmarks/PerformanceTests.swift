@@ -337,16 +337,21 @@ final class PerformanceTests: XCTestCase {
         let panel = AIPanelView()
         panel.frame = NSRect(x: 0, y: 0, width: 350, height: 800)
 
-        // Add 20 chat bubbles
-        for i in 0..<20 {
-            panel.addBubble(
-                role: i % 2 == 0 ? .user : .assistant,
-                text: "This is message number \(i) with some content to render."
+        // Add 20 TODO items
+        let items = (0..<20).map {
+            AIPanelView.TodoDisplayItem(
+                id: $0,
+                task: "Task number \($0) with some content to render.",
+                status: $0 % 3 == 0 ? "running" : "approved",
+                issue: "#\($0)",
+                worktree: nil,
+                progress: nil
             )
         }
+        panel.updateTodoItems(items)
 
         measure {
-            // Simulate 60 frames — updateLayer iterates all bubbles each time
+            // Simulate 60 frames
             for _ in 0..<60 {
                 panel.updateLayer()
             }

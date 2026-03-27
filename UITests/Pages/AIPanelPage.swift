@@ -10,11 +10,14 @@ final class AIPanelPage {
     var closeButton: XCUIElement { app.buttons["panel.ai.close"] }
     var inputField: XCUIElement { app.textFields["panel.ai.input"] }
     var sendButton: XCUIElement { app.buttons["panel.ai.send"] }
-    var messages: XCUIElement { app.groups["panel.ai.messages"] }
+    var content: XCUIElement { app.scrollViews["panel.ai.content"] }
+    var todoTab: XCUIElement { app.buttons["panel.ai.tab.todo"] }
+    var ideasTab: XCUIElement { app.buttons["panel.ai.tab.ideas"] }
 
     var isOpen: Bool { panel.waitForExistence(timeout: 2) }
 
-    func sendMessage(_ text: String) {
+    func addIdea(_ text: String) {
+        ideasTab.waitAndClick()
         inputField.waitAndClick()
         inputField.typeText(text)
         sendButton.waitAndClick()
