@@ -2,6 +2,7 @@ import AppKit
 
 protocol AIPanelDelegate: AnyObject {
     func aiPanelDidRequestClose()
+    func aiPanelDidSubmitIdea(_ text: String)
 }
 
 final class AIPanelView: NSView, NSTextViewDelegate {
@@ -411,8 +412,6 @@ final class AIPanelView: NSView, NSTextViewDelegate {
         applyColors()
         switchToTab(.todo)
 
-        // Load sample data for demo
-        loadSampleData()
     }
 
     // MARK: - Tab Switching
@@ -743,26 +742,12 @@ final class AIPanelView: NSView, NSTextViewDelegate {
         let text = inputTextView.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
-        // Add to ideas list
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        let timestamp = formatter.string(from: Date())
-
-        let newIdea = IdeaDisplayItem(
-            timestamp: timestamp,
-            text: text,
-            source: "amux",
-            tags: []
-        )
-        ideaItems.insert(newIdea, at: 0)
-
         inputTextView.string = ""
         placeholderLabel.isHidden = false
         sendButton.contentTintColor = SemanticColors.muted
         updateInputHeight()
-        rebuildIdeasList()
 
-        // TODO: persist to ideas.jsonl via AgentHead/MemoryStore
+        delegate?.aiPanelDidSubmitIdea(text)
     }
 
     // MARK: - NSTextViewDelegate
@@ -797,21 +782,4 @@ final class AIPanelView: NSView, NSTextViewDelegate {
         inputHeightConstraint.constant = clamped
     }
 
-    // MARK: - Sample Data
-
-    private func loadSampleData() {
-        todoItems = [
-            TodoDisplayItem(id: 1, task: "支付模块重构", status: "running", issue: "#42", worktree: "feat-payment", progress: "Claude Code running, 3 files created"),
-            TodoDisplayItem(id: 2, task: "修复登录 bug", status: "approved", issue: "#38", worktree: nil, progress: nil),
-            TodoDisplayItem(id: 3, task: "升级 Swift 依赖到 5.11", status: "rejected", issue: nil, worktree: nil, progress: nil),
-            TodoDisplayItem(id: 4, task: "补充 API 文档", status: "pending_approval", issue: nil, worktree: nil, progress: nil),
-            TodoDisplayItem(id: 5, task: "清理废弃代码", status: "completed", issue: "#30", worktree: nil, progress: nil),
-        ]
-
-        ideaItems = [
-            IdeaDisplayItem(timestamp: "08:30", text: "登录页能不能加个记住密码", source: "wechat", tags: ["ui", "login"]),
-            IdeaDisplayItem(timestamp: "12:15", text: "性能好像变差了，首屏加载要3秒", source: "amux", tags: ["perf"]),
-            IdeaDisplayItem(timestamp: "22:00", text: "考虑支持 dark mode 的自动切换", source: "mqtt", tags: []),
-        ]
-    }
 }
