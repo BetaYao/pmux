@@ -185,6 +185,7 @@ class MainWindowController: NSWindowController {
     }
 
     @objc func showNewBranchDialog() {
+        NSLog("[NewBranch] config.workspacePaths = \(config.workspacePaths)")
         let dialog = dialogPresenter.makeNewBranchDialog(repoPaths: config.workspacePaths, dialogDelegate: self)
         dialogPresenter.presentSheetOnActiveVC(dialog, tabCoordinator: tabCoordinator, dashboardVC: dashboardVC)
     }
@@ -637,6 +638,9 @@ extension MainWindowController: TitleBarDelegate {
     func titleBarDidSelectLayout(_ layout: DashboardLayout) {
         dashboardVC?.setLayout(layout)
         config.dashboardLayout = layout.rawValue
+        tabCoordinator.config.dashboardLayout = layout.rawValue
+        terminalCoordinator.config.dashboardLayout = layout.rawValue
+        updateCoordinator.config.dashboardLayout = layout.rawValue
         config.save()
         titleBar.setCurrentLayout(layout)
     }
@@ -653,6 +657,9 @@ extension MainWindowController: TitleBarDelegate {
         let isDark = window?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let next: ThemeMode = isDark ? .light : .dark
         config.themeMode = next.rawValue
+        tabCoordinator.config.themeMode = next.rawValue
+        terminalCoordinator.config.themeMode = next.rawValue
+        updateCoordinator.config.themeMode = next.rawValue
         config.save()
         ThemeMode.applyAppearance(next)
         // Window appearance must also be updated since it was set explicitly in init
@@ -767,6 +774,7 @@ extension MainWindowController {
 extension MainWindowController: SettingsDelegate {
     func settingsDidUpdateConfig(_ settings: SettingsViewController, config: Config) {
         let oldPaths = Set(self.config.workspacePaths)
+        let oldWecomBot = self.config.wecomBot
         self.config = config
         tabCoordinator.config = config
         terminalCoordinator.config = config
@@ -776,6 +784,20 @@ extension MainWindowController: SettingsDelegate {
         let newPaths = Set(config.workspacePaths)
         if oldPaths != newPaths {
             tabCoordinator.loadWorkspaces()
+        }
+
+        // Hot-reload WeCom bot connection on config change
+        if oldWecomBot != config.wecomBot {
+            // Disconnect existing WeCom channels
+            AgentHead.shared.unregisterAllExternalChannels()
+
+            // Connect if configured
+            if let wecomConfig = config.wecomBot, wecomConfig.resolvedAutoConnect {
+                let channel = WeComBotChannel(config: wecomConfig)
+                AgentHead.shared.registerChannel(channel)
+                channel.connect()
+                NSLog("[Settings] WeCom bot reconnecting: \(wecomConfig.resolvedName)")
+            }
         }
     }
 }
