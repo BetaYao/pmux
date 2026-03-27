@@ -18,6 +18,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSAppearance.current = NSApp.effectiveAppearance
 
+        // Load TODO and Ideas stores
+        TodoStore.shared.load()
+        IdeaStore.shared.load()
+
         // Initialize GhosttyApp singleton
         GhosttyBridge.shared.initialize()
 
