@@ -70,7 +70,7 @@ class IdeaStore {
             tags: tags,
             createdAt: Date()
         )
-        items.insert(item, at: 0)
+        items.append(item)
         save()
         return item
     }

@@ -3,6 +3,7 @@ import AppKit
 protocol AIPanelDelegate: AnyObject {
     func aiPanelDidRequestClose()
     func aiPanelDidSubmitIdea(_ text: String)
+    func aiPanelDidRequestDeleteIdea(id: String)
 }
 
 final class AIPanelView: NSView, NSTextViewDelegate {
@@ -32,6 +33,7 @@ final class AIPanelView: NSView, NSTextViewDelegate {
     }
 
     struct IdeaDisplayItem {
+        let id: String
         let timestamp: String
         let text: String
         let source: String
@@ -609,6 +611,15 @@ final class AIPanelView: NSView, NSTextViewDelegate {
             ideasStack.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: ideasStack.widthAnchor, constant: -24).isActive = true
         }
+
+        // Scroll to bottom (newest items at end)
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let docView = self.contentScrollView.documentView else { return }
+            let maxY = docView.frame.maxY - self.contentScrollView.contentSize.height
+            if maxY > 0 {
+                self.contentScrollView.contentView.scroll(to: NSPoint(x: 0, y: maxY))
+            }
+        }
     }
 
     private func makeIdeaRow(_ item: IdeaDisplayItem) -> NSView {
@@ -627,7 +638,16 @@ final class AIPanelView: NSView, NSTextViewDelegate {
         textLabel.isBordered = false
         textLabel.translatesAutoresizingMaskIntoConstraints = false
         textLabel.maximumNumberOfLines = 3
-        textLabel.preferredMaxLayoutWidth = 280
+        textLabel.preferredMaxLayoutWidth = 260
+
+        // Delete button
+        let deleteButton = NSButton(title: "\u{00D7}", target: self, action: #selector(deleteIdeaClicked(_:)))
+        deleteButton.identifier = NSUserInterfaceItemIdentifier("idea.delete.\(item.id)")
+        deleteButton.isBordered = false
+        deleteButton.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        deleteButton.contentTintColor = SemanticColors.muted
+        deleteButton.translatesAutoresizingMaskIntoConstraints = false
+        deleteButton.alphaValue = 0.5
 
         let metaLabel = NSTextField(labelWithString: "\(item.source) \u{00B7} \(item.timestamp)")
         metaLabel.font = NSFont.systemFont(ofSize: 10)
@@ -635,6 +655,7 @@ final class AIPanelView: NSView, NSTextViewDelegate {
         metaLabel.translatesAutoresizingMaskIntoConstraints = false
 
         container.addSubview(textLabel)
+        container.addSubview(deleteButton)
         container.addSubview(metaLabel)
 
         // Tags
@@ -658,13 +679,25 @@ final class AIPanelView: NSView, NSTextViewDelegate {
         NSLayoutConstraint.activate([
             textLabel.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
             textLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 10),
-            textLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
+            textLabel.trailingAnchor.constraint(lessThanOrEqualTo: deleteButton.leadingAnchor, constant: -4),
+
+            deleteButton.topAnchor.constraint(equalTo: container.topAnchor, constant: 6),
+            deleteButton.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -6),
+            deleteButton.widthAnchor.constraint(equalToConstant: 20),
+            deleteButton.heightAnchor.constraint(equalToConstant: 20),
 
             metaLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 10),
             metaLabel.topAnchor.constraint(equalTo: textLabel.bottomAnchor, constant: 4),
         ])
 
         return container
+    }
+
+    @objc private func deleteIdeaClicked(_ sender: NSButton) {
+        guard let identifier = sender.identifier?.rawValue,
+              identifier.hasPrefix("idea.delete.") else { return }
+        let ideaId = String(identifier.dropFirst("idea.delete.".count))
+        delegate?.aiPanelDidRequestDeleteIdea(id: ideaId)
     }
 
     // MARK: - Drawing
@@ -695,6 +728,7 @@ final class AIPanelView: NSView, NSTextViewDelegate {
         tabIndicator.layer?.backgroundColor = SemanticColors.accent.cgColor
         inputBorder.layer?.backgroundColor = SemanticColors.line.cgColor
         inputTextView.backgroundColor = .clear
+        inputTextView.insertionPointColor = SemanticColors.text
 
         sendButton.contentTintColor = SemanticColors.muted
         sendButton.layer?.backgroundColor = .clear

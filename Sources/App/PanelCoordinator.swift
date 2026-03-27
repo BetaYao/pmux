@@ -98,6 +98,7 @@ class PanelCoordinator: NSObject {
 
         let ideaDisplayItems = IdeaStore.shared.allItems().map { item in
             AIPanelView.IdeaDisplayItem(
+                id: item.id,
                 timestamp: formatter.string(from: item.createdAt),
                 text: item.text,
                 source: item.source,
@@ -138,6 +139,11 @@ extension PanelCoordinator: AIPanelDelegate {
 
     func aiPanelDidSubmitIdea(_ text: String) {
         IdeaStore.shared.add(text: text, project: "amux", source: "manual", tags: [])
+        refreshAIPanelData()
+    }
+
+    func aiPanelDidRequestDeleteIdea(id: String) {
+        IdeaStore.shared.remove(id: id)
         refreshAIPanelData()
     }
 }
