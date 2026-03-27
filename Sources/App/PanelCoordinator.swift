@@ -72,10 +72,41 @@ class PanelCoordinator: NSObject {
         notificationPopover.performClose(nil)
         notificationPanel.setOpen(false, animated: false)
 
+        // Feed real data from stores
+        refreshAIPanelData()
+
         aiPanel.setOpen(true, animated: false)
         guard let titleBar else { return }
         let anchor = titleBar.aiAnchorView()
         aiPopover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+    }
+
+    private func refreshAIPanelData() {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+
+        let todoDisplayItems = TodoStore.shared.allItems().map { item in
+            AIPanelView.TodoDisplayItem(
+                id: item.id.hashValue,
+                task: item.task,
+                status: item.status,
+                issue: item.issue,
+                worktree: item.branch,
+                progress: item.progress
+            )
+        }
+
+        let ideaDisplayItems = IdeaStore.shared.allItems().map { item in
+            AIPanelView.IdeaDisplayItem(
+                timestamp: formatter.string(from: item.createdAt),
+                text: item.text,
+                source: item.source,
+                tags: item.tags
+            )
+        }
+
+        aiPanel.updateTodoItems(todoDisplayItems)
+        aiPanel.updateIdeaItems(ideaDisplayItems)
     }
 }
 
@@ -103,6 +134,11 @@ extension PanelCoordinator: AIPanelDelegate {
     func aiPanelDidRequestClose() {
         aiPopover.performClose(nil)
         aiPanel.setOpen(false, animated: false)
+    }
+
+    func aiPanelDidSubmitIdea(_ text: String) {
+        IdeaStore.shared.add(text: text, project: "amux", source: "manual", tags: [])
+        refreshAIPanelData()
     }
 }
 
