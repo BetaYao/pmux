@@ -22,6 +22,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         TodoStore.shared.load()
         IdeaStore.shared.load()
 
+        // Auto-connect WeCom bot if configured
+        if let wecomConfig = config.wecomBot, wecomConfig.resolvedAutoConnect {
+            let channel = WeComBotChannel(config: wecomConfig)
+            AgentHead.shared.registerChannel(channel)
+            channel.connect()
+            NSLog("[App] WeCom bot auto-connecting: \(wecomConfig.resolvedName)")
+        }
+
         // Initialize GhosttyApp singleton
         GhosttyBridge.shared.initialize()
 

@@ -27,6 +27,7 @@ struct AgentDisplayInfo {
     let worktreePath: String    // needed to lazily create the terminal
     let paneCount: Int          // number of split panes (1 = no badge)
     let paneSurfaces: [TerminalSurface]  // all pane surfaces in leaf order
+    let tasks: [TaskItem]              // webhook-tracked task items
 
     /// Convenience: primary status string for display (first pane's status)
     var status: String {
@@ -209,7 +210,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
                 totalDuration: agent.totalDuration,
                 roundDuration: agent.roundDuration,
                 paneCount: agent.paneCount,
-                paneStatuses: agent.paneStatuses
+                paneStatuses: agent.paneStatuses,
+                tasks: agent.tasks
             )
             gridCards[index].isSelected = (agent.id == selectedAgentId)
         }
@@ -659,7 +661,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
                 lastMessage: agent.lastMessage,
                 totalDuration: agent.totalDuration,
                 roundDuration: agent.roundDuration,
-                paneCount: agent.paneCount
+                paneCount: agent.paneCount,
+                tasks: agent.tasks
             )
             container.isSelected = (agent.id == selectedAgentId)
             container.translatesAutoresizingMaskIntoConstraints = true

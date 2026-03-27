@@ -17,6 +17,7 @@ struct Config: Codable {
     var activeTabRepoPath: String?
     var activeWorktreePaths: [String: String]
     var focusedPaneIds: [String: String]
+    var wecomBot: WeComBotConfig?
 
     enum CodingKeys: String, CodingKey {
         case workspacePaths = "workspace_paths"
@@ -35,6 +36,7 @@ struct Config: Codable {
         case activeTabRepoPath = "active_tab_repo_path"
         case activeWorktreePaths = "active_worktree_paths"
         case focusedPaneIds = "focused_pane_ids"
+        case wecomBot = "wecom_bot"
     }
 
     init() {
@@ -54,6 +56,7 @@ struct Config: Codable {
         activeTabRepoPath = nil
         activeWorktreePaths = [:]
         focusedPaneIds = [:]
+        wecomBot = nil
     }
 
     init(from decoder: Decoder) throws {
@@ -78,6 +81,7 @@ struct Config: Codable {
         activeTabRepoPath = try container.decodeIfPresent(String.self, forKey: .activeTabRepoPath)
         activeWorktreePaths = try container.decodeIfPresent([String: String].self, forKey: .activeWorktreePaths) ?? [:]
         focusedPaneIds = try container.decodeIfPresent([String: String].self, forKey: .focusedPaneIds) ?? [:]
+        wecomBot = try container.decodeIfPresent(WeComBotConfig.self, forKey: .wecomBot)
     }
 
     static let configDir = FileManager.default.homeDirectoryForCurrentUser

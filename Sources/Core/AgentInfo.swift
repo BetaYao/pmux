@@ -14,6 +14,7 @@ struct AgentInfo {
     weak var surface: TerminalSurface? // weak ref, MainWindowController owns
     var channel: AgentChannel?         // communication channel (strong ref, AgentHead owns)
     var taskProgress: TaskProgress     // current task progress
+    var tasks: [TaskItem] = []          // webhook-tracked task items
 
     /// Total duration computed live from startedAt
     var totalDuration: TimeInterval {
@@ -39,4 +40,16 @@ struct TaskProgress {
         guard totalTasks > 0 else { return 0 }
         return Double(completedTasks) / Double(totalTasks)
     }
+}
+
+enum TaskItemStatus: String {
+    case pending
+    case inProgress = "in_progress"
+    case completed
+}
+
+struct TaskItem {
+    let id: String
+    var subject: String
+    var status: TaskItemStatus
 }

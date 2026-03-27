@@ -18,6 +18,8 @@ class WebhookStatusProvider {
         var status: AgentStatus
         var lastEvent: Date
         var lastMessage: String?
+        var tasks: [TaskItem] = []
+        var nextTaskId: Int = 1
     }
 
     func updateWorktrees(_ paths: [String]) {
@@ -39,12 +41,35 @@ class WebhookStatusProvider {
 
             // WorktreeCreate: record transfer intent before new worktree is discoverable
             if event.event == .worktreeCreate {
-                let worktreeName = event.data?["worktree_name"] as? String ?? ""
+                // Claude Code sends "branch" and "worktree_path", not "worktree_name".
+                // Prefer worktree_path's last component since PendingTransferTracker
+                // matches by directory name, not branch name.
+                let worktreeName: String = {
+                    if let name = event.data?["worktree_name"] as? String, !name.isEmpty { return name }
+                    if let wtPath = event.data?["worktree_path"] as? String, !wtPath.isEmpty {
+                        return URL(fileURLWithPath: wtPath).lastPathComponent
+                    }
+                    if let branch = event.data?["branch"] as? String, !branch.isEmpty { return branch }
+                    return ""
+                }()
                 if !worktreeName.isEmpty {
                     let sourcePath = canonCwd
+                    let worktreePath = event.data?["worktree_path"] as? String
                     NSLog("[WebhookStatusProvider] WorktreeCreate from \(sourcePath): \(worktreeName)")
                     DispatchQueue.main.async { [weak self] in
                         self?.onWorktreeCreateReceived?(sourcePath, worktreeName, event.sessionId)
+                    }
+                    // Also trigger delayed discovery — CwdChanged may not fire
+                    // if the agent stays in the original directory after creating the worktree
+                    if let wtPath = worktreePath {
+                        let canonWtPath = canonicalize(wtPath)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                            guard let self else { return }
+                            if self.matchWorktreeSync(canonWtPath) == nil {
+                                NSLog("[WebhookStatusProvider] Triggering discovery for WorktreeCreate path: \(wtPath)")
+                                self.onNewWorktreeDetected?(canonWtPath)
+                            }
+                        }
                     }
                 }
                 return
@@ -73,15 +98,18 @@ class WebhookStatusProvider {
                 existing.status = status
                 existing.lastEvent = Date()
                 if let message { existing.lastMessage = message }
+                Self.applyTaskEvent(event, to: &existing)
                 sessions[event.sessionId] = existing
             } else {
-                sessions[event.sessionId] = SessionState(
+                var newSession = SessionState(
                     sessionId: event.sessionId,
                     worktreePath: worktreePath,
                     status: status,
                     lastEvent: Date(),
                     lastMessage: message
                 )
+                Self.applyTaskEvent(event, to: &newSession)
+                sessions[event.sessionId] = newSession
             }
         }
     }
@@ -157,6 +185,56 @@ class WebhookStatusProvider {
         case .cwdChanged:
             return nil
         }
+    }
+
+    /// Parse TaskCreate/TaskUpdate from PostToolUse events and update session task list
+    private static func applyTaskEvent(_ event: WebhookEvent, to session: inout SessionState) {
+        // agentStop clears task list
+        if event.event == .agentStop {
+            session.tasks.removeAll()
+            session.nextTaskId = 1
+            return
+        }
+
+        guard event.event == .toolUseEnd,
+              let toolName = event.data?["tool_name"] as? String,
+              let toolInput = event.data?["tool_input"] as? [String: Any] else { return }
+
+        switch toolName {
+        case "TaskCreate":
+            guard let subject = toolInput["subject"] as? String else { return }
+            let id = String(session.nextTaskId)
+            session.nextTaskId += 1
+            session.tasks.append(TaskItem(id: id, subject: subject, status: .pending))
+
+        case "TaskUpdate":
+            guard let taskId = toolInput["taskId"] as? String else { return }
+            if let statusStr = toolInput["status"] as? String,
+               let newStatus = TaskItemStatus(rawValue: statusStr) {
+                if let idx = session.tasks.firstIndex(where: { $0.id == taskId }) {
+                    session.tasks[idx].status = newStatus
+                }
+            }
+
+        default:
+            break
+        }
+    }
+
+    /// Returns tasks from the most recent session for a worktree
+    func tasks(for worktreePath: String) -> [TaskItem] {
+        queue.sync {
+            let canon = canonicalize(worktreePath)
+            return sessions.values
+                .filter { $0.worktreePath == canon }
+                .max(by: { $0.lastEvent < $1.lastEvent })?
+                .tasks ?? []
+        }
+    }
+
+    /// Thread-safe check from outside the queue (e.g. main thread delayed dispatch)
+    func matchWorktreeSync(_ canonCwd: String) -> String? {
+        queue.sync { matchWorktree(canonCwd) }
     }
 
     private func matchWorktree(_ canonCwd: String) -> String? {

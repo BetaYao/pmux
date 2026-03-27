@@ -20,6 +20,8 @@ class AgentHead {
     /// Strong references to channels (keyed by terminal ID)
     private var channels: [String: AgentChannel] = [:]
     private var backendsByPath: [String: String] = [:]
+    /// External channels (WeCom, future: Slack, etc.) — keyed by channelId
+    private var externalChannels: [String: ExternalChannel] = [:]
     private let lock = NSLock()
 
     private init() {}
@@ -118,22 +120,34 @@ class AgentHead {
     // MARK: - Updates
 
     func updateStatus(terminalID: String, status: AgentStatus,
-                      lastMessage: String, roundDuration: TimeInterval) {
+                      lastMessage: String, roundDuration: TimeInterval,
+                      tasks: [TaskItem] = []) {
         lock.lock()
         guard var info = agents[terminalID] else {
             lock.unlock()
             return
         }
+        let previousStatus = info.status
         let changed = info.status != status || info.lastMessage != lastMessage
+            || info.tasks.count != tasks.count
         info.status = status
         info.lastMessage = lastMessage
         info.roundDuration = roundDuration
+        info.tasks = tasks
         agents[terminalID] = info
+        let hasExternalChannels = !externalChannels.isEmpty
         lock.unlock()
 
         if changed {
             DispatchQueue.main.async { [weak self] in
                 self?.delegate?.agentDidUpdate(info)
+            }
+
+            // Notify external channels on critical status transitions
+            if hasExternalChannels && previousStatus != status
+                && (status == .waiting || status == .error) {
+                let text = "[\(info.project)] \(status.icon) \(status.rawValue): \(lastMessage)"
+                broadcast(text, format: .markdown)
             }
         }
     }
@@ -344,5 +358,161 @@ class AgentHead {
     func updateTodoFromWebhook(_ event: WebhookEvent) {
         // Not yet implemented — will be filled when AgentHead status
         // pipeline is connected to TodoStore.
+    }
+
+    // MARK: - External Channel Management
+
+    /// Register an external channel (WeCom, Slack, etc.)
+    func registerChannel(_ channel: ExternalChannel) {
+        lock.lock()
+        externalChannels[channel.channelId] = channel
+        lock.unlock()
+
+        channel.onMessage = { [weak self] message in
+            self?.handleInbound(message)
+        }
+    }
+
+    /// Unregister and disconnect an external channel
+    func unregisterChannel(_ channelId: String) {
+        lock.lock()
+        let channel = externalChannels.removeValue(forKey: channelId)
+        lock.unlock()
+
+        channel?.disconnect()
+    }
+
+    /// Remove all external channels (for testing)
+    func unregisterAllExternalChannels() {
+        lock.lock()
+        let channels = externalChannels
+        externalChannels.removeAll()
+        lock.unlock()
+
+        for (_, channel) in channels {
+            channel.disconnect()
+        }
+    }
+
+    // MARK: - Inbound Message Handling
+
+    /// Process an inbound message from an external channel.
+    /// Phase 1: slash command routing.
+    /// Phase 2 (future): LLM intent understanding.
+    func handleInbound(_ message: InboundMessage) {
+        if let cmd = CommandParser.parse(message) {
+            executeCommand(cmd)
+        } else {
+            reply(to: message, content: "请使用 /help 查看支持的命令")
+        }
+    }
+
+    private func executeCommand(_ cmd: ParsedCommand) {
+        switch cmd.command {
+        case "help":
+            let help = """
+            **AMUX 命令列表**
+            `/idea <描述>` — 新增一个 idea
+            `/status` — 查看所有 agent 状态
+            `/list` — 列出所有 agent
+            `/send <project> <command>` — 给指定 agent 下指令
+            `/help` — 显示帮助
+            """
+            reply(to: cmd.rawMessage, content: help)
+
+        case "idea":
+            guard !cmd.args.isEmpty else {
+                reply(to: cmd.rawMessage, content: "用法: `/idea <描述>`")
+                return
+            }
+            let item = IdeaStore.shared.add(
+                text: cmd.args,
+                project: "external",
+                source: "wecom:\(cmd.rawMessage.senderId)",
+                tags: []
+            )
+            reply(to: cmd.rawMessage, content: "Idea added: \(item.text)")
+
+        case "status":
+            let agents = allAgents()
+            if agents.isEmpty {
+                reply(to: cmd.rawMessage, content: "No agents running.")
+                return
+            }
+            var lines = ["**Agent Status**", ""]
+            for a in agents {
+                lines.append("\(a.status.icon) **\(a.project)** [\(a.branch)] — \(a.status.rawValue): \(a.lastMessage)")
+            }
+            reply(to: cmd.rawMessage, content: lines.joined(separator: "\n"), format: .markdown)
+
+        case "list":
+            let agents = allAgents()
+            if agents.isEmpty {
+                reply(to: cmd.rawMessage, content: "No agents registered.")
+                return
+            }
+            var lines = ["**Agents**", ""]
+            for a in agents {
+                lines.append("- \(a.project) / \(a.branch) — \(a.status.rawValue)")
+            }
+            reply(to: cmd.rawMessage, content: lines.joined(separator: "\n"), format: .markdown)
+
+        case "send":
+            let parts = cmd.args.split(separator: " ", maxSplits: 1)
+            guard parts.count == 2 else {
+                reply(to: cmd.rawMessage, content: "用法: `/send <project> <command>`")
+                return
+            }
+            let project = String(parts[0])
+            let command = String(parts[1])
+            let matched = agentsForProject(project)
+            guard let target = matched.first else {
+                reply(to: cmd.rawMessage, content: "未找到 project: \(project)")
+                return
+            }
+            sendCommand(to: target.id, command: command)
+            reply(to: cmd.rawMessage, content: "Command sent to \(target.project): \(command)")
+
+        default:
+            reply(to: cmd.rawMessage, content: "未知命令: /\(cmd.command)\n请使用 /help 查看支持的命令")
+        }
+    }
+
+    /// Send a reply back through the same external channel
+    private func reply(to message: InboundMessage, content: String, format: MessageFormat = .text) {
+        let outbound = OutboundMessage(
+            channelId: message.channelId,
+            targetChatId: message.chatId,
+            targetUserId: message.chatId == nil ? message.senderId : nil,
+            content: content,
+            format: format,
+            replyToMessageId: message.messageId
+        )
+        pushToChannel(message.channelId, message: outbound)
+    }
+
+    /// Push a message to a specific external channel
+    func pushToChannel(_ channelId: String, message: OutboundMessage) {
+        lock.lock()
+        let channel = externalChannels[channelId]
+        lock.unlock()
+
+        channel?.send(message)
+    }
+
+    /// Broadcast a message to all registered external channels
+    func broadcast(_ content: String, format: MessageFormat = .text) {
+        lock.lock()
+        let channels = Array(externalChannels.values)
+        lock.unlock()
+
+        for channel in channels {
+            let message = OutboundMessage(
+                channelId: channel.channelId,
+                content: content,
+                format: format
+            )
+            channel.send(message)
+        }
     }
 }
