@@ -467,11 +467,12 @@ class TabCoordinator {
         worktreeRepoCache[newInfo.path] = repoRoot
 
         // 3. Re-register transferred surfaces in AgentHead under new worktree
+        // Unregister all old agents for the source path first
+        while let oldAgent = AgentHead.shared.agent(forWorktree: sourcePath) {
+            AgentHead.shared.unregister(terminalID: oldAgent.id)
+        }
         for leaf in transferredTree.allLeaves {
             if let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId) {
-                if let oldAgent = AgentHead.shared.agent(forWorktree: sourcePath) {
-                    AgentHead.shared.unregister(terminalID: oldAgent.id)
-                }
                 let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: newInfo.path)
                 AgentHead.shared.register(surface: surface, worktreePath: newInfo.path, branch: newInfo.branch, project: project, startedAt: Date(), tmuxSessionName: sessionName, backend: runtimeBackend)
             }
