@@ -775,6 +775,7 @@ extension MainWindowController: SettingsDelegate {
     func settingsDidUpdateConfig(_ settings: SettingsViewController, config: Config) {
         let oldPaths = Set(self.config.workspacePaths)
         let oldWecomBot = self.config.wecomBot
+        let oldWechat = self.config.wechat
         self.config = config
         tabCoordinator.config = config
         terminalCoordinator.config = config
@@ -786,17 +787,22 @@ extension MainWindowController: SettingsDelegate {
             tabCoordinator.loadWorkspaces()
         }
 
-        // Hot-reload WeCom bot connection on config change
-        if oldWecomBot != config.wecomBot {
-            // Disconnect existing WeCom channels
+        // Hot-reload external channels on config change
+        if oldWecomBot != config.wecomBot || oldWechat != config.wechat {
             AgentHead.shared.unregisterAllExternalChannels()
 
-            // Connect if configured
             if let wecomConfig = config.wecomBot, wecomConfig.resolvedAutoConnect {
                 let channel = WeComBotChannel(config: wecomConfig)
                 AgentHead.shared.registerChannel(channel)
                 channel.connect()
                 NSLog("[Settings] WeCom bot reconnecting: \(wecomConfig.resolvedName)")
+            }
+
+            if let wechatConfig = config.wechat, wechatConfig.resolvedAutoConnect {
+                let channel = WeChatChannel(config: wechatConfig)
+                AgentHead.shared.registerChannel(channel)
+                channel.connect()
+                NSLog("[Settings] WeChat reconnecting")
             }
         }
     }

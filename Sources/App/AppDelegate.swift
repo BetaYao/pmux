@@ -30,6 +30,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NSLog("[App] WeCom bot auto-connecting: \(wecomConfig.resolvedName)")
         }
 
+        // Auto-connect WeChat if configured
+        if let wechatConfig = config.wechat, wechatConfig.resolvedAutoConnect {
+            let channel = WeChatChannel(config: wechatConfig)
+            AgentHead.shared.registerChannel(channel)
+            channel.connect()
+            NSLog("[App] WeChat auto-connecting")
+        }
+
         // Initialize GhosttyApp singleton
         GhosttyBridge.shared.initialize()
 

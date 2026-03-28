@@ -32,6 +32,10 @@ class SettingsViewController: NSViewController {
     private let wecomNameField = NSTextField()
     private let wecomAutoConnectCheckbox = NSButton()
 
+    // WeChat tab controls
+    private let wechatTokenField = NSSecureTextField()
+    private let wechatAutoConnectCheckbox = NSButton()
+
     init(config: Config) {
         self.config = config
         self.workspacePaths = config.workspacePaths
@@ -70,6 +74,12 @@ class SettingsViewController: NSViewController {
         wecomTab.label = "WeCom Bot"
         wecomTab.view = buildWeComTab()
         tabView.addTabViewItem(wecomTab)
+
+        // Tab 4: WeChat
+        let wechatTab = NSTabViewItem(identifier: "wechat")
+        wechatTab.label = "WeChat"
+        wechatTab.view = buildWeChatTab()
+        tabView.addTabViewItem(wechatTab)
 
         // Buttons
         let saveButton = NSButton(title: "Save", target: self, action: #selector(saveClicked))
@@ -348,6 +358,60 @@ class SettingsViewController: NSViewController {
         return view
     }
 
+    // MARK: - WeChat Tab
+
+    private func buildWeChatTab() -> NSView {
+        let view = NSView()
+
+        let infoLabel = NSTextField(labelWithString: "微信个人号 iLink 长轮询连接。需通过 QR 码扫码获取 Bot Token。")
+        infoLabel.font = NSFont.systemFont(ofSize: 11)
+        infoLabel.textColor = Theme.textSecondary
+        infoLabel.lineBreakMode = .byWordWrapping
+        infoLabel.maximumNumberOfLines = 2
+        infoLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(infoLabel)
+
+        let tokenLabel = NSTextField(labelWithString: "Bot Token:")
+        tokenLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        tokenLabel.textColor = Theme.textSecondary
+        tokenLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(tokenLabel)
+
+        wechatTokenField.placeholderString = "QR 扫码获取的 bot_token"
+        wechatTokenField.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        wechatTokenField.stringValue = config.wechat?.botToken ?? ""
+        wechatTokenField.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(wechatTokenField)
+
+        wechatAutoConnectCheckbox.setButtonType(.switch)
+        wechatAutoConnectCheckbox.title = "启动时自动连接"
+        wechatAutoConnectCheckbox.font = NSFont.systemFont(ofSize: 12)
+        wechatAutoConnectCheckbox.state = (config.wechat?.resolvedAutoConnect ?? true) ? .on : .off
+        wechatAutoConnectCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(wechatAutoConnectCheckbox)
+
+        let labelWidth: CGFloat = 90
+
+        NSLayoutConstraint.activate([
+            infoLabel.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
+            infoLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            infoLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+
+            tokenLabel.topAnchor.constraint(equalTo: infoLabel.bottomAnchor, constant: 20),
+            tokenLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            tokenLabel.widthAnchor.constraint(equalToConstant: labelWidth),
+
+            wechatTokenField.centerYAnchor.constraint(equalTo: tokenLabel.centerYAnchor),
+            wechatTokenField.leadingAnchor.constraint(equalTo: tokenLabel.trailingAnchor, constant: 8),
+            wechatTokenField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+
+            wechatAutoConnectCheckbox.topAnchor.constraint(equalTo: tokenLabel.bottomAnchor, constant: 20),
+            wechatAutoConnectCheckbox.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+        ])
+
+        return view
+    }
+
     // MARK: - Actions
 
     @objc private func addPathClicked() {
@@ -402,6 +466,17 @@ class SettingsViewController: NSViewController {
             )
         } else {
             config.wecomBot = nil
+        }
+
+        // WeChat config
+        let wechatToken = wechatTokenField.stringValue.trimmingCharacters(in: .whitespaces)
+        if !wechatToken.isEmpty {
+            config.wechat = WeChatConfig(
+                botToken: wechatToken,
+                autoConnect: wechatAutoConnectCheckbox.state == .on
+            )
+        } else {
+            config.wechat = nil
         }
 
         config.save()
