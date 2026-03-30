@@ -125,6 +125,7 @@ final class AgentCardView: NSView {
 
         // Terminal container — fills top area
         terminalContainer.wantsLayer = true
+        terminalContainer.layer?.masksToBounds = true
         terminalContainer.translatesAutoresizingMaskIntoConstraints = false
         addSubview(terminalContainer)
 
