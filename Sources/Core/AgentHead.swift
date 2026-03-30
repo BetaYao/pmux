@@ -286,14 +286,25 @@ class AgentHead {
         let matchingTIDs = worktreeIndex.first { (worktreePath, _) in
             event.cwd == worktreePath || event.cwd.hasPrefix(worktreePath + "/")
         }?.value
-        guard let tid = matchingTIDs?.first,
-              let hooks = channels[tid] as? HooksChannel else {
+        guard let tid = matchingTIDs?.first else {
             lock.unlock()
             return
         }
+        let hooks = channels[tid] as? HooksChannel
         lock.unlock()
 
-        hooks.handleWebhookEvent(event)
+        hooks?.handleWebhookEvent(event)
+
+        // Extract activity events from tool use events
+        switch event.event {
+        case .toolUseEnd, .toolUseFailed:
+            let activityEvent = ActivityEventExtractor.extract(from: event)
+            appendActivityEvent(activityEvent, forTerminalID: tid)
+        case .agentStop:
+            clearActivityEvents(forTerminalID: tid)
+        default:
+            break
+        }
     }
 
     // MARK: - Activity Events
