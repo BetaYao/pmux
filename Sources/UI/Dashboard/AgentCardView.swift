@@ -28,6 +28,7 @@ final class AgentCardView: NSView {
 
     /// Message overlay shown in grid mode (no live terminal).
     private let messageLabel = NSTextField(labelWithString: "")
+    private var feedLabels: [NSTextField] = []
 
     private let separatorLine = NSView()
     private var statusDots: [NSView] = []
@@ -49,17 +50,24 @@ final class AgentCardView: NSView {
         fatalError("init(coder:) not supported")
     }
 
-    func configure(id: String, project: String, thread: String, status: String, lastMessage: String, totalDuration: String, roundDuration: String, paneCount: Int = 1, paneStatuses: [AgentStatus] = [], tasks: [TaskItem] = []) {
+    func configure(id: String, project: String, thread: String, status: String, lastMessage: String, totalDuration: String, roundDuration: String, paneCount: Int = 1, paneStatuses: [AgentStatus] = [], tasks: [TaskItem] = [], activityEvents: [ActivityEvent] = []) {
         agentId = id
         currentStatus = status
         setAccessibilityIdentifier("dashboard.card.\(id)")
 
         projectLabel.stringValue = project
         statusLabel.stringValue = status.capitalized
-        // Show task list when available, otherwise plain message
+        // Content priority: tasks > activity feed > last message
         if let taskAttr = TaskListRenderer.attributedString(for: tasks) {
+            clearFeedLabels()
+            messageLabel.isHidden = false
             messageLabel.attributedStringValue = taskAttr
+        } else if !activityEvents.isEmpty {
+            messageLabel.isHidden = true
+            updateFeedLabels(events: activityEvents)
         } else {
+            clearFeedLabels()
+            messageLabel.isHidden = false
             messageLabel.attributedStringValue = NSAttributedString(string: lastMessage, attributes: [
                 .font: NSFont.monospacedSystemFont(ofSize: Typography.secondaryPointSize, weight: .regular),
                 .foregroundColor: SemanticColors.muted,
@@ -272,6 +280,44 @@ final class AgentCardView: NSView {
         } else {
             layer.borderColor = resolvedCGColor(SemanticColors.line)
             layer.borderWidth = 1
+        }
+    }
+
+    private func clearFeedLabels() {
+        feedLabels.forEach { $0.removeFromSuperview() }
+        feedLabels.removeAll()
+    }
+
+    private func updateFeedLabels(events: [ActivityEvent]) {
+        clearFeedLabels()
+
+        // Estimate how many lines fit: container height / line height
+        // Use a reasonable max (20) as upper bound
+        let maxLines = 20
+        let rendered = ActivityFeedRenderer.render(events: events, maxLines: maxLines)
+
+        var previousLabel: NSTextField? = nil
+        for attrString in rendered {
+            let label = NSTextField(labelWithString: "")
+            label.attributedStringValue = attrString
+            label.lineBreakMode = .byTruncatingTail
+            label.maximumNumberOfLines = 1
+            label.translatesAutoresizingMaskIntoConstraints = false
+            terminalContainer.addSubview(label)
+
+            NSLayoutConstraint.activate([
+                label.leadingAnchor.constraint(equalTo: terminalContainer.leadingAnchor, constant: 10),
+                label.trailingAnchor.constraint(equalTo: terminalContainer.trailingAnchor, constant: -10),
+            ])
+
+            if let prev = previousLabel {
+                label.topAnchor.constraint(equalTo: prev.bottomAnchor, constant: 2).isActive = true
+            } else {
+                label.topAnchor.constraint(equalTo: terminalContainer.topAnchor, constant: 10).isActive = true
+            }
+
+            feedLabels.append(label)
+            previousLabel = label
         }
     }
 }
