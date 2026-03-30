@@ -201,6 +201,16 @@ class StatusPublisher {
             AgentHead.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: agentType)
             AgentHead.shared.updateStatus(terminalID: terminalID, status: detected, lastMessage: lastMessage, roundDuration: roundDur, tasks: webhookTasks)
 
+            // Extract activity events from terminal text (for non-webhook agents)
+            // Only if no webhook events exist (webhook takes priority)
+            let webhookEvents = AgentHead.shared.agent(for: terminalID)?.activityEvents ?? []
+            if webhookEvents.isEmpty {
+                let textEvents = detector.extractActivityEvents(from: content)
+                if !textEvents.isEmpty {
+                    AgentHead.shared.updateActivityEvents(textEvents, forTerminalID: terminalID)
+                }
+            }
+
             DispatchQueue.main.async { [weak self] in
                 self?.aggregator?.agentDidUpdate(
                     terminalID: terminalID,
