@@ -50,9 +50,62 @@ class StatusDetector {
 
         return .unknown
     }
+
+    /// Extract activity events from terminal viewport text.
+    /// Looks for tool-call-like patterns (⏺ Tool(detail), ▸ Tool detail, ✗ Tool detail).
+    /// Returns newest-first (bottom of terminal = most recent).
+    func extractActivityEvents(from text: String) -> [ActivityEvent] {
+        guard !text.isEmpty else { return [] }
+
+        var events: [ActivityEvent] = []
+        let lines = text.components(separatedBy: .newlines)
+
+        // Regex patterns for Claude Code terminal output
+        // ⏺ ToolName(args) or ✗ ToolName(args)
+        let circlePattern = try! NSRegularExpression(pattern: #"^[[:space:]]*([⏺✗])\s+(\w+)\((.+?)\)"#)
+        // ▸ ToolName   detail or ✗ ToolName   detail
+        let arrowPattern = try! NSRegularExpression(pattern: #"^[[:space:]]*([▸✗])\s+(\w+)\s{2,}(.+)$"#)
+
+        for line in lines {
+            let nsLine = line as NSString
+            let range = NSRange(location: 0, length: nsLine.length)
+
+            var marker: String?
+            var tool: String?
+            var detail: String?
+
+            if let match = circlePattern.firstMatch(in: line, range: range) {
+                marker = nsLine.substring(with: match.range(at: 1))
+                tool = nsLine.substring(with: match.range(at: 2))
+                detail = nsLine.substring(with: match.range(at: 3))
+            } else if let match = arrowPattern.firstMatch(in: line, range: range) {
+                marker = nsLine.substring(with: match.range(at: 1))
+                tool = nsLine.substring(with: match.range(at: 2))
+                detail = nsLine.substring(with: match.range(at: 3))
+            }
+
+            if let marker, let tool, let detail {
+                let isError = marker == "✗"
+                events.append(ActivityEvent(
+                    tool: tool,
+                    detail: detail.trimmingCharacters(in: .whitespaces),
+                    isError: isError,
+                    timestamp: Date()
+                ))
+            }
+        }
+
+        // Reverse so newest (bottom of terminal) is first, cap at 20
+        events.reverse()
+        if events.count > 20 {
+            events = Array(events.prefix(20))
+        }
+        return events
+    }
 }
 
 // MARK: - AgentDef status detection
+
 
 extension AgentDef {
     /// Get pre-lowercased rules (computed inline for efficiency)
