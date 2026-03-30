@@ -296,6 +296,46 @@ class AgentHead {
         hooks.handleWebhookEvent(event)
     }
 
+    // MARK: - Activity Events
+
+    /// Ring buffer helper: insert at front, cap at maxSize.
+    /// Exposed as static for testability.
+    static func appendToRingBuffer(_ buffer: inout [ActivityEvent], event: ActivityEvent, maxSize: Int) {
+        buffer.insert(event, at: 0)
+        if buffer.count > maxSize {
+            buffer.removeLast()
+        }
+    }
+
+    /// Append an activity event for a terminal's agent.
+    func appendActivityEvent(_ event: ActivityEvent, forTerminalID tid: String) {
+        lock.lock()
+        guard agents[tid] != nil else {
+            lock.unlock()
+            return
+        }
+        Self.appendToRingBuffer(&agents[tid]!.activityEvents, event: event, maxSize: 20)
+        lock.unlock()
+    }
+
+    /// Replace activity events for a terminal (used by text-based extraction).
+    func updateActivityEvents(_ events: [ActivityEvent], forTerminalID tid: String) {
+        lock.lock()
+        guard agents[tid] != nil else {
+            lock.unlock()
+            return
+        }
+        agents[tid]!.activityEvents = events
+        lock.unlock()
+    }
+
+    /// Clear activity events for a terminal (on agent stop).
+    func clearActivityEvents(forTerminalID tid: String) {
+        lock.lock()
+        agents[tid]?.activityEvents.removeAll()
+        lock.unlock()
+    }
+
     // MARK: - Ordering
 
     /// Reorder agents to match card ordering from config.
