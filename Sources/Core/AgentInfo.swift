@@ -15,6 +15,7 @@ struct AgentInfo {
     var channel: AgentChannel?         // communication channel (strong ref, AgentHead owns)
     var taskProgress: TaskProgress     // current task progress
     var tasks: [TaskItem] = []          // webhook-tracked task items
+    var activityEvents: [ActivityEvent] = []
 
     /// Total duration computed live from startedAt
     var totalDuration: TimeInterval {

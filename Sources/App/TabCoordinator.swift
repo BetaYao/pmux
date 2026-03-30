@@ -260,7 +260,7 @@ class TabCoordinator {
                 paneCount: paneCount,
                 paneSurfaces: paneSurfaces,
                 tasks: agent.tasks,
-                activityEvents: []
+                activityEvents: agent.activityEvents
             ))
         }
         return result

@@ -212,7 +212,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
                 roundDuration: agent.roundDuration,
                 paneCount: agent.paneCount,
                 paneStatuses: agent.paneStatuses,
-                tasks: agent.tasks
+                tasks: agent.tasks,
+                activityEvents: agent.activityEvents
             )
             gridCards[index].isSelected = (agent.id == selectedAgentId)
         }
@@ -663,7 +664,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
                 totalDuration: agent.totalDuration,
                 roundDuration: agent.roundDuration,
                 paneCount: agent.paneCount,
-                tasks: agent.tasks
+                tasks: agent.tasks,
+                activityEvents: agent.activityEvents
             )
             container.isSelected = (agent.id == selectedAgentId)
             container.translatesAutoresizingMaskIntoConstraints = true
