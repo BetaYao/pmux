@@ -259,7 +259,8 @@ class TabCoordinator {
                 worktreePath: agent.worktreePath,
                 paneCount: paneCount,
                 paneSurfaces: paneSurfaces,
-                tasks: agent.tasks
+                tasks: agent.tasks,
+                activityEvents: []
             ))
         }
         return result

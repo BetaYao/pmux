@@ -28,6 +28,7 @@ struct AgentDisplayInfo {
     let paneCount: Int          // number of split panes (1 = no badge)
     let paneSurfaces: [TerminalSurface]  // all pane surfaces in leaf order
     let tasks: [TaskItem]              // webhook-tracked task items
+    let activityEvents: [ActivityEvent]
 
     /// Convenience: primary status string for display (first pane's status)
     var status: String {
