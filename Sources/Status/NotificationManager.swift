@@ -3,6 +3,8 @@ import UserNotifications
 
 extension Notification.Name {
     static let navigateToWorktree = Notification.Name("amux.navigateToWorktree")
+    static let repoViewDidChangeWorktree = Notification.Name("amux.repoViewDidChangeWorktree")
+    static let repoViewDidChangeFocusedPane = Notification.Name("amux.repoViewDidChangeFocusedPane")
 }
 
 /// Sends macOS system notifications when agent status changes to actionable states.

@@ -38,8 +38,7 @@ The project uses XcodeGen (`project.yml`) to generate the Xcode project file. Af
 **Three-layer design:**
 
 1. **UI Layer** (`Sources/UI/`) — AppKit views and view controllers
-   - `Dashboard/` — Grid mode (responsive card grid) and Spotlight mode (one large terminal + sidebar)
-   - `Repo/` — Full repo view with sidebar for worktree switching, opened via "Open in Tab"
+   - `Dashboard/` — Grid mode (responsive card grid) and focus layouts (left-right, top-bottom) that embed SplitContainerView directly in the dashboard's focus panel
    - `TabBar/` — Tab switching; dashboard is always tab 0
    - `Dialog/` — Quick switcher (Cmd+P) and new branch dialog (Cmd+N)
    - `Shared/` — Theme constants and StatusBadge component
@@ -58,9 +57,9 @@ The project uses XcodeGen (`project.yml`) to generate the Xcode project file. Af
 
 ## Key Patterns
 
-**Surface lifecycle:** TerminalSurface instances are long-lived — created once per worktree, reparented between views (grid cards, spotlight, repo tabs), and destroyed only on explicit deletion or app quit. When switching tabs, `detachActiveTerminal()` is called on the previous tab before embedding the new one to prevent Z-order conflicts.
+**Surface lifecycle:** TerminalSurface instances are long-lived — created once per worktree, reparented between views (grid cards, focus panel), and destroyed only on explicit deletion or app quit.
 
-**Key orchestrator:** `MainWindowController` owns all TerminalSurface instances (keyed by worktree path), manages tab bar state, and coordinates view transitions. RepoViewController instances are created on-demand and cached in `repoVCs[repoPath]`.
+**Key orchestrator:** `MainWindowController` owns all TerminalSurface instances (keyed by worktree path), manages tab bar state, and coordinates view transitions.
 
 **Grid vs Spotlight layout:** Grid mode uses frame-based layout (`translatesAutoresizingMaskIntoConstraints = true`). Spotlight mode uses Auto Layout. Sidebar terminals in spotlight are output-only (`setFocus(false)`).
 
@@ -76,7 +75,7 @@ The project uses XcodeGen (`project.yml`) to generate the Xcode project file. Af
 - **Ghostty C interop** via `amux-Bridging-Header.h` → `ghostty.h`
 - Links against: Metal, QuartzCore, IOSurface, Carbon, libghostty, libc++
 - No external SPM dependencies — pure system frameworks + Ghostty
-- Delegate pattern used throughout: `DashboardDelegate`, `TabBarDelegate`, `SidebarDelegate`, `TerminalCardDelegate`, `RepoViewDelegate`
+- Delegate pattern used throughout: `DashboardDelegate`, `TabBarDelegate`, `TerminalCardDelegate`, `SplitContainerDelegate`
 - `GhosttyBridge.shared` is the singleton entry point for all terminal operations
 - Tests use XCTest with `@testable import amux`; no external test dependencies
 - Config uses `decodeIfPresent()` throughout for backward compatibility with older config files

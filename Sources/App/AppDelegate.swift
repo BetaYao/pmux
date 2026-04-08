@@ -4,6 +4,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var mainWindowController: MainWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Ensure notification delegate is set before any notification response arrives
+        _ = NotificationManager.shared
+
         // Force dark appearance globally BEFORE any views are created.
         // Must set BOTH NSApp.appearance AND NSAppearance.current so that
         // NSColor(name:) dynamic colors resolve correctly even for views
@@ -46,6 +49,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         mainWindowController?.showWindow(nil)
     }
 
+    func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
+        // Prevent macOS from trying to create a new window via NSDocumentController
+        // when the app is activated (e.g. from notification click)
+        return false
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         // Prevent macOS from creating a new window on reactivation (e.g. notification click)
         if let window = mainWindowController?.window {
@@ -53,6 +62,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             window.makeKeyAndOrderFront(nil)
         }
         return false
+    }
+
+    /// Block the default File > New Window action that macOS may invoke on activation
+    @objc func newDocument(_ sender: Any?) {
+        // Bring existing window to front instead of creating a new one
+        if let window = mainWindowController?.window {
+            window.deminiaturize(nil)
+            window.makeKeyAndOrderFront(nil)
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

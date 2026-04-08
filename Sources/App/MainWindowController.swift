@@ -60,8 +60,8 @@ class MainWindowController: NSWindowController {
 
     // Terminal management
     private lazy var terminalCoordinator: TerminalCoordinator = {
-        let tc = TerminalCoordinator(config: config, currentRepoVC: { [weak self] in
-            self?.tabCoordinator.currentRepoVC
+        let tc = TerminalCoordinator(config: config, activeSplitContainer: { [weak self] in
+            self?.tabCoordinator.dashboardVC?.activeSplitContainer
         })
         tc.delegate = self
         return tc
@@ -75,7 +75,6 @@ class MainWindowController: NSWindowController {
         tc.statusPublisher = statusPublisher
         tc.statusAggregator = statusAggregator
         tc.runtimeBackend = runtimeBackend
-        tc.repoViewDelegate = self
         tc.panelCoordinator = panelCoordinator
         return tc
     }()
@@ -191,16 +190,12 @@ class MainWindowController: NSWindowController {
     }
 
     @objc func closeCurrentTab() {
-        guard tabCoordinator.activeTabIndex > 0 else { return }
-        let repoIndex = tabCoordinator.activeTabIndex - 1
-        guard let tab = tabCoordinator.workspaceManager.tab(at: repoIndex) else { return }
-        tabCoordinator.showCloseProjectModal(tab.displayName, window: window)
+        // No-op: dashboard is always the only tab; individual project close is handled via dashboard UI.
     }
 
     /// Cmd+W: close focused pane if multiple panes, otherwise close tab.
     @objc func closePaneOrTab() {
-        if let repoVC = tabCoordinator.currentRepoVC,
-           let tree = repoVC.activeSplitContainer?.tree,
+        if let tree = tabCoordinator.dashboardVC?.activeSplitContainer?.tree,
            tree.leafCount > 1 {
             closeFocusedPane()
         } else {
@@ -209,15 +204,11 @@ class MainWindowController: NSWindowController {
     }
 
     @objc func selectNextTab() {
-        let maxIndex = tabCoordinator.workspaceManager.tabs.count // 0=dashboard, 1..N=projects
-        let next = tabCoordinator.activeTabIndex + 1 > maxIndex ? 0 : tabCoordinator.activeTabIndex + 1
-        switchToTab(next)
+        // No-op: only the dashboard tab exists.
     }
 
     @objc func selectPreviousTab() {
-        let maxIndex = tabCoordinator.workspaceManager.tabs.count
-        let prev = tabCoordinator.activeTabIndex - 1 < 0 ? maxIndex : tabCoordinator.activeTabIndex - 1
-        switchToTab(prev)
+        // No-op: only the dashboard tab exists.
     }
 
     @objc func showKeyboardShortcuts() {
@@ -243,15 +234,8 @@ class MainWindowController: NSWindowController {
     }
 
     @objc func showDiffOverlay() {
-        var worktreePath: String?
-        if tabCoordinator.activeTabIndex > 0 {
-            let repoIndex = tabCoordinator.activeTabIndex - 1
-            if let tab = tabCoordinator.workspaceManager.tab(at: repoIndex) {
-                worktreePath = tab.repoPath
-            }
-        }
-
-        guard let path = worktreePath else { return }
+        // Use the currently selected agent's worktree path from the dashboard.
+        guard let path = tabCoordinator.selectedAgent?.worktreePath else { return }
         presentDiffOverlay(for: path)
     }
 
@@ -308,6 +292,8 @@ class MainWindowController: NSWindowController {
         dashboard.dashboardDelegate = self
         dashboard.currentLayout = savedLayout
         dashboard.setZoomIndex(config.zoomIndex)
+        dashboard.surfaceManager = terminalCoordinator.surfaceManager
+        dashboard.splitContainerDelegate = self
         dashboardVC = dashboard
         tabCoordinator.dashboardVC = dashboard
 
@@ -425,36 +411,16 @@ class MainWindowController: NSWindowController {
     }
 
     private func updateTitleBar() {
-        titleBar.projects = tabCoordinator.workspaceManager.tabs.map { $0.displayName }
-        titleBar.currentView = tabCoordinator.activeTabIndex == 0 ? "dashboard" : "project"
-        if tabCoordinator.activeTabIndex > 0 {
-            let repoIndex = tabCoordinator.activeTabIndex - 1
-            titleBar.currentProject = tabCoordinator.workspaceManager.tab(at: repoIndex)?.displayName ?? ""
-        } else {
-            titleBar.currentProject = ""
-        }
+        let isGrid = tabCoordinator.dashboardVC?.currentLayout == .grid
+        let agent = tabCoordinator.selectedAgent
 
-        titleBar.projectStatusProvider = { [weak self] projectName -> String in
-            guard let self else { return "idle" }
-            guard let tab = self.tabCoordinator.workspaceManager.tabs.first(where: { $0.displayName == projectName }) else { return "idle" }
-            var hasError = false, hasWaiting = false, hasRunning = false
-            for wt in tab.worktrees {
-                if let ws = self.tabCoordinator.statusAggregator.status(for: wt.path) {
-                    switch ws.highestPriority {
-                    case .error: hasError = true
-                    case .waiting: hasWaiting = true
-                    case .running: hasRunning = true
-                    default: break
-                    }
-                }
-            }
-            if hasError { return "error" }
-            if hasWaiting { return "waiting" }
-            if hasRunning { return "running" }
-            return "idle"
-        }
-
-        titleBar.renderTabs()
+        titleBar.updateWorktreeInfo(
+            branch: agent?.name,
+            repo: agent?.project,
+            status: agent?.paneStatuses.first,
+            agentName: nil,
+            isGridLayout: isGrid
+        )
     }
 
 
@@ -516,8 +482,8 @@ class AmuxWindow: NSWindow {
             return super.performKeyEquivalent(with: event)
         }
 
-        // Only handle split keybindings when a repo tab is active with split panes
-        let hasSplitContext = mwc.tabCoordinator.currentRepoVC?.activeSplitContainer != nil
+        // Only handle split keybindings when dashboard has an active split container
+        let hasSplitContext = mwc.tabCoordinator.dashboardVC?.activeSplitContainer != nil
 
         if hasSplitContext {
             // Cmd+D: horizontal split
@@ -559,6 +525,18 @@ class AmuxWindow: NSWindow {
                 mwc.resetSplitRatio()
                 return true
             }
+        }
+
+        // Cmd+B: toggle sidebar collapse
+        if flags == .command && event.charactersIgnoringModifiers == "b" {
+            mwc.tabCoordinator.dashboardVC?.toggleSidebarCollapse()
+            return true
+        }
+
+        // Cmd+Shift+F: show diff overlay
+        if flags == [.command, .shift] && event.charactersIgnoringModifiers?.lowercased() == "f" {
+            mwc.showDiffOverlay()
+            return true
         }
 
         return super.performKeyEquivalent(with: event)
@@ -614,25 +592,12 @@ extension MainWindowController: NSWindowDelegate {
 // MARK: - TitleBarDelegate
 
 extension MainWindowController: TitleBarDelegate {
-    func titleBarDidSelectDashboard() {
-        tabCoordinator.switchToTab(0)
-    }
-
-    func titleBarDidSelectProject(_ projectName: String) {
-        guard let tabIndex = tabCoordinator.workspaceManager.tabs.firstIndex(where: { $0.displayName == projectName }) else { return }
-        tabCoordinator.switchToTab(tabIndex + 1)
-    }
-
-    func titleBarDidRequestCloseProject(_ projectName: String) {
-        tabCoordinator.showCloseProjectModal(projectName, window: window)
-    }
-
-    func titleBarDidRequestAddProject() {
-        tabCoordinator.addRepoViaOpenPanel(window: window)
-    }
-
     func titleBarDidRequestNewThread() {
         tabCoordinator.showNewThreadModal(window: window)
+    }
+
+    func titleBarDidRequestCollapseSidebar() {
+        tabCoordinator.dashboardVC?.toggleSidebarCollapse()
     }
 
     func titleBarDidSelectLayout(_ layout: DashboardLayout) {
@@ -643,6 +608,7 @@ extension MainWindowController: TitleBarDelegate {
         updateCoordinator.config.dashboardLayout = layout.rawValue
         config.save()
         titleBar.setCurrentLayout(layout)
+        updateTitleBar()
     }
 
     func titleBarDidToggleNotifications() {
@@ -675,18 +641,6 @@ extension MainWindowController: TitleBarDelegate {
         NSAppearance.current = window?.effectiveAppearance ?? NSApp.effectiveAppearance
         applyWindowBackgroundStyle()
     }
-    
-    func titleBarDidRequestCloseWindow() {
-        window?.close()
-    }
-    
-    func titleBarDidRequestMiniaturizeWindow() {
-        window?.miniaturize(nil)
-    }
-    
-    func titleBarDidRequestZoomWindow() {
-        window?.zoom(nil)
-    }
 }
 
 // MARK: - DashboardDelegate
@@ -713,21 +667,39 @@ extension MainWindowController: DashboardDelegate {
     func dashboardDidRequestAddProject() {
         tabCoordinator.addRepoViaOpenPanel(window: window)
     }
+
+    func dashboardDidChangeSelection(_ dashboard: DashboardViewController) {
+        updateTitleBar()
+        tabCoordinator.saveSelectedWorktree()
+        config.selectedWorktreePath = tabCoordinator.config.selectedWorktreePath
+        config.save()
+    }
 }
 
-// MARK: - RepoViewDelegate
+// MARK: - SplitContainerDelegate
 
-extension MainWindowController: RepoViewDelegate {
-    func repoView(_ repoVC: RepoViewController, didRequestDeleteWorktree info: WorktreeInfo) {
-        confirmAndDeleteWorktree(info)
+extension MainWindowController: SplitContainerDelegate {
+    func splitContainer(_ view: SplitContainerView, didChangeFocus leafId: String) {
+        guard let tree = view.tree else { return }
+        let worktreePath = tree.worktreePath
+        NotificationCenter.default.post(
+            name: .repoViewDidChangeFocusedPane,
+            object: self,
+            userInfo: ["worktreePath": worktreePath, "focusedLeafId": leafId]
+        )
     }
 
-    func repoViewDidRequestNewThread(_ repoVC: RepoViewController) {
-        showNewBranchDialog()
+    func splitContainer(_ view: SplitContainerView, didRequestSplit axis: SplitAxis) {
+        splitFocusedPane(axis: axis)
     }
 
-    func repoView(_ repoVC: RepoViewController, didRequestShowDiffForWorktreePath worktreePath: String) {
-        presentDiffOverlay(for: worktreePath)
+    func splitContainer(_ view: SplitContainerView, didRequestClosePane leafId: String) {
+        closeFocusedPane()
+    }
+
+    func splitContainerDidChangeLayout(_ view: SplitContainerView) {
+        guard let tree = view.tree else { return }
+        terminalCoordinator.saveSplitLayout(tree)
     }
 }
 
@@ -812,18 +784,8 @@ extension MainWindowController: SettingsDelegate {
 
 extension MainWindowController: QuickSwitcherDelegate {
     func quickSwitcher(_ vc: QuickSwitcherViewController, didSelect worktree: WorktreeInfo) {
-        let repoPath = WorktreeDiscovery.findRepoRoot(from: worktree.path) ?? worktree.path
-        if let tabIndex = tabCoordinator.workspaceManager.tabs.firstIndex(where: { $0.repoPath == repoPath }) {
-            tabCoordinator.switchToTab(tabIndex + 1)
-            if let repoVC = tabCoordinator.repoVCs[repoPath] {
-                repoVC.selectWorktree(byPath: worktree.path)
-            }
-        } else {
-            tabCoordinator.openRepoTab(repoPath: repoPath)
-            if let repoVC = tabCoordinator.repoVCs[repoPath] {
-                repoVC.selectWorktree(byPath: worktree.path)
-            }
-        }
+        // Navigate to dashboard — quick switcher now selects the agent card
+        tabCoordinator.switchToTab(0)
     }
 }
 

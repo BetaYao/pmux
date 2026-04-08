@@ -13,11 +13,7 @@ final class DialogPresenter {
     }
 
     func presentSheetOnActiveVC(_ vc: NSViewController, tabCoordinator: TabCoordinator, dashboardVC: DashboardViewController?) {
-        if let activeVC = tabCoordinator.currentRepoVC {
-            activeVC.presentAsSheet(vc)
-        } else {
-            dashboardVC?.presentAsSheet(vc)
-        }
+        dashboardVC?.presentAsSheet(vc)
     }
 
     func makeQuickSwitcher(quickSwitcherDelegate: QuickSwitcherDelegate) -> QuickSwitcherViewController {

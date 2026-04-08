@@ -15,6 +15,7 @@ struct Config: Codable {
     var worktreeStartedAt: [String: String]
     var splitLayouts: [String: CodableSplitNode]
     var activeTabRepoPath: String?
+    var selectedWorktreePath: String?
     var activeWorktreePaths: [String: String]
     var focusedPaneIds: [String: String]
     var wecomBot: WeComBotConfig?
@@ -35,6 +36,7 @@ struct Config: Codable {
         case worktreeStartedAt = "worktree_started_at"
         case splitLayouts = "split_layouts"
         case activeTabRepoPath = "active_tab_repo_path"
+        case selectedWorktreePath = "selected_worktree_path"
         case activeWorktreePaths = "active_worktree_paths"
         case focusedPaneIds = "focused_pane_ids"
         case wecomBot = "wecom_bot"
@@ -56,6 +58,7 @@ struct Config: Codable {
         worktreeStartedAt = [:]
         splitLayouts = [:]
         activeTabRepoPath = nil
+        selectedWorktreePath = nil
         activeWorktreePaths = [:]
         focusedPaneIds = [:]
         wecomBot = nil
@@ -82,6 +85,7 @@ struct Config: Codable {
         worktreeStartedAt = try container.decodeIfPresent([String: String].self, forKey: .worktreeStartedAt) ?? [:]
         splitLayouts = try container.decodeIfPresent([String: CodableSplitNode].self, forKey: .splitLayouts) ?? [:]
         activeTabRepoPath = try container.decodeIfPresent(String.self, forKey: .activeTabRepoPath)
+        selectedWorktreePath = try container.decodeIfPresent(String.self, forKey: .selectedWorktreePath)
         activeWorktreePaths = try container.decodeIfPresent([String: String].self, forKey: .activeWorktreePaths) ?? [:]
         focusedPaneIds = try container.decodeIfPresent([String: String].self, forKey: .focusedPaneIds) ?? [:]
         wecomBot = try container.decodeIfPresent(WeComBotConfig.self, forKey: .wecomBot)

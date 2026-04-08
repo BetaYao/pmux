@@ -11,13 +11,13 @@ class TerminalCoordinator {
     let surfaceManager = TerminalSurfaceManager()
     var webhookServer: WebhookServer?
 
-    /// Closure to access the current RepoViewController for split pane operations.
-    /// Provided by MainWindowController, avoids direct TabCoordinator dependency.
-    var currentRepoVC: () -> RepoViewController?
+    /// Closure to access the active SplitContainerView for split pane operations.
+    /// Provided by MainWindowController via DashboardViewController.
+    var activeSplitContainer: () -> SplitContainerView?
 
-    init(config: Config, currentRepoVC: @escaping () -> RepoViewController?) {
+    init(config: Config, activeSplitContainer: @escaping () -> SplitContainerView?) {
         self.config = config
-        self.currentRepoVC = currentRepoVC
+        self.activeSplitContainer = activeSplitContainer
     }
 
     // MARK: - Tree Resolution
@@ -41,8 +41,7 @@ class TerminalCoordinator {
     // MARK: - Split Pane Operations
 
     func splitFocusedPane(axis: SplitAxis) {
-        guard let repoVC = currentRepoVC(),
-              let container = repoVC.activeSplitContainer,
+        guard let container = activeSplitContainer(),
               let tree = container.tree else { return }
 
         let sessionName = tree.nextSessionName()
@@ -79,8 +78,7 @@ class TerminalCoordinator {
     }
 
     func closeFocusedPane() {
-        guard let repoVC = currentRepoVC(),
-              let container = repoVC.activeSplitContainer,
+        guard let container = activeSplitContainer(),
               let tree = container.tree else { return }
 
         guard let closed = tree.closeFocusedLeaf() else { return }
@@ -122,8 +120,7 @@ class TerminalCoordinator {
     }
 
     func moveFocus(_ axis: SplitAxis, positive: Bool) {
-        guard let repoVC = currentRepoVC(),
-              let container = repoVC.activeSplitContainer else { return }
+        guard let container = activeSplitContainer() else { return }
         if let newFocusId = container.focusLeaf(direction: axis, positive: positive) {
             if let tree = container.tree,
                let leaf = tree.root.findLeaf(id: newFocusId),
@@ -135,8 +132,7 @@ class TerminalCoordinator {
     }
 
     func resizeSplit(_ axis: SplitAxis, delta: CGFloat) {
-        guard let repoVC = currentRepoVC(),
-              let container = repoVC.activeSplitContainer,
+        guard let container = activeSplitContainer(),
               let tree = container.tree else { return }
         guard let splitId = tree.nearestAncestorSplit(axis: axis) else { return }
         func findRatio(in node: SplitNode) -> CGFloat? {
@@ -154,8 +150,7 @@ class TerminalCoordinator {
     }
 
     func resetSplitRatio() {
-        guard let repoVC = currentRepoVC(),
-              let container = repoVC.activeSplitContainer,
+        guard let container = activeSplitContainer(),
               let tree = container.tree else { return }
         for axis in [SplitAxis.horizontal, .vertical] {
             if let splitId = tree.nearestAncestorSplit(axis: axis) {

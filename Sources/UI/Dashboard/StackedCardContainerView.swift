@@ -1,6 +1,8 @@
 import AppKit
 
 final class StackedCardContainerView: NSView, NSGestureRecognizerDelegate {
+    override var acceptsFirstResponder: Bool { false }
+
     let cardView = AgentCardView()
     private(set) var ghostViews: [NSView] = []
 
@@ -124,6 +126,20 @@ final class StackedCardContainerView: NSView, NSGestureRecognizerDelegate {
 
     @objc private func handleDoubleClick() {
         delegate?.agentCardDoubleClicked(agentId: cardView.agentId)
+    }
+
+    // MARK: - Context menu
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = NSMenu()
+        let deleteItem = NSMenuItem(title: "Delete Worktree", action: #selector(deleteWorktreeAction), keyEquivalent: "")
+        deleteItem.target = self
+        menu.addItem(deleteItem)
+        return menu
+    }
+
+    @objc private func deleteWorktreeAction() {
+        delegate?.agentCardDidRequestDelete(agentId: cardView.agentId)
     }
 
     // MARK: - Test helpers (internal for @testable access)

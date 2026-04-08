@@ -14,7 +14,6 @@ class TabCoordinator {
     var config: Config
     let workspaceManager = WorkspaceManager()
 
-    var repoVCs: [String: RepoViewController] = [:]
     var activeTabIndex: Int = 0
     var allWorktrees: [(info: WorktreeInfo, tree: SplitTree)] = []
     var worktreeRepoCache: [String: String] = [:]
@@ -33,6 +32,14 @@ class TabCoordinator {
         f.formatOptions = [.withInternetDateTime]
         return f
     }()
+
+    var selectedAgent: AgentDisplayInfo? {
+        guard let dashboard = dashboardVC else { return nil }
+        let index = dashboard.selectedAgentIndex
+        let agents = dashboard.agents
+        guard index < agents.count else { return nil }
+        return agents[index]
+    }
 
     init(config: Config) {
         self.config = config
@@ -56,43 +63,17 @@ class TabCoordinator {
         }
     }
 
-    // MARK: - Current Repo VC
-
-    var currentRepoVC: RepoViewController? {
-        guard activeTabIndex > 0 else { return nil }
-        let repoIndex = activeTabIndex - 1
-        guard let tab = workspaceManager.tab(at: repoIndex) else { return nil }
-        return repoVCs[tab.repoPath]
-    }
-
     // MARK: - Tab Switching
 
     func switchToTab(_ index: Int) {
         guard index != activeTabIndex else { return }
 
-        // Detach terminals from current repo view
-        if activeTabIndex > 0 {
-            let repoIndex = activeTabIndex - 1
-            if let tab = workspaceManager.tab(at: repoIndex),
-               let repoVC = repoVCs[tab.repoPath] {
-                repoVC.detachActiveTerminal()
-            }
-        } else {
-            dashboardVC?.detachTerminals()
-        }
+        dashboardVC?.detachTerminals()
+        activeTabIndex = 0
 
-        activeTabIndex = index
-
-        if index == 0 {
-            if let dashboard = dashboardVC {
-                delegate?.tabCoordinator(self, embedViewController: dashboard)
-                dashboard.updateAgents(buildAgentDisplayInfos())
-            }
-        } else {
-            let repoIndex = index - 1
-            guard let tab = workspaceManager.tab(at: repoIndex) else { return }
-            let repoVC = getOrCreateRepoVC(for: tab)
-            delegate?.tabCoordinator(self, embedViewController: repoVC)
+        if let dashboard = dashboardVC {
+            delegate?.tabCoordinator(self, embedViewController: dashboard)
+            dashboard.updateAgents(buildAgentDisplayInfos())
         }
 
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
@@ -102,35 +83,9 @@ class TabCoordinator {
     }
 
     func updateStatusPollPreferences() {
-        guard activeTabIndex > 0 else {
-            statusPublisher.setPreferredPaths([])
-            return
-        }
-        let repoIndex = activeTabIndex - 1
-        guard let tab = workspaceManager.tab(at: repoIndex) else {
-            statusPublisher.setPreferredPaths([])
-            return
-        }
-        statusPublisher.setPreferredPaths(tab.worktrees.map(\.path))
+        // Dashboard is always active (no separate repo tabs), so no preferred filtering.
+        statusPublisher.setPreferredPaths([])
     }
-
-    // MARK: - Repo VC Management
-
-    func getOrCreateRepoVC(for tab: WorkspaceTab) -> RepoViewController {
-        if let existing = repoVCs[tab.repoPath] {
-            existing.reconfigurePreservingSelection(worktrees: tab.worktrees, trees: terminalCoordinator.surfaceManager.all)
-            return existing
-        }
-
-        let repoVC = RepoViewController()
-        repoVC.repoDelegate = repoViewDelegate
-        repoVC.configure(worktrees: tab.worktrees, trees: terminalCoordinator.surfaceManager.all)
-        repoVCs[tab.repoPath] = repoVC
-        return repoVC
-    }
-
-    /// Weak reference to the object implementing RepoViewDelegate (MainWindowController)
-    weak var repoViewDelegate: RepoViewDelegate?
 
     func openRepoTab(repoPath: String, completion: (() -> Void)? = nil) {
         WorktreeDiscovery.discoverAsync(repoPath: repoPath) { [weak self] worktrees in
@@ -159,9 +114,6 @@ class TabCoordinator {
 
     func addRepo(at path: String) {
         guard !config.workspacePaths.contains(path) else {
-            if let tabIndex = workspaceManager.tabs.firstIndex(where: { $0.repoPath == path }) {
-                switchToTab(tabIndex + 1)
-            }
             return
         }
 
@@ -216,9 +168,6 @@ class TabCoordinator {
         statusPublisher.updateSurfaces(terminalCoordinator.surfaceManager.all)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
 
-        if activateTab {
-            switchToTab(tabIndex + 1)
-        }
         return tabIndex
     }
 
@@ -245,6 +194,8 @@ class TabCoordinator {
             let mostRecentMessage = ws?.mostRecentMessage ?? (agent.lastMessage.isEmpty ? "No active task." : agent.lastMessage)
             let mostRecentPaneIndex = ws?.mostRecentPaneIndex ?? 1
 
+            let isMain = allWorktrees.first(where: { $0.info.path == agent.worktreePath })?.info.isMainWorktree ?? false
+
             result.append(AgentDisplayInfo(
                 id: agent.id,
                 name: agent.branch,
@@ -259,6 +210,7 @@ class TabCoordinator {
                 worktreePath: agent.worktreePath,
                 paneCount: paneCount,
                 paneSurfaces: paneSurfaces,
+                isMainWorktree: isMain,
                 tasks: agent.tasks,
                 activityEvents: agent.activityEvents
             ))
@@ -435,15 +387,7 @@ class TabCoordinator {
                     self.statusPublisher.updateSurfaces(self.terminalCoordinator.surfaceManager.all)
                     self.delegate?.tabCoordinatorRequestUpdateTitleBar(self)
 
-                    // Update repo VC sidebar and auto-navigate to the new worktree
-                    if let repoVC = self.repoVCs[repoRoot] {
-                        repoVC.configure(worktrees: worktrees, trees: self.terminalCoordinator.surfaceManager.all)
-                        // Find index of newly added worktree and switch to it
-                        if let firstNew = newWorktrees.first,
-                           let newIndex = worktrees.firstIndex(where: { $0.path == firstNew.path }) {
-                            repoVC.showTerminal(at: newIndex)
-                        }
-                    }
+                    // Dashboard already updated above via updateAgents
                 }
             } else {
                 // Repo not tracked yet — add it
@@ -487,9 +431,7 @@ class TabCoordinator {
         terminalCoordinator.saveSplitLayout(transferredTree)
 
         // 5. Invalidate the old split container so the UI rebuilds it
-        if let repoVC = repoVCs[repoRoot] {
-            repoVC.invalidateSplitContainer(forPath: sourcePath)
-        }
+        dashboardVC?.invalidateSplitContainer(forPath: sourcePath)
 
         // 6. Create a fresh tree for the source worktree (e.g., main)
         if let sourceInfo = allDiscoveredWorktrees.first(where: { $0.path == transfer.sourceWorktreePath }) {
@@ -516,26 +458,9 @@ class TabCoordinator {
         if let agent = AgentHead.shared.agent(forWorktree: info.path) {
             AgentHead.shared.unregister(terminalID: agent.id)
         }
+        dashboardVC?.invalidateSplitContainer(forPath: info.path)
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
         statusPublisher.updateSurfaces(terminalCoordinator.surfaceManager.all)
-
-        if activeTabIndex > 0 {
-            let repoIndex = activeTabIndex - 1
-            if let tab = workspaceManager.tab(at: repoIndex) {
-                let repoPath = tab.repoPath
-                let displayName = tab.displayName
-                WorktreeDiscovery.discoverAsync(repoPath: repoPath) { [weak self] updatedWorktrees in
-                    guard let self else { return }
-                    self.workspaceManager.updateWorktrees(at: repoIndex, worktrees: updatedWorktrees)
-                    if let repoVC = self.repoVCs[repoPath] {
-                        repoVC.configure(worktrees: updatedWorktrees, trees: self.terminalCoordinator.surfaceManager.all)
-                    }
-                    if updatedWorktrees.isEmpty {
-                        self.performCloseRepo(projectName: displayName)
-                    }
-                }
-            }
-        }
 
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }
@@ -569,18 +494,7 @@ class TabCoordinator {
         config.workspacePaths.removeAll { $0 == tab.repoPath }
         config.save()
 
-        repoVCs.removeValue(forKey: tab.repoPath)
         workspaceManager.removeTab(at: tabIndex)
-
-        let uiTabIndex = tabIndex + 1
-        let targetTab: Int
-        if activeTabIndex == uiTabIndex {
-            targetTab = max(0, uiTabIndex - 1)
-        } else if activeTabIndex > uiTabIndex {
-            targetTab = activeTabIndex - 1
-        } else {
-            targetTab = activeTabIndex
-        }
 
         activeTabIndex = -1
         delegate?.tabCoordinatorRequestClearContentContainer(self)
@@ -588,7 +502,7 @@ class TabCoordinator {
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
         statusPublisher.updateSurfaces(terminalCoordinator.surfaceManager.all)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
-        switchToTab(targetTab)
+        switchToTab(0)
     }
 
     // MARK: - Modals
@@ -653,10 +567,6 @@ class TabCoordinator {
                     }
                 }
 
-                if let repoVC = self.repoVCs[tab.repoPath] {
-                    repoVC.updateWorktreeInfos(freshWorktrees)
-                }
-
                 self.dashboardVC?.updateAgents(self.buildAgentDisplayInfos())
             }
         }
@@ -665,50 +575,21 @@ class TabCoordinator {
     // MARK: - Session State Persistence
 
     func saveSessionState() {
-        if activeTabIndex == 0 {
-            config.activeTabRepoPath = nil
-        } else {
-            let repoIndex = activeTabIndex - 1
-            if let tab = workspaceManager.tab(at: repoIndex) {
-                config.activeTabRepoPath = tab.repoPath
-            }
-        }
+        config.activeTabRepoPath = nil
+        saveSelectedWorktree()
         config.save()
     }
 
-    func restoreSessionState() {
-        // Determine which tab to show
-        guard let savedRepoPath = config.activeTabRepoPath,
-              let tabIndex = workspaceManager.tabs.firstIndex(where: { $0.repoPath == savedRepoPath }) else {
-            // No saved state or repo no longer exists — stay on dashboard
-            return
+    func saveSelectedWorktree() {
+        if let agent = selectedAgent {
+            config.selectedWorktreePath = agent.worktreePath
         }
+    }
 
-        let uiTabIndex = tabIndex + 1
-        switchToTab(uiTabIndex)
-
-        // Restore worktree selection within the repo
-        let tab = workspaceManager.tabs[tabIndex]
-        if let savedWorktreePath = config.activeWorktreePaths[savedRepoPath],
-           let repoVC = repoVCs[savedRepoPath] {
-            repoVC.selectWorktree(byPath: savedWorktreePath)
-
-            // Restore focused pane within the worktree
-            if let savedSessionName = config.focusedPaneIds[savedWorktreePath],
-               let container = repoVC.activeSplitContainer,
-               let tree = container.tree,
-               let targetLeaf = tree.allLeaves.first(where: { $0.sessionName == savedSessionName }) {
-                tree.focusedId = targetLeaf.id
-                container.updateDimOverlays()
-                if let surface = SurfaceRegistry.shared.surface(forId: targetLeaf.surfaceId),
-                   let termView = surface.view {
-                    repoVC.view.window?.makeFirstResponder(termView)
-                }
-            }
-        } else if let firstWorktree = tab.worktrees.first,
-                  let repoVC = repoVCs[savedRepoPath] {
-            // Saved worktree gone, fall back to first
-            repoVC.selectWorktree(byPath: firstWorktree.path)
+    func restoreSessionState() {
+        // Restore selected agent card from config
+        if let savedPath = config.selectedWorktreePath {
+            dashboardVC?.selectAgent(byWorktreePath: savedPath)
         }
     }
 
@@ -718,21 +599,16 @@ class TabCoordinator {
 
     func dashboardDidSelectProject(_ project: String, thread: String) {
         guard let tab = workspaceManager.tabs.first(where: { $0.displayName == project }) else { return }
-        let tabIndex = workspaceManager.tabs.firstIndex(where: { $0.repoPath == tab.repoPath }) ?? 0
-        switchToTab(tabIndex + 1)
         // Save the selected worktree for this project
         if let worktreePath = tab.worktrees.first(where: { $0.branch == thread })?.path {
             config.activeWorktreePaths[tab.repoPath] = worktreePath
             config.save()
         }
-        if let repoVC = repoVCs[tab.repoPath] {
-            repoVC.selectWorktree(branch: thread)
-        }
+        // Dashboard handles focus panel display via agent card selection
     }
 
     func dashboardDidRequestEnterProject(_ project: String) {
-        guard let tabIndex = workspaceManager.tabs.firstIndex(where: { $0.displayName == project }) else { return }
-        switchToTab(tabIndex + 1)
+        // Dashboard handles focus panel — no separate tab needed
     }
 
     func dashboardDidRequestDelete(_ terminalID: String) {
@@ -755,32 +631,12 @@ class TabCoordinator {
 
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
         statusPublisher.updateSurfaces(terminalCoordinator.surfaceManager.all)
-
-        if activeTabIndex > 0 {
-            let repoIndex = activeTabIndex - 1
-            if let tab = workspaceManager.tab(at: repoIndex),
-               tab.repoPath == repoPath,
-               let repoVC = repoVCs[repoPath] {
-                var updatedWorktrees = tab.worktrees
-                updatedWorktrees.append(info)
-                workspaceManager.updateWorktrees(at: repoIndex, worktrees: updatedWorktrees)
-                repoVC.addWorktree(info, tree: tree)
-                return
-            }
-        }
     }
 
     // MARK: - Status Update Forwarding
 
     func handleWorktreeStatusUpdate(_ status: WorktreeStatus) {
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
-        if activeTabIndex > 0 {
-            let repoIndex = activeTabIndex - 1
-            if let tab = workspaceManager.tab(at: repoIndex),
-               let repoVC = repoVCs[tab.repoPath] {
-                repoVC.updateStatus(for: status.worktreePath, status: status.highestPriority, lastMessage: status.mostRecentMessage)
-            }
-        }
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }
 
@@ -807,9 +663,7 @@ class TabCoordinator {
 
     /// Check if a specific worktree + pane is the currently focused pane.
     private func isFocusedPane(worktreePath: String, paneIndex: Int) -> Bool {
-        guard activeTabIndex > 0 else { return false }
-        guard let repoVC = currentRepoVC,
-              let container = repoVC.activeSplitContainer,
+        guard let container = dashboardVC?.activeSplitContainer,
               let tree = container.tree,
               tree.worktreePath == worktreePath else { return false }
         let leaves = tree.allLeaves
@@ -821,24 +675,14 @@ class TabCoordinator {
     // MARK: - Navigation
 
     func handleNavigateToWorktree(worktreePath: String, paneIndex: Int?) {
-        // Check already-open tabs first
-        if let tabIndex = workspaceManager.tabs.firstIndex(where: { tab in
+        // Navigation is now handled by the dashboard — select the matching agent card.
+        // If the worktree is already known, the dashboard will show it in the focus panel.
+        // If not yet tracked, discover and add it first.
+        if workspaceManager.tabs.contains(where: { tab in
             tab.worktrees.contains(where: { $0.path == worktreePath })
         }) {
-            let repoPath = workspaceManager.tabs[tabIndex].repoPath
-            switchToTab(tabIndex + 1)
-            if let repoVC = repoVCs[repoPath] {
-                repoVC.selectWorktree(byPath: worktreePath)
-                if let paneIndex {
-                    repoVC.focusPane(at: paneIndex)
-                }
-            }
+            dashboardVC?.updateAgents(buildAgentDisplayInfos())
             return
-        }
-
-        // If navigating to dashboard (tab 0), focus the specific pane
-        if let paneIndex, activeTabIndex == 0 {
-            dashboardVC?.selectedPaneIndex = paneIndex - 1
         }
 
         // Fall back: search workspace paths asynchronously
@@ -854,12 +698,7 @@ class TabCoordinator {
             }
             DispatchQueue.main.async {
                 guard let self, let repoPath = foundRepoPath else { return }
-                self.openRepoTab(repoPath: repoPath) { [weak self] in
-                    guard let self else { return }
-                    if let repoVC = self.repoVCs[repoPath] {
-                        repoVC.selectWorktree(byPath: worktreePath)
-                    }
-                }
+                self.openRepoTab(repoPath: repoPath)
             }
         }
     }

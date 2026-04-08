@@ -1,6 +1,7 @@
 import AppKit
 
 let app = NSApplication.shared
+NSWindow.allowsAutomaticWindowTabbing = false
 
 // Force appearance BEFORE anything else — must happen before any views are created.
 // This is the earliest possible point in the app lifecycle.

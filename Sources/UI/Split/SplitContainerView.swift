@@ -230,6 +230,25 @@ class SplitContainerView: NSView, DividerDelegate {
         }
     }
 
+    // MARK: - Mouse → focus restore
+
+    /// Clicking anywhere on the split container (background, divider gap, etc.)
+    /// should restore keyboard focus to the currently-focused terminal leaf.
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        restoreFocusToActiveLeaf()
+    }
+
+    func restoreFocusToActiveLeaf() {
+        guard let tree else { return }
+        let targetId = tree.focusedId
+        if let leaf = tree.allLeaves.first(where: { $0.id == targetId }),
+           let view = surfaceViews[leaf.surfaceId],
+           window?.firstResponder !== view {
+            window?.makeFirstResponder(view)
+        }
+    }
+
     // MARK: - Focus navigation
 
     func focusLeaf(direction: SplitAxis, positive: Bool) -> String? {

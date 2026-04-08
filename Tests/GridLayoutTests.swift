@@ -283,17 +283,6 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertEqual(MiniCardView.Typography.bodyPointSize, 12)
         XCTAssertEqual(MiniCardView.Typography.secondaryPointSize, 11)
 
-        XCTAssertEqual(FocusPanelView.Typography.primaryPointSize, 13)
-        XCTAssertEqual(FocusPanelView.Typography.bodyPointSize, 12)
-        XCTAssertEqual(FocusPanelView.Typography.secondaryPointSize, 11)
-    }
-
-    func testFocusPanel_DefaultHeaderPosition_IsBottom() {
-        XCTAssertEqual(FocusPanelView.defaultHeaderPosition, .bottom)
-    }
-
-    func testRepoView_DefaultTopInset_IsEightPoints() {
-        XCTAssertEqual(RepoViewController.layoutTopInset, 8)
     }
 
     func testStatusPublisherPollPolicy_PollsPreferredEveryCycle() {
@@ -319,168 +308,9 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertTrue(StatusPublisher.shouldPollPath("/repo/b", preferredPaths: [], pollCycle: 2, nonPreferredStride: 3))
     }
 
-    func testRepoView_BackgroundAndTerminalAdaptToAppearanceChanges() {
-        let repoVC = RepoViewController()
-        repoVC.loadViewIfNeeded()
-
-        let terminal = findView(in: repoVC.view, identifier: "project.terminal")
-        XCTAssertNotNil(terminal)
-
-        repoVC.view.appearance = NSAppearance(named: .aqua)
-        repoVC.view.viewDidChangeEffectiveAppearance()
-        repoVC.view.needsDisplay = true
-        repoVC.view.displayIfNeeded()
-        let lightRoot = repoVC.view.layer?.backgroundColor
-        let lightTerminalBg = terminal?.layer?.backgroundColor
-        let lightTerminalBorder = terminal?.layer?.borderColor
-        let lightTerminalBorderWidth = terminal?.layer?.borderWidth
-
-        repoVC.view.appearance = NSAppearance(named: .darkAqua)
-        repoVC.view.viewDidChangeEffectiveAppearance()
-        repoVC.view.needsDisplay = true
-        repoVC.view.displayIfNeeded()
-        let darkRoot = repoVC.view.layer?.backgroundColor
-        let darkTerminalBg = terminal?.layer?.backgroundColor
-        let darkTerminalBorder = terminal?.layer?.borderColor
-        let darkTerminalBorderWidth = terminal?.layer?.borderWidth
-
-        XCTAssertNotNil(lightRoot)
-        XCTAssertNotNil(darkRoot)
-
-        XCTAssertNotEqual(lightRoot, darkRoot)
-        XCTAssertNotEqual(lightTerminalBg, darkTerminalBg)
-        XCTAssertNotEqual(lightTerminalBorder, darkTerminalBorder)
-        XCTAssertEqual(lightTerminalBorderWidth, 1)
-        XCTAssertEqual(darkTerminalBorderWidth, 0)
-    }
-
-    func testSidebar_DefaultBackground_IsTransparent() {
-        let sidebarVC = SidebarViewController()
-        sidebarVC.loadViewIfNeeded()
-
-        guard let bgColor = sidebarVC.view.layer?.backgroundColor,
-              let nsColor = NSColor(cgColor: bgColor)
-        else {
-            XCTFail("Sidebar background color should exist")
-            return
-        }
-
-        XCTAssertLessThanOrEqual(nsColor.alphaComponent, 0.001)
-    }
-
-    func testSidebar_UsesComfortableRowInsets() {
-        XCTAssertEqual(SidebarViewController.Layout.listHorizontalInset, 0)
-        XCTAssertEqual(SidebarViewController.Layout.rowBackgroundHorizontalInset, 8)
-        XCTAssertEqual(SidebarViewController.Layout.cellLeadingInset, 8)
-        XCTAssertEqual(SidebarViewController.Layout.cellTrailingInset, 6)
-    }
-
-    func testSidebar_HeaderSeparator_DefaultsToHidden() {
-        XCTAssertFalse(SidebarViewController.Layout.showsHeaderSeparator)
-    }
-
-    func testRepoView_SideBySideTerminalCorners_LeftOnlyRounded() {
-        XCTAssertEqual(RepoViewController.terminalCornerRadius, 10)
-        let expected: CACornerMask = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
-        XCTAssertEqual(RepoViewController.sideBySideTerminalMaskedCorners, expected)
-    }
-
     func testNewThreadDialog_ActionButtonsUseEqualSizingPolicy() {
         XCTAssertTrue(NewBranchDialog.Layout.actionButtonsFillEqually)
         XCTAssertEqual(NewBranchDialog.Layout.actionButtonHeight, 40)
-    }
-
-    func testSidebar_DefaultSelectionStyle_IsMacOSNative() {
-        XCTAssertTrue(SidebarViewController.Layout.usesNativeSelectionStyle)
-    }
-
-    func testSidebar_TableDisallowsEmptySelection() {
-        let sidebarVC = SidebarViewController()
-        sidebarVC.loadViewIfNeeded()
-
-        let table = findView(in: sidebarVC.view, identifier: "sidebar.worktreeList") as? NSTableView
-        XCTAssertNotNil(table)
-        XCTAssertFalse(table?.allowsEmptySelection ?? true)
-    }
-
-    func testSidebar_TableDoesNotForceSourceListStyle() {
-        let sidebarVC = SidebarViewController()
-        sidebarVC.loadViewIfNeeded()
-
-        let table = findView(in: sidebarVC.view, identifier: "sidebar.worktreeList") as? NSTableView
-        XCTAssertNotNil(table)
-        XCTAssertNotEqual(table?.style, .sourceList)
-    }
-
-    func testSidebar_TableUsesRegularSelectionHighlight() {
-        let sidebarVC = SidebarViewController()
-        sidebarVC.loadViewIfNeeded()
-
-        let table = findView(in: sidebarVC.view, identifier: "sidebar.worktreeList") as? NSTableView
-        XCTAssertNotNil(table)
-        XCTAssertEqual(table?.selectionHighlightStyle, .regular)
-    }
-
-    func testSidebar_DoesNotProvideCustomRowViewForSelectionAppearance() {
-        let sidebarVC = SidebarViewController()
-        sidebarVC.loadViewIfNeeded()
-
-        let info = WorktreeInfo(path: NSHomeDirectory(), branch: "main", commitHash: "abc", isMainWorktree: true)
-        sidebarVC.setWorktrees([info])
-
-        let table = findView(in: sidebarVC.view, identifier: "sidebar.worktreeList") as? NSTableView
-        XCTAssertNotNil(table)
-        XCTAssertFalse(sidebarVC.responds(to: NSSelectorFromString("tableView:rowViewForRow:")))
-    }
-
-    func testRepoShowTerminal_DoesNotForceFirstResponderToTerminalView() {
-        let repoVC = RepoViewController()
-        let window = TrackingWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
-            styleMask: [.titled, .closable, .resizable],
-            backing: .buffered,
-            defer: false
-        )
-        window.contentViewController = repoVC
-        repoVC.loadViewIfNeeded()
-
-        let info = WorktreeInfo(path: NSHomeDirectory(), branch: "main", commitHash: "abc", isMainWorktree: true)
-        let surface = TerminalSurface()
-        SurfaceRegistry.shared.register(surface)
-        let splitTree = SplitTree(worktreePath: info.path, rootLeafId: UUID().uuidString, surfaceId: surface.id, sessionName: "")
-        repoVC.configure(worktrees: [info], trees: [info.path: splitTree])
-
-        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
-        window.makeFirstResponderCallCount = 0
-
-        repoVC.showTerminal(at: 0)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
-
-        XCTAssertEqual(window.makeFirstResponderCallCount, 0)
-    }
-
-    func testSidebar_AddButton_UsesNativeButtonChrome() {
-        let sidebarVC = SidebarViewController()
-        sidebarVC.loadViewIfNeeded()
-
-        let addButton = findButton(in: sidebarVC.view, identifier: "sidebar.addThread")
-        XCTAssertNotNil(addButton)
-        XCTAssertTrue(addButton?.isBordered == true)
-        XCTAssertEqual(addButton?.bezelStyle, .texturedRounded)
-        XCTAssertNotNil(addButton?.image)
-    }
-
-    func testSidebar_DiffButtonExistsAndDefaultDisabled() {
-        let sidebarVC = SidebarViewController()
-        sidebarVC.loadViewIfNeeded()
-
-        let diffButton = findButton(in: sidebarVC.view, identifier: "sidebar.showDiff")
-        XCTAssertNotNil(diffButton)
-        XCTAssertFalse(diffButton?.isEnabled ?? true)
-        XCTAssertEqual(diffButton?.bezelStyle, .texturedRounded)
-        XCTAssertEqual(diffButton?.title, "")
-        XCTAssertEqual(diffButton?.imagePosition, .imageOnly)
-        XCTAssertNotNil(diffButton?.image)
     }
 
     func testNewThreadDialog_ActionButtonsUseNativeButtonChrome() {
@@ -540,26 +370,6 @@ final class GridLayoutTests: XCTestCase {
 
         XCTAssertNotNil(dashboard)
         XCTAssertEqual(dashboard?.alignment, .center)
-    }
-
-    func testTitleBar_RenderTabsResetsScrollOffset() {
-        let titleBar = TitleBarView(frame: NSRect(x: 0, y: 0, width: 320, height: 52))
-        titleBar.projects = ["opencode", "ganwork", "feature/new-thread", "long-long-long-branch"]
-        titleBar.currentView = "dashboard"
-        titleBar.renderTabs()
-        titleBar.layoutSubtreeIfNeeded()
-
-        guard let tabsScroll = findFirstScrollView(in: titleBar) else {
-            XCTFail("Expected tabs scroll view")
-            return
-        }
-
-        tabsScroll.contentView.setBoundsOrigin(NSPoint(x: 120, y: 0))
-        tabsScroll.reflectScrolledClipView(tabsScroll.contentView)
-
-        titleBar.renderTabs()
-
-        XCTAssertEqual(tabsScroll.contentView.bounds.origin.x, 0, accuracy: 0.001)
     }
 
     func testMainWindowController_TrafficLightsAlignWithCapsuleCenter() {

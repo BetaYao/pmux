@@ -3,13 +3,17 @@ import AppKit
 protocol AgentCardDelegate: AnyObject {
     func agentCardClicked(agentId: String)
     func agentCardDoubleClicked(agentId: String)
+    func agentCardDidRequestDelete(agentId: String)
 }
 
 extension AgentCardDelegate {
     func agentCardDoubleClicked(agentId: String) {}
+    func agentCardDidRequestDelete(agentId: String) {}
 }
 
 final class AgentCardView: NSView {
+    override var acceptsFirstResponder: Bool { false }
+
     enum Typography {
         static let primaryPointSize: CGFloat = 13
         static let bodyPointSize: CGFloat = 12

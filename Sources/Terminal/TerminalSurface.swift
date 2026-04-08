@@ -536,6 +536,10 @@ class GhosttyNSView: NSView, NSTextInputClient {
         if let surface {
             ghostty_surface_set_focus(surface, false)
         }
+        #if DEBUG
+        let symbols = Thread.callStackSymbols.prefix(12).joined(separator: "\n")
+        NSLog("GhosttyNSView.resignFirstResponder — stack:\n%@", symbols)
+        #endif
         return super.resignFirstResponder()
     }
 

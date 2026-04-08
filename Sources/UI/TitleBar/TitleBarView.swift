@@ -1,11 +1,8 @@
 import AppKit
 
 protocol TitleBarDelegate: AnyObject {
-    func titleBarDidSelectDashboard()
-    func titleBarDidSelectProject(_ projectName: String)
-    func titleBarDidRequestCloseProject(_ projectName: String)
-    func titleBarDidRequestAddProject()
     func titleBarDidRequestNewThread()
+    func titleBarDidRequestCollapseSidebar()
     func titleBarDidSelectLayout(_ layout: DashboardLayout)
     func titleBarDidToggleNotifications()
     func titleBarDidToggleAI()
@@ -23,25 +20,21 @@ final class TitleBarView: NSView {
 
     weak var delegate: TitleBarDelegate?
 
-    var currentView: String = "dashboard" {
-        didSet { updateViewState() }
-    }
-    var currentProject: String = ""
-    var projects: [String] = []
-    var projectStatusProvider: ((String) -> String)?
-
     // MARK: - Arc Blocks
 
     private let leftArcBlock = NSView()
     private let rightArcBlock = NSView()
 
-    // Left controls
-    private let dashboardTab = NSButton()
-    private let leftSeparator2 = NSView()
-    private let tabsScrollView = NSScrollView()
-    private let tabsStack = NSStackView()
-    private let addButton = NSButton()
-    private var projectTabViews: [ProjectTabView] = []
+    // Left controls — worktree info
+    private let worktreeStatusDot = NSView()
+    private let worktreeBranchLabel = NSTextField(labelWithString: "")
+    private let worktreeRepoLabel = NSTextField(labelWithString: "")
+    private let worktreeMetaLabel = NSTextField(labelWithString: "")
+    private let newWorktreeButton = NSButton()
+    private let collapseSidebarButton = NSButton()
+    private let dashboardTitleLabel = NSTextField(labelWithString: "AMUX Dashboard")
+    private let worktreeInfoStack = NSStackView()
+    private let worktreeButtonStack = NSStackView()
 
     // Right controls
     private let viewSwitcherButton = NSButton()
@@ -54,7 +47,6 @@ final class TitleBarView: NSView {
 
     // State
     private var isWindowHovered = false
-    private var isDashboardTabHovered = false
     private var notifCount = 0
     private var hoverTrackingArea: NSTrackingArea?
 
@@ -77,45 +69,36 @@ final class TitleBarView: NSView {
         updateArcBlockColors()
     }
 
-    func renderTabs() {
-        // Fully reset arranged subviews to avoid stale NSStackView state
-        for view in tabsStack.arrangedSubviews {
-            tabsStack.removeArrangedSubview(view)
-            view.removeFromSuperview()
-        }
-        projectTabViews.removeAll()
+    func updateWorktreeInfo(branch: String?, repo: String?, status: AgentStatus?, agentName: String?, isGridLayout: Bool) {
+        let showWorktreeInfo = !isGridLayout && branch != nil
 
-        // Add separator before project tabs if needed
-        if !projects.isEmpty {
-            tabsStack.addArrangedSubview(leftSeparator2)
-        }
+        dashboardTitleLabel.isHidden = showWorktreeInfo
+        worktreeInfoStack.isHidden = !showWorktreeInfo
+        worktreeButtonStack.isHidden = !showWorktreeInfo
 
-        // Add project tabs
-        for name in projects {
-            let tab = ProjectTabView(name: name)
-            let statusString = projectStatusProvider?(name) ?? "idle"
-            tab.updateStatus(statusString)
-            tab.setSelected(currentView == "project" && currentProject == name)
-            tab.onSelect = { [weak self] in
-                self?.delegate?.titleBarDidSelectProject(name)
+        if showWorktreeInfo {
+            worktreeBranchLabel.stringValue = branch ?? ""
+            worktreeRepoLabel.stringValue = repo ?? ""
+
+            var metaParts: [String] = []
+            if let status = status {
+                metaParts.append(status.rawValue)
             }
-            tab.onClose = { [weak self] in
-                self?.delegate?.titleBarDidRequestCloseProject(name)
+            if let agentName = agentName, !agentName.isEmpty {
+                metaParts.append(agentName)
             }
-            tab.identifier = NSUserInterfaceItemIdentifier("titlebar.projectTab.\(name)")
-            tabsStack.addArrangedSubview(tab)
-            projectTabViews.append(tab)
+            worktreeMetaLabel.stringValue = metaParts.joined(separator: " \u{00B7} ")
+
+            let dotColor: NSColor
+            switch status {
+            case .running: dotColor = SemanticColors.running
+            case .waiting: dotColor = SemanticColors.waiting
+            case .error: dotColor = SemanticColors.danger
+            case .exited: dotColor = SemanticColors.danger
+            default: dotColor = SemanticColors.idle
+            }
+            worktreeStatusDot.layer?.backgroundColor = dotColor.cgColor
         }
-
-        // Add "+" button at the end
-        tabsStack.addArrangedSubview(addButton)
-
-        if currentView == "dashboard" {
-            tabsScrollView.contentView.setBoundsOrigin(.zero)
-            tabsScrollView.reflectScrolledClipView(tabsScrollView.contentView)
-        }
-
-        updateDashboardTabAppearance()
     }
 
     func updateNotifBadge(_ count: Int) {
@@ -156,12 +139,11 @@ final class TitleBarView: NSView {
             rightArcBlock.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Layout.arcVerticalOffset),
             rightArcBlock.heightAnchor.constraint(equalToConstant: Layout.capsuleHeight),
 
-            // 8px gap between blocks
-            rightArcBlock.leadingAnchor.constraint(
-                greaterThanOrEqualTo: leftArcBlock.trailingAnchor, constant: 8),
+            // 8px gap between blocks — left block fills remaining space
+            leftArcBlock.trailingAnchor.constraint(
+                equalTo: rightArcBlock.leadingAnchor, constant: -8),
         ])
 
-        updateViewState()
         updateArcBlockColors()
     }
 
@@ -171,114 +153,98 @@ final class TitleBarView: NSView {
         leftArcBlock.translatesAutoresizingMaskIntoConstraints = false
         addSubview(leftArcBlock)
 
-        // Dashboard tab
-        configureDashboardTab()
-        leftArcBlock.addSubview(dashboardTab)
+        // Dashboard title (shown in grid mode)
+        dashboardTitleLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        dashboardTitleLabel.textColor = SemanticColors.text
+        dashboardTitleLabel.translatesAutoresizingMaskIntoConstraints = false
+        dashboardTitleLabel.setContentHuggingPriority(.required, for: .horizontal)
+        leftArcBlock.addSubview(dashboardTitleLabel)
 
-        // Separator 2 (after dashboard, before project tabs) — created but added dynamically
-        leftSeparator2.wantsLayer = true
-        leftSeparator2.layer?.backgroundColor = SemanticColors.line.cgColor
-        leftSeparator2.translatesAutoresizingMaskIntoConstraints = false
+        // Status dot (8px circle)
+        worktreeStatusDot.wantsLayer = true
+        worktreeStatusDot.layer?.cornerRadius = 4
+        worktreeStatusDot.layer?.backgroundColor = SemanticColors.idle.cgColor
+        worktreeStatusDot.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            leftSeparator2.widthAnchor.constraint(equalToConstant: 1),
-            leftSeparator2.heightAnchor.constraint(equalToConstant: 18),
+            worktreeStatusDot.widthAnchor.constraint(equalToConstant: 8),
+            worktreeStatusDot.heightAnchor.constraint(equalToConstant: 8),
         ])
 
-        // Tabs scroll area
-        tabsScrollView.translatesAutoresizingMaskIntoConstraints = false
-        tabsScrollView.hasHorizontalScroller = false
-        tabsScrollView.hasVerticalScroller = false
-        tabsScrollView.drawsBackground = false
-        tabsScrollView.horizontalScrollElasticity = .allowed
+        // Branch label (bold)
+        worktreeBranchLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        worktreeBranchLabel.textColor = SemanticColors.text
+        worktreeBranchLabel.lineBreakMode = .byTruncatingTail
+        worktreeBranchLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        worktreeBranchLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
-        tabsStack.orientation = .horizontal
-        tabsStack.spacing = 4
-        tabsStack.alignment = .centerY
-        tabsStack.translatesAutoresizingMaskIntoConstraints = false
-        tabsScrollView.documentView = tabsStack
-        leftArcBlock.addSubview(tabsScrollView)
+        // Repo label (dimmed)
+        worktreeRepoLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+        worktreeRepoLabel.textColor = SemanticColors.muted
+        worktreeRepoLabel.lineBreakMode = .byTruncatingTail
+        worktreeRepoLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        worktreeRepoLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        // Add button
-        addButton.title = "+"
-        addButton.bezelStyle = .recessed
-        addButton.isBordered = false
-        addButton.font = NSFont.systemFont(ofSize: 16, weight: .medium)
-        addButton.contentTintColor = SemanticColors.muted
-        addButton.target = self
-        addButton.action = #selector(addProjectClicked)
-        addButton.translatesAutoresizingMaskIntoConstraints = false
-        addButton.setAccessibilityIdentifier("titlebar.addProject")
-        addButton.wantsLayer = true
-        addButton.layer?.cornerRadius = 7
+        // Meta label — status/agent (dimmed)
+        worktreeMetaLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+        worktreeMetaLabel.textColor = SemanticColors.muted
+        worktreeMetaLabel.lineBreakMode = .byTruncatingTail
+        worktreeMetaLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        worktreeMetaLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        // Dot separator helpers
+        let dotSep1 = NSTextField(labelWithString: "\u{00B7}")
+        dotSep1.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        dotSep1.textColor = SemanticColors.muted
+        dotSep1.setContentHuggingPriority(.required, for: .horizontal)
+
+        let dotSep2 = NSTextField(labelWithString: "\u{00B7}")
+        dotSep2.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        dotSep2.textColor = SemanticColors.muted
+        dotSep2.setContentHuggingPriority(.required, for: .horizontal)
+
+        // Info stack: [dot] [branch] [·] [repo] [·] [meta]
+        worktreeInfoStack.orientation = .horizontal
+        worktreeInfoStack.spacing = 5
+        worktreeInfoStack.alignment = .centerY
+        worktreeInfoStack.translatesAutoresizingMaskIntoConstraints = false
+        worktreeInfoStack.addArrangedSubview(worktreeStatusDot)
+        worktreeInfoStack.addArrangedSubview(worktreeBranchLabel)
+        worktreeInfoStack.addArrangedSubview(dotSep1)
+        worktreeInfoStack.addArrangedSubview(worktreeRepoLabel)
+        worktreeInfoStack.addArrangedSubview(dotSep2)
+        worktreeInfoStack.addArrangedSubview(worktreeMetaLabel)
+        worktreeInfoStack.isHidden = true
+        leftArcBlock.addSubview(worktreeInfoStack)
+
+        // Button stack: [+] [sidebar]
+        configureArcIconButton(newWorktreeButton, symbol: "plus",
+                               identifier: "titlebar.newWorktree", label: "New Worktree",
+                               action: #selector(newWorktreeClicked))
+        configureArcIconButton(collapseSidebarButton, symbol: "sidebar.right",
+                               identifier: "titlebar.collapseSidebar", label: "Toggle Sidebar",
+                               action: #selector(collapseSidebarClicked))
+
+        worktreeButtonStack.orientation = .horizontal
+        worktreeButtonStack.spacing = 2
+        worktreeButtonStack.alignment = .centerY
+        worktreeButtonStack.translatesAutoresizingMaskIntoConstraints = false
+        worktreeButtonStack.addArrangedSubview(newWorktreeButton)
+        worktreeButtonStack.addArrangedSubview(collapseSidebarButton)
+        worktreeButtonStack.isHidden = true
+        leftArcBlock.addSubview(worktreeButtonStack)
+
         NSLayoutConstraint.activate([
-            addButton.widthAnchor.constraint(equalToConstant: 30),
-            addButton.heightAnchor.constraint(equalToConstant: 28),
+            dashboardTitleLabel.leadingAnchor.constraint(equalTo: leftArcBlock.leadingAnchor, constant: Layout.dashboardLeadingInset),
+            dashboardTitleLabel.centerYAnchor.constraint(equalTo: leftArcBlock.centerYAnchor),
+            dashboardTitleLabel.trailingAnchor.constraint(lessThanOrEqualTo: leftArcBlock.trailingAnchor, constant: -8),
+
+            worktreeInfoStack.leadingAnchor.constraint(equalTo: leftArcBlock.leadingAnchor, constant: Layout.dashboardLeadingInset),
+            worktreeInfoStack.centerYAnchor.constraint(equalTo: leftArcBlock.centerYAnchor),
+
+            worktreeButtonStack.leadingAnchor.constraint(greaterThanOrEqualTo: worktreeInfoStack.trailingAnchor, constant: 8),
+            worktreeButtonStack.trailingAnchor.constraint(equalTo: leftArcBlock.trailingAnchor, constant: -4),
+            worktreeButtonStack.centerYAnchor.constraint(equalTo: leftArcBlock.centerYAnchor),
         ])
-        setupHoverTracking(for: addButton, defaultTint: SemanticColors.muted)
-        tabsStack.addArrangedSubview(addButton)
-
-        NSLayoutConstraint.activate([
-            dashboardTab.leadingAnchor.constraint(equalTo: leftArcBlock.leadingAnchor, constant: Layout.dashboardLeadingInset),
-            dashboardTab.centerYAnchor.constraint(equalTo: leftArcBlock.centerYAnchor),
-
-            tabsScrollView.leadingAnchor.constraint(equalTo: dashboardTab.trailingAnchor, constant: 4),
-            tabsScrollView.trailingAnchor.constraint(equalTo: leftArcBlock.trailingAnchor, constant: -4),
-            tabsScrollView.topAnchor.constraint(equalTo: leftArcBlock.topAnchor),
-            tabsScrollView.bottomAnchor.constraint(equalTo: leftArcBlock.bottomAnchor),
-
-            tabsStack.topAnchor.constraint(equalTo: tabsScrollView.topAnchor),
-            tabsStack.bottomAnchor.constraint(equalTo: tabsScrollView.bottomAnchor),
-            tabsStack.leadingAnchor.constraint(equalTo: tabsScrollView.contentView.leadingAnchor),
-        ])
-    }
-
-    private func configureDashboardTab() {
-        dashboardTab.bezelStyle = .recessed
-        dashboardTab.isBordered = false
-        dashboardTab.translatesAutoresizingMaskIntoConstraints = false
-        dashboardTab.setAccessibilityIdentifier("titlebar.dashboardTab")
-        dashboardTab.target = self
-        dashboardTab.action = #selector(dashboardTabClicked)
-        dashboardTab.wantsLayer = true
-        dashboardTab.layer?.cornerRadius = 14
-
-        // Build attributed title with icon + text
-        let attachment = NSTextAttachment()
-        if let image = NSImage(systemSymbolName: "square.grid.2x2", accessibilityDescription: "Dashboard") {
-            let config = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
-            attachment.image = image.withSymbolConfiguration(config)
-        }
-        let attrString = NSMutableAttributedString(attachment: attachment)
-        attrString.append(NSAttributedString(string: " Dashboard", attributes: [
-            .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
-        ]))
-        dashboardTab.attributedTitle = attrString
-        dashboardTab.alignment = .center
-        dashboardTab.setContentHuggingPriority(.required, for: .horizontal)
-
-        let contentWidth = ceil(attrString.size().width + (Layout.dashboardHorizontalPadding * 2))
-        NSLayoutConstraint.activate([
-            dashboardTab.widthAnchor.constraint(equalToConstant: contentWidth),
-            dashboardTab.heightAnchor.constraint(equalToConstant: 28),
-        ])
-
-        setupDashboardTabHoverTracking()
-    }
-
-    private func setupDashboardTabHoverTracking() {
-        let hover = HoverTrackingView()
-        hover.translatesAutoresizingMaskIntoConstraints = false
-        dashboardTab.addSubview(hover)
-        NSLayoutConstraint.activate([
-            hover.topAnchor.constraint(equalTo: dashboardTab.topAnchor),
-            hover.leadingAnchor.constraint(equalTo: dashboardTab.leadingAnchor),
-            hover.trailingAnchor.constraint(equalTo: dashboardTab.trailingAnchor),
-            hover.bottomAnchor.constraint(equalTo: dashboardTab.bottomAnchor),
-        ])
-        hover.onHoverChanged = { [weak self] hovered in
-            self?.isDashboardTabHovered = hovered
-            self?.updateDashboardTabAppearance(animated: true)
-        }
     }
 
     private func setupRightArcBlock() {
@@ -416,15 +382,12 @@ final class TitleBarView: NSView {
 
     // MARK: - Actions
 
-    @objc private func dashboardTabClicked() {
-        currentView = "dashboard"
-        currentProject = ""
-        delegate?.titleBarDidSelectDashboard()
-        renderTabs()
+    @objc private func newWorktreeClicked() {
+        delegate?.titleBarDidRequestNewThread()
     }
 
-    @objc private func addProjectClicked() {
-        delegate?.titleBarDidRequestAddProject()
+    @objc private func collapseSidebarClicked() {
+        delegate?.titleBarDidRequestCollapseSidebar()
     }
 
     @objc private func viewMenuClicked() {
@@ -477,44 +440,6 @@ final class TitleBarView: NSView {
 
     // MARK: - State
 
-    private func updateViewState() {
-        viewSwitcherButton.alphaValue = currentView == "dashboard" ? 1.0 : 0.3
-        viewSwitcherButton.isEnabled = currentView == "dashboard"
-        updateDashboardTabAppearance()
-    }
-
-    private func updateDashboardTabAppearance(animated: Bool = false) {
-        let isActive = currentView == "dashboard"
-        let bgColor: CGColor
-        let tintColor: NSColor
-
-        if isActive {
-            bgColor = SemanticColors.accentAlpha15.cgColor
-            tintColor = SemanticColors.accent
-        } else if isDashboardTabHovered {
-            bgColor = SemanticColors.iconButtonHoverBg.cgColor
-            tintColor = SemanticColors.iconButtonHoverTint
-        } else {
-            bgColor = NSColor.clear.cgColor
-            tintColor = SemanticColors.muted
-        }
-
-        let apply = {
-            self.dashboardTab.layer?.backgroundColor = bgColor
-            if animated {
-                self.dashboardTab.animator().contentTintColor = tintColor
-            } else {
-                self.dashboardTab.contentTintColor = tintColor
-            }
-        }
-
-        if animated {
-            animateHoverTransition(apply)
-        } else {
-            apply()
-        }
-    }
-
     private func updateArcBlockColors() {
         // Caller (applyColors/setWindowHovered) must set NSAppearance.current first
         let saved = NSAppearance.current
@@ -538,9 +463,10 @@ final class TitleBarView: NSView {
         let saved = NSAppearance.current
         NSAppearance.current = window?.effectiveAppearance ?? NSApp.effectiveAppearance
         updateArcBlockColors()
-        leftSeparator2.layer?.backgroundColor = SemanticColors.line.cgColor
-        addButton.contentTintColor = SemanticColors.muted
-        updateDashboardTabAppearance()
+        dashboardTitleLabel.textColor = SemanticColors.text
+        worktreeBranchLabel.textColor = SemanticColors.text
+        worktreeRepoLabel.textColor = SemanticColors.muted
+        worktreeMetaLabel.textColor = SemanticColors.muted
         notifBadge.layer?.backgroundColor = SemanticColors.danger.cgColor
         NSAppearance.current = saved
     }
@@ -568,196 +494,6 @@ final class TitleBarView: NSView {
     override func mouseExited(with event: NSEvent) {
         setWindowHovered(false)
         super.mouseExited(with: event)
-    }
-}
-
-// MARK: - ProjectTabView
-
-private final class ProjectTabView: NSButton {
-    var onSelect: (() -> Void)?
-    var onClose: (() -> Void)?
-
-    private let statusDot = NSView()
-    private let nameLabel = NSTextField(labelWithString: "")
-    private let closeButton = NSButton()
-    private var isSelected = false
-    private var trackingArea: NSTrackingArea?
-    private var isHovered = false
-    private let projectName: String
-
-    override var mouseDownCanMoveWindow: Bool { false }
-    override var acceptsFirstResponder: Bool { true }
-
-    init(name: String) {
-        self.projectName = name
-        super.init(frame: .zero)
-        setup()
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) not supported")
-    }
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
-        true
-    }
-
-    func setSelected(_ selected: Bool) {
-        isSelected = selected
-        updateAppearance()
-    }
-
-    func updateStatus(_ status: String) {
-        let color: NSColor
-        switch status {
-        case "error": color = SemanticColors.danger
-        case "waiting": color = SemanticColors.waiting
-        case "running": color = SemanticColors.running
-        default: color = SemanticColors.idle
-        }
-        statusDot.layer?.backgroundColor = color.cgColor
-
-        if status == "running" {
-            startBreathingAnimation()
-        } else {
-            stopBreathingAnimation()
-        }
-    }
-
-    private func startBreathingAnimation() {
-        guard statusDot.layer?.animation(forKey: "breathing") == nil else { return }
-        let anim = CABasicAnimation(keyPath: "opacity")
-        anim.fromValue = 1.0
-        anim.toValue = 0.3
-        anim.duration = 1.2
-        anim.autoreverses = true
-        anim.repeatCount = .infinity
-        anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        statusDot.layer?.add(anim, forKey: "breathing")
-    }
-
-    private func stopBreathingAnimation() {
-        statusDot.layer?.removeAnimation(forKey: "breathing")
-        statusDot.layer?.opacity = 1.0
-    }
-
-    private func setup() {
-        wantsLayer = true
-        layer?.cornerRadius = 7
-        isBordered = false
-        title = ""
-        target = self
-        action = #selector(selectTapped)
-        translatesAutoresizingMaskIntoConstraints = false
-
-        // Status dot
-        statusDot.wantsLayer = true
-        statusDot.layer?.cornerRadius = 3
-        statusDot.layer?.backgroundColor = SemanticColors.idle.cgColor
-        statusDot.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(statusDot)
-
-        // Name label
-        nameLabel.stringValue = projectName
-        nameLabel.font = NSFont.systemFont(ofSize: 11)
-        nameLabel.lineBreakMode = .byTruncatingTail
-        nameLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(nameLabel)
-
-        // Close button
-        closeButton.title = "\u{00D7}"
-        closeButton.bezelStyle = .recessed
-        closeButton.isBordered = false
-        closeButton.font = NSFont.systemFont(ofSize: 14, weight: .medium)
-        closeButton.contentTintColor = SemanticColors.muted
-        closeButton.target = self
-        closeButton.action = #selector(closeTapped)
-        closeButton.translatesAutoresizingMaskIntoConstraints = false
-        closeButton.setAccessibilityIdentifier("titlebar.projectTab.\(projectName).close")
-        addSubview(closeButton)
-
-        NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 28),
-            widthAnchor.constraint(greaterThanOrEqualToConstant: 60),
-            widthAnchor.constraint(lessThanOrEqualToConstant: 180),
-
-            statusDot.widthAnchor.constraint(equalToConstant: 6),
-            statusDot.heightAnchor.constraint(equalToConstant: 6),
-            statusDot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            statusDot.centerYAnchor.constraint(equalTo: centerYAnchor),
-
-            nameLabel.leadingAnchor.constraint(equalTo: statusDot.trailingAnchor, constant: 5),
-            nameLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-
-            closeButton.leadingAnchor.constraint(equalTo: nameLabel.trailingAnchor, constant: 4),
-            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
-            closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            closeButton.widthAnchor.constraint(equalToConstant: 18),
-            closeButton.heightAnchor.constraint(equalToConstant: 18),
-        ])
-
-    }
-
-    @objc private func selectTapped() {
-        onSelect?()
-    }
-
-    @objc private func closeTapped() {
-        onClose?()
-    }
-
-    private func updateAppearance() {
-        if isSelected {
-            layer?.backgroundColor = resolvedCGColor(SemanticColors.tabSelectedBg)
-            layer?.borderWidth = 1.5
-            layer?.borderColor = resolvedCGColor(SemanticColors.tabSelectedBorder)
-            nameLabel.textColor = SemanticColors.text
-        } else if isHovered {
-            layer?.backgroundColor = resolvedCGColor(SemanticColors.tabHoverBg)
-            layer?.borderWidth = 1.5
-            layer?.borderColor = resolvedCGColor(SemanticColors.tabHoverBorder)
-            nameLabel.textColor = SemanticColors.text
-        } else {
-            layer?.backgroundColor = NSColor.clear.cgColor
-            layer?.borderWidth = 0
-            layer?.borderColor = nil
-            nameLabel.textColor = SemanticColors.muted
-        }
-        closeButton.contentTintColor = isSelected
-            ? SemanticColors.muted
-            : SemanticColors.mutedAlpha50
-    }
-
-    // MARK: - Tracking
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let existing = trackingArea {
-            removeTrackingArea(existing)
-        }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInActiveApp],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        isHovered = true
-        updateAppearance()
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        isHovered = false
-        updateAppearance()
-    }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        updateAppearance()
     }
 }
 

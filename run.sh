@@ -43,5 +43,5 @@ echo "==> Killing existing amux..."
 killall amux 2>/dev/null || true
 sleep 1
 
-echo "==> Launching amux..."
-open -n "$APP"
+echo "==> Launching amux (Ctrl+C to quit)..."
+"$APP/Contents/MacOS/amux"

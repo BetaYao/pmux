@@ -9,6 +9,7 @@ protocol DashboardDelegate: AnyObject {
     func dashboardDidReorderCards(order: [String])
     func dashboardDidRequestDelete(_ terminalID: String)
     func dashboardDidRequestAddProject()
+    func dashboardDidChangeSelection(_ dashboard: DashboardViewController)
 }
 
 // MARK: - AgentDisplayInfo
@@ -27,6 +28,7 @@ struct AgentDisplayInfo {
     let worktreePath: String    // needed to lazily create the terminal
     let paneCount: Int          // number of split panes (1 = no badge)
     let paneSurfaces: [TerminalSurface]  // all pane surfaces in leaf order
+    let isMainWorktree: Bool    // true = base repo, false = git worktree
     let tasks: [TaskItem]              // webhook-tracked task items
     let activityEvents: [ActivityEvent]
 
@@ -49,7 +51,7 @@ extension NSPasteboard.PasteboardType {
 
 // MARK: - DashboardViewController
 
-class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDelegate, DraggableGridDelegate {
+class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGridDelegate {
     enum LayoutMetrics {
         static let focusPanelCornerRadius: CGFloat = 10
         static let containerHorizontalInset: CGFloat = 0
@@ -81,16 +83,40 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
 
     weak var dashboardDelegate: DashboardDelegate?
 
+    /// Set by TabCoordinator during setup
+    weak var surfaceManager: TerminalSurfaceManager?
+
+    /// Set by MainWindowController — forwards split events to TerminalCoordinator
+    weak var splitContainerDelegate: SplitContainerDelegate?
+
     var currentLayout: DashboardLayout = .leftRight
     var selectedAgentId: String = ""
-    var selectedPaneIndex: Int = 0
+    private var isSidebarCollapsed = false
+
+    // Constraints swapped when sidebar collapses/expands
+    private var leftRightFocusWidthExpanded: NSLayoutConstraint?   // 0.78 multiplier
+    private var leftRightFocusWidthCollapsed: NSLayoutConstraint?  // trailing = container trailing
+    private var topSmallScrollHeight: NSLayoutConstraint?          // 128pt
+    private var topSmallScrollHeightCollapsed: NSLayoutConstraint? // 0pt
+    private var topLargeScrollHeight: NSLayoutConstraint?          // 128pt
+    private var topLargeScrollHeightCollapsed: NSLayoutConstraint? // 0pt
+
+    var selectedAgentIndex: Int {
+        agents.firstIndex(where: { $0.id == selectedAgentId }) ?? 0
+    }
     private(set) var zoomIndex: Int = GridLayout.defaultZoomIndex
 
+    /// Cached SplitContainerView per worktree path
+    private var splitContainers: [String: SplitContainerView] = [:]
+
+    /// Currently visible split container in the focus panel
+    private(set) var activeSplitContainer: SplitContainerView?
+
     // Data
-    private var agents: [AgentDisplayInfo] = []
+    private(set) var agents: [AgentDisplayInfo] = []
 
     // Grid layout
-    private let gridScrollView = NSScrollView()
+    private let gridScrollView = NonFirstResponderScrollView()
     private let gridContainer = DraggableGridView()
     private var gridCards: [StackedCardContainerView] = []
 
@@ -101,22 +127,22 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     // Left-Right layout
     private let leftRightContainer = NSView()
     private let leftRightFocusPanel = FocusPanelView()
-    private let leftRightSidebarScroll = NSScrollView()
+    private let leftRightSidebarScroll = NonFirstResponderScrollView()
     private let leftRightSidebarStack = FlippedStackView()
     private var leftRightMiniCards: [StackedMiniCardContainerView] = []
 
     // Top-Small layout
     private let topSmallContainer = NSView()
     private let topSmallFocusPanel = FocusPanelView()
-    private let topSmallTopScroll = NSScrollView()
-    private let topSmallTopStack = NSStackView()
+    private let topSmallTopScroll = NonFirstResponderScrollView()
+    private let topSmallTopStack = NonFirstResponderStackView()
     private var topSmallMiniCards: [StackedMiniCardContainerView] = []
 
     // Top-Large layout
     private let topLargeContainer = NSView()
     private let topLargeFocusPanel = FocusPanelView()
-    private let topLargeBottomScroll = NSScrollView()
-    private let topLargeBottomStack = NSStackView()
+    private let topLargeBottomScroll = NonFirstResponderScrollView()
+    private let topLargeBottomStack = NonFirstResponderStackView()
     private var topLargeMiniCards: [StackedMiniCardContainerView] = []
 
     // Empty state
@@ -150,6 +176,14 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         let newIds = Set(newAgents.map { $0.id })
         let structureChanged = oldIds != newIds
 
+        #if DEBUG
+        if structureChanged, !oldIds.isEmpty {
+            let added = newIds.subtracting(oldIds)
+            let removed = oldIds.subtracting(newIds)
+            NSLog("DashboardVC.updateAgents: structureChanged — added=%@ removed=%@", "\(added)", "\(removed)")
+        }
+        #endif
+
         agents = newAgents
 
         // Show empty state when no agents
@@ -168,13 +202,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
 
         // Validate selectedAgentId
         if !agents.contains(where: { $0.id == selectedAgentId }) {
-            selectedAgentId = sortedAgents().first?.id ?? ""
-            selectedPaneIndex = 0
-        }
-
-        // Clamp selectedPaneIndex to current pane count
-        if let selected = agents.first(where: { $0.id == selectedAgentId }) {
-            selectedPaneIndex = min(selectedPaneIndex, max(selected.paneCount - 1, 0))
+            selectedAgentId = agents.first?.id ?? ""
         }
 
         if structureChanged {
@@ -186,11 +214,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
 
     /// Update existing views in-place without rebuilding the view hierarchy
     private func updateCurrentLayoutInPlace() {
-        let sorted = sortedAgents()
         if currentLayout == .grid {
-            updateGridInPlace(sorted)
+            updateGridInPlace(sortedAgents())
         } else if let refs = focusLayoutRefs(for: currentLayout) {
-            updateFocusLayoutInPlace(sorted, miniCards: refs.miniCards, focusPanel: refs.focusPanel)
+            updateFocusLayoutInPlace(agents, miniCards: refs.miniCards, focusPanel: refs.focusPanel)
         }
     }
 
@@ -220,18 +247,16 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     }
 
     private func updateFocusLayoutInPlace(_ sorted: [AgentDisplayInfo], miniCards: [StackedMiniCardContainerView], focusPanel: FocusPanelView) {
-        guard sorted.count == miniCards.count else {
-            rebuildCurrentLayout()
-            return
-        }
-        if let selected = sorted.first(where: { $0.id == selectedAgentId }) ?? sorted.first {
-            configureFocusPanel(focusPanel, with: selected)
-            // Re-embed terminal if it was detached (e.g. after tab switch),
-            // but only when the dashboard is actually visible — otherwise we'd
-            // steal the surface from the active repo tab's split container.
-            if focusPanel.terminalContainer.subviews.isEmpty, view.window != nil {
-                embedSurface(selected, in: focusPanel.terminalContainer)
-            }
+        // Count mismatch means structure changed — handled by structureChanged check in updateAgents
+        guard sorted.count == miniCards.count else { return }
+
+        // Re-embed split container if it was detached (e.g. after tab switch),
+        // but only when the dashboard is actually visible.
+        // Skip if a terminal already has focus — avoids stealing focus during
+        // periodic updates (branch refresh, status polling).
+        if activeSplitContainer == nil, view.window != nil,
+           !(view.window?.firstResponder is GhosttyNSView) {
+            embedSplitContainerForSelectedAgent()
         }
         for (index, agent) in sorted.enumerated() {
             miniCards[index].configure(paneCount: agent.paneCount)
@@ -244,7 +269,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
                 lastMessage: agent.lastMessage,
                 totalDuration: agent.totalDuration,
                 roundDuration: agent.roundDuration,
-                paneStatuses: agent.paneStatuses
+                paneStatuses: agent.paneStatuses,
+                isMainWorktree: agent.isMainWorktree
             )
             miniCards[index].isSelected = (agent.id == selectedAgentId)
         }
@@ -253,6 +279,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     func setLayout(_ layout: DashboardLayout) {
         guard layout != currentLayout else { return }
         detachTerminals()
+        resetSidebarConstraints()
+        isSidebarCollapsed = false
         currentLayout = layout
         showLayout(layout)
         rebuildCurrentLayout()
@@ -267,9 +295,64 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     }
 
     func detachTerminals() {
-        for layout in [DashboardLayout.leftRight, .topSmall, .topLarge] {
-            focusLayoutRefs(for: layout)?.focusPanel.terminalContainer.subviews.forEach { $0.removeFromSuperview() }
+        activeSplitContainer?.removeFromSuperview()
+        activeSplitContainer = nil
+        activeSplitWorktreePath = nil
+    }
+
+    func selectAgent(byWorktreePath path: String) {
+        guard let agent = agents.first(where: { $0.worktreePath == path }) else { return }
+        selectedAgentId = agent.id
+        if currentLayout != .grid {
+            detachTerminals()
+            embedSplitContainerForSelectedAgent()
+            updateMiniCardSelection()
+        } else {
+            for container in gridCards {
+                container.isSelected = (container.agentId == selectedAgentId)
+            }
         }
+    }
+
+    func toggleSidebarCollapse() {
+        guard currentLayout != .grid else { return }
+        isSidebarCollapsed.toggle()
+
+        guard let refs = focusLayoutRefs(for: currentLayout) else { return }
+
+        // Swap constraints based on layout type
+        switch currentLayout {
+        case .leftRight:
+            leftRightFocusWidthExpanded?.isActive = !isSidebarCollapsed
+            leftRightFocusWidthCollapsed?.isActive = isSidebarCollapsed
+        case .topSmall:
+            topSmallScrollHeight?.isActive = !isSidebarCollapsed
+            topSmallScrollHeightCollapsed?.isActive = isSidebarCollapsed
+        case .topLarge:
+            topLargeScrollHeight?.isActive = !isSidebarCollapsed
+            topLargeScrollHeightCollapsed?.isActive = isSidebarCollapsed
+        case .grid:
+            break
+        }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            context.allowsImplicitAnimation = true
+
+            refs.scrollView.animator().isHidden = isSidebarCollapsed
+            refs.scrollView.animator().alphaValue = isSidebarCollapsed ? 0 : 1
+
+            self.view.layoutSubtreeIfNeeded()
+        }
+    }
+
+    private func resetSidebarConstraints() {
+        leftRightFocusWidthExpanded?.isActive = true
+        leftRightFocusWidthCollapsed?.isActive = false
+        topSmallScrollHeight?.isActive = true
+        topSmallScrollHeightCollapsed?.isActive = false
+        topLargeScrollHeight?.isActive = true
+        topLargeScrollHeightCollapsed?.isActive = false
     }
 
     // MARK: - Sorting
@@ -291,21 +374,13 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
     // MARK: - Layout visibility
 
     private func showLayout(_ layout: DashboardLayout) {
-        gridScrollView.isHidden = true
-        leftRightContainer.isHidden = true
-        topSmallContainer.isHidden = true
-        topLargeContainer.isHidden = true
-
-        switch layout {
-        case .grid:
-            gridScrollView.isHidden = false
-        case .leftRight:
-            leftRightContainer.isHidden = false
-        case .topSmall:
-            topSmallContainer.isHidden = false
-        case .topLarge:
-            topLargeContainer.isHidden = false
-        }
+        // Only hide containers that are NOT the target layout.
+        // Hiding and immediately un-hiding the active container causes AppKit
+        // to resign the first responder (terminal loses keyboard focus).
+        gridScrollView.isHidden = layout != .grid
+        leftRightContainer.isHidden = layout != .leftRight
+        topSmallContainer.isHidden = layout != .topSmall
+        topLargeContainer.isHidden = layout != .topLarge
     }
 
     private func rebuildCurrentLayout() {
@@ -336,21 +411,19 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         refs.miniCards.removeAll()
         refs.stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
-        let sorted = sortedAgents()
-        guard !sorted.isEmpty else { return }
+        guard !agents.isEmpty else { return }
 
-        if let selected = sorted.first(where: { $0.id == selectedAgentId }) ?? sorted.first {
+        if let selected = agents.first(where: { $0.id == selectedAgentId }) ?? agents.first {
             selectedAgentId = selected.id
-            configureFocusPanel(refs.focusPanel, with: selected)
             // Only embed when the dashboard is visible to avoid stealing
             // surfaces from the active repo tab's split container.
             if view.window != nil {
-                embedSurface(selected, in: refs.focusPanel.terminalContainer)
+                embedSplitContainerForSelectedAgent()
             }
         }
 
         let fixedWidth = refs.scrollView.bounds.width > 0 ? refs.scrollView.bounds.width : 240
-        for agent in sorted {
+        for agent in agents {
             let container = StackedMiniCardContainerView()
             container.delegate = self
             container.configure(paneCount: agent.paneCount)
@@ -358,7 +431,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
                 id: agent.id, project: agent.project, thread: agent.thread,
                 status: agent.status, lastMessage: agent.lastMessage,
                 totalDuration: agent.totalDuration, roundDuration: agent.roundDuration,
-                paneStatuses: agent.paneStatuses
+                paneStatuses: agent.paneStatuses,
+                isMainWorktree: agent.isMainWorktree
             )
             container.isSelected = (agent.id == selectedAgentId)
             container.translatesAutoresizingMaskIntoConstraints = false
@@ -489,7 +563,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
 
         // Focus panel (left, 78%)
         leftRightFocusPanel.translatesAutoresizingMaskIntoConstraints = false
-        leftRightFocusPanel.delegate = self
         leftRightFocusPanel.setCornerMask(
             LayoutMetrics.leftRightFocusMaskedCorners,
             radius: LayoutMetrics.focusPanelCornerRadius
@@ -522,13 +595,17 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
             leftRightFocusPanel.topAnchor.constraint(equalTo: leftRightContainer.topAnchor),
             leftRightFocusPanel.leadingAnchor.constraint(equalTo: leftRightContainer.leadingAnchor),
             leftRightFocusPanel.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor),
-            leftRightFocusPanel.widthAnchor.constraint(equalTo: leftRightContainer.widthAnchor, multiplier: 0.78, constant: -spacing / 2),
 
             leftRightSidebarScroll.topAnchor.constraint(equalTo: leftRightContainer.topAnchor),
             leftRightSidebarScroll.trailingAnchor.constraint(equalTo: leftRightContainer.trailingAnchor, constant: -LayoutMetrics.leftRightSidebarTrailingInset),
             leftRightSidebarScroll.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor),
             leftRightSidebarScroll.leadingAnchor.constraint(equalTo: leftRightFocusPanel.trailingAnchor, constant: spacing),
         ])
+
+        // Sidebar collapse constraints for left-right
+        leftRightFocusWidthExpanded = leftRightFocusPanel.widthAnchor.constraint(equalTo: leftRightContainer.widthAnchor, multiplier: 0.78, constant: -spacing / 2)
+        leftRightFocusWidthCollapsed = leftRightFocusPanel.trailingAnchor.constraint(equalTo: leftRightContainer.trailingAnchor)
+        leftRightFocusWidthExpanded?.isActive = true
     }
 
     // MARK: - Setup: Top-Small
@@ -559,7 +636,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
 
         // Bottom: focus panel
         topSmallFocusPanel.translatesAutoresizingMaskIntoConstraints = false
-        topSmallFocusPanel.delegate = self
         topSmallFocusPanel.setCornerMask(
             LayoutMetrics.topSmallFocusMaskedCorners,
             radius: LayoutMetrics.focusPanelCornerRadius
@@ -578,13 +654,16 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
             topSmallTopScroll.topAnchor.constraint(equalTo: topSmallContainer.topAnchor),
             topSmallTopScroll.leadingAnchor.constraint(equalTo: topSmallContainer.leadingAnchor, constant: LayoutMetrics.topSmallMiniRowHorizontalInset),
             topSmallTopScroll.trailingAnchor.constraint(equalTo: topSmallContainer.trailingAnchor, constant: -LayoutMetrics.topSmallMiniRowHorizontalInset),
-            topSmallTopScroll.heightAnchor.constraint(equalToConstant: miniCardHeight),
 
             topSmallFocusPanel.topAnchor.constraint(equalTo: topSmallTopScroll.bottomAnchor, constant: LayoutMetrics.topSmallFocusJoinSpacing),
             topSmallFocusPanel.leadingAnchor.constraint(equalTo: topSmallContainer.leadingAnchor),
             topSmallFocusPanel.trailingAnchor.constraint(equalTo: topSmallContainer.trailingAnchor),
             topSmallFocusPanel.bottomAnchor.constraint(equalTo: topSmallContainer.bottomAnchor),
         ])
+
+        topSmallScrollHeight = topSmallTopScroll.heightAnchor.constraint(equalToConstant: miniCardHeight)
+        topSmallScrollHeightCollapsed = topSmallTopScroll.heightAnchor.constraint(equalToConstant: 0)
+        topSmallScrollHeight?.isActive = true
     }
 
     // MARK: - Setup: Top-Large
@@ -599,7 +678,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
 
         // Top: focus panel
         topLargeFocusPanel.translatesAutoresizingMaskIntoConstraints = false
-        topLargeFocusPanel.delegate = self
         topLargeFocusPanel.setCornerMask(
             LayoutMetrics.topLargeFocusMaskedCorners,
             radius: LayoutMetrics.focusPanelCornerRadius
@@ -638,8 +716,11 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
             topLargeBottomScroll.leadingAnchor.constraint(equalTo: topLargeContainer.leadingAnchor, constant: LayoutMetrics.topLargeMiniRowHorizontalInset),
             topLargeBottomScroll.trailingAnchor.constraint(equalTo: topLargeContainer.trailingAnchor, constant: -LayoutMetrics.topLargeMiniRowHorizontalInset),
             topLargeBottomScroll.bottomAnchor.constraint(equalTo: topLargeContainer.bottomAnchor, constant: -LayoutMetrics.topLargeMiniRowBottomInset),
-            topLargeBottomScroll.heightAnchor.constraint(equalToConstant: miniCardHeight),
         ])
+
+        topLargeScrollHeight = topLargeBottomScroll.heightAnchor.constraint(equalToConstant: miniCardHeight)
+        topLargeScrollHeightCollapsed = topLargeBottomScroll.heightAnchor.constraint(equalToConstant: 0)
+        topLargeScrollHeight?.isActive = true
     }
 
     // MARK: - Rebuild: Grid
@@ -701,43 +782,88 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         }
     }
 
-    // MARK: - Focus panel helper
+    // MARK: - Split container embedding
 
-    private func configureFocusPanel(_ panel: FocusPanelView, with agent: AgentDisplayInfo) {
-        panel.configure(
-            name: agent.name,
-            project: agent.project,
-            thread: agent.thread,
-            status: agent.status,
-            total: agent.totalDuration,
-            round: agent.roundDuration,
-            paneStatuses: agent.paneStatuses,
-            activePaneIndex: selectedPaneIndex + 1
-        )
-        // Navigation shows panes within the selected group, not groups
-        panel.configureNavigation(currentIndex: selectedPaneIndex, total: agent.paneCount)
+    private var activeSplitWorktreePath: String?
+
+    func embedSplitContainerForSelectedAgent() {
+        guard currentLayout != .grid else { return }
+        guard let refs = focusLayoutRefs(for: currentLayout) else { return }
+        let container = refs.focusPanel.terminalContainer
+
+        guard let agent = agents.first(where: { $0.id == selectedAgentId }) ?? agents.first else { return }
+        let worktreePath = agent.worktreePath
+
+        // Skip re-embed if the same split container is already active for this worktree
+        if let active = activeSplitContainer,
+           active.superview === container,
+           activeSplitWorktreePath == worktreePath {
+            return
+        }
+
+        // Deactivate previous
+        activeSplitContainer?.removeFromSuperview()
+        activeSplitContainer = nil
+        activeSplitWorktreePath = nil
+
+        // Get or create SplitContainerView
+        let splitView: SplitContainerView
+        if let cached = splitContainers[worktreePath] {
+            splitView = cached
+        } else {
+            splitView = SplitContainerView(frame: container.bounds)
+            splitView.delegate = splitContainerDelegate
+            splitContainers[worktreePath] = splitView
+        }
+
+        // Populate surface views from SurfaceRegistry
+        guard let tree = surfaceManager?.tree(forPath: worktreePath) else { return }
+        var surfaceViews: [String: NSView] = [:]
+        for leaf in tree.allLeaves {
+            if let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId) {
+                // Ensure surface is created
+                if surface.surface == nil {
+                    _ = surface.create(in: container, workingDirectory: worktreePath, sessionName: surface.sessionName)
+                }
+                if let termView = surface.view {
+                    surfaceViews[leaf.surfaceId] = termView
+                }
+            }
+        }
+        splitView.surfaceViews = surfaceViews
+
+        // Embed
+        splitView.frame = container.bounds
+        splitView.autoresizingMask = [.width, .height]
+        container.addSubview(splitView)
+        splitView.tree = tree
+        activeSplitContainer = splitView
+        activeSplitWorktreePath = worktreePath
+
+        // Focus the active leaf — defer to let the view hierarchy settle
+        let leafToFocus = tree.allLeaves.first(where: { $0.id == tree.focusedId }) ?? tree.allLeaves.first
+        if let leaf = leafToFocus,
+           let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId),
+           let termView = surface.view {
+            // Immediate attempt (works when hierarchy is stable)
+            termView.window?.makeFirstResponder(termView)
+            // Deferred attempt (catches cases where the hierarchy hasn't settled yet)
+            DispatchQueue.main.async {
+                if !(termView.window?.firstResponder is GhosttyNSView) {
+                    termView.window?.makeFirstResponder(termView)
+                }
+            }
+        }
     }
 
-    /// Embed a terminal surface into a container, creating it if needed.
-    private func embedSurface(_ agent: AgentDisplayInfo, in container: NSView) {
-        // Use the selected pane surface when available
-        let surface: TerminalSurface
-        if selectedPaneIndex < agent.paneSurfaces.count {
-            surface = agent.paneSurfaces[selectedPaneIndex]
-        } else {
-            surface = agent.surface
+    func invalidateSplitContainer(forPath path: String) {
+        let container = splitContainers[path]
+        container?.removeFromSuperview()
+        if activeSplitContainer === container {
+            activeSplitContainer = nil
+            activeSplitWorktreePath = nil
         }
-        embedPaneSurface(surface, worktreePath: agent.worktreePath, in: container)
-    }
-
-    /// Embed a specific pane surface into a container, creating it if needed.
-    private func embedPaneSurface(_ surface: TerminalSurface, worktreePath: String, in container: NSView) {
-        surface.delegate = self
-        if surface.surface == nil {
-            _ = surface.create(in: container, workingDirectory: worktreePath, sessionName: surface.sessionName)
-        } else {
-            surface.reparent(to: container)
-        }
+        splitContainers.removeValue(forKey: path)
     }
 
     // MARK: - Resize
@@ -760,12 +886,13 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
                 container.isSelected = (container.agentId == agentId)
             }
         default:
-            // Click selects group, resets to first pane
+            // Click selects agent and embeds its split container
             detachTerminals()
             selectedAgentId = agentId
-            selectedPaneIndex = 0
-            rebuildCurrentLayout()
+            embedSplitContainerForSelectedAgent()
+            updateMiniCardSelection()
         }
+        dashboardDelegate?.dashboardDidChangeSelection(self)
     }
 
     func agentCardDoubleClicked(agentId: String) {
@@ -773,60 +900,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, FocusPanelDe
         dashboardDelegate?.dashboardDidSelectProject(agent.project, thread: agent.thread)
     }
 
-    // MARK: - FocusPanelDelegate
-
-    func focusPanelDidRequestEnterProject(_ projectName: String) {
-        dashboardDelegate?.dashboardDidRequestEnterProject(projectName)
-    }
-
-    func focusPanelDidRequestNavigate(_ panel: FocusPanelView, direction: NavigationDirection) {
-        let sorted = sortedAgents()
-        guard let agent = sorted.first(where: { $0.id == selectedAgentId }) else { return }
-        guard agent.paneCount > 1 else { return }
-
-        let newIndex: Int
-        switch direction {
-        case .next:
-            newIndex = min(selectedPaneIndex + 1, agent.paneCount - 1)
-        case .previous:
-            newIndex = max(selectedPaneIndex - 1, 0)
-        }
-        guard newIndex != selectedPaneIndex else { return }
-
-        guard let refs = focusLayoutRefs(for: currentLayout) else { return }
-        let focusPanel = refs.focusPanel
-
-        // Add slide transition
-        let transition = CATransition()
-        transition.type = .push
-        transition.duration = 0.25
-        transition.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        transition.subtype = slideSubtype(for: currentLayout, direction: direction)
-        focusPanel.terminalContainer.layer?.add(transition, forKey: "slideTransition")
-
-        // Swap to the new pane's surface
-        detachTerminals()
-        selectedPaneIndex = newIndex
-        configureFocusPanel(focusPanel, with: agent)
-
-        // Embed the specific pane surface
-        if newIndex < agent.paneSurfaces.count {
-            let surface = agent.paneSurfaces[newIndex]
-            embedPaneSurface(surface, worktreePath: agent.worktreePath, in: focusPanel.terminalContainer)
-        }
-    }
-
-    private func slideSubtype(for layout: DashboardLayout, direction: NavigationDirection) -> CATransitionSubtype {
-        switch layout {
-        case .leftRight:
-            return direction == .next ? .fromRight : .fromLeft
-        case .topSmall:
-            return direction == .next ? .fromBottom : .fromTop
-        case .topLarge:
-            return direction == .next ? .fromTop : .fromBottom
-        case .grid:
-            return .fromRight
-        }
+    func agentCardDidRequestDelete(agentId: String) {
+        dashboardDelegate?.dashboardDidRequestDelete(agentId)
     }
 
     private func updateMiniCardSelection() {
@@ -898,23 +973,38 @@ private class DashboardRootView: NSView {
 
 extension DashboardViewController: TerminalSurfaceDelegate {
     func terminalSurfaceDidRecover(_ surface: TerminalSurface) {
-        // Only re-embed when the dashboard is visible; otherwise the active
-        // repo tab owns the surface and will handle recovery itself.
+        // Only re-embed when the dashboard is visible
         guard view.window != nil else { return }
-        // Find the agent whose surface recovered and re-embed it
+        // Find the agent whose surface recovered
         guard let agent = agents.first(where: { $0.surface === surface }) else { return }
-        // Try grid card first
-        if let container = gridCards.first(where: { $0.agentId == agent.id }) {
-            embedSurface(agent, in: container.cardView.terminalContainer)
-            return
+        // Re-embed into grid card if visible
+        if let container = gridCards.first(where: { $0.agentId == agent.id }),
+           let surface = surfaceManager?.primarySurface(forPath: agent.worktreePath) {
+            surface.delegate = self
+            if surface.surface == nil {
+                _ = surface.create(in: container.cardView.terminalContainer, workingDirectory: agent.worktreePath, sessionName: surface.sessionName)
+            } else {
+                surface.reparent(to: container.cardView.terminalContainer)
+            }
         }
-        // Try current focus panel
-        if agent.id == selectedAgentId, let refs = focusLayoutRefs(for: currentLayout) {
-            embedSurface(agent, in: refs.focusPanel.terminalContainer)
+        // Re-embed the split container for the active agent
+        if agent.id == selectedAgentId {
+            invalidateSplitContainer(forPath: agent.worktreePath)
+            embedSplitContainerForSelectedAgent()
         }
     }
 }
 
 private final class FlippedStackView: NSStackView {
     override var isFlipped: Bool { true }
+    override var acceptsFirstResponder: Bool { false }
+}
+
+private final class NonFirstResponderStackView: NSStackView {
+    override var acceptsFirstResponder: Bool { false }
+}
+
+/// NSScrollView that never steals keyboard focus from the terminal.
+private final class NonFirstResponderScrollView: NSScrollView {
+    override var acceptsFirstResponder: Bool { false }
 }

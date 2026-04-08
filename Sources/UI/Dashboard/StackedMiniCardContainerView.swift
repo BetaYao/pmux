@@ -2,6 +2,8 @@
 import AppKit
 
 final class StackedMiniCardContainerView: NSView {
+    override var acceptsFirstResponder: Bool { false }
+
     let miniCardView = MiniCardView()
     private(set) var ghostViews: [NSView] = []
 
@@ -90,6 +92,20 @@ final class StackedMiniCardContainerView: NSView {
 
     @objc private func handleClick() {
         delegate?.agentCardClicked(agentId: miniCardView.agentId)
+    }
+
+    // MARK: - Context menu
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = NSMenu()
+        let deleteItem = NSMenuItem(title: "Delete Worktree", action: #selector(deleteWorktreeAction), keyEquivalent: "")
+        deleteItem.target = self
+        menu.addItem(deleteItem)
+        return menu
+    }
+
+    @objc private func deleteWorktreeAction() {
+        delegate?.agentCardDidRequestDelete(agentId: miniCardView.agentId)
     }
 
     // MARK: - Appearance

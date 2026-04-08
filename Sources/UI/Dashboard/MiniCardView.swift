@@ -11,9 +11,8 @@ final class MiniCardView: NSView {
     private(set) var agentId: String = ""
     var isSelected: Bool = false { didSet { updateAppearance() } }
 
-    // Line 1: status dots + branch
-    private var statusDots: [NSView] = []
-    private let branchLabel = NSTextField(labelWithString: "")
+    // Line 1: project/repo name (title)
+    private let projectLabel = NSTextField(labelWithString: "")
 
     // Line 2: duration
     private let durationLabel = NSTextField(labelWithString: "")
@@ -21,14 +20,17 @@ final class MiniCardView: NSView {
     // Message area
     private let messageLabel = NSTextField(labelWithString: "")
 
-    // Bottom line: project (left) + status (right)
-    private let projectLabel = NSTextField(labelWithString: "")
+    // Line 1: status dots (before repo name) + status text (right)
+    private var statusDots: [NSView] = []
     private let statusTextLabel = NSTextField(labelWithString: "")
+
+    // Bottom: worktree/branch name
+    private let branchLabel = NSTextField(labelWithString: "")
 
     private var isHovered = false
     private var currentStatus: String = ""
     private var currentPaneStatuses: [AgentStatus] = []
-    private var branchLeadingConstraint: NSLayoutConstraint?
+    private var projectLeadingConstraint: NSLayoutConstraint?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -39,22 +41,38 @@ final class MiniCardView: NSView {
         fatalError("init(coder:) not supported")
     }
 
-    func configure(id: String, project: String, thread: String, status: String, lastMessage: String, totalDuration: String, roundDuration: String, paneStatuses: [AgentStatus] = []) {
+    func configure(id: String, project: String, thread: String, status: String, lastMessage: String, totalDuration: String, roundDuration: String, paneStatuses: [AgentStatus] = [], isMainWorktree: Bool = false) {
         agentId = id
         currentStatus = status
         setAccessibilityIdentifier("dashboard.miniCard.\(id)")
 
         projectLabel.stringValue = project
-        branchLabel.stringValue = thread
+        // SF Symbol icon: house for base repo, arrow.triangle.branch for worktree
+        let symbolName = isMainWorktree ? "house" : "arrow.triangle.branch"
+        let branchText = NSMutableAttributedString()
+        if let symbolImage = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) {
+            let config = NSImage.SymbolConfiguration(pointSize: Typography.secondaryPointSize - 1, weight: .regular)
+            let sized = symbolImage.withSymbolConfiguration(config) ?? symbolImage
+            let attachment = NSTextAttachment()
+            attachment.image = sized
+            branchText.append(NSAttributedString(attachment: attachment))
+            branchText.append(NSAttributedString(string: " "))
+        }
+        branchText.append(NSAttributedString(string: thread, attributes: [
+            .font: branchLabel.font as Any,
+            .foregroundColor: SemanticColors.muted,
+        ]))
+        branchLabel.attributedStringValue = branchText
         messageLabel.stringValue = lastMessage
 
-        // Rebuild status dots
+        // Rebuild status dots on line 1 (before repo name)
         statusDots.forEach { $0.removeFromSuperview() }
         statusDots.removeAll()
-        branchLeadingConstraint?.isActive = false
+        projectLeadingConstraint?.isActive = false
 
         let statuses = paneStatuses.isEmpty ? [AgentStatus(rawValue: status) ?? .unknown] : paneStatuses
         currentPaneStatuses = statuses
+        let padding: CGFloat = 8
         var previousDot: NSView? = nil
         for agentStatus in statuses {
             let dot = NSView()
@@ -67,18 +85,18 @@ final class MiniCardView: NSView {
             NSLayoutConstraint.activate([
                 dot.widthAnchor.constraint(equalToConstant: 6),
                 dot.heightAnchor.constraint(equalToConstant: 6),
-                dot.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+                dot.centerYAnchor.constraint(equalTo: projectLabel.centerYAnchor),
                 dot.leadingAnchor.constraint(equalTo: previousDot?.trailingAnchor ?? leadingAnchor,
-                                             constant: previousDot != nil ? 3 : 8),
+                                             constant: previousDot != nil ? 3 : padding),
             ])
             statusDots.append(dot)
             previousDot = dot
         }
 
-        // Anchor branch label to the last dot
+        // Anchor repo name after the last dot
         if let lastDot = statusDots.last {
-            branchLeadingConstraint = branchLabel.leadingAnchor.constraint(equalTo: lastDot.trailingAnchor, constant: 5)
-            branchLeadingConstraint?.isActive = true
+            projectLeadingConstraint = projectLabel.leadingAnchor.constraint(equalTo: lastDot.trailingAnchor, constant: 5)
+            projectLeadingConstraint?.isActive = true
         }
 
         // Line 2: duration + relative time
@@ -102,14 +120,24 @@ final class MiniCardView: NSView {
         aspectConstraint.priority = .defaultHigh
         aspectConstraint.isActive = true
 
-        // Line 1: branch label
-        branchLabel.font = NSFont.systemFont(ofSize: Typography.primaryPointSize, weight: .semibold)
-        branchLabel.textColor = SemanticColors.text
-        branchLabel.lineBreakMode = .byTruncatingTail
-        branchLabel.maximumNumberOfLines = 1
-        branchLabel.translatesAutoresizingMaskIntoConstraints = false
-        branchLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        addSubview(branchLabel)
+        // Line 1: repo name (leading set dynamically after dots in configure())
+        projectLabel.font = NSFont.systemFont(ofSize: Typography.primaryPointSize, weight: .semibold)
+        projectLabel.textColor = SemanticColors.text
+        projectLabel.lineBreakMode = .byTruncatingTail
+        projectLabel.maximumNumberOfLines = 1
+        projectLabel.translatesAutoresizingMaskIntoConstraints = false
+        projectLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        addSubview(projectLabel)
+
+        // Line 1: status text (right)
+        statusTextLabel.font = NSFont.systemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
+        statusTextLabel.lineBreakMode = .byTruncatingTail
+        statusTextLabel.maximumNumberOfLines = 1
+        statusTextLabel.alignment = .right
+        statusTextLabel.translatesAutoresizingMaskIntoConstraints = false
+        statusTextLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        statusTextLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        addSubview(statusTextLabel)
 
         // Line 2: duration
         durationLabel.font = NSFont.systemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
@@ -132,34 +160,27 @@ final class MiniCardView: NSView {
         messageLabel.setContentHuggingPriority(.defaultLow, for: .vertical)
         addSubview(messageLabel)
 
-        // Bottom line: project (left)
-        projectLabel.font = NSFont.systemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
-        projectLabel.textColor = SemanticColors.muted
-        projectLabel.lineBreakMode = .byTruncatingTail
-        projectLabel.maximumNumberOfLines = 1
-        projectLabel.translatesAutoresizingMaskIntoConstraints = false
-        projectLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        addSubview(projectLabel)
-
-        // Bottom line: status (right)
-        statusTextLabel.font = NSFont.systemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
-        statusTextLabel.lineBreakMode = .byTruncatingTail
-        statusTextLabel.maximumNumberOfLines = 1
-        statusTextLabel.alignment = .right
-        statusTextLabel.translatesAutoresizingMaskIntoConstraints = false
-        statusTextLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        statusTextLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-        addSubview(statusTextLabel)
+        // Bottom: worktree/branch name
+        branchLabel.font = NSFont.systemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
+        branchLabel.textColor = SemanticColors.muted
+        branchLabel.lineBreakMode = .byTruncatingTail
+        branchLabel.maximumNumberOfLines = 1
+        branchLabel.translatesAutoresizingMaskIntoConstraints = false
+        branchLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        addSubview(branchLabel)
 
         let padding: CGFloat = 8
 
         NSLayoutConstraint.activate([
-            // Line 1: branch name (leading constraint set dynamically in configure())
-            branchLabel.topAnchor.constraint(equalTo: topAnchor, constant: padding + 2),
-            branchLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -padding),
+            // Line 1: dots + repo name (left) + status (right)
+            projectLabel.topAnchor.constraint(equalTo: topAnchor, constant: padding + 2),
+            projectLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusTextLabel.leadingAnchor, constant: -4),
+
+            statusTextLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padding),
+            statusTextLabel.centerYAnchor.constraint(equalTo: projectLabel.centerYAnchor),
 
             // Line 2: duration
-            durationLabel.topAnchor.constraint(equalTo: branchLabel.bottomAnchor, constant: 3),
+            durationLabel.topAnchor.constraint(equalTo: projectLabel.bottomAnchor, constant: 3),
             durationLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
             durationLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -padding),
 
@@ -168,17 +189,13 @@ final class MiniCardView: NSView {
             messageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
             messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padding),
 
-            // Bottom line: project (left)
-            projectLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
-            projectLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -padding),
-            projectLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusTextLabel.leadingAnchor, constant: -4),
+            // Bottom: worktree name
+            branchLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
+            branchLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -padding),
+            branchLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -padding),
 
-            // Bottom line: status (right)
-            statusTextLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padding),
-            statusTextLabel.centerYAnchor.constraint(equalTo: projectLabel.centerYAnchor),
-
-            // Message bottom connects to project top
-            messageLabel.bottomAnchor.constraint(lessThanOrEqualTo: projectLabel.topAnchor, constant: -4),
+            // Message doesn't overlap branch
+            messageLabel.bottomAnchor.constraint(lessThanOrEqualTo: branchLabel.topAnchor, constant: -4),
         ])
 
         // Click handler
@@ -211,6 +228,7 @@ final class MiniCardView: NSView {
         updateAppearance()
     }
 
+    override var acceptsFirstResponder: Bool { false }
     override var wantsUpdateLayer: Bool { true }
 
     override func updateLayer() {
@@ -245,7 +263,8 @@ final class MiniCardView: NSView {
             layer.shadowOffset = NSSize(width: 0, height: -2)
         }
 
-        branchLabel.textColor = SemanticColors.text
+        projectLabel.textColor = SemanticColors.text
+        branchLabel.textColor = SemanticColors.muted
         messageLabel.textColor = SemanticColors.muted
     }
 }

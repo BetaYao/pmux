@@ -46,7 +46,7 @@ final class TabCoordinatorTests: XCTestCase {
 
     func testBuildAgentDisplayInfosEmptyByDefault() {
         let coordinator = TabCoordinator(config: Config())
-        coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), currentRepoVC: { nil })
+        coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
         coordinator.statusAggregator = WorktreeStatusAggregator()
         let infos = coordinator.buildAgentDisplayInfos()
         XCTAssertTrue(infos.isEmpty)
@@ -54,7 +54,7 @@ final class TabCoordinatorTests: XCTestCase {
 
     func testWorktreeDidDeleteRemovesFromList() {
         let coordinator = TabCoordinator(config: Config())
-        coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), currentRepoVC: { nil })
+        coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
         coordinator.statusPublisher = StatusPublisher(agentConfig: Config().agentDetect)
         coordinator.statusAggregator = WorktreeStatusAggregator()
         let info = WorktreeInfo(path: "/tmp/test-wt", branch: "feature", commitHash: "", isMainWorktree: false)
@@ -63,10 +63,5 @@ final class TabCoordinatorTests: XCTestCase {
 
         coordinator.worktreeDidDelete(info)
         XCTAssertTrue(coordinator.allWorktrees.isEmpty)
-    }
-
-    func testCurrentRepoVCNilAtDashboard() {
-        let coordinator = TabCoordinator(config: Config())
-        XCTAssertNil(coordinator.currentRepoVC)
     }
 }
