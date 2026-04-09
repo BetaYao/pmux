@@ -567,6 +567,15 @@ class TabCoordinator {
                 guard let self else { return }
                 let oldWorktrees = tab.worktrees
 
+                // Detect new worktrees not yet tracked
+                let knownPaths = Set(self.allWorktrees.map { $0.info.path })
+                let newWorktrees = freshWorktrees.filter { !knownPaths.contains($0.path) }
+                if !newWorktrees.isEmpty {
+                    self.integrateNewWorktrees(repoRoot: tab.repoPath, allDiscovered: freshWorktrees, newWorktrees: newWorktrees)
+                    return  // integrateNewWorktrees already refreshes the dashboard
+                }
+
+                // Detect branch name changes (existing behavior)
                 var changed = false
                 for fresh in freshWorktrees {
                     if let old = oldWorktrees.first(where: { $0.path == fresh.path }),
