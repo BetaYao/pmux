@@ -192,17 +192,21 @@ class TabCoordinator {
             let ws = statusAggregator.status(for: agent.worktreePath)
             let paneStatuses = ws?.statuses ?? [agent.status]
             let mostRecentMessage = ws?.mostRecentMessage ?? (agent.lastMessage.isEmpty ? "No active task." : agent.lastMessage)
+            let mostRecentUserPrompt = ws?.mostRecentUserPrompt ?? agent.lastUserPrompt
             let mostRecentPaneIndex = ws?.mostRecentPaneIndex ?? 1
 
-            let isMain = allWorktrees.first(where: { $0.info.path == agent.worktreePath })?.info.isMainWorktree ?? false
+            let matchedWorktree = allWorktrees.first(where: { $0.info.path == agent.worktreePath })
+            let isMain = matchedWorktree?.info.isMainWorktree ?? false
+            let freshBranch = matchedWorktree?.info.branch ?? agent.branch
 
             result.append(AgentDisplayInfo(
                 id: agent.id,
-                name: agent.branch,
+                name: freshBranch,
                 project: agent.project,
-                thread: agent.branch,
+                thread: freshBranch,
                 paneStatuses: paneStatuses,
                 mostRecentMessage: mostRecentMessage,
+                lastUserPrompt: mostRecentUserPrompt,
                 mostRecentPaneIndex: mostRecentPaneIndex,
                 totalDuration: AgentDisplayHelpers.formatDuration(agent.totalDuration),
                 roundDuration: AgentDisplayHelpers.formatDuration(agent.roundDuration),
@@ -337,60 +341,74 @@ class TabCoordinator {
         }
     }
 
+    // MARK: - Shared Worktree Integration
+
+    /// Integrate newly discovered worktrees into the dashboard.
+    /// Called from both webhook-triggered discovery and periodic polling.
+    private func integrateNewWorktrees(repoRoot: String, allDiscovered: [WorktreeInfo], newWorktrees: [WorktreeInfo]) {
+        guard !newWorktrees.isEmpty else { return }
+
+        NSLog("[TabCoordinator] Integrating \(newWorktrees.count) new worktree(s) for \(repoRoot)")
+
+        // Update WorkspaceManager tab
+        if let tabIndex = workspaceManager.tabs.firstIndex(where: { $0.repoPath == repoRoot }) {
+            workspaceManager.updateWorktrees(at: tabIndex, worktrees: allDiscovered)
+        }
+
+        for info in newWorktrees {
+            let proj = workspaceManager.tabs.first(where: { $0.repoPath == repoRoot })?.displayName
+                ?? URL(fileURLWithPath: repoRoot).lastPathComponent
+
+            // Check if this worktree has a pending transfer (created via hook from an existing pane)
+            if let transfer = pendingTransfers.consume(newWorktreePath: info.path) {
+                NSLog("[TabCoordinator] Transferring pane from \(transfer.sourceWorktreePath) to \(info.path)")
+                performPaneTransfer(transfer: transfer, newInfo: info, repoRoot: repoRoot, project: proj, allDiscoveredWorktrees: allDiscovered)
+            } else {
+                // No pending transfer — create a fresh tree
+                let tree = terminalCoordinator.resolveTree(for: info)
+                allWorktrees.append((info: info, tree: tree))
+                worktreeRepoCache[info.path] = repoRoot
+
+                let sessionName = runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
+                if let surface = terminalCoordinator.surfaceManager.primarySurface(forPath: info.path) {
+                    AgentHead.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: Date(), tmuxSessionName: sessionName, backend: runtimeBackend)
+                }
+            }
+        }
+
+        // Record startedAt for new worktrees
+        let now = Self.iso8601.string(from: Date())
+        var configChanged = false
+        for info in newWorktrees {
+            if config.worktreeStartedAt[info.path] == nil {
+                config.worktreeStartedAt[info.path] = now
+                configChanged = true
+            }
+        }
+        if configChanged { config.save() }
+
+        dashboardVC?.updateAgents(buildAgentDisplayInfos())
+        statusPublisher.updateSurfaces(terminalCoordinator.surfaceManager.all)
+        delegate?.tabCoordinatorRequestUpdateTitleBar(self)
+    }
+
     // MARK: - Worktree Auto-Discovery (via Agent Hooks)
 
     private func handleNewWorktreeFromHook(_ worktreePath: String) {
-        // Find which repo this worktree belongs to
         WorktreeDiscovery.findRepoRootAsync(from: worktreePath) { [weak self] repoRoot in
             guard let self, let repoRoot else {
                 NSLog("[TabCoordinator] Could not find repo root for hook-discovered worktree: \(worktreePath)")
                 return
             }
 
-            // If repo is already tracked, re-discover its worktrees to pick up the new one
             if self.config.workspacePaths.contains(repoRoot) {
                 WorktreeDiscovery.discoverAsync(repoPath: repoRoot) { [weak self] worktrees in
                     guard let self else { return }
-                    // Find new worktrees not yet in allWorktrees
                     let knownPaths = Set(self.allWorktrees.map { $0.info.path })
                     let newWorktrees = worktrees.filter { !knownPaths.contains($0.path) }
-                    guard !newWorktrees.isEmpty else { return }
-
-                    NSLog("[TabCoordinator] Auto-discovered \(newWorktrees.count) new worktree(s) via hook")
-
-                    // Integrate new worktrees into the existing tab
-                    if let tabIndex = self.workspaceManager.tabs.firstIndex(where: { $0.repoPath == repoRoot }) {
-                        self.workspaceManager.updateWorktrees(at: tabIndex, worktrees: worktrees)
-                    }
-                    for info in newWorktrees {
-                        let proj = self.workspaceManager.tabs.first(where: { $0.repoPath == repoRoot })?.displayName
-                            ?? URL(fileURLWithPath: repoRoot).lastPathComponent
-
-                        // Check if this worktree has a pending transfer (created via hook from an existing pane)
-                        if let transfer = self.pendingTransfers.consume(newWorktreePath: info.path) {
-                            NSLog("[TabCoordinator] Transferring pane from \(transfer.sourceWorktreePath) to \(info.path)")
-                            self.performPaneTransfer(transfer: transfer, newInfo: info, repoRoot: repoRoot, project: proj, allDiscoveredWorktrees: worktrees)
-                        } else {
-                            // No pending transfer — create a fresh tree as before
-                            let tree = self.terminalCoordinator.resolveTree(for: info)
-                            self.allWorktrees.append((info: info, tree: tree))
-                            self.worktreeRepoCache[info.path] = repoRoot
-
-                            let sessionName = self.runtimeBackend == "local" ? nil : SessionManager.persistentSessionName(for: info.path)
-                            if let surface = self.terminalCoordinator.surfaceManager.primarySurface(forPath: info.path) {
-                                AgentHead.shared.register(surface: surface, worktreePath: info.path, branch: info.branch, project: proj, startedAt: Date(), tmuxSessionName: sessionName, backend: self.runtimeBackend)
-                            }
-                        }
-                    }
-
-                    self.dashboardVC?.updateAgents(self.buildAgentDisplayInfos())
-                    self.statusPublisher.updateSurfaces(self.terminalCoordinator.surfaceManager.all)
-                    self.delegate?.tabCoordinatorRequestUpdateTitleBar(self)
-
-                    // Dashboard already updated above via updateAgents
+                    self.integrateNewWorktrees(repoRoot: repoRoot, allDiscovered: worktrees, newWorktrees: newWorktrees)
                 }
             } else {
-                // Repo not tracked yet — add it
                 NSLog("[TabCoordinator] Auto-adding new repo via hook: \(repoRoot)")
                 self.addRepo(at: repoRoot)
             }
