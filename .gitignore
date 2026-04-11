@@ -21,3 +21,6 @@ ghostty/.zig-cache/
 # SPM
 .build/
 .superpowers/
+
+# Git worktrees
+.worktrees/
