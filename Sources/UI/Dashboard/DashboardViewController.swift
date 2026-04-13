@@ -91,6 +91,9 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
     weak var splitContainerDelegate: SplitContainerDelegate?
 
     var currentLayout: DashboardLayout = .leftRight
+    /// The most recently used non-grid focus layout. Grid's Return drill-in uses this as the target.
+    /// Seeded to .leftRight so first-launch behavior is predictable.
+    private(set) var lastFocusLayout: DashboardLayout = .leftRight
     var selectedAgentId: String = ""
     private var isSidebarCollapsed = false
 
@@ -285,6 +288,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         detachTerminals()
         resetSidebarConstraints()
         isSidebarCollapsed = false
+        // Remember the focus layout we are LEAVING, so grid Return can restore it.
+        if currentLayout != .grid {
+            lastFocusLayout = currentLayout
+        }
         currentLayout = layout
         showLayout(layout)
         rebuildCurrentLayout()
