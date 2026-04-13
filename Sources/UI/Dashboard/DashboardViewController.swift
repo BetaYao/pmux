@@ -308,6 +308,12 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         currentLayout = layout
         showLayout(layout)
         rebuildCurrentLayout()
+
+        if layout == .grid {
+            DispatchQueue.main.async { [weak self] in
+                self?.enterDashboardNavigation()
+            }
+        }
     }
 
     func zoomIn() {
@@ -1064,6 +1070,13 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
     }
 
     // MARK: - Resize
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        if currentLayout == .grid && !isInDState {
+            enterDashboardNavigation()
+        }
+    }
 
     override func viewDidLayout() {
         super.viewDidLayout()
