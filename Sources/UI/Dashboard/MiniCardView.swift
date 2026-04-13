@@ -10,6 +10,7 @@ final class MiniCardView: NSView {
     weak var delegate: AgentCardDelegate?
     private(set) var agentId: String = ""
     var isSelected: Bool = false { didSet { updateAppearance() } }
+    var isKeyboardFocused: Bool = false { didSet { updateAppearance() } }
 
     // Line 1: project/repo name (title)
     private let projectLabel = NSTextField(labelWithString: "")
@@ -34,6 +35,7 @@ final class MiniCardView: NSView {
     private var currentStatus: String = ""
     private var currentPaneStatuses: [AgentStatus] = []
     private var projectLeadingConstraint: NSLayoutConstraint?
+    private var dimOverlayLayer: CALayer?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -277,6 +279,24 @@ final class MiniCardView: NSView {
         updateAppearance()
     }
 
+    // MARK: - Dim overlay
+
+    func showDimOverlay(opacity: CGFloat) {
+        if dimOverlayLayer == nil {
+            let overlay = CALayer()
+            overlay.backgroundColor = NSColor.white.withAlphaComponent(opacity).cgColor
+            overlay.frame = bounds
+            overlay.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+            layer?.addSublayer(overlay)
+            dimOverlayLayer = overlay
+        }
+    }
+
+    func hideDimOverlay() {
+        dimOverlayLayer?.removeFromSuperlayer()
+        dimOverlayLayer = nil
+    }
+
     override var acceptsFirstResponder: Bool { false }
     override var wantsUpdateLayer: Bool { true }
 
@@ -291,6 +311,18 @@ final class MiniCardView: NSView {
 
     private func updateAppearance() {
         guard let layer = layer else { return }
+
+        if isKeyboardFocused {
+            layer.backgroundColor = resolvedCGColor(SemanticColors.panel2)
+            layer.borderColor = resolvedCGColor(SemanticColors.accent)
+            layer.borderWidth = 2
+            layer.shadowColor = resolvedCGColor(SemanticColors.accent)
+            layer.shadowOpacity = 0.6
+            layer.shadowRadius = 8
+            layer.shadowOffset = .zero
+            layer.masksToBounds = false
+            return
+        }
 
         if isSelected {
             layer.backgroundColor = resolvedCGColor(SemanticColors.panel2)

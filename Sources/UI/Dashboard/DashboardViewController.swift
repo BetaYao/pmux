@@ -91,8 +91,15 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
     weak var splitContainerDelegate: SplitContainerDelegate?
 
     var currentLayout: DashboardLayout = .leftRight
+    /// The most recently used non-grid focus layout. Grid's Return drill-in uses this as the target.
+    /// Seeded to .leftRight so first-launch behavior is predictable.
+    private(set) var lastFocusLayout: DashboardLayout = .leftRight
     var selectedAgentId: String = ""
     private var isSidebarCollapsed = false
+
+    let focusController = DashboardFocusController()
+    private var isInDState: Bool { focusController.mode != .idle }
+    var isInDStateForWindow: Bool { isInDState }
 
     // Constraints swapped when sidebar collapses/expands
     private var leftRightFocusWidthExpanded: NSLayoutConstraint?   // 0.78 multiplier
@@ -153,6 +160,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         GridLayout.zoomLevels[zoomIndex]
     }
 
+    // MARK: - First responder
+
+    override var acceptsFirstResponder: Bool { isInDState }
+
     // MARK: - View lifecycle
 
     override func loadView() {
@@ -186,6 +197,11 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         #endif
 
         agents = newAgents
+
+        if isInDState {
+            focusController.refreshCards(agents.map { $0.id })
+            applyKeyboardFocusVisuals()
+        }
 
         // Show empty state when no agents
         if agents.isEmpty {
@@ -285,9 +301,19 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         detachTerminals()
         resetSidebarConstraints()
         isSidebarCollapsed = false
+        // Remember the focus layout we are LEAVING, so grid Return can restore it.
+        if currentLayout != .grid {
+            lastFocusLayout = currentLayout
+        }
         currentLayout = layout
         showLayout(layout)
         rebuildCurrentLayout()
+
+        if layout == .grid {
+            DispatchQueue.main.async { [weak self] in
+                self?.enterDashboardNavigation()
+            }
+        }
     }
 
     func zoomIn() {
@@ -879,7 +905,179 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         splitContainers.removeValue(forKey: path)
     }
 
+    // MARK: - Dashboard Navigation (D-state)
+
+    func enterDashboardNavigation() {
+        guard !isInDState else { return }
+
+        let snapshot = DashboardFocusController.Snapshot(
+            firstResponder: view.window?.firstResponder,
+            focusedWorktreePath: agents.first(where: { $0.id == selectedAgentId })?.worktreePath,
+            layout: currentLayout
+        )
+        focusController.captureSnapshot(snapshot)
+
+        let cardIds = agents.map { $0.id }
+        if currentLayout == .grid {
+            let initial = snapshot.focusedWorktreePath
+                .flatMap { path in agents.first(where: { $0.worktreePath == path })?.id }
+                ?? (selectedAgentId.isEmpty ? nil : selectedAgentId)
+            focusController.enterGrid(cardIds: cardIds, initialId: initial)
+        } else {
+            focusController.enterFocusLayout(cardIds: cardIds)
+        }
+
+        view.window?.makeFirstResponder(self)
+        applyKeyboardFocusVisuals()
+        applyDimOverlayIfNeeded()
+    }
+
+    func exitDashboardNavigation(restoreSnapshot: Bool) {
+        guard isInDState else { return }
+
+        let snapshot = focusController.snapshot
+        focusController.exit()
+
+        clearKeyboardFocusVisuals()
+        clearDimOverlay()
+
+        if restoreSnapshot, let snap = snapshot, let responder = snap.firstResponder,
+           (responder as? NSView)?.window != nil {
+            view.window?.makeFirstResponder(responder)
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let container = self.activeSplitContainer, let tree = container.tree else { return }
+                let focusedId = tree.focusedId
+                if let leaf = tree.allLeaves.first(where: { $0.id == focusedId }),
+                   let termView = container.surfaceViews[leaf.surfaceId] {
+                    self.view.window?.makeFirstResponder(termView)
+                }
+            }
+        }
+    }
+
+    // MARK: - D-state visual helpers
+
+    private func applyKeyboardFocusVisuals() {
+        clearKeyboardFocusVisuals()
+        switch focusController.focusedTarget {
+        case .none: return
+        case .bigPanel:
+            if let refs = focusLayoutRefs(for: currentLayout) {
+                refs.focusPanel.isKeyboardFocused = true
+            }
+        case .card(let agentId):
+            if currentLayout == .grid {
+                gridCards.first(where: { $0.agentId == agentId })?.isKeyboardFocused = true
+            } else if let refs = focusLayoutRefs(for: currentLayout) {
+                refs.miniCards.first(where: { $0.agentId == agentId })?.miniCardView.isKeyboardFocused = true
+            }
+        }
+    }
+
+    private func clearKeyboardFocusVisuals() {
+        gridCards.forEach { $0.isKeyboardFocused = false }
+        if let refs = focusLayoutRefs(for: currentLayout) {
+            refs.focusPanel.isKeyboardFocused = false
+            refs.miniCards.forEach { $0.miniCardView.isKeyboardFocused = false }
+        }
+    }
+
+    private func applyDimOverlayIfNeeded() {
+        guard currentLayout != .grid else { return }
+        guard let refs = focusLayoutRefs(for: currentLayout) else { return }
+        refs.focusPanel.showDimOverlay(opacity: 0.05)
+        refs.miniCards.forEach { $0.miniCardView.showDimOverlay(opacity: 0.05) }
+    }
+
+    private func clearDimOverlay() {
+        if let refs = focusLayoutRefs(for: currentLayout) {
+            refs.focusPanel.hideDimOverlay()
+            refs.miniCards.forEach { $0.miniCardView.hideDimOverlay() }
+        }
+    }
+
+    // MARK: - D-state key handling
+
+    override func keyDown(with event: NSEvent) {
+        guard isInDState else { super.keyDown(with: event); return }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+        switch event.keyCode {
+        case 48: // Tab
+            if flags.contains(.shift) { focusController.prev() } else { focusController.next() }
+            applyKeyboardFocusVisuals()
+            scrollFocusedIntoView()
+            return
+        case 36: // Return
+            handleReturnInDState()
+            return
+        case 53: // Escape
+            exitDashboardNavigation(restoreSnapshot: true)
+            return
+        case 51: // Backspace
+            if flags.contains(.command) { handleDeleteInDState(); return }
+        case 117: // Forward Delete
+            handleDeleteInDState()
+            return
+        default: break
+        }
+        super.keyDown(with: event)
+    }
+
+    private func handleReturnInDState() {
+        switch focusController.focusedTarget {
+        case .none:
+            exitDashboardNavigation(restoreSnapshot: true)
+        case .bigPanel:
+            exitDashboardNavigation(restoreSnapshot: false)
+        case .card(let agentId):
+            guard let agent = agents.first(where: { $0.id == agentId }) else {
+                exitDashboardNavigation(restoreSnapshot: true); return
+            }
+            if currentLayout == .grid {
+                setLayout(lastFocusLayout)
+                selectAgent(byWorktreePath: agent.worktreePath)
+                exitDashboardNavigation(restoreSnapshot: false)
+            } else {
+                selectAgent(byWorktreePath: agent.worktreePath)
+                exitDashboardNavigation(restoreSnapshot: false)
+            }
+        }
+    }
+
+    private func handleDeleteInDState() {
+        guard case .card(let agentId) = focusController.focusedTarget,
+              let agent = agents.first(where: { $0.id == agentId }) else { return }
+        guard !agent.isMainWorktree else { return }
+
+        dashboardDelegate?.dashboardDidRequestDelete(agentId)
+
+        focusController.removeCurrentCard()
+        applyKeyboardFocusVisuals()
+    }
+
+    private func scrollFocusedIntoView() {
+        guard case .card(let agentId) = focusController.focusedTarget else { return }
+        if currentLayout == .grid {
+            if let card = gridCards.first(where: { $0.agentId == agentId }) {
+                card.scrollToVisible(card.bounds)
+            }
+        } else if let refs = focusLayoutRefs(for: currentLayout) {
+            if let card = refs.miniCards.first(where: { $0.agentId == agentId }) {
+                card.scrollToVisible(card.bounds)
+            }
+        }
+    }
+
     // MARK: - Resize
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        if currentLayout == .grid && !isInDState {
+            enterDashboardNavigation()
+        }
+    }
 
     override func viewDidLayout() {
         super.viewDidLayout()

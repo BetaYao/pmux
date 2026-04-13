@@ -20,6 +20,25 @@ final class StackedCardContainerView: NSView, NSGestureRecognizerDelegate {
         set { cardView.isSelected = newValue }
     }
 
+    var isKeyboardFocused: Bool = false { didSet { updateKeyboardFocusAppearance() } }
+
+    private func updateKeyboardFocusAppearance() {
+        wantsLayer = true
+        if isKeyboardFocused {
+            layer?.borderColor = SemanticColors.accent.cgColor
+            layer?.borderWidth = 2
+            layer?.shadowColor = SemanticColors.accent.cgColor
+            layer?.shadowOpacity = 0.6
+            layer?.shadowRadius = 8
+            layer?.shadowOffset = .zero
+            layer?.masksToBounds = false
+        } else {
+            layer?.borderColor = nil
+            layer?.borderWidth = 0
+            layer?.shadowOpacity = 0
+        }
+    }
+
     override init(frame: NSRect) {
         super.init(frame: frame)
         setup()

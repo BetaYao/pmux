@@ -68,6 +68,7 @@
 		42F15738CDD467055210F0BF /* SessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0935D46D032322E0AAD958B9 /* SessionManager.swift */; };
 		4435E3865D9E61DDFF8AA050 /* WebhookServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F8CD528BB84100CE6A1C2BC /* WebhookServer.swift */; };
 		4457220CF1D043B972484F7F /* MenuBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A9CA5A8238F664ACD3EB68 /* MenuBuilder.swift */; };
+		459DC560D846BC498DB1A6D5 /* DashboardFocusController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0900293E11EEB98055F543F1 /* DashboardFocusController.swift */; };
 		45C7F2F9EEEA6EA4031996DD /* UpdateBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A216C6E480EEA731BD8903E5 /* UpdateBanner.swift */; };
 		49150B028361C8D2CF5D54E0 /* PaneTransferTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDD599FC50FBC7F6AE526E3E /* PaneTransferTests.swift */; };
 		4AA5BE5C097BA17B7B157638 /* RegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B1D3D1EBAEC67D4B46912F4 /* RegressionTests.swift */; };
@@ -143,6 +144,7 @@
 		BEDF7341FC2030542DEEE7CE /* StackedMiniCardContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DF5258EBCC0ACAD9103DCF1 /* StackedMiniCardContainerView.swift */; };
 		C37EE61B17C189561A22723E /* TerminalSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C4D5846AB681D2D0A21C30B /* TerminalSurface.swift */; };
 		C3C7E538CA764951E56DFF69 /* StatusDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 527459C40BE04C457EE1DC58 /* StatusDetectorTests.swift */; };
+		C79624766A5642D89E0E3961 /* DashboardFocusControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A734AE469187A302F64B605 /* DashboardFocusControllerTests.swift */; };
 		C87DC5D4301C4ACFD042C3D5 /* AgentTypeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 271AB089E64947C58BC542B4 /* AgentTypeTests.swift */; };
 		CAFB60F0632F4FF267D72185 /* WorkspaceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DB689B815F1B3AD7B4678CA /* WorkspaceManager.swift */; };
 		CC9CD12FC1E1965921AEAC63 /* AIPanelPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45D2C4A02A0F96E5F8676691 /* AIPanelPage.swift */; };
@@ -190,6 +192,7 @@
 
 /* Begin PBXFileReference section */
 		02AF91CF0B55CA8D13D3520A /* NotificationPanelPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPanelPage.swift; sourceTree = "<group>"; };
+		0900293E11EEB98055F543F1 /* DashboardFocusController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardFocusController.swift; sourceTree = "<group>"; };
 		0935D46D032322E0AAD958B9 /* SessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManager.swift; sourceTree = "<group>"; };
 		0AB8D053BDDF2A0E75362054 /* RepoPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoPage.swift; sourceTree = "<group>"; };
 		0C7B621A87E3D727BCBF4A77 /* ProcessRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessRunner.swift; sourceTree = "<group>"; };
@@ -243,6 +246,7 @@
 		534D30F22E8DA59B1A4A9A76 /* FuzzyMatchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FuzzyMatchTests.swift; sourceTree = "<group>"; };
 		55F8AEF4B3C37C2A732D15D0 /* Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Config.swift; sourceTree = "<group>"; };
 		56706CC58A67A5ECE631BF79 /* StackedCardContainerViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StackedCardContainerViewTests.swift; sourceTree = "<group>"; };
+		5A734AE469187A302F64B605 /* DashboardFocusControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardFocusControllerTests.swift; sourceTree = "<group>"; };
 		5B4A9E21D8086F7B7D7B7BD9 /* SplitTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitTree.swift; sourceTree = "<group>"; };
 		5CD3330BAD7C61C143951F62 /* FocusPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusPanelView.swift; sourceTree = "<group>"; };
 		5CE7477048E954AB50ACAAFA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -389,6 +393,7 @@
 			children = (
 				919CE6923B654A5EB0DFEE1F /* ActivityFeedRenderer.swift */,
 				FA5C4B3263DF63944A22D190 /* AgentCardView.swift */,
+				0900293E11EEB98055F543F1 /* DashboardFocusController.swift */,
 				4C8C1C62BF62C18F2B901A35 /* DashboardViewController.swift */,
 				BADA07A3BC0F02C284B4A731 /* DraggableGridView.swift */,
 				5CD3330BAD7C61C143951F62 /* FocusPanelView.swift */,
@@ -423,6 +428,7 @@
 				F5427B61BE49E63450FF1AA8 /* BackendResolverTests.swift */,
 				442E7AA73798474882C87ACF /* CommandParserTests.swift */,
 				4D718460AD9491F743280FE5 /* ConfigTests.swift */,
+				5A734AE469187A302F64B605 /* DashboardFocusControllerTests.swift */,
 				956A5CED2CE82A7DECB94A23 /* DashboardViewControllerClickTests.swift */,
 				534D30F22E8DA59B1A4A9A76 /* FuzzyMatchTests.swift */,
 				E1FFDB5E28F5B9C02E702E07 /* GatewayStateTests.swift */,
@@ -851,6 +857,7 @@
 				1F45E3EC13AAD4A0A5502840 /* ClaudeHooksSetup.swift in Sources */,
 				9E25B2192D8FB5482E57B4BA /* CommandParser.swift in Sources */,
 				3E6518AA6470D2846BBA8F74 /* Config.swift in Sources */,
+				459DC560D846BC498DB1A6D5 /* DashboardFocusController.swift in Sources */,
 				1CC9AAD40D595F1A14D033AC /* DashboardViewController.swift in Sources */,
 				722B2FE26406ACE23298D47C /* DialogPresenter.swift in Sources */,
 				418EEA9B00C73A54B3273DEB /* DiffOverlayViewController.swift in Sources */,
@@ -969,6 +976,7 @@
 				57489B6BEB4A454DA4DD21C9 /* BackendResolverTests.swift in Sources */,
 				EBD010AF007094117E941F9C /* CommandParserTests.swift in Sources */,
 				03D18C244ECAAF95830A4FE5 /* ConfigTests.swift in Sources */,
+				C79624766A5642D89E0E3961 /* DashboardFocusControllerTests.swift in Sources */,
 				2D0892AAED3E61654B881E5C /* DashboardViewControllerClickTests.swift in Sources */,
 				53DCDAAD9533697D3C7A2188 /* FuzzyMatchTests.swift in Sources */,
 				B0B9CD0816B4D7B559DCAFEC /* GatewayStateTests.swift in Sources */,
