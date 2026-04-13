@@ -486,6 +486,10 @@ class AmuxWindow: NSWindow {
         // Only handle split keybindings when dashboard has an active split container
         let hasSplitContext = mwc.tabCoordinator.dashboardVC?.activeSplitContainer != nil
 
+        // Arrow keys carry .numericPad and .function flags on macOS; strip them
+        // so modifier comparisons match what the user actually pressed.
+        let baseFlags = flags.subtracting([.numericPad, .function])
+
         if hasSplitContext {
             // Cmd+D: horizontal split
             if flags == .command && event.charactersIgnoringModifiers == "d" {
@@ -500,7 +504,7 @@ class AmuxWindow: NSWindow {
             }
 
             // Cmd+Option+Arrows: focus navigation
-            if flags == [.command, .option] {
+            if baseFlags == [.command, .option] {
                 switch event.keyCode {
                 case 123: mwc.moveFocus(.horizontal, positive: false); return true
                 case 124: mwc.moveFocus(.horizontal, positive: true); return true
@@ -511,7 +515,7 @@ class AmuxWindow: NSWindow {
             }
 
             // Cmd+Ctrl+Arrows: resize
-            if flags == [.command, .control] {
+            if baseFlags == [.command, .control] {
                 switch event.keyCode {
                 case 123: mwc.resizeSplit(.horizontal, delta: -0.05); return true
                 case 124: mwc.resizeSplit(.horizontal, delta: 0.05); return true
