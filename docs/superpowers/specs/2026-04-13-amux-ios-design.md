@@ -25,6 +25,7 @@ A thin iOS client for AMUX that lets users monitor and interact with agents runn
 - **UI:** SwiftUI + Liquid Glass (`.glassEffect()`)
 - **State management:** `@Observable` (Observation framework), `@State`, `@Environment`
 - **MQTT:** MQTTNIO (SwiftNIO-based, async/await native)
+- **Serialization:** Protobuf (swift-protobuf) — shared `.proto` schema between iOS and macOS
 - **Persistence:** SwiftData (Todo & Ideas local storage)
 - **Concurrency:** Swift structured concurrency (async/await, actors)
 
@@ -33,10 +34,13 @@ A thin iOS client for AMUX that lets users monitor and interact with agents runn
 ```
 amux-ios/
 ├── Package.swift
+├── Proto/                        # Shared .proto definitions (git submodule or copied)
+│   └── amux.proto
 ├── App/                          # App target (entry point, scenes)
 │   └── amuxApp.swift
 ├── Packages/
 │   ├── AMUXCore/                 # Data models, MQTT service, state
+│   │   ├── Proto/Generated/      # swift-protobuf generated code
 │   │   ├── Models/               # Worktree, Pane, AgentStatus, Todo, Idea
 │   │   ├── MQTT/                 # MQTTService (connect, subscribe, publish)
 │   │   └── State/                # AppState (@Observable), DeviceManager
@@ -46,7 +50,7 @@ amux-ios/
 │       └── TodoIdeas/            # TodoListView, IdeasView, TodoRow, IdeaCard
 ```
 
-`AMUXCore` has no UI dependency — pure Swift models and services. `AMUXUI` imports both `AMUXCore` and SwiftUI.
+`AMUXCore` has no UI dependency — pure Swift models and services. `AMUXUI` imports both `AMUXCore` and SwiftUI. The `.proto` file is the single source of truth for MQTT message formats, shared with the macOS app.
 
 ### MQTT Communication
 
@@ -74,33 +78,69 @@ amux/{deviceId}/command/worktree                    # create/delete worktree (Qo
 - `worktrees` topic uses retain so iOS gets latest list on connect.
 - Commands bound to pane level (prompt, cancel) to target specific agent instances.
 
-**Payloads (JSON):**
+**Payloads (Protobuf):**
 
-Worktree list:
-```json
-{
-  "worktrees": [{
-    "name": "feat-auth",
-    "branch": "feat/auth-flow",
-    "status": "agent_active",
-    "lastPrompt": "implement login",
-    "lastMessage": "Building auth module...",
-    "paneCount": 2,
-    "duration": "12m",
-    "todoProgress": null
-  }]
+```protobuf
+syntax = "proto3";
+package amux;
+
+enum AgentStatus {
+  AGENT_STATUS_UNKNOWN = 0;
+  AGENT_STATUS_ACTIVE = 1;
+  AGENT_STATUS_WAITING = 2;
+  AGENT_STATUS_IDLE = 3;
+  AGENT_STATUS_ERROR = 4;
 }
-```
 
-Terminal viewport:
-```json
-{
-  "worktree": "feat-auth",
-  "paneId": "pane-0",
-  "paneIndex": 0,
-  "totalPanes": 2,
-  "lines": ["$ claude", "> Building auth module...", "✓ Created AuthService.swift"],
-  "timestamp": 1706000000
+message WorktreeList {
+  repeated WorktreeInfo worktrees = 1;
+}
+
+message WorktreeInfo {
+  string name = 1;
+  string branch = 2;
+  AgentStatus status = 3;
+  string last_prompt = 4;
+  string last_message = 5;
+  int32 pane_count = 6;
+  string duration = 7;
+  optional TodoProgress todo_progress = 8;
+}
+
+message TodoProgress {
+  int32 completed = 1;
+  int32 total = 2;
+  string current_task = 3;
+}
+
+message TerminalViewport {
+  string worktree = 1;
+  string pane_id = 2;
+  int32 pane_index = 3;
+  int32 total_panes = 4;
+  repeated string lines = 5;
+  int64 timestamp = 6;
+}
+
+message PromptCommand {
+  string worktree = 1;
+  string pane_id = 2;
+  string text = 3;
+}
+
+message CancelCommand {
+  string worktree = 1;
+  string pane_id = 2;
+}
+
+message WorktreeCommand {
+  enum Action {
+    CREATE = 0;
+    DELETE = 1;
+  }
+  Action action = 1;
+  string name = 2;
+  string branch = 3;
 }
 ```
 
