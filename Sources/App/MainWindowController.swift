@@ -540,6 +540,41 @@ class AmuxWindow: NSWindow {
             return true
         }
 
+        // Cmd+1..4: switch dashboard layout.
+        if flags == .command, let chars = event.charactersIgnoringModifiers {
+            let layoutMap: [String: DashboardLayout] = [
+                "1": .grid,
+                "2": .leftRight,
+                "3": .topSmall,
+                "4": .topLarge
+            ]
+            if let target = layoutMap[chars], let dashVC = mwc.tabCoordinator.dashboardVC {
+                if dashVC.isInDStateForWindow {
+                    dashVC.exitDashboardNavigation(restoreSnapshot: true)
+                }
+                dashVC.setLayout(target)
+                if target == .grid {
+                    dashVC.enterDashboardNavigation()
+                }
+                return true
+            }
+        }
+
+        // Cmd+E: toggle D-state in focus layouts. No-op in grid (already in D).
+        if flags == .command && event.charactersIgnoringModifiers == "e" {
+            if let dashVC = mwc.tabCoordinator.dashboardVC {
+                if dashVC.currentLayout == .grid {
+                    return true  // swallow, no-op
+                }
+                if dashVC.isInDStateForWindow {
+                    dashVC.exitDashboardNavigation(restoreSnapshot: true)
+                } else {
+                    dashVC.enterDashboardNavigation()
+                }
+                return true
+            }
+        }
+
         return super.performKeyEquivalent(with: event)
     }
 
