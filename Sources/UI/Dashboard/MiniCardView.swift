@@ -35,6 +35,7 @@ final class MiniCardView: NSView {
     private var currentStatus: String = ""
     private var currentPaneStatuses: [AgentStatus] = []
     private var projectLeadingConstraint: NSLayoutConstraint?
+    private var dimOverlayLayer: CALayer?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -276,6 +277,24 @@ final class MiniCardView: NSView {
     override func mouseExited(with event: NSEvent) {
         isHovered = false
         updateAppearance()
+    }
+
+    // MARK: - Dim overlay
+
+    func showDimOverlay(opacity: CGFloat) {
+        if dimOverlayLayer == nil {
+            let overlay = CALayer()
+            overlay.backgroundColor = NSColor.white.withAlphaComponent(opacity).cgColor
+            overlay.frame = bounds
+            overlay.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+            layer?.addSublayer(overlay)
+            dimOverlayLayer = overlay
+        }
+    }
+
+    func hideDimOverlay() {
+        dimOverlayLayer?.removeFromSuperlayer()
+        dimOverlayLayer = nil
     }
 
     override var acceptsFirstResponder: Bool { false }

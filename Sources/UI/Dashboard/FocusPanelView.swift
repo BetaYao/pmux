@@ -56,6 +56,26 @@ final class FocusPanelView: NSView {
         ])
     }
 
+    // MARK: - Dim overlay
+
+    private var dimOverlayLayer: CALayer?
+
+    func showDimOverlay(opacity: CGFloat) {
+        if dimOverlayLayer == nil {
+            let overlay = CALayer()
+            overlay.backgroundColor = NSColor.white.withAlphaComponent(opacity).cgColor
+            overlay.frame = bounds
+            overlay.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+            layer?.addSublayer(overlay)
+            dimOverlayLayer = overlay
+        }
+    }
+
+    func hideDimOverlay() {
+        dimOverlayLayer?.removeFromSuperlayer()
+        dimOverlayLayer = nil
+    }
+
     // MARK: - Focus restore
 
     /// Clicking anywhere on the focus panel (border, padding) should restore
