@@ -18,8 +18,35 @@ A thin iOS client for AMUX that lets users monitor and interact with agents runn
 - **Separate repository:** `amux-ios`
 - **Pure SwiftUI**, iOS 26+, no UIKit
 - **Standard Xcode project** (no XcodeGen)
-- **Dependencies:** MQTT client library (e.g. CocoaMQTT or MQTTNIO)
 - Two-way MQTT protocol doc aligns iOS and macOS data formats
+
+### Tech Stack
+
+- **UI:** SwiftUI + Liquid Glass (`.glassEffect()`)
+- **State management:** `@Observable` (Observation framework), `@State`, `@Environment`
+- **MQTT:** MQTTNIO (SwiftNIO-based, async/await native)
+- **Persistence:** SwiftData (Todo & Ideas local storage)
+- **Concurrency:** Swift structured concurrency (async/await, actors)
+
+### SPM Module Structure
+
+```
+amux-ios/
+├── Package.swift
+├── App/                          # App target (entry point, scenes)
+│   └── amuxApp.swift
+├── Packages/
+│   ├── AMUXCore/                 # Data models, MQTT service, state
+│   │   ├── Models/               # Worktree, Pane, AgentStatus, Todo, Idea
+│   │   ├── MQTT/                 # MQTTService (connect, subscribe, publish)
+│   │   └── State/                # AppState (@Observable), DeviceManager
+│   └── AMUXUI/                   # SwiftUI views
+│       ├── Main/                 # WorktreeListView, WorktreeCard, DevicePicker
+│       ├── Detail/               # TerminalView, PaneSwipeView, InputPanel, BottomToolbar
+│       └── TodoIdeas/            # TodoListView, IdeasView, TodoRow, IdeaCard
+```
+
+`AMUXCore` has no UI dependency — pure Swift models and services. `AMUXUI` imports both `AMUXCore` and SwiftUI.
 
 ### MQTT Communication
 
