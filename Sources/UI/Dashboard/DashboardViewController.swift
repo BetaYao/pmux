@@ -927,6 +927,11 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
             focusController.enterFocusLayout(cardIds: cardIds)
         }
 
+        // Clear mouse-selection visuals so only the keyboard focus ring is visible.
+        if currentLayout == .grid {
+            gridCards.forEach { $0.isSelected = false }
+        }
+
         view.window?.makeFirstResponder(self)
         applyKeyboardFocusVisuals()
         applyDimOverlayIfNeeded()
@@ -940,6 +945,13 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
 
         clearKeyboardFocusVisuals()
         clearDimOverlay()
+
+        // Restore mouse-selection visual on the selected card.
+        if currentLayout == .grid {
+            for container in gridCards {
+                container.isSelected = (container.agentId == selectedAgentId)
+            }
+        }
 
         if restoreSnapshot, let snap = snapshot, let responder = snap.firstResponder,
            (responder as? NSView)?.window != nil {
@@ -1089,6 +1101,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
     // MARK: - AgentCardDelegate
 
     func agentCardClicked(agentId: String) {
+        // Mouse click exits D-state — mouse takes over from keyboard.
+        if isInDState {
+            exitDashboardNavigation(restoreSnapshot: false)
+        }
         switch currentLayout {
         case .grid:
             // Single click → select in place (no layout switch)
