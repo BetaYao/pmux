@@ -17,6 +17,9 @@ final class MiniCardView: NSView {
     // Line 2: duration
     private let durationLabel = NSTextField(labelWithString: "")
 
+    // User prompt line (single line, above message)
+    private let promptLabel = NSTextField(labelWithString: "")
+
     // Message area
     private let messageLabel = NSTextField(labelWithString: "")
 
@@ -41,7 +44,7 @@ final class MiniCardView: NSView {
         fatalError("init(coder:) not supported")
     }
 
-    func configure(id: String, project: String, thread: String, status: String, lastMessage: String, totalDuration: String, roundDuration: String, paneStatuses: [AgentStatus] = [], isMainWorktree: Bool = false) {
+    func configure(id: String, project: String, thread: String, status: String, lastMessage: String, lastUserPrompt: String = "", totalDuration: String, roundDuration: String, paneStatuses: [AgentStatus] = [], isMainWorktree: Bool = false, tasks: [TaskItem] = [], activityEvents: [ActivityEvent] = []) {
         agentId = id
         currentStatus = status
         setAccessibilityIdentifier("dashboard.miniCard.\(id)")
@@ -63,7 +66,27 @@ final class MiniCardView: NSView {
             .foregroundColor: SemanticColors.muted,
         ]))
         branchLabel.attributedStringValue = branchText
-        messageLabel.stringValue = lastMessage
+        if !lastUserPrompt.isEmpty {
+            promptLabel.stringValue = "\u{276F} " + lastUserPrompt
+            promptLabel.isHidden = false
+        } else {
+            promptLabel.stringValue = ""
+            promptLabel.isHidden = true
+        }
+        // Content priority: tasks > activity feed > last message (same as grid card)
+        if let taskAttr = TaskListRenderer.attributedString(for: tasks) {
+            messageLabel.attributedStringValue = taskAttr
+        } else if !activityEvents.isEmpty {
+            let rendered = ActivityFeedRenderer.render(events: activityEvents, maxLines: 2)
+            let combined = NSMutableAttributedString()
+            for (i, line) in rendered.enumerated() {
+                if i > 0 { combined.append(NSAttributedString(string: "\n")) }
+                combined.append(line)
+            }
+            messageLabel.attributedStringValue = combined
+        } else {
+            messageLabel.stringValue = lastMessage
+        }
 
         // Rebuild status dots on line 1 (before repo name)
         statusDots.forEach { $0.removeFromSuperview() }
@@ -126,7 +149,9 @@ final class MiniCardView: NSView {
         projectLabel.lineBreakMode = .byTruncatingTail
         projectLabel.maximumNumberOfLines = 1
         projectLabel.translatesAutoresizingMaskIntoConstraints = false
-        projectLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // Resist compression so the repo name never collapses to 0 width when
+        // layout runs mid-rebuild (dots removed, new leading constraint not yet active).
+        projectLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         addSubview(projectLabel)
 
         // Line 1: status text (right)
@@ -148,11 +173,22 @@ final class MiniCardView: NSView {
         durationLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         addSubview(durationLabel)
 
+        // User prompt line (single line above message)
+        promptLabel.font = NSFont.monospacedSystemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
+        promptLabel.textColor = SemanticColors.text
+        promptLabel.lineBreakMode = .byTruncatingTail
+        promptLabel.maximumNumberOfLines = 1
+        promptLabel.translatesAutoresizingMaskIntoConstraints = false
+        promptLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        promptLabel.setContentHuggingPriority(.defaultHigh, for: .vertical)
+        promptLabel.isHidden = true
+        addSubview(promptLabel)
+
         // Message area
         messageLabel.font = NSFont.monospacedSystemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
         messageLabel.textColor = SemanticColors.muted
         messageLabel.lineBreakMode = .byTruncatingTail
-        messageLabel.maximumNumberOfLines = 3
+        messageLabel.maximumNumberOfLines = 2
         messageLabel.cell?.wraps = true
         messageLabel.cell?.truncatesLastVisibleLine = true
         messageLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -171,10 +207,18 @@ final class MiniCardView: NSView {
 
         let padding: CGFloat = 8
 
+        // Fallback leading constraint — active whenever the dynamic dot-anchored
+        // constraint in configure() is not. Low priority so the dot-anchored
+        // constraint wins when present, but guarantees projectLabel always has
+        // a valid leading anchor (prevents 0-width collapse during rebuilds).
+        let projectLabelFallbackLeading = projectLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding)
+        projectLabelFallbackLeading.priority = .defaultLow
+
         NSLayoutConstraint.activate([
             // Line 1: dots + repo name (left) + status (right)
             projectLabel.topAnchor.constraint(equalTo: topAnchor, constant: padding + 2),
             projectLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusTextLabel.leadingAnchor, constant: -4),
+            projectLabelFallbackLeading,
 
             statusTextLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padding),
             statusTextLabel.centerYAnchor.constraint(equalTo: projectLabel.centerYAnchor),
@@ -184,8 +228,13 @@ final class MiniCardView: NSView {
             durationLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
             durationLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -padding),
 
+            // User prompt line
+            promptLabel.topAnchor.constraint(equalTo: durationLabel.bottomAnchor, constant: 4),
+            promptLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
+            promptLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padding),
+
             // Message area
-            messageLabel.topAnchor.constraint(equalTo: durationLabel.bottomAnchor, constant: 4),
+            messageLabel.topAnchor.constraint(equalTo: promptLabel.bottomAnchor, constant: 1),
             messageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
             messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padding),
 

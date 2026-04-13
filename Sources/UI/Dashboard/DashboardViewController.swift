@@ -21,6 +21,7 @@ struct AgentDisplayInfo {
     let thread: String      // branch name
     let paneStatuses: [AgentStatus]     // per-pane statuses
     let mostRecentMessage: String       // message from most recently updated pane
+    let lastUserPrompt: String          // most recent user prompt text
     let mostRecentPaneIndex: Int
     let totalDuration: String   // "HH:MM:SS" format
     let roundDuration: String   // "HH:MM:SS" format
@@ -267,10 +268,13 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
                 thread: agent.thread,
                 status: agent.status,
                 lastMessage: agent.lastMessage,
+                lastUserPrompt: agent.lastUserPrompt,
                 totalDuration: agent.totalDuration,
                 roundDuration: agent.roundDuration,
                 paneStatuses: agent.paneStatuses,
-                isMainWorktree: agent.isMainWorktree
+                isMainWorktree: agent.isMainWorktree,
+                tasks: agent.tasks,
+                activityEvents: agent.activityEvents
             )
             miniCards[index].isSelected = (agent.id == selectedAgentId)
         }
@@ -430,9 +434,12 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
             container.miniCardView.configure(
                 id: agent.id, project: agent.project, thread: agent.thread,
                 status: agent.status, lastMessage: agent.lastMessage,
+                lastUserPrompt: agent.lastUserPrompt,
                 totalDuration: agent.totalDuration, roundDuration: agent.roundDuration,
                 paneStatuses: agent.paneStatuses,
-                isMainWorktree: agent.isMainWorktree
+                isMainWorktree: agent.isMainWorktree,
+                tasks: agent.tasks,
+                activityEvents: agent.activityEvents
             )
             container.isSelected = (agent.id == selectedAgentId)
             container.translatesAutoresizingMaskIntoConstraints = false
@@ -823,7 +830,13 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
             if let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId) {
                 // Ensure surface is created
                 if surface.surface == nil {
-                    _ = surface.create(in: container, workingDirectory: worktreePath, sessionName: surface.sessionName)
+                    let surfaceId = leaf.surfaceId
+                    _ = surface.create(in: container, workingDirectory: worktreePath, sessionName: surface.sessionName) { [weak splitView] in
+                        // Async backend (tmux): register the view once creation finishes
+                        guard let splitView, let termView = surface.view else { return }
+                        splitView.surfaceViews[surfaceId] = termView
+                        splitView.layoutTree()
+                    }
                 }
                 if let termView = surface.view {
                     surfaceViews[leaf.surfaceId] = termView

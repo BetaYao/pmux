@@ -78,6 +78,7 @@
 		53DCDAAD9533697D3C7A2188 /* FuzzyMatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 534D30F22E8DA59B1A4A9A76 /* FuzzyMatchTests.swift */; };
 		53EA5B08C32A1BE2CEA88E91 /* WeComFrameParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C5FC39612AA92BA43B1B90C /* WeComFrameParserTests.swift */; };
 		548EF49CEC589A3EB592667B /* IdeaStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71246792B8CA4D8013FF1143 /* IdeaStoreTests.swift */; };
+		55B9704C8E921E64B489616B /* TaskListRenderingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 486CC42818703C3DBDE79145 /* TaskListRenderingTests.swift */; };
 		55FF2B9E0D70E804B31C4261 /* AgentType.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3A2E0A7AFE5800BDC7ABC95 /* AgentType.swift */; };
 		56CAB308499BCB5E2931EFD8 /* StatusDetectorActivityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAC2A77448722B3D30D67825 /* StatusDetectorActivityTests.swift */; };
 		57489B6BEB4A454DA4DD21C9 /* BackendResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5427B61BE49E63450FF1AA8 /* BackendResolverTests.swift */; };
@@ -231,6 +232,7 @@
 		442E7AA73798474882C87ACF /* CommandParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandParserTests.swift; sourceTree = "<group>"; };
 		44410620EE5165E3D3BB3D25 /* SurfaceRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceRegistry.swift; sourceTree = "<group>"; };
 		45D2C4A02A0F96E5F8676691 /* AIPanelPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPanelPage.swift; sourceTree = "<group>"; };
+		486CC42818703C3DBDE79145 /* TaskListRenderingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskListRenderingTests.swift; sourceTree = "<group>"; };
 		48C4B02FAF458184FCA375F5 /* GhosttyBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyBridge.swift; sourceTree = "<group>"; };
 		4993D01FF97C414264153CED /* UpdateCheckerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCheckerTests.swift; sourceTree = "<group>"; };
 		4C8C1C62BF62C18F2B901A35 /* DashboardViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardViewController.swift; sourceTree = "<group>"; };
@@ -445,6 +447,7 @@
 				527459C40BE04C457EE1DC58 /* StatusDetectorTests.swift */,
 				F4D5F07D350C7434EADA71E8 /* StatusPublisherThreadTests.swift */,
 				8A2CD6BFC4EC79E9FC75D872 /* TabCoordinatorTests.swift */,
+				486CC42818703C3DBDE79145 /* TaskListRenderingTests.swift */,
 				238329F7A0DCD4BEFDBC77D3 /* TaskProgressParserTests.swift */,
 				6438CD6B3B3691B526364A70 /* TerminalCoordinatorTests.swift */,
 				D71889CE21B57B848EE76371 /* TerminalSurfaceReparentTests.swift */,
@@ -990,6 +993,7 @@
 				C3C7E538CA764951E56DFF69 /* StatusDetectorTests.swift in Sources */,
 				042DE663BEC390F068E354A4 /* StatusPublisherThreadTests.swift in Sources */,
 				718D81760B2F343314164B55 /* TabCoordinatorTests.swift in Sources */,
+				55B9704C8E921E64B489616B /* TaskListRenderingTests.swift in Sources */,
 				BBBDB1A623812A5987C072E9 /* TaskProgressParserTests.swift in Sources */,
 				CF1EC2EC6546E022A1E752C0 /* TerminalCoordinatorTests.swift in Sources */,
 				F6235E4BB9DAEB19F7F283ED /* TerminalSurfaceReparentTests.swift in Sources */,

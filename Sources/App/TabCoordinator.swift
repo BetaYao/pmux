@@ -638,26 +638,25 @@ class TabCoordinator {
         // Dashboard handles focus panel — no separate tab needed
     }
 
-    func dashboardDidRequestDelete(_ terminalID: String) {
+    func dashboardDidRequestDelete(_ terminalID: String, window: NSWindow?) {
         guard let agent = AgentHead.shared.agent(for: terminalID) else { return }
         let worktreePath = agent.worktreePath
         guard let item = allWorktrees.first(where: { $0.info.path == worktreePath }) else { return }
-        terminalCoordinator.confirmAndDeleteWorktree(item.info, window: nil)
+        terminalCoordinator.confirmAndDeleteWorktree(item.info, window: window)
     }
 
     // MARK: - New Branch Integration
 
     func handleNewBranch(info: WorktreeInfo, repoPath: String) {
-        let tree = terminalCoordinator.surfaceManager.tree(for: info, backend: runtimeBackend)
-        allWorktrees.append((info: info, tree: tree))
+        // Build the full worktree list for this repo (existing + newly created)
+        // so integrateNewWorktrees can update workspaceManager correctly.
+        let existing = workspaceManager.tabs.first(where: { $0.repoPath == repoPath })?.worktrees ?? []
+        let allDiscovered = existing + [info]
 
-        if config.worktreeStartedAt[info.path] == nil {
-            config.worktreeStartedAt[info.path] = ISO8601DateFormatter().string(from: Date())
-            config.save()
-        }
+        integrateNewWorktrees(repoRoot: repoPath, allDiscovered: allDiscovered, newWorktrees: [info])
 
-        dashboardVC?.updateAgents(buildAgentDisplayInfos())
-        statusPublisher.updateSurfaces(terminalCoordinator.surfaceManager.all)
+        // Focus the newly created worktree's minicard
+        dashboardVC?.selectAgent(byWorktreePath: info.path)
     }
 
     // MARK: - Status Update Forwarding

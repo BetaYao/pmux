@@ -18,6 +18,7 @@ class WebhookStatusProvider {
         var status: AgentStatus
         var lastEvent: Date
         var lastMessage: String?
+        var lastUserPrompt: String?
         var tasks: [TaskItem] = []
         var nextTaskId: Int = 1
     }
@@ -93,11 +94,13 @@ class WebhookStatusProvider {
 
             let status = event.event.agentStatus(data: event.data)
             let message = Self.extractMessage(from: event)
+            let userPrompt = Self.extractUserPrompt(from: event)
 
             if var existing = sessions[event.sessionId] {
                 existing.status = status
                 existing.lastEvent = Date()
                 if let message { existing.lastMessage = message }
+                if let userPrompt { existing.lastUserPrompt = userPrompt }
                 Self.applyTaskEvent(event, to: &existing)
                 sessions[event.sessionId] = existing
             } else {
@@ -106,7 +109,8 @@ class WebhookStatusProvider {
                     worktreePath: worktreePath,
                     status: status,
                     lastEvent: Date(),
-                    lastMessage: message
+                    lastMessage: message,
+                    lastUserPrompt: userPrompt
                 )
                 Self.applyTaskEvent(event, to: &newSession)
                 sessions[event.sessionId] = newSession
@@ -134,6 +138,30 @@ class WebhookStatusProvider {
                 .max(by: { $0.lastEvent < $1.lastEvent })?
                 .lastMessage
         }
+    }
+
+    /// Returns the most recent user prompt for a worktree, or nil
+    func lastUserPrompt(for worktreePath: String) -> String? {
+        queue.sync {
+            let canon = canonicalize(worktreePath)
+            return sessions.values
+                .filter { $0.worktreePath == canon }
+                .max(by: { $0.lastEvent < $1.lastEvent })?
+                .lastUserPrompt
+        }
+    }
+
+    /// Extract the user's prompt text from a userPrompt event
+    private static func extractUserPrompt(from event: WebhookEvent) -> String? {
+        guard event.event == .userPrompt else { return nil }
+        // Claude Code sends the prompt text in the "prompt" field
+        if let prompt = event.data?["prompt"] as? String, !prompt.isEmpty {
+            return prompt
+        }
+        if let message = event.data?["message"] as? String, !message.isEmpty {
+            return message
+        }
+        return nil
     }
 
     /// Extract a human-readable message from a webhook event

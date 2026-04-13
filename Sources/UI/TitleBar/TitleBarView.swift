@@ -3,6 +3,7 @@ import AppKit
 protocol TitleBarDelegate: AnyObject {
     func titleBarDidRequestNewThread()
     func titleBarDidRequestCollapseSidebar()
+    func titleBarDidRequestAddProject()
     func titleBarDidSelectLayout(_ layout: DashboardLayout)
     func titleBarDidToggleNotifications()
     func titleBarDidToggleAI()
@@ -30,13 +31,13 @@ final class TitleBarView: NSView {
     private let worktreeBranchLabel = NSTextField(labelWithString: "")
     private let worktreeRepoLabel = NSTextField(labelWithString: "")
     private let worktreeMetaLabel = NSTextField(labelWithString: "")
-    private let newWorktreeButton = NSButton()
-    private let collapseSidebarButton = NSButton()
+    private let addProjectButton = NSButton()
     private let dashboardTitleLabel = NSTextField(labelWithString: "AMUX Dashboard")
     private let worktreeInfoStack = NSStackView()
-    private let worktreeButtonStack = NSStackView()
 
     // Right controls
+    private let newWorktreeButton = NSButton()
+    private let collapseSidebarButton = NSButton()
     private let viewSwitcherButton = NSButton()
     private let notifButton = NSButton()
     private let notifBadge = NSView()
@@ -69,12 +70,17 @@ final class TitleBarView: NSView {
         updateArcBlockColors()
     }
 
-    func updateWorktreeInfo(branch: String?, repo: String?, status: AgentStatus?, agentName: String?, isGridLayout: Bool) {
+    func updateWorktreeInfo(branch: String?, repo: String?, status: AgentStatus?, agentName: String?, isGridLayout: Bool, hasWorkspaces: Bool = true) {
         let showWorktreeInfo = !isGridLayout && branch != nil
 
         dashboardTitleLabel.isHidden = showWorktreeInfo
         worktreeInfoStack.isHidden = !showWorktreeInfo
-        worktreeButtonStack.isHidden = !showWorktreeInfo
+
+        // Hide workspace-dependent buttons when no workspaces exist
+        collapseSidebarButton.isHidden = !hasWorkspaces
+        newWorktreeButton.isHidden = !hasWorkspaces
+        viewSwitcherButton.isHidden = !hasWorkspaces
+        notifButton.isHidden = !hasWorkspaces
 
         if showWorktreeInfo {
             worktreeBranchLabel.stringValue = branch ?? ""
@@ -216,34 +222,34 @@ final class TitleBarView: NSView {
         worktreeInfoStack.isHidden = true
         leftArcBlock.addSubview(worktreeInfoStack)
 
-        // Button stack: [+] [sidebar]
-        configureArcIconButton(newWorktreeButton, symbol: "plus",
-                               identifier: "titlebar.newWorktree", label: "New Worktree",
-                               action: #selector(newWorktreeClicked))
-        configureArcIconButton(collapseSidebarButton, symbol: "sidebar.right",
-                               identifier: "titlebar.collapseSidebar", label: "Toggle Sidebar",
-                               action: #selector(collapseSidebarClicked))
+        // Right-side button stack: [Add Project] [AI]
+        configureArcIconButton(addProjectButton, symbol: "plus.rectangle",
+                               identifier: "titlebar.addProject", label: "Add Project",
+                               action: #selector(addProjectClicked))
+        configureArcIconButton(aiButton, symbol: "sparkles",
+                               identifier: "titlebar.aiButton", label: "AI Assistant",
+                               action: #selector(aiClicked))
 
-        worktreeButtonStack.orientation = .horizontal
-        worktreeButtonStack.spacing = 2
-        worktreeButtonStack.alignment = .centerY
-        worktreeButtonStack.translatesAutoresizingMaskIntoConstraints = false
-        worktreeButtonStack.addArrangedSubview(newWorktreeButton)
-        worktreeButtonStack.addArrangedSubview(collapseSidebarButton)
-        worktreeButtonStack.isHidden = true
-        leftArcBlock.addSubview(worktreeButtonStack)
+        let leftButtonStack = NSStackView()
+        leftButtonStack.orientation = .horizontal
+        leftButtonStack.spacing = 2
+        leftButtonStack.alignment = .centerY
+        leftButtonStack.translatesAutoresizingMaskIntoConstraints = false
+        leftButtonStack.addArrangedSubview(addProjectButton)
+        leftButtonStack.addArrangedSubview(aiButton)
+        leftArcBlock.addSubview(leftButtonStack)
 
         NSLayoutConstraint.activate([
             dashboardTitleLabel.leadingAnchor.constraint(equalTo: leftArcBlock.leadingAnchor, constant: Layout.dashboardLeadingInset),
             dashboardTitleLabel.centerYAnchor.constraint(equalTo: leftArcBlock.centerYAnchor),
-            dashboardTitleLabel.trailingAnchor.constraint(lessThanOrEqualTo: leftArcBlock.trailingAnchor, constant: -8),
 
             worktreeInfoStack.leadingAnchor.constraint(equalTo: leftArcBlock.leadingAnchor, constant: Layout.dashboardLeadingInset),
             worktreeInfoStack.centerYAnchor.constraint(equalTo: leftArcBlock.centerYAnchor),
 
-            worktreeButtonStack.leadingAnchor.constraint(greaterThanOrEqualTo: worktreeInfoStack.trailingAnchor, constant: 8),
-            worktreeButtonStack.trailingAnchor.constraint(equalTo: leftArcBlock.trailingAnchor, constant: -4),
-            worktreeButtonStack.centerYAnchor.constraint(equalTo: leftArcBlock.centerYAnchor),
+            leftButtonStack.leadingAnchor.constraint(greaterThanOrEqualTo: worktreeInfoStack.trailingAnchor, constant: 8),
+            leftButtonStack.leadingAnchor.constraint(greaterThanOrEqualTo: dashboardTitleLabel.trailingAnchor, constant: 8),
+            leftButtonStack.trailingAnchor.constraint(equalTo: leftArcBlock.trailingAnchor, constant: -4),
+            leftButtonStack.centerYAnchor.constraint(equalTo: leftArcBlock.centerYAnchor),
         ])
     }
 
@@ -259,6 +265,18 @@ final class TitleBarView: NSView {
         rightStack.alignment = .centerY
         rightStack.translatesAutoresizingMaskIntoConstraints = false
         rightArcBlock.addSubview(rightStack)
+
+        // Collapse sidebar
+        configureArcIconButton(collapseSidebarButton, symbol: "sidebar.right",
+                               identifier: "titlebar.collapseSidebar", label: "Toggle Sidebar",
+                               action: #selector(collapseSidebarClicked))
+        rightStack.addArrangedSubview(collapseSidebarButton)
+
+        // New worktree
+        configureArcIconButton(newWorktreeButton, symbol: "plus",
+                               identifier: "titlebar.newWorktree", label: "New Worktree",
+                               action: #selector(newWorktreeClicked))
+        rightStack.addArrangedSubview(newWorktreeButton)
 
         // View switcher
         configureArcIconButton(viewSwitcherButton, symbol: "square.grid.2x2",
@@ -284,12 +302,6 @@ final class TitleBarView: NSView {
             notifBadge.trailingAnchor.constraint(equalTo: notifButton.trailingAnchor, constant: -4),
         ])
         rightStack.addArrangedSubview(notifButton)
-
-        // AI button
-        configureArcIconButton(aiButton, symbol: "sparkles",
-                               identifier: "titlebar.aiButton", label: "AI Assistant",
-                               action: #selector(aiClicked))
-        rightStack.addArrangedSubview(aiButton)
 
         // Theme button
         configureArcIconButton(themeButton, symbol: "circle.lefthalf.filled",
@@ -388,6 +400,10 @@ final class TitleBarView: NSView {
 
     @objc private func collapseSidebarClicked() {
         delegate?.titleBarDidRequestCollapseSidebar()
+    }
+
+    @objc private func addProjectClicked() {
+        delegate?.titleBarDidRequestAddProject()
     }
 
     @objc private func viewMenuClicked() {

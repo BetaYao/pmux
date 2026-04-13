@@ -35,47 +35,64 @@ The project uses XcodeGen (`project.yml`) to generate the Xcode project file. Af
 
 ## Architecture
 
-**Three-layer design:**
+**Four-layer design:**
 
-1. **UI Layer** (`Sources/UI/`) — AppKit views and view controllers
-   - `Dashboard/` — Grid mode (responsive card grid) and focus layouts (left-right, top-bottom) that embed SplitContainerView directly in the dashboard's focus panel
-   - `TabBar/` — Tab switching; dashboard is always tab 0
+1. **App Coordinators** (`Sources/App/`)
+   - `MainWindowController` — Window owner, embeds content VCs, positions traffic lights, handles keyboard shortcuts via `AmuxWindow` subclass
+   - `TabCoordinator` — Orchestrates tab switching, repo VC lifecycle (cached in `repoVCs[repoPath]`), status update forwarding, and session state save/restore
+   - `TerminalCoordinator` — Split pane operations (split, close, move focus, resize), worktree deletion, surface manager ownership
+   - `PanelCoordinator` — Manages side panels (AI panel, notification panel)
+
+2. **UI Layer** (`Sources/UI/`)
+   - `Dashboard/` — Four layout modes: Grid, LeftRight, TopSmall, TopLarge. Grid uses frame-based layout; focus layouts use Auto Layout with a `FocusPanelView` + mini card sidebar
+   - `Repo/` — `RepoViewController` with `SidebarViewController` for worktree switching; `SplitContainerView` hosts split panes
+   - `Split/` — `SplitContainerView` renders `SplitTree` as frame-based leaf views with `DividerView` drag handles and dim overlays on unfocused panes
+   - `TitleBar/` — Custom `TitleBarView` with project tabs, layout switcher, notification badge
    - `Dialog/` — Quick switcher (Cmd+P) and new branch dialog (Cmd+N)
-   - `Shared/` — Theme constants and StatusBadge component
 
-2. **Core Services** (`Sources/Core/`, `Sources/Status/`)
-   - `WorkspaceManager` — Tracks tabs and workspaces; disambiguates repo names when parent dirs differ
-   - `StatusPublisher` — Timer-based polling (2s interval) of terminal surfaces for agent status
-   - `StatusDetector` — Three-layer priority: process exit > OSC 133 shell phase > text pattern matching > Unknown
-   - `Config` — Loads/saves JSON config from `~/.config/amux/config.json`; auto-saves on UI changes (zoom, reorder, repo add)
-   - `AgentStatus` — Enum: Running, Idle, Waiting, Error, Exited, Unknown
+3. **Core Services** (`Sources/Core/`, `Sources/Status/`)
+   - `AgentHead` — Single source of truth for all agent state; delegates notify UI of changes
+   - `StatusPublisher` — Timer-based polling (2s) on background queue, reads viewport text via `ghosttyLock`-protected C API calls
+   - `StatusDetector` — Priority: process exit > OSC 133 shell phase > text pattern matching > Unknown
+   - `WorktreeStatusAggregator` — Aggregates per-pane statuses into per-worktree status, fires `WorktreeStatusDelegate`
+   - `Config` — JSON config at `~/.config/amux/config.json`; uses `decodeIfPresent()` for backward compat
+   - `SurfaceRegistry` — Global registry mapping surface IDs to `TerminalSurface` instances
+   - `ExternalChannel` — Protocol for WeChat/WeCom bot integrations
 
-3. **Terminal & System** (`Sources/Terminal/`, `Sources/Git/`)
+4. **Terminal & System** (`Sources/Terminal/`, `Sources/Git/`)
    - `GhosttyBridge` — Singleton wrapping the Ghostty C API (`ghostty.h` via bridging header)
-   - `TerminalSurface` — NSView + Metal renderer + PTY; surfaces are lazily created and reparented between views
+   - `TerminalSurface` — Wraps `GhosttyNSView` (NSView + Metal renderer + PTY); manages surface lifecycle, reparenting, and backend session attachment
+   - `SplitTree` / `SplitNode` — Tree data structure for split pane layout; serializable for persistence in config
    - `WorktreeDiscovery` — Runs `git worktree list --porcelain` to discover worktrees
 
 ## Key Patterns
 
-**Surface lifecycle:** TerminalSurface instances are long-lived — created once per worktree, reparented between views (grid cards, focus panel), and destroyed only on explicit deletion or app quit.
+**Surface lifecycle:** TerminalSurface instances are long-lived — created once per split leaf, reparented between views (dashboard focus panel, repo tab split containers). `reparent(to:)` uses `CATransaction` to suppress animations, then defers size sync and focus restoration via two `DispatchQueue.main.async` passes. Surfaces are destroyed only on explicit deletion or app quit.
 
-**Key orchestrator:** `MainWindowController` owns all TerminalSurface instances (keyed by worktree path), manages tab bar state, and coordinates view transitions.
+**Tab switching:** `detachActiveTerminal()` removes the active `SplitContainerView` from its superview before embedding the new tab's content. This prevents Z-order conflicts when surfaces are shared across views.
 
-**Grid vs Spotlight layout:** Grid mode uses frame-based layout (`translatesAutoresizingMaskIntoConstraints = true`). Spotlight mode uses Auto Layout. Sidebar terminals in spotlight are output-only (`setFocus(false)`).
+**Split pane system:** `SplitTree` is a binary tree of `SplitNode` (leaf or split with axis + ratio). `SplitContainerView.layoutTree()` computes frame-based positions for each leaf, places `GhosttyNSView` instances, adds `DividerView` drag handles, and updates dim overlays. Focus is tracked via `tree.focusedId`; `GhosttyNSView.onFocusAcquired` callback keeps the tree in sync when user clicks a pane.
 
-**Terminal persistence:** tmux sessions named `amux-<parent>-<name>` (dots/colons sanitized to underscores) are created per worktree and reattached on relaunch. Sessions are killed via `tmux kill-session` on repo tab close.
+**Terminal persistence:** Backend sessions (tmux or zmx) named `amux-<parent>-<name>` are created per split leaf. For zmx, a health check runs 3s after creation; stale sessions trigger `recoverZmxSession` (destroy + recreate). Split layouts are serialized to config for restore on relaunch.
 
-**Status detection:** `StatusPublisher` polls every 2s, reads viewport text, finds matching `AgentDef` (case-insensitive CLI name match), runs through `StatusDetector` priority rules, and fires delegate callback. `DebouncedStatusTracker` preserves current state when detection returns Unknown (debouncing).
+**Status detection pipeline:** `StatusPublisher` (background queue, 2s timer) → `readViewportText()` (with `ghosttyLock`) → `StatusDetector.detect()` → `DebouncedStatusTracker` → `WorktreeStatusAggregator` (main queue) → `AgentHead` → UI delegates. Preferred worktrees (active tab) poll every cycle; others every 3rd cycle.
 
-**Window key handling:** Custom `AmuxWindow` subclass intercepts Escape (exit spotlight) and Ctrl+Tab (cycle spotlight focus) via `sendEvent()` override.
+**Focus management:** `GhosttyNSView` overrides `becomeFirstResponder`/`resignFirstResponder` to call `ghostty_surface_set_focus()` and apply visual shadow state. `mouseDown` calls `makeFirstResponder(self)`. Split pane operations defer `makeFirstResponder` via `DispatchQueue.main.async` to run after Ghostty's own deferred focus handling.
+
+**Thread safety:** `ghosttyLock` (NSLock) serializes all Ghostty C API calls between the background status poll and main-thread input. Key input deliberately does NOT hold the lock (Ghostty is internally thread-safe for keys, and holding it would deadlock on synchronous callbacks).
+
+**Window key handling:** `AmuxWindow.performKeyEquivalent` handles split pane shortcuts (Cmd+D split, Cmd+Shift+Arrow move focus, Cmd+Ctrl+Arrow resize) before menu key equivalents. `sendEvent` intercepts Escape.
 
 ## Key Technical Details
 
 - **Swift 5.10**, macOS 14.0+ (Sonoma), AppKit (not SwiftUI)
-- **Ghostty C interop** via `amux-Bridging-Header.h` → `ghostty.h`
-- Links against: Metal, QuartzCore, IOSurface, Carbon, libghostty, libc++
+- **Ghostty C interop** via `amux-Bridging-Header.h` → `ghostty.h`; `GhosttyKit.xcframework` provides `libghostty`
+- Links against: Metal, QuartzCore, IOSurface, Carbon, UniformTypeIdentifiers, libghostty, libc++
 - No external SPM dependencies — pure system frameworks + Ghostty
-- Delegate pattern used throughout: `DashboardDelegate`, `TabBarDelegate`, `TerminalCardDelegate`, `SplitContainerDelegate`
+- Delegate pattern used throughout (not Combine/async-await for UI updates)
 - `GhosttyBridge.shared` is the singleton entry point for all terminal operations
-- Tests use XCTest with `@testable import amux`; no external test dependencies
+- `SurfaceRegistry.shared` is the global surface lookup table (surface ID → TerminalSurface)
+- `AgentHead.shared` is the single source of truth for agent state (status, messages, activity events)
+- Tests use XCTest with `@testable import amux`; test files in `Tests/` directory; no external test dependencies
 - Config uses `decodeIfPresent()` throughout for backward compatibility with older config files
+- `ghostty/` directory contains the vendored Ghostty source (read-only reference, not built from here)

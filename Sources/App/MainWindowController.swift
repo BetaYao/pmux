@@ -419,7 +419,8 @@ class MainWindowController: NSWindowController {
             repo: agent?.project,
             status: agent?.paneStatuses.first,
             agentName: nil,
-            isGridLayout: isGrid
+            isGridLayout: isGrid,
+            hasWorkspaces: !tabCoordinator.workspaceManager.tabs.isEmpty
         )
     }
 
@@ -600,6 +601,10 @@ extension MainWindowController: TitleBarDelegate {
         tabCoordinator.dashboardVC?.toggleSidebarCollapse()
     }
 
+    func titleBarDidRequestAddProject() {
+        tabCoordinator.addRepoViaOpenPanel(window: window)
+    }
+
     func titleBarDidSelectLayout(_ layout: DashboardLayout) {
         dashboardVC?.setLayout(layout)
         config.dashboardLayout = layout.rawValue
@@ -661,7 +666,7 @@ extension MainWindowController: DashboardDelegate {
     }
 
     func dashboardDidRequestDelete(_ terminalID: String) {
-        tabCoordinator.dashboardDidRequestDelete(terminalID)
+        tabCoordinator.dashboardDidRequestDelete(terminalID, window: window)
     }
 
     func dashboardDidRequestAddProject() {

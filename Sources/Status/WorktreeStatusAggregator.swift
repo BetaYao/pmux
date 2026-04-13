@@ -45,22 +45,26 @@ class WorktreeStatusAggregator {
         rebuildWorktreeStatus(worktreePath: worktreePath)
     }
 
-    func agentDidUpdate(terminalID: String, status: AgentStatus, lastMessage: String) {
+    func agentDidUpdate(terminalID: String, status: AgentStatus, lastMessage: String, lastUserPrompt: String = "") {
         guard let worktreePath = terminalToWorktree[terminalID] else { return }
 
         let now = Date()
         let oldPaneState = paneStates[terminalID]
         let statusChanged = oldPaneState?.status != status
         let messageChanged = oldPaneState?.lastMessage != lastMessage
+        let promptChanged = oldPaneState?.lastUserPrompt != lastUserPrompt
 
-        guard statusChanged || messageChanged else { return }
+        guard statusChanged || messageChanged || promptChanged else { return }
 
         let paneIndex = paneIndexForTerminal(terminalID, worktreePath: worktreePath)
+        // Preserve existing prompt if new one is empty
+        let effectivePrompt = lastUserPrompt.isEmpty ? (oldPaneState?.lastUserPrompt ?? "") : lastUserPrompt
         let newPaneState = PaneStatus(
             paneIndex: paneIndex,
             terminalID: terminalID,
             status: status,
             lastMessage: lastMessage,
+            lastUserPrompt: effectivePrompt,
             lastUpdated: now
         )
         paneStates[terminalID] = newPaneState
@@ -99,6 +103,7 @@ class WorktreeStatusAggregator {
                     terminalID: pane.terminalID,
                     status: pane.status,
                     lastMessage: pane.lastMessage,
+                    lastUserPrompt: pane.lastUserPrompt,
                     lastUpdated: pane.lastUpdated
                 )
                 paneStates[tid] = pane
@@ -114,7 +119,8 @@ class WorktreeStatusAggregator {
             worktreePath: worktreePath,
             panes: panes,
             mostRecentPaneIndex: mostRecent.paneIndex,
-            mostRecentMessage: mostRecent.lastMessage
+            mostRecentMessage: mostRecent.lastMessage,
+            mostRecentUserPrompt: mostRecent.lastUserPrompt
         )
         worktreeStatuses[worktreePath] = ws
         delegate?.worktreeStatusDidUpdate(ws)

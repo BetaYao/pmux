@@ -29,11 +29,17 @@ enum WorktreeDeleter {
         deleteBranch: Bool = false,
         force: Bool = false
     ) throws {
-        // Don't allow deleting the main worktree
-        let mainPath = runGit(args: ["rev-parse", "--show-toplevel"], in: repoPath)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if worktreePath == mainPath {
-            throw WorktreeDeleterError.isMainWorktree
+        // Don't allow deleting the main worktree.
+        // Use the first entry from `git worktree list` which is always the main worktree.
+        // Note: `git rev-parse --show-toplevel` returns the worktree's own path when run
+        // inside a linked worktree, so it cannot reliably identify the main worktree.
+        let listOutput = runGit(args: ["worktree", "list", "--porcelain"], in: repoPath) ?? ""
+        if let firstLine = listOutput.components(separatedBy: "\n").first,
+           firstLine.hasPrefix("worktree ") {
+            let mainPath = String(firstLine.dropFirst("worktree ".count))
+            if worktreePath == mainPath {
+                throw WorktreeDeleterError.isMainWorktree
+            }
         }
 
         // git worktree remove <path> [--force]

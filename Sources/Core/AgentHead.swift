@@ -121,7 +121,7 @@ class AgentHead {
 
     func updateStatus(terminalID: String, status: AgentStatus,
                       lastMessage: String, roundDuration: TimeInterval,
-                      tasks: [TaskItem] = []) {
+                      tasks: [TaskItem] = [], lastUserPrompt: String = "") {
         lock.lock()
         guard var info = agents[terminalID] else {
             lock.unlock()
@@ -132,6 +132,9 @@ class AgentHead {
             || info.tasks.count != tasks.count
         info.status = status
         info.lastMessage = lastMessage
+        if !lastUserPrompt.isEmpty {
+            info.lastUserPrompt = lastUserPrompt
+        }
         info.roundDuration = roundDuration
         info.tasks = tasks
         agents[terminalID] = info

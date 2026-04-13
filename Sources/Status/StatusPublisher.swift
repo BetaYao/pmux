@@ -179,6 +179,7 @@ class StatusPublisher {
             let terminalMessage = agentDef?.extractLastMessage(from: content, maxLen: 80) ?? ""
             let lastMessage = webhookMessage ?? (terminalMessage.isEmpty ? nil : terminalMessage) ?? ""
             let webhookTasks = webhookProvider.tasks(for: worktreePath)
+            let lastUserPrompt = webhookProvider.lastUserPrompt(for: worktreePath) ?? ""
 
             // Feed AgentHead with structured data on every poll
             let agentType = AgentType.detect(fromLowercased: lowerContent)
@@ -199,7 +200,7 @@ class StatusPublisher {
             lock.unlock()
 
             AgentHead.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: agentType)
-            AgentHead.shared.updateStatus(terminalID: terminalID, status: detected, lastMessage: lastMessage, roundDuration: roundDur, tasks: webhookTasks)
+            AgentHead.shared.updateStatus(terminalID: terminalID, status: detected, lastMessage: lastMessage, roundDuration: roundDur, tasks: webhookTasks, lastUserPrompt: lastUserPrompt)
 
             // Extract activity events from terminal text (for non-webhook agents)
             // Only if no webhook events exist (webhook takes priority)
@@ -215,7 +216,8 @@ class StatusPublisher {
                 self?.aggregator?.agentDidUpdate(
                     terminalID: terminalID,
                     status: detected,
-                    lastMessage: lastMessage
+                    lastMessage: lastMessage,
+                    lastUserPrompt: lastUserPrompt
                 )
             }
 

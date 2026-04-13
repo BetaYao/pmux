@@ -7,11 +7,12 @@ final class PaneStatusTests: XCTestCase {
         let ws = WorktreeStatus(
             worktreePath: "/repo/main",
             panes: [
-                PaneStatus(paneIndex: 1, terminalID: "t1", status: .running, lastMessage: "building", lastUpdated: Date()),
-                PaneStatus(paneIndex: 2, terminalID: "t2", status: .idle, lastMessage: "done", lastUpdated: Date()),
+                PaneStatus(paneIndex: 1, terminalID: "t1", status: .running, lastMessage: "building", lastUserPrompt: "", lastUpdated: Date()),
+                PaneStatus(paneIndex: 2, terminalID: "t2", status: .idle, lastMessage: "done", lastUserPrompt: "", lastUpdated: Date()),
             ],
             mostRecentPaneIndex: 1,
-            mostRecentMessage: "building"
+            mostRecentMessage: "building",
+            mostRecentUserPrompt: ""
         )
         XCTAssertEqual(ws.statuses, [.running, .idle])
     }
@@ -20,11 +21,12 @@ final class PaneStatusTests: XCTestCase {
         let ws = WorktreeStatus(
             worktreePath: "/repo/main",
             panes: [
-                PaneStatus(paneIndex: 1, terminalID: "t1", status: .running, lastMessage: "", lastUpdated: Date()),
-                PaneStatus(paneIndex: 2, terminalID: "t2", status: .error, lastMessage: "failed", lastUpdated: Date()),
+                PaneStatus(paneIndex: 1, terminalID: "t1", status: .running, lastMessage: "", lastUserPrompt: "", lastUpdated: Date()),
+                PaneStatus(paneIndex: 2, terminalID: "t2", status: .error, lastMessage: "failed", lastUserPrompt: "", lastUpdated: Date()),
             ],
             mostRecentPaneIndex: 2,
-            mostRecentMessage: "failed"
+            mostRecentMessage: "failed",
+            mostRecentUserPrompt: ""
         )
         XCTAssertTrue(ws.hasUrgent)
     }
@@ -33,10 +35,11 @@ final class PaneStatusTests: XCTestCase {
         let ws = WorktreeStatus(
             worktreePath: "/repo/main",
             panes: [
-                PaneStatus(paneIndex: 1, terminalID: "t1", status: .running, lastMessage: "", lastUpdated: Date()),
+                PaneStatus(paneIndex: 1, terminalID: "t1", status: .running, lastMessage: "", lastUserPrompt: "", lastUpdated: Date()),
             ],
             mostRecentPaneIndex: 1,
-            mostRecentMessage: ""
+            mostRecentMessage: "",
+            mostRecentUserPrompt: ""
         )
         XCTAssertFalse(ws.hasUrgent)
     }
@@ -45,12 +48,13 @@ final class PaneStatusTests: XCTestCase {
         let ws = WorktreeStatus(
             worktreePath: "/repo/main",
             panes: [
-                PaneStatus(paneIndex: 1, terminalID: "t1", status: .idle, lastMessage: "", lastUpdated: Date()),
-                PaneStatus(paneIndex: 2, terminalID: "t2", status: .waiting, lastMessage: "?", lastUpdated: Date()),
-                PaneStatus(paneIndex: 3, terminalID: "t3", status: .running, lastMessage: "", lastUpdated: Date()),
+                PaneStatus(paneIndex: 1, terminalID: "t1", status: .idle, lastMessage: "", lastUserPrompt: "", lastUpdated: Date()),
+                PaneStatus(paneIndex: 2, terminalID: "t2", status: .waiting, lastMessage: "?", lastUserPrompt: "", lastUpdated: Date()),
+                PaneStatus(paneIndex: 3, terminalID: "t3", status: .running, lastMessage: "", lastUserPrompt: "", lastUpdated: Date()),
             ],
             mostRecentPaneIndex: 2,
-            mostRecentMessage: "?"
+            mostRecentMessage: "?",
+            mostRecentUserPrompt: ""
         )
         XCTAssertEqual(ws.highestPriority, .waiting)
     }
@@ -59,10 +63,11 @@ final class PaneStatusTests: XCTestCase {
         let ws = WorktreeStatus(
             worktreePath: "/repo/main",
             panes: [
-                PaneStatus(paneIndex: 1, terminalID: "t1", status: .running, lastMessage: "working", lastUpdated: Date()),
+                PaneStatus(paneIndex: 1, terminalID: "t1", status: .running, lastMessage: "working", lastUserPrompt: "", lastUpdated: Date()),
             ],
             mostRecentPaneIndex: 1,
-            mostRecentMessage: "working"
+            mostRecentMessage: "working",
+            mostRecentUserPrompt: ""
         )
         XCTAssertEqual(ws.statuses.count, 1)
         XCTAssertEqual(ws.highestPriority, .running)

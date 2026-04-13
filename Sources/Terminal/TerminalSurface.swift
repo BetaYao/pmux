@@ -34,7 +34,7 @@ class TerminalSurface {
 
     /// Create the terminal surface and add it to the given container view.
     /// If sessionName is provided, the surface runs inside a persistent backend session.
-    func create(in container: NSView, workingDirectory: String? = nil, sessionName: String? = nil) -> Bool {
+    func create(in container: NSView, workingDirectory: String? = nil, sessionName: String? = nil, completion: (() -> Void)? = nil) -> Bool {
         guard let app = GhosttyBridge.shared.app else {
             NSLog("GhosttyBridge not initialized")
             return false
@@ -52,6 +52,7 @@ class TerminalSurface {
                         tmuxCommand = "tmux new-session -s \(sessionName) \\; set-option status off"
                     }
                     self._createWithCommand(app: app, container: container, workingDirectory: workingDirectory, command: tmuxCommand)
+                    completion?()
                 }
                 return true  // Surface creation is deferred
             }

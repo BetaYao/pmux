@@ -201,6 +201,9 @@ class TerminalCoordinator {
     private func performDeleteWorktree(_ info: WorktreeInfo, repoPath: String, deleteBranch: Bool, force: Bool) {
         surfaceManager.removeTree(forPath: info.path)
 
+        // Notify delegate immediately so the UI card disappears instantly
+        delegate?.terminalCoordinator(self, didDeleteWorktree: info)
+
         DispatchQueue.global().async { [weak self] in
             do {
                 try WorktreeDeleter.deleteWorktree(
@@ -210,10 +213,7 @@ class TerminalCoordinator {
                     deleteBranch: deleteBranch,
                     force: force
                 )
-                DispatchQueue.main.async {
-                    guard let self else { return }
-                    self.delegate?.terminalCoordinator(self, didDeleteWorktree: info)
-                }
+                // Git deletion succeeded — no further UI update needed
             } catch {
                 DispatchQueue.main.async {
                     let errAlert = NSAlert()

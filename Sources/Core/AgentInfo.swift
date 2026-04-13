@@ -8,6 +8,7 @@ struct AgentInfo {
     let branch: String                 // git branch
     var status: AgentStatus            // current status
     var lastMessage: String            // latest message
+    var lastUserPrompt: String = ""    // most recent user prompt text
     var commandLine: String?           // current command from OSC 133 or text matching
     var roundDuration: TimeInterval    // seconds in current running round
     let startedAt: Date?               // for computing totalDuration live

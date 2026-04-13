@@ -5,6 +5,7 @@ struct PaneStatus {
     let terminalID: String    // TerminalSurface.id
     var status: AgentStatus
     var lastMessage: String
+    var lastUserPrompt: String
     var lastUpdated: Date     // When status or message last changed
 }
 
@@ -13,6 +14,7 @@ struct WorktreeStatus {
     var panes: [PaneStatus]           // Ordered by SplitTree leaf position
     var mostRecentPaneIndex: Int      // Pane whose lastMessage is displayed
     var mostRecentMessage: String     // That pane's lastMessage
+    var mostRecentUserPrompt: String  // That pane's lastUserPrompt
 
     var statuses: [AgentStatus] {
         panes.map(\.status)

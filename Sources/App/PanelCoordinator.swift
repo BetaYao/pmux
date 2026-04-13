@@ -23,7 +23,7 @@ class PanelCoordinator: NSObject {
         notificationPopover.contentViewController = ViewHostController(hostedView: notificationPanel)
 
         aiPanel.delegate = self
-        aiPanel.frame = NSRect(x: 0, y: 0, width: 360, height: 460)
+        aiPanel.frame = NSRect(x: 0, y: 0, width: 440, height: 460)
         aiPopover.contentSize = aiPanel.frame.size
         aiPopover.behavior = .transient
         aiPopover.animates = true
