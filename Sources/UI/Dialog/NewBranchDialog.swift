@@ -209,7 +209,14 @@ class NewBranchDialog: NSViewController {
             loadBranches(for: repoPaths[0])
         }
     }
-    
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        view.window?.initialFirstResponder = branchField
+        view.window?.makeFirstResponder(branchField)
+        view.window?.recalculateKeyViewLoop()
+    }
+
     private func createLabel(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text)
         label.font = ZoomTypography.label
@@ -320,6 +327,7 @@ class NewBranchDialog: NSViewController {
         createButton.isBordered = true
         createButton.target = self
         createButton.action = #selector(createClicked)
+        createButton.keyEquivalent = "\r"   // Return triggers Create
         createButton.setAccessibilityIdentifier("dialog.newBranch.createButton")
 
         createLoadingIndicator.style = .spinning
