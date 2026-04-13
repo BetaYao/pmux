@@ -941,7 +941,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         clearKeyboardFocusVisuals()
         clearDimOverlay()
 
-        if restoreSnapshot, let snap = snapshot, let responder = snap.firstResponder {
+        if restoreSnapshot, let snap = snapshot, let responder = snap.firstResponder,
+           (responder as? NSView)?.window != nil {
             view.window?.makeFirstResponder(responder)
         } else {
             DispatchQueue.main.async { [weak self] in
