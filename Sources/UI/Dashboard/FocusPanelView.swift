@@ -2,6 +2,7 @@ import AppKit
 
 final class FocusPanelView: NSView {
     let terminalContainer = NSView()
+    var isKeyboardFocused: Bool = false { didSet { updateKeyboardFocusAppearance() } }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -15,6 +16,23 @@ final class FocusPanelView: NSView {
         layer?.cornerRadius = radius
         layer?.maskedCorners = maskedCorners
         layer?.masksToBounds = true
+    }
+
+    private func updateKeyboardFocusAppearance() {
+        if isKeyboardFocused {
+            layer?.borderColor = SemanticColors.accent.cgColor
+            layer?.borderWidth = 3
+            layer?.shadowColor = SemanticColors.accent.cgColor
+            layer?.shadowOpacity = 0.6
+            layer?.shadowRadius = 10
+            layer?.shadowOffset = .zero
+            layer?.masksToBounds = false
+        } else {
+            layer?.borderColor = nil
+            layer?.borderWidth = 1
+            layer?.masksToBounds = true
+            layer?.shadowOpacity = 0
+        }
     }
 
     private func setup() {

@@ -10,6 +10,7 @@ final class MiniCardView: NSView {
     weak var delegate: AgentCardDelegate?
     private(set) var agentId: String = ""
     var isSelected: Bool = false { didSet { updateAppearance() } }
+    var isKeyboardFocused: Bool = false { didSet { updateAppearance() } }
 
     // Line 1: project/repo name (title)
     private let projectLabel = NSTextField(labelWithString: "")
@@ -291,6 +292,18 @@ final class MiniCardView: NSView {
 
     private func updateAppearance() {
         guard let layer = layer else { return }
+
+        if isKeyboardFocused {
+            layer.backgroundColor = resolvedCGColor(SemanticColors.panel2)
+            layer.borderColor = resolvedCGColor(SemanticColors.accent)
+            layer.borderWidth = 2
+            layer.shadowColor = resolvedCGColor(SemanticColors.accent)
+            layer.shadowOpacity = 0.6
+            layer.shadowRadius = 8
+            layer.shadowOffset = .zero
+            layer.masksToBounds = false
+            return
+        }
 
         if isSelected {
             layer.backgroundColor = resolvedCGColor(SemanticColors.panel2)
