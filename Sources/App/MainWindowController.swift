@@ -564,8 +564,8 @@ class AmuxWindow: NSWindow {
             }
         }
 
-        // Cmd+E: toggle D-state in focus layouts. No-op in grid (already in D).
-        if flags == .command && event.charactersIgnoringModifiers == "e" {
+        // Cmd+J: toggle D-state in focus layouts. No-op in grid (already in D).
+        if flags == .command && event.charactersIgnoringModifiers == "j" {
             if let dashVC = mwc.tabCoordinator.dashboardVC {
                 if dashVC.currentLayout == .grid {
                     return true  // swallow, no-op
