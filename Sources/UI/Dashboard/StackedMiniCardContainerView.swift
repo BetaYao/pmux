@@ -1,6 +1,11 @@
 // Sources/UI/Dashboard/StackedMiniCardContainerView.swift
 import AppKit
 
+protocol MiniCardReorderDelegate: AnyObject {
+    func miniCardReorderBegan(_ card: StackedMiniCardContainerView)
+    func miniCardReorderEnded(_ card: StackedMiniCardContainerView)
+}
+
 final class StackedMiniCardContainerView: NSView {
     override var acceptsFirstResponder: Bool { false }
 
@@ -9,6 +14,8 @@ final class StackedMiniCardContainerView: NSView {
 
     /// The container owns click handling. miniCardView.delegate must remain nil.
     weak var delegate: AgentCardDelegate?
+    /// Delegate for drag-to-reorder in sidebar. Set by DashboardViewController.
+    weak var reorderDelegate: MiniCardReorderDelegate?
 
     var agentId: String { miniCardView.agentId }
 
@@ -36,6 +43,98 @@ final class StackedMiniCardContainerView: NSView {
 
         let click = NSClickGestureRecognizer(target: self, action: #selector(handleClick))
         addGestureRecognizer(click)
+
+        let press = NSPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
+        press.minimumPressDuration = 0.3
+        press.allowableMovement = 4
+        addGestureRecognizer(press)
+    }
+
+    // MARK: - Drag-to-Reorder
+
+    private var dragStartLocation: NSPoint = .zero
+    private var dragOriginalFrame: NSRect = .zero
+
+    @objc private func handleLongPress(_ gesture: NSPressGestureRecognizer) {
+        guard let stack = superview as? NSStackView else { return }
+
+        switch gesture.state {
+        case .began:
+            dragStartLocation = gesture.location(in: stack)
+            dragOriginalFrame = frame
+
+            // Visual lift
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.15
+                ctx.allowsImplicitAnimation = true
+                self.animator().alphaValue = 0.85
+                self.layer?.shadowOpacity = 0.5
+                self.layer?.shadowRadius = 12
+                self.layer?.shadowOffset = CGSize(width: 0, height: -4)
+                self.layer?.shadowColor = NSColor.black.cgColor
+            }
+            reorderDelegate?.miniCardReorderBegan(self)
+
+        case .changed:
+            let current = gesture.location(in: stack)
+            let isVertical = stack.orientation == .vertical
+            let delta = isVertical ? (current.y - dragStartLocation.y) : (current.x - dragStartLocation.x)
+
+            // Move the card visually
+            if isVertical {
+                frame.origin.y = dragOriginalFrame.origin.y + delta
+            } else {
+                frame.origin.x = dragOriginalFrame.origin.x + delta
+            }
+
+            // Determine target index based on card center position in stack
+            let center = isVertical ? frame.midY : frame.midX
+            let arranged = stack.arrangedSubviews
+            var targetIndex = arranged.count - 1
+            for (i, sibling) in arranged.enumerated() {
+                let siblingMid = isVertical ? sibling.frame.midY : sibling.frame.midX
+                // For vertical (flipped): lower midY = higher in list
+                if isVertical {
+                    if center > siblingMid { targetIndex = i; break }
+                } else {
+                    if center < siblingMid { targetIndex = i; break }
+                }
+            }
+
+            // Animate siblings to make room
+            if let currentIndex = arranged.firstIndex(of: self), currentIndex != targetIndex {
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = 0.2
+                    ctx.allowsImplicitAnimation = true
+                    stack.removeArrangedSubview(self)
+                    stack.insertArrangedSubview(self, at: min(targetIndex, stack.arrangedSubviews.count))
+                    stack.layoutSubtreeIfNeeded()
+                }
+                // Keep the card at the dragged position (don't let layout snap it)
+                if isVertical {
+                    frame.origin.y = dragOriginalFrame.origin.y + delta
+                } else {
+                    frame.origin.x = dragOriginalFrame.origin.x + delta
+                }
+            }
+
+        case .ended, .cancelled:
+            // Settle into position
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.2
+                ctx.allowsImplicitAnimation = true
+                self.animator().alphaValue = 1.0
+                self.layer?.shadowOpacity = 0
+                self.layer?.shadowRadius = 0
+                if let stack = self.superview as? NSStackView {
+                    stack.layoutSubtreeIfNeeded()
+                }
+            }
+            reorderDelegate?.miniCardReorderEnded(self)
+
+        default:
+            break
+        }
     }
 
     // MARK: - Configure

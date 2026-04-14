@@ -456,6 +456,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         for agent in agents {
             let container = StackedMiniCardContainerView()
             container.delegate = self
+            container.reorderDelegate = self
             container.configure(paneCount: agent.paneCount)
             container.miniCardView.configure(
                 id: agent.id, project: agent.project, thread: agent.thread,
@@ -1195,6 +1196,40 @@ private class DashboardRootView: NSView {
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         needsDisplay = true
+    }
+}
+
+extension DashboardViewController: MiniCardReorderDelegate {
+    func miniCardReorderBegan(_ card: StackedMiniCardContainerView) {
+        // No-op — visual lift handled by the card itself
+    }
+
+    func miniCardReorderEnded(_ card: StackedMiniCardContainerView) {
+        guard let refs = focusLayoutRefs(for: currentLayout) else { return }
+        // Read the new order from the stack's arrangedSubviews
+        let newOrder = refs.stack.arrangedSubviews.compactMap { ($0 as? StackedMiniCardContainerView)?.agentId }
+        guard newOrder.count == agents.count else { return }
+
+        // Rebuild agents in the new order
+        var reordered: [AgentDisplayInfo] = []
+        for id in newOrder {
+            if let agent = agents.first(where: { $0.id == id }) {
+                reordered.append(agent)
+            }
+        }
+        agents = reordered
+
+        // Sync the stored miniCards array to match the new stack order
+        let updatedCards = refs.stack.arrangedSubviews.compactMap { $0 as? StackedMiniCardContainerView }
+        switch currentLayout {
+        case .leftRight: leftRightMiniCards = updatedCards
+        case .topSmall: topSmallMiniCards = updatedCards
+        case .topLarge: topLargeMiniCards = updatedCards
+        case .grid: break
+        }
+
+        // Persist
+        dashboardDelegate?.dashboardDidReorderCards(order: agents.map { $0.id })
     }
 }
 
