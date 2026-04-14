@@ -41,6 +41,17 @@ class TabCoordinator {
         return agents[index]
     }
 
+    /// Save config with split layouts synced from TerminalCoordinator.
+    /// Config is a value type — each coordinator holds its own copy.
+    /// Without syncing, saves from this coordinator would overwrite
+    /// splitLayouts written by TerminalCoordinator with an empty dictionary.
+    private func saveConfig() {
+        if let tc = terminalCoordinator {
+            config.splitLayouts = tc.config.splitLayouts
+        }
+        config.save()
+    }
+
     init(config: Config) {
         self.config = config
         NotificationCenter.default.addObserver(forName: .repoViewDidChangeWorktree, object: nil, queue: .main) { [weak self] notification in
@@ -48,7 +59,7 @@ class TabCoordinator {
                   let worktreePath = notification.userInfo?["worktreePath"] as? String,
                   let repoPath = self.worktreeRepoCache[worktreePath] else { return }
             self.config.activeWorktreePaths[repoPath] = worktreePath
-            self.config.save()
+            self.saveConfig()
         }
         NotificationCenter.default.addObserver(forName: .repoViewDidChangeFocusedPane, object: nil, queue: .main) { [weak self] notification in
             guard let self,
@@ -59,7 +70,7 @@ class TabCoordinator {
                let leaf = tree.allLeaves.first(where: { $0.id == leafId }) {
                 self.config.focusedPaneIds[worktreePath] = leaf.sessionName
             }
-            self.config.save()
+            self.saveConfig()
         }
     }
 
@@ -113,16 +124,19 @@ class TabCoordinator {
     }
 
     func addRepo(at path: String) {
-        guard !config.workspacePaths.contains(path) else {
-            return
-        }
-
-        config.workspacePaths.append(path)
-        config.save()
-
         WorktreeDiscovery.discoverAsync(repoPath: path) { [weak self] worktrees in
             guard let self else { return }
-            _ = self.integrateDiscoveredRepo(repoPath: path, worktrees: worktrees)
+            // Resolve to main worktree path so the display name reflects the repo root directory
+            let repoPath = worktrees.first(where: { $0.isMainWorktree })?.path ?? path
+
+            guard !self.config.workspacePaths.contains(repoPath) else {
+                return
+            }
+
+            self.config.workspacePaths.append(repoPath)
+            self.saveConfig()
+
+            _ = self.integrateDiscoveredRepo(repoPath: repoPath, worktrees: worktrees)
         }
     }
 
@@ -162,7 +176,7 @@ class TabCoordinator {
                 configChanged = true
             }
         }
-        if configChanged { config.save() }
+        if configChanged { saveConfig() }
 
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
         statusPublisher.updateSurfaces(terminalCoordinator.surfaceManager.all)
@@ -219,6 +233,20 @@ class TabCoordinator {
                 activityEvents: agent.activityEvents
             ))
         }
+
+        // Respect user-defined card order from config.
+        let cardOrder = config.cardOrder
+        if !cardOrder.isEmpty {
+            let orderIndex: [String: Int] = Dictionary(uniqueKeysWithValues:
+                cardOrder.enumerated().map { ($1, $0) }
+            )
+            result.sort { a, b in
+                let ia = orderIndex[a.worktreePath] ?? Int.max
+                let ib = orderIndex[b.worktreePath] ?? Int.max
+                return ia < ib
+            }
+        }
+
         return result
     }
 
@@ -232,13 +260,23 @@ class TabCoordinator {
             guard let self else { return }
 
             var discoveredWorktrees: [(repoPath: String, worktrees: [WorktreeInfo])] = []
+            var resolvedPaths: [String] = []
             for repoPath in repoPaths {
                 let worktrees = WorktreeDiscovery.discover(repoPath: repoPath)
-                discoveredWorktrees.append((repoPath, worktrees))
+                // Resolve to main worktree path so display name reflects the repo root
+                let resolved = worktrees.first(where: { $0.isMainWorktree })?.path ?? repoPath
+                discoveredWorktrees.append((resolved, worktrees))
+                resolvedPaths.append(resolved)
             }
 
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
+
+                // Update config if any paths were resolved to their main worktree
+                if resolvedPaths != repoPaths {
+                    self.config.workspacePaths = resolvedPaths
+                    self.saveConfig()
+                }
 
                 var allWorktreeInfos: [(info: WorktreeInfo, tree: SplitTree)] = []
 
@@ -273,7 +311,7 @@ class TabCoordinator {
                         configChanged = true
                     }
                 }
-                if configChanged { self.config.save() }
+                if configChanged { self.saveConfig() }
 
                 // Apply saved card order
                 if !cardOrder.isEmpty {
@@ -385,7 +423,7 @@ class TabCoordinator {
                 configChanged = true
             }
         }
-        if configChanged { config.save() }
+        if configChanged { saveConfig() }
 
         dashboardVC?.updateAgents(buildAgentDisplayInfos())
         statusPublisher.updateSurfaces(terminalCoordinator.surfaceManager.all)
@@ -510,7 +548,7 @@ class TabCoordinator {
         }
 
         config.workspacePaths.removeAll { $0 == tab.repoPath }
-        config.save()
+        saveConfig()
 
         workspaceManager.removeTab(at: tabIndex)
 
@@ -604,7 +642,7 @@ class TabCoordinator {
     func saveSessionState() {
         config.activeTabRepoPath = nil
         saveSelectedWorktree()
-        config.save()
+        saveConfig()
     }
 
     func saveSelectedWorktree() {
@@ -629,7 +667,7 @@ class TabCoordinator {
         // Save the selected worktree for this project
         if let worktreePath = tab.worktrees.first(where: { $0.branch == thread })?.path {
             config.activeWorktreePaths[tab.repoPath] = worktreePath
-            config.save()
+            saveConfig()
         }
         // Dashboard handles focus panel display via agent card selection
     }
