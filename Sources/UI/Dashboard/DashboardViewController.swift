@@ -769,6 +769,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         for agent in sorted {
             let container = StackedCardContainerView()
             container.delegate = self
+            container.reorderDelegate = self
             container.configure(paneCount: agent.paneCount)
             container.cardView.configure(
                 id: agent.id,
@@ -1227,6 +1228,54 @@ extension DashboardViewController: MiniCardReorderDelegate {
         case .topLarge: topLargeMiniCards = updatedCards
         case .grid: break
         }
+
+        // Persist
+        dashboardDelegate?.dashboardDidReorderCards(order: agents.map { $0.id })
+    }
+}
+
+extension DashboardViewController: GridCardReorderDelegate {
+    /// Index of the card being dragged in `gridCards`, before dragging started.
+    private static var gridDragOriginIndex: Int = 0
+
+    func gridCardReorderBegan(_ card: StackedCardContainerView) {
+        guard let idx = gridCards.firstIndex(of: card) else { return }
+        Self.gridDragOriginIndex = idx
+    }
+
+    func gridCardReorderMoved(_ card: StackedCardContainerView, locationInContainer point: NSPoint) {
+        let layout = currentGridLayout
+        let targetIndex = layout.gridIndex(for: point)
+        guard let currentIndex = gridCards.firstIndex(of: card),
+              targetIndex != currentIndex,
+              targetIndex >= 0, targetIndex < gridCards.count else { return }
+
+        // Move the card in the array
+        let moved = gridCards.remove(at: currentIndex)
+        gridCards.insert(moved, at: targetIndex)
+
+        // Animate other cards to their new positions (skip the dragged card)
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.2
+            ctx.allowsImplicitAnimation = true
+            for (i, c) in gridCards.enumerated() where c !== card {
+                c.animator().frame = layout.cardFrame(at: i)
+            }
+        }
+    }
+
+    func gridCardReorderEnded(_ card: StackedCardContainerView) {
+        // Rebuild agents array to match gridCards order
+        var reordered: [AgentDisplayInfo] = []
+        for c in gridCards {
+            if let agent = agents.first(where: { $0.id == c.agentId }) {
+                reordered.append(agent)
+            }
+        }
+        agents = reordered
+
+        // Snap the dragged card to its final grid position and re-layout
+        layoutGridFrames()
 
         // Persist
         dashboardDelegate?.dashboardDidReorderCards(order: agents.map { $0.id })

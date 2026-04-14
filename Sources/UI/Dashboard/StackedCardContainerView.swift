@@ -1,5 +1,11 @@
 import AppKit
 
+protocol GridCardReorderDelegate: AnyObject {
+    func gridCardReorderBegan(_ card: StackedCardContainerView)
+    func gridCardReorderMoved(_ card: StackedCardContainerView, locationInContainer point: NSPoint)
+    func gridCardReorderEnded(_ card: StackedCardContainerView)
+}
+
 final class StackedCardContainerView: NSView, NSGestureRecognizerDelegate {
     override var acceptsFirstResponder: Bool { false }
 
@@ -9,6 +15,8 @@ final class StackedCardContainerView: NSView, NSGestureRecognizerDelegate {
     /// The container owns click handling via its own gesture recognizer.
     /// cardView.delegate must remain nil to prevent double-firing.
     weak var delegate: AgentCardDelegate?
+    /// Delegate for drag-to-reorder in grid. Set by DashboardViewController.
+    weak var reorderDelegate: GridCardReorderDelegate?
 
     /// Stored so the NSGestureRecognizerDelegate can reference it for failure dependency.
     private var doubleClickRecognizer: NSClickGestureRecognizer?
@@ -77,6 +85,60 @@ final class StackedCardContainerView: NSView, NSGestureRecognizerDelegate {
 
         addGestureRecognizer(doubleClick)
         addGestureRecognizer(singleClick)
+
+        let press = NSPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
+        press.minimumPressDuration = 0.3
+        press.allowableMovement = 4
+        addGestureRecognizer(press)
+    }
+
+    // MARK: - Drag-to-Reorder
+
+    private var dragStartLocation: NSPoint = .zero
+
+    @objc private func handleLongPress(_ gesture: NSPressGestureRecognizer) {
+        guard let container = superview else { return }
+
+        switch gesture.state {
+        case .began:
+            dragStartLocation = gesture.location(in: container)
+
+            // Visual lift
+            layer?.zPosition = 100
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.15
+                ctx.allowsImplicitAnimation = true
+                self.alphaValue = 0.85
+                self.layer?.shadowOpacity = 0.5
+                self.layer?.shadowRadius = 12
+                self.layer?.shadowOffset = CGSize(width: 0, height: -4)
+                self.layer?.shadowColor = NSColor.black.cgColor
+            }
+            reorderDelegate?.gridCardReorderBegan(self)
+
+        case .changed:
+            let current = gesture.location(in: container)
+            let dx = current.x - dragStartLocation.x
+            let dy = current.y - dragStartLocation.y
+            frame.origin.x += dx
+            frame.origin.y += dy
+            dragStartLocation = current
+            reorderDelegate?.gridCardReorderMoved(self, locationInContainer: current)
+
+        case .ended, .cancelled:
+            layer?.zPosition = 0
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.2
+                ctx.allowsImplicitAnimation = true
+                self.alphaValue = 1.0
+                self.layer?.shadowOpacity = 0
+                self.layer?.shadowRadius = 0
+            }
+            reorderDelegate?.gridCardReorderEnded(self)
+
+        default:
+            break
+        }
     }
 
     // MARK: - Configure
