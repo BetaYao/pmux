@@ -8,6 +8,7 @@ protocol DashboardDelegate: AnyObject {
     func dashboardDidRequestEnterProject(_ project: String)
     func dashboardDidReorderCards(order: [String])
     func dashboardDidRequestDelete(_ terminalID: String)
+    func dashboardDidRequestCloseRepo(_ project: String)
     func dashboardDidRequestAddProject()
     func dashboardDidChangeSelection(_ dashboard: DashboardViewController)
 }
@@ -1131,6 +1132,11 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
 
     func agentCardDidRequestDelete(agentId: String) {
         dashboardDelegate?.dashboardDidRequestDelete(agentId)
+    }
+
+    func agentCardDidRequestCloseRepo(agentId: String) {
+        guard let agent = agents.first(where: { $0.id == agentId }) else { return }
+        dashboardDelegate?.dashboardDidRequestCloseRepo(agent.project)
     }
 
     private func updateMiniCardSelection() {

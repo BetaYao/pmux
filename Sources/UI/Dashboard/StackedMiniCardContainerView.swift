@@ -238,11 +238,19 @@ final class StackedMiniCardContainerView: NSView {
         let deleteItem = NSMenuItem(title: "Delete Worktree", action: #selector(deleteWorktreeAction), keyEquivalent: "")
         deleteItem.target = self
         menu.addItem(deleteItem)
+        menu.addItem(NSMenuItem.separator())
+        let closeRepoItem = NSMenuItem(title: "Close Repo", action: #selector(closeRepoAction), keyEquivalent: "")
+        closeRepoItem.target = self
+        menu.addItem(closeRepoItem)
         return menu
     }
 
     @objc private func deleteWorktreeAction() {
         delegate?.agentCardDidRequestDelete(agentId: miniCardView.agentId)
+    }
+
+    @objc private func closeRepoAction() {
+        delegate?.agentCardDidRequestCloseRepo(agentId: miniCardView.agentId)
     }
 
     // MARK: - Appearance

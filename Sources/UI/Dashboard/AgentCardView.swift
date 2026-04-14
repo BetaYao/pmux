@@ -4,11 +4,13 @@ protocol AgentCardDelegate: AnyObject {
     func agentCardClicked(agentId: String)
     func agentCardDoubleClicked(agentId: String)
     func agentCardDidRequestDelete(agentId: String)
+    func agentCardDidRequestCloseRepo(agentId: String)
 }
 
 extension AgentCardDelegate {
     func agentCardDoubleClicked(agentId: String) {}
     func agentCardDidRequestDelete(agentId: String) {}
+    func agentCardDidRequestCloseRepo(agentId: String) {}
 }
 
 final class AgentCardView: NSView {

@@ -150,6 +150,14 @@ class MainWindowController: NSWindowController {
         )
     }
 
+    /// Sync split layouts from TerminalCoordinator before saving config.
+    /// Config is a value type — without syncing, saves here overwrite
+    /// splitLayouts written by TerminalCoordinator with stale data.
+    private func saveConfig() {
+        config.splitLayouts = terminalCoordinator.config.splitLayouts
+        config.save()
+    }
+
     // MARK: - Menu Shortcuts
 
     private func setupMenuShortcuts() {
@@ -163,7 +171,7 @@ class MainWindowController: NSWindowController {
             self.tabCoordinator.runtimeBackend = resolution.backend
             if resolution.warningMessage == nil, resolution.backend != self.config.backend {
                 self.config.backend = resolution.backend
-                self.config.save()
+                self.saveConfig()
             }
             BackendResolver.showWarningIfNeeded(resolution, configBackend: self.config.backend)
         }
@@ -224,13 +232,13 @@ class MainWindowController: NSWindowController {
     @objc func dashboardZoomIn() {
         dashboardVC?.zoomIn()
         config.zoomIndex = dashboardVC?.zoomIndex ?? GridLayout.defaultZoomIndex
-        config.save()
+        saveConfig()
     }
 
     @objc func dashboardZoomOut() {
         dashboardVC?.zoomOut()
         config.zoomIndex = dashboardVC?.zoomIndex ?? GridLayout.defaultZoomIndex
-        config.save()
+        saveConfig()
     }
 
     @objc func showDiffOverlay() {
@@ -650,7 +658,7 @@ extension MainWindowController: TitleBarDelegate {
         tabCoordinator.config.dashboardLayout = layout.rawValue
         terminalCoordinator.config.dashboardLayout = layout.rawValue
         updateCoordinator.config.dashboardLayout = layout.rawValue
-        config.save()
+        saveConfig()
         titleBar.setCurrentLayout(layout)
         updateTitleBar()
     }
@@ -670,7 +678,7 @@ extension MainWindowController: TitleBarDelegate {
         tabCoordinator.config.themeMode = next.rawValue
         terminalCoordinator.config.themeMode = next.rawValue
         updateCoordinator.config.themeMode = next.rawValue
-        config.save()
+        saveConfig()
         ThemeMode.applyAppearance(next)
         // Window appearance must also be updated since it was set explicitly in init
         switch next {
@@ -701,7 +709,11 @@ extension MainWindowController: DashboardDelegate {
     func dashboardDidReorderCards(order: [String]) {
         let paths = order.compactMap { AgentHead.shared.agent(for: $0)?.worktreePath }
         config.cardOrder = paths
-        config.save()
+        saveConfig()
+    }
+
+    func dashboardDidRequestCloseRepo(_ project: String) {
+        tabCoordinator.showCloseProjectModal(project, window: window)
     }
 
     func dashboardDidRequestDelete(_ terminalID: String) {
@@ -716,7 +728,7 @@ extension MainWindowController: DashboardDelegate {
         updateTitleBar()
         tabCoordinator.saveSelectedWorktree()
         config.selectedWorktreePath = tabCoordinator.config.selectedWorktreePath
-        config.save()
+        saveConfig()
     }
 }
 
@@ -792,10 +804,13 @@ extension MainWindowController: SettingsDelegate {
         let oldPaths = Set(self.config.workspacePaths)
         let oldWecomBot = self.config.wecomBot
         let oldWechat = self.config.wechat
-        self.config = config
-        tabCoordinator.config = config
-        terminalCoordinator.config = config
-        updateCoordinator.config = config
+        // Preserve split layouts — SettingsVC doesn't track them
+        var merged = config
+        merged.splitLayouts = terminalCoordinator.config.splitLayouts
+        self.config = merged
+        tabCoordinator.config = merged
+        terminalCoordinator.config = merged
+        updateCoordinator.config = merged
         normalizeBackendAvailabilityIfNeeded()
 
         let newPaths = Set(config.workspacePaths)
