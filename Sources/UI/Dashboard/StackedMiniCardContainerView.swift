@@ -117,17 +117,19 @@ final class StackedMiniCardContainerView: NSView {
             frame.origin = newOrigin
             dragStartLocation = current
 
-            // Determine target index from the card's center vs. arranged subviews
+            // Determine target index from the card's center vs. arranged subviews.
+            // FlippedStackView has y=0 at top, increasing downward. Horizontal stacks
+            // go left-to-right. In both cases midY/midX increases with index.
+            // Find the first sibling whose midpoint is PAST the card's center.
             let center = isVertical ? frame.midY : frame.midX
             let arranged = stack.arrangedSubviews // includes placeholder, not self
-            var targetIndex = arranged.count - 1
+            var targetIndex = arranged.count
             for (i, sibling) in arranged.enumerated() {
                 guard sibling !== self else { continue }
                 let siblingMid = isVertical ? sibling.frame.midY : sibling.frame.midX
-                if isVertical {
-                    if center > siblingMid { targetIndex = i; break }
-                } else {
-                    if center < siblingMid { targetIndex = i; break }
+                if siblingMid > center {
+                    targetIndex = i
+                    break
                 }
             }
 
