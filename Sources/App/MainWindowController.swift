@@ -644,10 +644,6 @@ extension MainWindowController: TitleBarDelegate {
         tabCoordinator.showNewThreadModal(window: window)
     }
 
-    func titleBarDidRequestCollapseSidebar() {
-        tabCoordinator.dashboardVC?.toggleSidebarCollapse()
-    }
-
     func titleBarDidRequestAddProject() {
         tabCoordinator.addRepoViaOpenPanel(window: window)
     }
@@ -665,10 +661,6 @@ extension MainWindowController: TitleBarDelegate {
 
     func titleBarDidToggleNotifications() {
         panelCoordinator.toggleNotificationPanel()
-    }
-
-    func titleBarDidToggleAI() {
-        panelCoordinator.toggleAIPanel()
     }
 
     func titleBarDidToggleTheme() {
