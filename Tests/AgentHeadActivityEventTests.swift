@@ -35,4 +35,22 @@ final class AgentHeadActivityEventTests: XCTestCase {
         events.removeAll()
         XCTAssertTrue(events.isEmpty)
     }
+
+    func testUpsertLatestActivityEventReplacesMatchingNewestEvent() {
+        let head = AgentHead.shared
+        let surface = TerminalSurface()
+        head.register(surface: surface, worktreePath: "/tmp/project", branch: "main", project: "project", startedAt: nil)
+        defer { head.unregister(terminalID: surface.id) }
+
+        let first = ActivityEvent(tool: "Bash", detail: "swift test", isError: false, timestamp: Date())
+        let second = ActivityEvent(tool: "Bash", detail: "swift test", isError: true, timestamp: Date())
+
+        head.upsertLatestActivityEvent(first, forTerminalID: surface.id)
+        head.upsertLatestActivityEvent(second, forTerminalID: surface.id)
+
+        let events = head.agent(for: surface.id)?.activityEvents ?? []
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events[0].tool, "Bash")
+        XCTAssertTrue(events[0].isError)
+    }
 }

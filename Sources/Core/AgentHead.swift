@@ -186,7 +186,7 @@ class AgentHead {
     /// - .unknown → any type allowed
     /// - shell task (isShellTask) → any type allowed
     /// - AI agent (isAIAgent) → only another AI agent allowed (no demotion)
-    /// When type is .claudeCode, upgrades TmuxChannel → HooksChannel.
+    /// When type supports hooks, upgrades backend channel → HooksChannel.
     func updateDetection(terminalID: String, commandLine: String?, agentType: AgentType) {
         lock.lock()
         guard var info = agents[terminalID] else {
@@ -196,8 +196,8 @@ class AgentHead {
 
         let worktreePath = info.worktreePath
 
-        // Upgrade channel for Claude Code: backend channel -> HooksChannel
-        if agentType == .claudeCode {
+        // Upgrade channel for supported hook-based agents.
+        if agentType == .claudeCode || agentType == .codex {
             let backend = backendsByPath[worktreePath] ?? "zmx"
             if let zmx = channels[terminalID] as? ZmxChannel {
                 let hooks = HooksChannel(sessionName: zmx.sessionName, backend: backend)
@@ -236,8 +236,9 @@ class AgentHead {
                 info.agentType = agentType
                 changed = true
 
-                // Upgrade channel for Claude Code: TmuxChannel → HooksChannel
-                if agentType == .claudeCode, let tmux = channels[terminalID] as? TmuxChannel {
+                // Upgrade channel for supported hook-based agents.
+                if (agentType == .claudeCode || agentType == .codex),
+                   let tmux = channels[terminalID] as? TmuxChannel {
                     let hooks = HooksChannel(sessionName: tmux.sessionName)
                     channels[terminalID] = hooks
                     info.channel = hooks
@@ -293,16 +294,26 @@ class AgentHead {
             lock.unlock()
             return
         }
-        let hooks = channels[tid] as? HooksChannel
         lock.unlock()
+
+        switch event.source {
+        case "claude-code":
+            updateDetection(terminalID: tid, commandLine: nil, agentType: .claudeCode)
+        case "codex":
+            updateDetection(terminalID: tid, commandLine: nil, agentType: .codex)
+        default:
+            break
+        }
+
+        let hooks = channel(for: tid) as? HooksChannel
 
         hooks?.handleWebhookEvent(event)
 
         // Extract activity events from tool use events
         switch event.event {
-        case .toolUseEnd, .toolUseFailed:
+        case .toolUseStart, .toolUseEnd, .toolUseFailed:
             let activityEvent = ActivityEventExtractor.extract(from: event)
-            appendActivityEvent(activityEvent, forTerminalID: tid)
+            upsertLatestActivityEvent(activityEvent, forTerminalID: tid)
         case .agentStop:
             clearActivityEvents(forTerminalID: tid)
         default:
@@ -329,6 +340,23 @@ class AgentHead {
             return
         }
         Self.appendToRingBuffer(&agents[tid]!.activityEvents, event: event, maxSize: 20)
+        lock.unlock()
+    }
+
+    /// Append or replace the newest activity event when the incoming event refers to the same tool/detail.
+    func upsertLatestActivityEvent(_ event: ActivityEvent, forTerminalID tid: String) {
+        lock.lock()
+        guard agents[tid] != nil else {
+            lock.unlock()
+            return
+        }
+        if let latest = agents[tid]!.activityEvents.first,
+           latest.tool == event.tool,
+           latest.detail == event.detail {
+            agents[tid]!.activityEvents[0] = event
+        } else {
+            Self.appendToRingBuffer(&agents[tid]!.activityEvents, event: event, maxSize: 20)
+        }
         lock.unlock()
     }
 

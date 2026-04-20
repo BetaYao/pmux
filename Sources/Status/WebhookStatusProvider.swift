@@ -158,6 +158,12 @@ class WebhookStatusProvider {
         if let prompt = event.data?["prompt"] as? String, !prompt.isEmpty {
             return prompt
         }
+        if let input = event.data?["input"] as? String, !input.isEmpty {
+            return input
+        }
+        if let text = event.data?["text"] as? String, !text.isEmpty {
+            return text
+        }
         if let message = event.data?["message"] as? String, !message.isEmpty {
             return message
         }
@@ -170,12 +176,14 @@ class WebhookStatusProvider {
         switch event.event {
         case .toolUseStart:
             if let toolName = data?["tool_name"] as? String {
-                return "Using \(toolName)"
+                let toolInput = data?["tool_input"] as? [String: Any] ?? [:]
+                return ActivityEventExtractor.summary(toolName: toolName, toolInput: toolInput)
             }
             return nil
         case .toolUseEnd:
             if let toolName = data?["tool_name"] as? String {
-                return "Done: \(toolName)"
+                let toolInput = data?["tool_input"] as? [String: Any] ?? [:]
+                return ActivityEventExtractor.summary(toolName: toolName, toolInput: toolInput)
             }
             return nil
         case .agentStop:
@@ -203,7 +211,8 @@ class WebhookStatusProvider {
             return "Processing prompt"
         case .toolUseFailed:
             if let toolName = data?["tool_name"] as? String {
-                return "Failed: \(toolName)"
+                let toolInput = data?["tool_input"] as? [String: Any] ?? [:]
+                return ActivityEventExtractor.summary(toolName: toolName, toolInput: toolInput, isError: true)
             }
             return "Tool failed"
         case .stopFailure:

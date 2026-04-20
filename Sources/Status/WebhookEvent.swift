@@ -64,15 +64,15 @@ struct WebhookEvent {
     let timestamp: String?
     let data: [String: Any]?
 
-    /// Parse from JSON data. Supports both generic protocol and Claude Code native format.
+    /// Parse from JSON data. Supports generic protocol and native hook payloads.
     static func parse(from jsonData: Data) throws -> WebhookEvent {
         guard let json = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else {
             throw WebhookEventError.invalidJSON
         }
 
-        // Detect format: Claude Code native has "hook_event_name", generic has "event"
+        // Detect format: native hook payloads have "hook_event_name", generic payloads have "event"
         if let hookEventName = json["hook_event_name"] as? String {
-            return try parseClaudeCode(json: json, hookEventName: hookEventName)
+            return try parseNativeHook(json: json, hookEventName: hookEventName)
         } else {
             return try parseGeneric(json: json)
         }
@@ -98,7 +98,7 @@ struct WebhookEvent {
         )
     }
 
-    private static func parseClaudeCode(json: [String: Any], hookEventName: String) throws -> WebhookEvent {
+    private static func parseNativeHook(json: [String: Any], hookEventName: String) throws -> WebhookEvent {
         guard let sessionId = json["session_id"] as? String,
               let cwd = json["cwd"] as? String else {
             throw WebhookEventError.missingRequiredField
@@ -106,6 +106,7 @@ struct WebhookEvent {
         guard let event = WebhookEventType.fromClaudeCode(hookEventName) else {
             throw WebhookEventError.unknownEventType(hookEventName)
         }
+        let source = inferNativeHookSource(from: json, hookEventName: hookEventName)
 
         // Collect remaining fields as data
         var data: [String: Any] = [:]
@@ -115,13 +116,42 @@ struct WebhookEvent {
         }
 
         return WebhookEvent(
-            source: "claude-code",
+            source: source,
             sessionId: sessionId,
             event: event,
             cwd: cwd,
             timestamp: nil,
             data: data.isEmpty ? nil : data
         )
+    }
+
+    /// Inference based on observed payload differences:
+    /// Codex hook payloads commonly include extra execution metadata such as turn_id/call_id/tool_kind/model.
+    /// Claude Code-only hook events are treated as Claude immediately.
+    private static func inferNativeHookSource(from json: [String: Any], hookEventName: String) -> String {
+        switch hookEventName {
+        case "Notification", "WorktreeCreate", "PostToolUseFailure", "StopFailure", "SubagentStart", "SubagentStop", "CwdChanged":
+            return "claude-code"
+        default:
+            break
+        }
+
+        let codexSpecificKeys: Set<String> = [
+            "turn_id",
+            "call_id",
+            "tool_kind",
+            "duration_ms",
+            "output_preview",
+            "model",
+            "agent_id",
+            "agent_type",
+        ]
+
+        if !codexSpecificKeys.isDisjoint(with: Set(json.keys)) {
+            return "codex"
+        }
+
+        return "claude-code"
     }
 }
 

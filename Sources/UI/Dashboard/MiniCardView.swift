@@ -75,17 +75,13 @@ final class MiniCardView: NSView {
             promptLabel.stringValue = ""
             promptLabel.isHidden = true
         }
-        // Content priority: tasks > activity feed > last message (same as grid card)
+        // Content priority: tasks > current tool > last message.
+        // Mini cards are compact, so only show the newest tool event.
         if let taskAttr = TaskListRenderer.attributedString(for: tasks) {
             messageLabel.attributedStringValue = taskAttr
         } else if !activityEvents.isEmpty {
-            let rendered = ActivityFeedRenderer.render(events: activityEvents, maxLines: 2)
-            let combined = NSMutableAttributedString()
-            for (i, line) in rendered.enumerated() {
-                if i > 0 { combined.append(NSAttributedString(string: "\n")) }
-                combined.append(line)
-            }
-            messageLabel.attributedStringValue = combined
+            messageLabel.attributedStringValue = ActivityFeedRenderer.render(events: activityEvents, maxLines: 1).first
+                ?? NSAttributedString(string: lastMessage)
         } else {
             messageLabel.stringValue = lastMessage
         }
@@ -190,8 +186,8 @@ final class MiniCardView: NSView {
         messageLabel.font = NSFont.monospacedSystemFont(ofSize: Typography.secondaryPointSize, weight: .regular)
         messageLabel.textColor = SemanticColors.muted
         messageLabel.lineBreakMode = .byTruncatingTail
-        messageLabel.maximumNumberOfLines = 2
-        messageLabel.cell?.wraps = true
+        messageLabel.maximumNumberOfLines = 1
+        messageLabel.cell?.wraps = false
         messageLabel.cell?.truncatesLastVisibleLine = true
         messageLabel.translatesAutoresizingMaskIntoConstraints = false
         messageLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)

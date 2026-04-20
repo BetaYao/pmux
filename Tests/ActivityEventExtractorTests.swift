@@ -104,6 +104,23 @@ final class ActivityEventExtractorTests: XCTestCase {
         XCTAssertEqual(ActivityEventExtractor.shortPath("/a/b.swift"), "a/b.swift")
     }
 
+    func testSummaryIncludesToolAndDetail() {
+        let summary = ActivityEventExtractor.summary(
+            toolName: "Bash",
+            toolInput: ["command": "swift test --filter AuthTests"]
+        )
+        XCTAssertEqual(summary, "Bash swift test --filter AuthTests")
+    }
+
+    func testSummaryIncludesFailurePrefix() {
+        let summary = ActivityEventExtractor.summary(
+            toolName: "Read",
+            toolInput: ["file_path": "/tmp/project/file.swift"],
+            isError: true
+        )
+        XCTAssertEqual(summary, "Failed Read project/file.swift")
+    }
+
     private func makeWebhookEvent(tool: String, input: [String: Any], eventType: WebhookEventType = .toolUseEnd, result: String? = nil) -> WebhookEvent {
         var data: [String: Any] = ["tool_name": tool, "tool_input": input]
         if let result { data["tool_result"] = result }

@@ -90,6 +90,16 @@ final class WebhookEventTests: XCTestCase {
         XCTAssertEqual(event.event, .toolUseEnd)
     }
 
+    func testParseCodexNativeSessionStart() throws {
+        let json = """
+        {"hook_event_name":"SessionStart","session_id":"sess_codex","cwd":"/tmp/project","model":"gpt-5.4","turn_id":"turn_123"}
+        """.data(using: .utf8)!
+        let event = try WebhookEvent.parse(from: json)
+        XCTAssertEqual(event.event, .sessionStart)
+        XCTAssertEqual(event.source, "codex")
+        XCTAssertEqual(event.data?["model"] as? String, "gpt-5.4")
+    }
+
     // MARK: - Event → AgentStatus mapping
 
     func testEventToAgentStatus() {

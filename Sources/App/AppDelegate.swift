@@ -15,9 +15,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let mode = ThemeMode(rawValue: config.themeMode) ?? .dark
         ThemeMode.applyAppearance(mode)
 
-        // Ensure Claude Code hooks are configured
+        // Ensure supported CLI hook integrations are configured
         if config.webhook.enabled {
             ClaudeHooksSetup.ensureHooksConfigured(port: config.webhook.port)
+            CodexHooksSetup.ensureHooksConfigured(port: config.webhook.port)
         }
         NSAppearance.current = NSApp.effectiveAppearance
 

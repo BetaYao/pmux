@@ -18,6 +18,12 @@ enum ActivityEventExtractor {
         )
     }
 
+    static func summary(toolName: String, toolInput: [String: Any], isError: Bool = false) -> String {
+        let detail = extractDetail(toolName: toolName, toolInput: toolInput)
+        let base = detail == toolName ? toolName : "\(toolName) \(detail)"
+        return isError ? "Failed \(base)" : base
+    }
+
     static func shortPath(_ path: String) -> String {
         let url = URL(fileURLWithPath: path)
         let components = url.pathComponents.filter { $0 != "/" }
@@ -39,6 +45,11 @@ enum ActivityEventExtractor {
                 return shortPath(path)
             }
             return toolName
+        case "MultiEdit":
+            if let path = toolInput["file_path"] as? String {
+                return shortPath(path)
+            }
+            return toolName
         case "Bash":
             if let cmd = toolInput["command"] as? String {
                 return truncate(cmd, maxLen: 60)
@@ -55,6 +66,14 @@ enum ActivityEventExtractor {
             }
             return toolName
         case "Agent":
+            if let prompt = toolInput["prompt"] as? String {
+                return truncate(prompt, maxLen: 40)
+            }
+            return toolName
+        case "Task":
+            if let description = toolInput["description"] as? String {
+                return truncate(description, maxLen: 40)
+            }
             if let prompt = toolInput["prompt"] as? String {
                 return truncate(prompt, maxLen: 40)
             }
