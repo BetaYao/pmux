@@ -2,7 +2,7 @@ import AppKit
 
 protocol NotificationPanelDelegate: AnyObject {
     func notificationPanelDidRequestClose()
-    func notificationPanelDidSelectItem(worktreePath: String)
+    func notificationPanelDidSelectItem(_ entry: NotificationEntry)
 }
 
 final class NotificationPanelView: NSView {
@@ -12,7 +12,7 @@ final class NotificationPanelView: NSView {
 
     // MARK: - Data
 
-    private var items: [(title: String, meta: String, worktreePath: String)] = []
+    private var items: [NotificationEntry] = []
 
     // MARK: - Subviews
 
@@ -118,11 +118,7 @@ final class NotificationPanelView: NSView {
         }
     }
 
-    func updateNotifications(_ items: [(title: String, meta: String)]) {
-        updateNotifications(items.map { (title: $0.title, meta: $0.meta, worktreePath: "") })
-    }
-
-    func updateNotifications(_ items: [(title: String, meta: String, worktreePath: String)]) {
+    func updateNotifications(_ items: [NotificationEntry]) {
         self.items = items
         countLabel.stringValue = "\(items.count)"
 
@@ -133,7 +129,7 @@ final class NotificationPanelView: NSView {
         }
 
         for (index, item) in items.enumerated() {
-            let card = makeItemView(index: index, title: item.title, meta: item.meta)
+            let card = makeItemView(index: index, entry: item)
             contentStack.addArrangedSubview(card)
 
             NSLayoutConstraint.activate([
@@ -221,7 +217,7 @@ final class NotificationPanelView: NSView {
         layer?.shadowOpacity = 1.0
     }
 
-    private func makeItemView(index: Int, title: String, meta: String) -> NSView {
+    private func makeItemView(index: Int, entry: NotificationEntry) -> NSView {
         let container = NSView()
         container.wantsLayer = true
         container.identifier = NSUserInterfaceItemIdentifier("panel.notification.item.\(index)")
@@ -232,13 +228,13 @@ final class NotificationPanelView: NSView {
         container.layer?.borderColor = SemanticColors.line.cgColor
         container.layer?.cornerRadius = 6
 
-        let titleLabel = NSTextField(labelWithString: title)
+        let titleLabel = NSTextField(labelWithString: titleText(for: entry))
         titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
         titleLabel.textColor = SemanticColors.text
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        let metaLabel = NSTextField(labelWithString: meta)
+        let metaLabel = NSTextField(labelWithString: entry.message)
         metaLabel.font = NSFont.systemFont(ofSize: 11)
         metaLabel.textColor = SemanticColors.muted
         metaLabel.lineBreakMode = .byTruncatingTail
@@ -263,6 +259,15 @@ final class NotificationPanelView: NSView {
         container.addGestureRecognizer(click)
 
         return container
+    }
+
+    private func titleText(for entry: NotificationEntry) -> String {
+        var suffix = entry.status.rawValue
+        if let paneIndex = entry.paneIndex {
+            suffix += " [Pane \(paneIndex)]"
+        }
+        let target = entry.workspaceName.isEmpty ? entry.branch : "\(entry.workspaceName) / \(entry.branch)"
+        return "\(target)  \(suffix)"
     }
 
     // MARK: - Drawing
@@ -304,6 +309,6 @@ final class NotificationPanelView: NSView {
               idStr.hasPrefix("panel.notification.item."),
               let index = Int(idStr.replacingOccurrences(of: "panel.notification.item.", with: "")),
               index < items.count else { return }
-        delegate?.notificationPanelDidSelectItem(worktreePath: items[index].worktreePath)
+        delegate?.notificationPanelDidSelectItem(items[index])
     }
 }

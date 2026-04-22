@@ -4,6 +4,10 @@ class WebhookStatusProvider {
     private let queue = DispatchQueue(label: "amux.webhook-status")
     private var sessions: [String: SessionState] = [:]
     private var knownWorktrees: [String] = []
+    var onStatusChanged: ((String) -> Void)?
+    var codexPromptLookup: (String) -> String? = { sessionId in
+        CodexSessionPromptLookup.lastUserPrompt(sessionId: sessionId)
+    }
 
     /// Called when a WorktreeCreate event arrives with a path not in knownWorktrees
     var onNewWorktreeDetected: ((String) -> Void)?
@@ -94,7 +98,7 @@ class WebhookStatusProvider {
 
             let status = event.event.agentStatus(data: event.data)
             let message = Self.extractMessage(from: event)
-            let userPrompt = Self.extractUserPrompt(from: event)
+            let userPrompt = Self.extractUserPrompt(from: event) ?? fallbackUserPrompt(for: event)
 
             if var existing = sessions[event.sessionId] {
                 existing.status = status
@@ -114,6 +118,10 @@ class WebhookStatusProvider {
                 )
                 Self.applyTaskEvent(event, to: &newSession)
                 sessions[event.sessionId] = newSession
+            }
+
+            DispatchQueue.main.async { [weak self] in
+                self?.onStatusChanged?(worktreePath)
             }
         }
     }
@@ -170,6 +178,11 @@ class WebhookStatusProvider {
         return nil
     }
 
+    private func fallbackUserPrompt(for event: WebhookEvent) -> String? {
+        guard event.source == "codex", event.event == .userPrompt else { return nil }
+        return codexPromptLookup(event.sessionId)
+    }
+
     /// Extract a human-readable message from a webhook event
     private static func extractMessage(from event: WebhookEvent) -> String? {
         let data = event.data
@@ -187,8 +200,15 @@ class WebhookStatusProvider {
             }
             return nil
         case .agentStop:
-            let reason = data?["stop_reason"] as? String ?? "done"
-            return "Stopped: \(reason)"
+            let reason = (data?["stop_reason"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            switch reason {
+            case nil, "", "done", "completed", "complete", "success", "succeeded":
+                return "Task completed"
+            case "cancelled", "canceled":
+                return "Task cancelled"
+            default:
+                return "Stopped"
+            }
         case .error:
             let message = data?["message"] as? String ?? "Error occurred"
             return message

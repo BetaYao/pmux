@@ -168,7 +168,8 @@ extension NotificationHistoryViewController: NSTableViewDelegate {
         cell.addSubview(timeLabel)
 
         // Branch + status
-        let statusText = "\(entry.branch)  \(entry.status.rawValue)"
+        let target = entry.workspaceName.isEmpty ? entry.branch : "\(entry.workspaceName) / \(entry.branch)"
+        let statusText = "\(target)  \(entry.status.rawValue)"
         let branchLabel = NSTextField(labelWithString: statusText)
         branchLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         branchLabel.textColor = Theme.textPrimary

@@ -3,6 +3,7 @@ import Foundation
 struct NotificationEntry: Identifiable {
     let id: UUID
     let timestamp: Date
+    let workspaceName: String
     let branch: String
     let worktreePath: String
     let status: AgentStatus
@@ -10,9 +11,10 @@ struct NotificationEntry: Identifiable {
     var isRead: Bool
     let paneIndex: Int?  // nil for single-pane worktrees
 
-    init(branch: String, worktreePath: String, status: AgentStatus, message: String, paneIndex: Int? = nil) {
+    init(workspaceName: String = "", branch: String, worktreePath: String, status: AgentStatus, message: String, paneIndex: Int? = nil) {
         self.id = UUID()
         self.timestamp = Date()
+        self.workspaceName = workspaceName
         self.branch = branch
         self.worktreePath = worktreePath
         self.status = status
@@ -43,6 +45,15 @@ class NotificationHistory {
 
     func markRead(id: UUID) {
         if let index = entries.firstIndex(where: { $0.id == id }) {
+            entries[index].isRead = true
+            NotificationCenter.default.post(name: .notificationHistoryDidChange, object: nil)
+        }
+    }
+
+    func markLatestRead(worktreePath: String, paneIndex: Int?) {
+        if let index = entries.firstIndex(where: {
+            $0.worktreePath == worktreePath && $0.paneIndex == paneIndex && !$0.isRead
+        }) {
             entries[index].isRead = true
             NotificationCenter.default.post(name: .notificationHistoryDidChange, object: nil)
         }

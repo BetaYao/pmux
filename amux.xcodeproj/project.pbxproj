@@ -89,6 +89,7 @@
 		60EAB450B28BE33A6B10AB2D /* FuzzyMatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = E52052467AC47FB35B914991 /* FuzzyMatch.swift */; };
 		65302E44A50551B00DB56FF8 /* UpdateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40B73C9CDD58BD5046BEDBF9 /* UpdateManager.swift */; };
 		657A8C63949C0D25073D8794 /* PasteRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 625358E2BF5C78EEC9AD1849 /* PasteRegressionTests.swift */; };
+		67D28AAC8088E0CAFA4CAF61 /* CodexSessionPromptLookup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91692BA3DA00B2A74251D935 /* CodexSessionPromptLookup.swift */; };
 		68450E7786073CCF31F3A3BD /* StackedCardContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A7A0330F333A0B2C6446D3E /* StackedCardContainerView.swift */; };
 		69C15496E8B2B3F786E6130E /* PanelBackdropView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B60D750E445BAD16A19C4EA /* PanelBackdropView.swift */; };
 		69F53C95363DFBD282918709 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5CE7477048E954AB50ACAAFA /* Assets.xcassets */; };
@@ -293,6 +294,7 @@
 		8F6EB7B05754EDB7EFE397AD /* ClaudeHooksSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeHooksSetup.swift; sourceTree = "<group>"; };
 		8FD74DC269CC1047CDF533BE /* WeComFrameParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeComFrameParser.swift; sourceTree = "<group>"; };
 		90AF598DFE449A8C4E256799 /* MainWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowController.swift; sourceTree = "<group>"; };
+		91692BA3DA00B2A74251D935 /* CodexSessionPromptLookup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexSessionPromptLookup.swift; sourceTree = "<group>"; };
 		919CE6923B654A5EB0DFEE1F /* ActivityFeedRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityFeedRenderer.swift; sourceTree = "<group>"; };
 		94C3780E9A9F385A62BA4B4E /* OSC133ParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSC133ParserTests.swift; sourceTree = "<group>"; };
 		956A5CED2CE82A7DECB94A23 /* DashboardViewControllerClickTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardViewControllerClickTests.swift; sourceTree = "<group>"; };
@@ -623,6 +625,7 @@
 				E3A2E0A7AFE5800BDC7ABC95 /* AgentType.swift */,
 				8F6EB7B05754EDB7EFE397AD /* ClaudeHooksSetup.swift */,
 				9FC9B4D4CE66F445A566937A /* CodexHooksSetup.swift */,
+				91692BA3DA00B2A74251D935 /* CodexSessionPromptLookup.swift */,
 				764A4EFA7F1260ED02735D23 /* CommandParser.swift */,
 				55F8AEF4B3C37C2A732D15D0 /* Config.swift */,
 				5178802A6CFC60D26D8095F7 /* ExternalChannel.swift */,
@@ -865,6 +868,7 @@
 				22244DBB49E60EAB3BFC97FF /* BackendResolver.swift in Sources */,
 				1F45E3EC13AAD4A0A5502840 /* ClaudeHooksSetup.swift in Sources */,
 				A9510E9013F76A2439445185 /* CodexHooksSetup.swift in Sources */,
+				67D28AAC8088E0CAFA4CAF61 /* CodexSessionPromptLookup.swift in Sources */,
 				9E25B2192D8FB5482E57B4BA /* CommandParser.swift in Sources */,
 				3E6518AA6470D2846BBA8F74 /* Config.swift in Sources */,
 				459DC560D846BC498DB1A6D5 /* DashboardFocusController.swift in Sources */,

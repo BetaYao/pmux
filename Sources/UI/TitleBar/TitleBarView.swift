@@ -4,8 +4,9 @@ protocol TitleBarDelegate: AnyObject {
     func titleBarDidRequestNewThread()
     func titleBarDidRequestAddProject()
     func titleBarDidSelectLayout(_ layout: DashboardLayout)
-    func titleBarDidToggleNotifications()
+    func titleBarDidActivatePrimaryCapsule()
     func titleBarDidToggleTheme()
+    func titleBarDidRequestCollapseSidebar()
 }
 
 final class TitleBarView: NSView {
@@ -15,7 +16,24 @@ final class TitleBarView: NSView {
         static let arcVerticalOffset: CGFloat = 2
         static let dashboardLeadingInset: CGFloat = 16
         static let dashboardHorizontalPadding: CGFloat = 10
+        static let tipRotationInterval: TimeInterval = 7.0
     }
+
+    private enum PrimaryCapsuleMode {
+        case tips
+        case notification(NotificationEntry)
+    }
+
+    private static let tips: [(leading: String, body: String)] = [
+        ("Tip", "Cmd+1..4 switch layout"),
+        ("Tip", "Cmd+J toggle dashboard focus"),
+        ("Tip", "Cmd+B toggle sidebar"),
+        ("Tip", "Cmd+D split horizontally"),
+        ("Tip", "Cmd+Shift+D split vertically"),
+        ("Tip", "Cmd+Option+Arrow move focus"),
+        ("Tip", "Cmd+Ctrl+Arrow resize split"),
+        ("Tip", "Cmd+Shift+F show diff"),
+    ]
 
     weak var delegate: TitleBarDelegate?
 
@@ -24,28 +42,39 @@ final class TitleBarView: NSView {
     private let leftArcBlock = NSView()
     private let rightArcBlock = NSView()
 
-    // Left controls — worktree info
-    private let worktreeStatusDot = NSView()
-    private let worktreeBranchLabel = NSTextField(labelWithString: "")
-    private let worktreeRepoLabel = NSTextField(labelWithString: "")
-    private let worktreeMetaLabel = NSTextField(labelWithString: "")
-    private let addProjectButton = NSButton()
-    private let dashboardTitleLabel = NSTextField(labelWithString: "AMUX Dashboard")
-    private let worktreeInfoStack = NSStackView()
+    // Left controls — primary capsule
+    private let capsuleIconView = NSImageView()
+    private let capsuleLeadingLabel = NSTextField(labelWithString: "")
+    private let capsuleBodyLabel = NSTextField(labelWithString: "")
+    private let capsuleTrailingLabel = NSTextField(labelWithString: "")
+    private let capsuleSep1Label = NSTextField(labelWithString: "\u{00B7}")
+    private let capsuleSep2Label = NSTextField(labelWithString: "\u{00B7}")
+    private let primaryCapsuleStack = NSStackView()
 
-    // Right controls
+    // Right controls — layout group
+    private let gridLayoutButton = NSButton()
+    private let leftLayoutButton = NSButton()
+    private let topSmallLayoutButton = NSButton()
+    private let topLargeLayoutButton = NSButton()
+    private var layoutButtons: [DashboardLayout: NSButton] = [:]
+
+    // Right controls — action group
+    private let addProjectButton = NSButton()
     private let newWorktreeButton = NSButton()
-    private let viewSwitcherButton = NSButton()
-    private let notifButton = NSButton()
-    private let notifBadge = NSView()
     private let themeButton = NSButton()
+    private let collapseSidebarButton = NSButton()
 
     private var currentLayout: DashboardLayout = .grid
 
     // State
     private var isWindowHovered = false
-    private var notifCount = 0
+    private var highlightedNotificationStatus: AgentStatus?
+    private var primaryCapsuleMode: PrimaryCapsuleMode = .tips
+    private var currentTipIndex = 0
+    private var tipRotationTimer: Timer?
+    private var isPrimaryCapsuleHovered = false
     private var hoverTrackingArea: NSTrackingArea?
+    private var primaryCapsuleTrackingArea: NSTrackingArea?
 
     // MARK: - Init
 
@@ -59,6 +88,10 @@ final class TitleBarView: NSView {
         setup()
     }
 
+    deinit {
+        tipRotationTimer?.invalidate()
+    }
+
     // MARK: - Public API
 
     func setWindowHovered(_ hovered: Bool) {
@@ -66,58 +99,34 @@ final class TitleBarView: NSView {
         updateArcBlockColors()
     }
 
-    func updateWorktreeInfo(branch: String?, repo: String?, status: AgentStatus?, agentName: String?, isGridLayout: Bool, hasWorkspaces: Bool = true) {
-        let showWorktreeInfo = !isGridLayout && branch != nil
-
-        dashboardTitleLabel.isHidden = showWorktreeInfo
-        worktreeInfoStack.isHidden = !showWorktreeInfo
-
-        // Hide workspace-dependent buttons when no workspaces exist
+    func updateChromeState(isGridLayout: Bool, hasWorkspaces: Bool = true) {
         newWorktreeButton.isHidden = !hasWorkspaces
-        viewSwitcherButton.isHidden = !hasWorkspaces
-        notifButton.isHidden = !hasWorkspaces
-
-        if showWorktreeInfo {
-            worktreeBranchLabel.stringValue = branch ?? ""
-            worktreeRepoLabel.stringValue = repo ?? ""
-
-            var metaParts: [String] = []
-            if let status = status {
-                metaParts.append(status.rawValue)
-            }
-            if let agentName = agentName, !agentName.isEmpty {
-                metaParts.append(agentName)
-            }
-            worktreeMetaLabel.stringValue = metaParts.joined(separator: " \u{00B7} ")
-
-            let dotColor: NSColor
-            switch status {
-            case .running: dotColor = SemanticColors.running
-            case .waiting: dotColor = SemanticColors.waiting
-            case .error: dotColor = SemanticColors.danger
-            case .exited: dotColor = SemanticColors.danger
-            default: dotColor = SemanticColors.idle
-            }
-            worktreeStatusDot.layer?.backgroundColor = dotColor.cgColor
-        }
+        collapseSidebarButton.isHidden = !hasWorkspaces
+        collapseSidebarButton.isEnabled = !isGridLayout
+        collapseSidebarButton.alphaValue = isGridLayout ? 0.3 : 1.0
     }
 
-    func updateNotifBadge(_ count: Int) {
-        notifCount = count
-        notifBadge.isHidden = count <= 0
+    func updateNotificationSummary(entry: NotificationEntry?, unreadCount: Int) {
+        highlightedNotificationStatus = entry?.status
+
+        if let entry {
+            primaryCapsuleMode = .notification(entry)
+            showNotification(entry, unreadCount: unreadCount)
+            stopTipRotation()
+        } else {
+            primaryCapsuleMode = .tips
+            showCurrentTip()
+            startTipRotationIfNeeded()
+        }
     }
 
     func setCurrentLayout(_ layout: DashboardLayout) {
         currentLayout = layout
-        viewSwitcherButton.menu = makeLayoutMenu()
-    }
-
-    func notificationsAnchorView() -> NSView {
-        notifButton
+        updateLayoutButtonHighlight()
     }
 
     func aiAnchorView() -> NSView {
-        notifButton  // AI panel removed; return notifButton as fallback anchor
+        themeButton
     }
 
     // MARK: - Setup
@@ -140,89 +149,76 @@ final class TitleBarView: NSView {
             rightArcBlock.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Layout.arcVerticalOffset),
             rightArcBlock.heightAnchor.constraint(equalToConstant: Layout.capsuleHeight),
 
-            // 8px gap between blocks — left block fills remaining space
-            leftArcBlock.trailingAnchor.constraint(
-                equalTo: rightArcBlock.leadingAnchor, constant: -8),
+            leftArcBlock.trailingAnchor.constraint(equalTo: rightArcBlock.leadingAnchor, constant: -8),
         ])
 
+        showCurrentTip()
+        startTipRotationIfNeeded()
         updateArcBlockColors()
     }
 
     private func setupLeftArcBlock() {
         leftArcBlock.wantsLayer = true
         leftArcBlock.layer?.cornerRadius = 10
+        leftArcBlock.layer?.borderWidth = 1
         leftArcBlock.translatesAutoresizingMaskIntoConstraints = false
+        leftArcBlock.setAccessibilityIdentifier("titlebar.primaryCapsule")
         addSubview(leftArcBlock)
 
-        // Dashboard title (shown in grid mode)
-        dashboardTitleLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-        dashboardTitleLabel.textColor = SemanticColors.text
-        dashboardTitleLabel.translatesAutoresizingMaskIntoConstraints = false
-        dashboardTitleLabel.setContentHuggingPriority(.required, for: .horizontal)
-        leftArcBlock.addSubview(dashboardTitleLabel)
+        let click = NSClickGestureRecognizer(target: self, action: #selector(primaryCapsuleClicked))
+        leftArcBlock.addGestureRecognizer(click)
 
-        // Status dot (8px circle)
-        worktreeStatusDot.wantsLayer = true
-        worktreeStatusDot.layer?.cornerRadius = 4
-        worktreeStatusDot.layer?.backgroundColor = SemanticColors.idle.cgColor
-        worktreeStatusDot.translatesAutoresizingMaskIntoConstraints = false
+        capsuleIconView.translatesAutoresizingMaskIntoConstraints = false
+        capsuleIconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
+        capsuleIconView.contentTintColor = SemanticColors.muted
+        capsuleIconView.setContentHuggingPriority(.required, for: .horizontal)
         NSLayoutConstraint.activate([
-            worktreeStatusDot.widthAnchor.constraint(equalToConstant: 8),
-            worktreeStatusDot.heightAnchor.constraint(equalToConstant: 8),
+            capsuleIconView.widthAnchor.constraint(equalToConstant: 12),
+            capsuleIconView.heightAnchor.constraint(equalToConstant: 12),
         ])
 
-        // Branch label (bold)
-        worktreeBranchLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
-        worktreeBranchLabel.textColor = SemanticColors.text
-        worktreeBranchLabel.lineBreakMode = .byTruncatingTail
-        worktreeBranchLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-        worktreeBranchLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        capsuleLeadingLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        capsuleLeadingLabel.textColor = SemanticColors.text
+        capsuleLeadingLabel.lineBreakMode = .byTruncatingTail
+        capsuleLeadingLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        capsuleLeadingLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
-        // Repo label (dimmed)
-        worktreeRepoLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
-        worktreeRepoLabel.textColor = SemanticColors.muted
-        worktreeRepoLabel.lineBreakMode = .byTruncatingTail
-        worktreeRepoLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        worktreeRepoLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        capsuleBodyLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+        capsuleBodyLabel.textColor = SemanticColors.muted
+        capsuleBodyLabel.lineBreakMode = .byTruncatingTail
+        capsuleBodyLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        capsuleBodyLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        // Meta label — status/agent (dimmed)
-        worktreeMetaLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
-        worktreeMetaLabel.textColor = SemanticColors.muted
-        worktreeMetaLabel.lineBreakMode = .byTruncatingTail
-        worktreeMetaLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        worktreeMetaLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        capsuleTrailingLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+        capsuleTrailingLabel.textColor = SemanticColors.muted
+        capsuleTrailingLabel.lineBreakMode = .byTruncatingTail
+        capsuleTrailingLabel.setContentHuggingPriority(.required, for: .horizontal)
+        capsuleTrailingLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        // Dot separator helpers
-        let dotSep1 = NSTextField(labelWithString: "\u{00B7}")
-        dotSep1.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        dotSep1.textColor = SemanticColors.muted
-        dotSep1.setContentHuggingPriority(.required, for: .horizontal)
+        capsuleSep1Label.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        capsuleSep1Label.textColor = SemanticColors.muted
+        capsuleSep1Label.setContentHuggingPriority(.required, for: .horizontal)
 
-        let dotSep2 = NSTextField(labelWithString: "\u{00B7}")
-        dotSep2.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        dotSep2.textColor = SemanticColors.muted
-        dotSep2.setContentHuggingPriority(.required, for: .horizontal)
+        capsuleSep2Label.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        capsuleSep2Label.textColor = SemanticColors.muted
+        capsuleSep2Label.setContentHuggingPriority(.required, for: .horizontal)
 
-        // Info stack: [dot] [branch] [·] [repo] [·] [meta]
-        worktreeInfoStack.orientation = .horizontal
-        worktreeInfoStack.spacing = 5
-        worktreeInfoStack.alignment = .centerY
-        worktreeInfoStack.translatesAutoresizingMaskIntoConstraints = false
-        worktreeInfoStack.addArrangedSubview(worktreeStatusDot)
-        worktreeInfoStack.addArrangedSubview(worktreeBranchLabel)
-        worktreeInfoStack.addArrangedSubview(dotSep1)
-        worktreeInfoStack.addArrangedSubview(worktreeRepoLabel)
-        worktreeInfoStack.addArrangedSubview(dotSep2)
-        worktreeInfoStack.addArrangedSubview(worktreeMetaLabel)
-        worktreeInfoStack.isHidden = true
-        leftArcBlock.addSubview(worktreeInfoStack)
+        primaryCapsuleStack.orientation = .horizontal
+        primaryCapsuleStack.spacing = 5
+        primaryCapsuleStack.alignment = .centerY
+        primaryCapsuleStack.translatesAutoresizingMaskIntoConstraints = false
+        primaryCapsuleStack.addArrangedSubview(capsuleIconView)
+        primaryCapsuleStack.addArrangedSubview(capsuleLeadingLabel)
+        primaryCapsuleStack.addArrangedSubview(capsuleSep1Label)
+        primaryCapsuleStack.addArrangedSubview(capsuleBodyLabel)
+        primaryCapsuleStack.addArrangedSubview(capsuleSep2Label)
+        primaryCapsuleStack.addArrangedSubview(capsuleTrailingLabel)
+        leftArcBlock.addSubview(primaryCapsuleStack)
 
         NSLayoutConstraint.activate([
-            dashboardTitleLabel.leadingAnchor.constraint(equalTo: leftArcBlock.leadingAnchor, constant: Layout.dashboardLeadingInset),
-            dashboardTitleLabel.centerYAnchor.constraint(equalTo: leftArcBlock.centerYAnchor),
-
-            worktreeInfoStack.leadingAnchor.constraint(equalTo: leftArcBlock.leadingAnchor, constant: Layout.dashboardLeadingInset),
-            worktreeInfoStack.centerYAnchor.constraint(equalTo: leftArcBlock.centerYAnchor),
+            primaryCapsuleStack.leadingAnchor.constraint(equalTo: leftArcBlock.leadingAnchor, constant: Layout.dashboardLeadingInset),
+            primaryCapsuleStack.trailingAnchor.constraint(lessThanOrEqualTo: leftArcBlock.trailingAnchor, constant: -Layout.dashboardLeadingInset),
+            primaryCapsuleStack.centerYAnchor.constraint(equalTo: leftArcBlock.centerYAnchor),
         ])
     }
 
@@ -232,67 +228,99 @@ final class TitleBarView: NSView {
         rightArcBlock.translatesAutoresizingMaskIntoConstraints = false
         addSubview(rightArcBlock)
 
-        let rightStack = NSStackView()
-        rightStack.orientation = .horizontal
-        rightStack.spacing = 2
-        rightStack.alignment = .centerY
-        rightStack.translatesAutoresizingMaskIntoConstraints = false
-        rightArcBlock.addSubview(rightStack)
+        let layoutStack = NSStackView()
+        layoutStack.orientation = .horizontal
+        layoutStack.spacing = 2
+        layoutStack.alignment = .centerY
 
-        // Add/Open repo
+        configureArcIconButton(gridLayoutButton, symbol: "square.grid.2x2",
+                               identifier: "titlebar.layout.grid", label: "Grid",
+                               action: #selector(layoutButtonClicked(_:)))
+        gridLayoutButton.tag = 0
+        layoutStack.addArrangedSubview(gridLayoutButton)
+
+        configureArcIconButton(leftLayoutButton, symbol: "rectangle.split.2x1",
+                               identifier: "titlebar.layout.left", label: "Left Right",
+                               action: #selector(layoutButtonClicked(_:)))
+        leftLayoutButton.tag = 1
+        layoutStack.addArrangedSubview(leftLayoutButton)
+
+        configureArcIconButton(topSmallLayoutButton, symbol: "rectangle.split.1x2",
+                               identifier: "titlebar.layout.topSmall", label: "Top Small",
+                               action: #selector(layoutButtonClicked(_:)))
+        topSmallLayoutButton.tag = 2
+        layoutStack.addArrangedSubview(topSmallLayoutButton)
+
+        configureArcIconButton(topLargeLayoutButton, symbol: "rectangle.tophalf.filled",
+                               identifier: "titlebar.layout.topLarge", label: "Top Large",
+                               action: #selector(layoutButtonClicked(_:)))
+        topLargeLayoutButton.tag = 3
+        layoutStack.addArrangedSubview(topLargeLayoutButton)
+
+        layoutButtons = [
+            .grid: gridLayoutButton,
+            .leftRight: leftLayoutButton,
+            .topSmall: topSmallLayoutButton,
+            .topLarge: topLargeLayoutButton,
+        ]
+
+        let divider = NSView()
+        divider.wantsLayer = true
+        divider.layer?.backgroundColor = NSColor(hex: 0x888888).withAlphaComponent(0.3).cgColor
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            divider.widthAnchor.constraint(equalToConstant: 1),
+            divider.heightAnchor.constraint(equalToConstant: 16),
+        ])
+
+        let actionStack = NSStackView()
+        actionStack.orientation = .horizontal
+        actionStack.spacing = 2
+        actionStack.alignment = .centerY
+
         configureArcIconButton(addProjectButton, symbol: "plus.rectangle",
                                identifier: "titlebar.addProject", label: "Add Project",
                                action: #selector(addProjectClicked))
-        rightStack.addArrangedSubview(addProjectButton)
+        actionStack.addArrangedSubview(addProjectButton)
 
-        // New worktree
         configureArcIconButton(newWorktreeButton, symbol: "plus",
                                identifier: "titlebar.newWorktree", label: "New Worktree",
                                action: #selector(newWorktreeClicked))
-        rightStack.addArrangedSubview(newWorktreeButton)
+        actionStack.addArrangedSubview(newWorktreeButton)
 
-        // View switcher
-        configureArcIconButton(viewSwitcherButton, symbol: "square.grid.2x2",
-                               identifier: "titlebar.viewMenu", label: "Layout",
-                               action: #selector(viewMenuClicked))
-        rightStack.addArrangedSubview(viewSwitcherButton)
-
-        // Notification button (with badge)
-        configureArcIconButton(notifButton, symbol: "bell",
-                               identifier: "titlebar.notifButton", label: "Notifications",
-                               action: #selector(notifClicked))
-        // Badge dot
-        notifBadge.wantsLayer = true
-        notifBadge.layer?.backgroundColor = SemanticColors.danger.cgColor
-        notifBadge.layer?.cornerRadius = 4
-        notifBadge.translatesAutoresizingMaskIntoConstraints = false
-        notifBadge.isHidden = true
-        notifButton.addSubview(notifBadge)
-        NSLayoutConstraint.activate([
-            notifBadge.widthAnchor.constraint(equalToConstant: 8),
-            notifBadge.heightAnchor.constraint(equalToConstant: 8),
-            notifBadge.topAnchor.constraint(equalTo: notifButton.topAnchor, constant: 4),
-            notifBadge.trailingAnchor.constraint(equalTo: notifButton.trailingAnchor, constant: -4),
-        ])
-        rightStack.addArrangedSubview(notifButton)
-
-        // Theme button
         configureArcIconButton(themeButton, symbol: "circle.lefthalf.filled",
                                identifier: "titlebar.themeToggle", label: "Toggle Theme",
                                action: #selector(themeClicked))
-        rightStack.addArrangedSubview(themeButton)
+        actionStack.addArrangedSubview(themeButton)
+
+        configureArcIconButton(collapseSidebarButton, symbol: "sidebar.right",
+                               identifier: "titlebar.collapseSidebar", label: "Toggle Sidebar",
+                               action: #selector(collapseSidebarClicked))
+        actionStack.addArrangedSubview(collapseSidebarButton)
+
+        let rightStack = NSStackView()
+        rightStack.orientation = .horizontal
+        rightStack.spacing = 6
+        rightStack.alignment = .centerY
+        rightStack.translatesAutoresizingMaskIntoConstraints = false
+        rightStack.addArrangedSubview(layoutStack)
+        rightStack.addArrangedSubview(divider)
+        rightStack.addArrangedSubview(actionStack)
+        rightArcBlock.addSubview(rightStack)
 
         NSLayoutConstraint.activate([
             rightStack.leadingAnchor.constraint(equalTo: rightArcBlock.leadingAnchor, constant: 4),
             rightStack.trailingAnchor.constraint(equalTo: rightArcBlock.trailingAnchor, constant: -4),
             rightStack.centerYAnchor.constraint(equalTo: rightArcBlock.centerYAnchor),
         ])
+
+        updateLayoutButtonHighlight()
     }
 
     // MARK: - Arc Icon Button Helper
 
     private func configureArcIconButton(_ button: NSButton, symbol: String,
-                                         identifier: String, label: String? = nil, action: Selector) {
+                                        identifier: String, label: String? = nil, action: Selector) {
         let desc = label ?? identifier
         let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
         if let image = NSImage(systemSymbolName: symbol, accessibilityDescription: desc) {
@@ -375,62 +403,188 @@ final class TitleBarView: NSView {
         delegate?.titleBarDidRequestAddProject()
     }
 
-    @objc private func viewMenuClicked() {
-        let menu = makeLayoutMenu()
-        _ = menu.popUp(positioning: nil, at: NSPoint(x: 0, y: viewSwitcherButton.bounds.height), in: viewSwitcherButton)
-    }
+    private static let tagToLayout: [Int: DashboardLayout] = [
+        0: .grid, 1: .leftRight, 2: .topSmall, 3: .topLarge,
+    ]
 
-    private func makeLayoutMenu() -> NSMenu {
-        let menu = NSMenu(title: "Layout")
-        addLayoutMenuItem(menu, title: "Grid", symbol: "square.grid.2x2", layout: .grid)
-        addLayoutMenuItem(menu, title: "Left Right", symbol: "rectangle.split.2x1", layout: .leftRight)
-        addLayoutMenuItem(menu, title: "Top Small", symbol: "rectangle.split.1x2", layout: .topSmall)
-        addLayoutMenuItem(menu, title: "Top Large", symbol: "rectangle.tophalf.filled", layout: .topLarge)
-        return menu
-    }
-
-    private func addLayoutMenuItem(_ menu: NSMenu, title: String, symbol: String, layout: DashboardLayout) {
-        let item = NSMenuItem(title: title, action: #selector(layoutMenuItemSelected(_:)), keyEquivalent: "")
-        item.target = self
-        item.representedObject = layout.rawValue
-        item.state = (currentLayout == layout) ? .on : .off
-        if let image = NSImage(systemSymbolName: symbol, accessibilityDescription: title) {
-            let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .regular)
-            item.image = image.withSymbolConfiguration(config)
-        }
-        menu.addItem(item)
-    }
-
-    @objc private func layoutMenuItemSelected(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String,
-              let layout = DashboardLayout(rawValue: raw)
-        else {
-            return
-        }
+    @objc private func layoutButtonClicked(_ sender: NSButton) {
+        guard let layout = Self.tagToLayout[sender.tag] else { return }
         currentLayout = layout
+        updateLayoutButtonHighlight()
         delegate?.titleBarDidSelectLayout(layout)
     }
 
-    @objc private func notifClicked() {
-        delegate?.titleBarDidToggleNotifications()
+    private func updateLayoutButtonHighlight() {
+        let activeTint = SemanticColors.accent
+        let inactiveTint = NSColor(hex: 0x888888)
+        for (layout, button) in layoutButtons {
+            button.contentTintColor = (layout == currentLayout) ? activeTint : inactiveTint
+        }
+    }
+
+    @objc private func primaryCapsuleClicked() {
+        if case .notification = primaryCapsuleMode {
+            delegate?.titleBarDidActivatePrimaryCapsule()
+        }
     }
 
     @objc private func themeClicked() {
         delegate?.titleBarDidToggleTheme()
     }
 
+    @objc private func collapseSidebarClicked() {
+        delegate?.titleBarDidRequestCollapseSidebar()
+    }
+
     // MARK: - State
 
     private func updateArcBlockColors() {
-        // Caller (applyColors/setWindowHovered) must set NSAppearance.current first
         let saved = NSAppearance.current
         NSAppearance.current = window?.effectiveAppearance ?? NSApp.effectiveAppearance
         let bg = isWindowHovered
             ? SemanticColors.arcBlockHover
             : SemanticColors.arcBlockInactive
         leftArcBlock.layer?.backgroundColor = bg.cgColor
+        leftArcBlock.layer?.borderColor = capsuleBorderColor().cgColor
         rightArcBlock.layer?.backgroundColor = bg.cgColor
         NSAppearance.current = saved
+    }
+
+    private func capsuleBorderColor() -> NSColor {
+        guard let status = highlightedNotificationStatus else {
+            return isWindowHovered ? SemanticColors.lineAlpha45 : SemanticColors.lineAlpha22
+        }
+
+        switch status {
+        case .error, .exited:
+            return SemanticColors.danger.withAlphaComponent(isWindowHovered ? 0.45 : 0.30)
+        case .waiting:
+            return SemanticColors.waiting.withAlphaComponent(isWindowHovered ? 0.45 : 0.30)
+        case .idle:
+            return SemanticColors.idle.withAlphaComponent(isWindowHovered ? 0.35 : 0.24)
+        case .running:
+            return SemanticColors.running.withAlphaComponent(isWindowHovered ? 0.35 : 0.24)
+        default:
+            return isWindowHovered ? SemanticColors.lineAlpha45 : SemanticColors.lineAlpha22
+        }
+    }
+
+    private func updatePrimaryCapsuleSeparators() {
+        let hasBodyText = !capsuleBodyLabel.stringValue.isEmpty
+        let hasTrailingText = !capsuleTrailingLabel.stringValue.isEmpty
+        capsuleSep1Label.isHidden = !hasBodyText
+        capsuleBodyLabel.isHidden = !hasBodyText
+        capsuleSep2Label.isHidden = !hasBodyText || !hasTrailingText
+        capsuleTrailingLabel.isHidden = !hasTrailingText
+    }
+
+    private func notificationMetaText(for entry: NotificationEntry, unreadCount: Int) -> String {
+        var parts: [String] = [entry.status.rawValue]
+        if let paneIndex = entry.paneIndex {
+            parts.append("Pane \(paneIndex)")
+        }
+        if unreadCount > 1 {
+            parts.append("\(unreadCount) unread")
+        } else if unreadCount == 1 {
+            parts.append("1 unread")
+        }
+        return parts.joined(separator: " \u{00B7} ")
+    }
+
+    private func showNotification(_ entry: NotificationEntry, unreadCount: Int) {
+        capsuleIconView.image = NSImage(systemSymbolName: "bell.fill", accessibilityDescription: "Notification")
+        capsuleIconView.contentTintColor = statusColor(for: entry.status)
+        capsuleLeadingLabel.attributedStringValue = notificationTargetText(for: entry)
+        capsuleBodyLabel.stringValue = Self.sanitizedNotificationMessage(entry.message)
+        capsuleTrailingLabel.stringValue = notificationMetaText(for: entry, unreadCount: unreadCount)
+        updatePrimaryCapsuleSeparators()
+        updateArcBlockColors()
+    }
+
+    private func showCurrentTip() {
+        let tip = Self.tips[currentTipIndex]
+        capsuleIconView.image = NSImage(systemSymbolName: "command", accessibilityDescription: "Tip")
+        capsuleIconView.contentTintColor = SemanticColors.muted
+        capsuleLeadingLabel.attributedStringValue = NSAttributedString(
+            string: tip.leading,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                .foregroundColor: SemanticColors.text
+            ]
+        )
+        capsuleBodyLabel.stringValue = tip.body
+        capsuleTrailingLabel.stringValue = "Shortcuts"
+        updatePrimaryCapsuleSeparators()
+        updateArcBlockColors()
+    }
+
+    private func notificationTargetText(for entry: NotificationEntry) -> NSAttributedString {
+        let workspaceFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        let branchFont = NSFont.systemFont(ofSize: 11, weight: .regular)
+
+        if entry.workspaceName.isEmpty {
+            return NSAttributedString(
+                string: entry.branch,
+                attributes: [
+                    .font: workspaceFont,
+                    .foregroundColor: SemanticColors.text
+                ]
+            )
+        }
+
+        let result = NSMutableAttributedString(
+            string: entry.workspaceName,
+            attributes: [
+                .font: workspaceFont,
+                .foregroundColor: SemanticColors.text
+            ]
+        )
+        result.append(NSAttributedString(
+            string: " / \(entry.branch)",
+            attributes: [
+                .font: branchFont,
+                .foregroundColor: SemanticColors.subtle
+            ]
+        ))
+        return result
+    }
+
+    private func startTipRotationIfNeeded() {
+        guard tipRotationTimer == nil, case .tips = primaryCapsuleMode else { return }
+        tipRotationTimer = Timer.scheduledTimer(withTimeInterval: Layout.tipRotationInterval, repeats: true) { [weak self] _ in
+            self?.advanceTipIfNeeded()
+        }
+    }
+
+    private func stopTipRotation() {
+        tipRotationTimer?.invalidate()
+        tipRotationTimer = nil
+    }
+
+    private func advanceTipIfNeeded() {
+        guard case .tips = primaryCapsuleMode, !isPrimaryCapsuleHovered else { return }
+        currentTipIndex = (currentTipIndex + 1) % Self.tips.count
+        showCurrentTip()
+    }
+
+    private func statusColor(for status: AgentStatus) -> NSColor {
+        switch status {
+        case .running:
+            return SemanticColors.running
+        case .waiting:
+            return SemanticColors.waiting
+        case .error, .exited:
+            return SemanticColors.danger
+        default:
+            return SemanticColors.idle
+        }
+    }
+
+    private static func sanitizedNotificationMessage(_ message: String) -> String {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "Open workspace" }
+        let firstLine = trimmed.components(separatedBy: .newlines).first ?? trimmed
+        return firstLine
     }
 
     // MARK: - Theme
@@ -444,11 +598,11 @@ final class TitleBarView: NSView {
         let saved = NSAppearance.current
         NSAppearance.current = window?.effectiveAppearance ?? NSApp.effectiveAppearance
         updateArcBlockColors()
-        dashboardTitleLabel.textColor = SemanticColors.text
-        worktreeBranchLabel.textColor = SemanticColors.text
-        worktreeRepoLabel.textColor = SemanticColors.muted
-        worktreeMetaLabel.textColor = SemanticColors.muted
-        notifBadge.layer?.backgroundColor = SemanticColors.danger.cgColor
+        capsuleLeadingLabel.textColor = SemanticColors.text
+        capsuleBodyLabel.textColor = SemanticColors.muted
+        capsuleTrailingLabel.textColor = SemanticColors.muted
+        capsuleSep1Label.textColor = SemanticColors.muted
+        capsuleSep2Label.textColor = SemanticColors.muted
         NSAppearance.current = saved
     }
 
@@ -465,14 +619,34 @@ final class TitleBarView: NSView {
         )
         addTrackingArea(area)
         hoverTrackingArea = area
+
+        if let existing = primaryCapsuleTrackingArea {
+            leftArcBlock.removeTrackingArea(existing)
+        }
+        let capsuleArea = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: ["target": "primaryCapsule"]
+        )
+        leftArcBlock.addTrackingArea(capsuleArea)
+        primaryCapsuleTrackingArea = capsuleArea
     }
 
     override func mouseEntered(with event: NSEvent) {
+        if event.trackingArea?.userInfo?["target"] as? String == "primaryCapsule" {
+            isPrimaryCapsuleHovered = true
+            return
+        }
         setWindowHovered(true)
         super.mouseEntered(with: event)
     }
 
     override func mouseExited(with event: NSEvent) {
+        if event.trackingArea?.userInfo?["target"] as? String == "primaryCapsule" {
+            isPrimaryCapsuleHovered = false
+            return
+        }
         setWindowHovered(false)
         super.mouseExited(with: event)
     }

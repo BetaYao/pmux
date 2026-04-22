@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 BUILD_DIR="$(pwd)/.build"
 CLEAN_RESTART=0
@@ -35,7 +35,7 @@ fi
 echo "==> Building amux..."
 xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug \
   -derivedDataPath "$BUILD_DIR" \
-  build 2>&1 | tail -1
+  build
 
 APP="$BUILD_DIR/Build/Products/Debug/amux.app"
 

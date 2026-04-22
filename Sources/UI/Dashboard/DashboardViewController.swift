@@ -837,8 +837,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
             return
         }
 
-        // Deactivate previous
-        activeSplitContainer?.removeFromSuperview()
+        // Hold reference to previous view for crossfade
+        let previousSplitView = activeSplitContainer
         activeSplitContainer = nil
         activeSplitWorktreePath = nil
 
@@ -881,6 +881,9 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         splitView.tree = tree
         activeSplitContainer = splitView
         activeSplitWorktreePath = worktreePath
+
+        previousSplitView?.removeFromSuperview()
+        previousSplitView?.alphaValue = 1
 
         // Focus the active leaf — defer to let the view hierarchy settle
         let leafToFocus = tree.allLeaves.first(where: { $0.id == tree.focusedId }) ?? tree.allLeaves.first
@@ -1169,7 +1172,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
 
         rebuildGrid()
 
-        dashboardDelegate?.dashboardDidReorderCards(order: agents.map { $0.id })
+        dashboardDelegate?.dashboardDidReorderCards(order: agents.map { $0.worktreePath })
     }
 }
 
@@ -1235,8 +1238,8 @@ extension DashboardViewController: MiniCardReorderDelegate {
         case .grid: break
         }
 
-        // Persist
-        dashboardDelegate?.dashboardDidReorderCards(order: agents.map { $0.id })
+        // Persist — pass worktree paths directly to avoid ID→AgentHead lookup failures
+        dashboardDelegate?.dashboardDidReorderCards(order: agents.map { $0.worktreePath })
     }
 }
 
@@ -1284,7 +1287,7 @@ extension DashboardViewController: GridCardReorderDelegate {
         layoutGridFrames()
 
         // Persist
-        dashboardDelegate?.dashboardDidReorderCards(order: agents.map { $0.id })
+        dashboardDelegate?.dashboardDidReorderCards(order: agents.map { $0.worktreePath })
     }
 }
 

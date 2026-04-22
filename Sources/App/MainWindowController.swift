@@ -42,6 +42,9 @@ enum WindowStyling {
 }
 
 class MainWindowController: NSWindowController {
+    private static let primaryCapsuleDismissDelay: TimeInterval = 1.0
+    private static let primaryCapsuleDisplayDuration: TimeInterval = 8.0
+
     private let titleBar = TitleBarView()
     private let backgroundEffectView = NSVisualEffectView()
     private let contentContainer = NSView()
@@ -57,6 +60,9 @@ class MainWindowController: NSWindowController {
     private var dashboardVC: DashboardViewController?
     private var config = Config.load()
     private var runtimeBackend: String = "zmx"
+    private var primaryCapsuleNotification: NotificationEntry?
+    private var dismissedPrimaryCapsuleNotificationIDs: Set<UUID> = []
+    private var primaryCapsuleDismissWorkItem: DispatchWorkItem?
 
     // Terminal management
     private lazy var terminalCoordinator: TerminalCoordinator = {
@@ -148,12 +154,22 @@ class MainWindowController: NSWindowController {
             self, selector: #selector(handleNavigateToWorktree(_:)),
             name: .navigateToWorktree, object: nil
         )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handleNotificationHistoryDidChange(_:)),
+            name: .notificationHistoryDidChange, object: nil
+        )
+        handleNotificationHistoryDidChange(nil)
     }
 
     /// Sync split layouts from TerminalCoordinator before saving config.
     /// Config is a value type — without syncing, saves here overwrite
     /// splitLayouts written by TerminalCoordinator with stale data.
     private func saveConfig() {
+        // Sync fields that TabCoordinator may have updated independently
+        config.workspacePaths = tabCoordinator.config.workspacePaths
+        config.cardOrder = tabCoordinator.config.cardOrder
+        config.worktreeStartedAt = tabCoordinator.config.worktreeStartedAt
+        config.selectedWorktreePath = tabCoordinator.config.selectedWorktreePath
         config.splitLayouts = terminalCoordinator.config.splitLayouts
         config.save()
     }
@@ -192,7 +208,6 @@ class MainWindowController: NSWindowController {
     }
 
     @objc func showNewBranchDialog() {
-        NSLog("[NewBranch] config.workspacePaths = \(config.workspacePaths)")
         let dialog = dialogPresenter.makeNewBranchDialog(repoPaths: config.workspacePaths, dialogDelegate: self)
         dialogPresenter.presentSheetOnActiveVC(dialog, tabCoordinator: tabCoordinator, dashboardVC: dashboardVC)
     }
@@ -224,20 +239,23 @@ class MainWindowController: NSWindowController {
     }
 
     @objc func openDocumentation() {
-        if let url = URL(string: "https://github.com/nicematt/amux") {
-            NSWorkspace.shared.open(url)
-        }
+        let repositoryURL = URL(string: "https://github.com/\(UpdateChecker.repositoryOwner)/\(UpdateChecker.repositoryName)")!
+        NSWorkspace.shared.open(repositoryURL)
     }
 
     @objc func dashboardZoomIn() {
         dashboardVC?.zoomIn()
-        config.zoomIndex = dashboardVC?.zoomIndex ?? GridLayout.defaultZoomIndex
+        let zoom = dashboardVC?.zoomIndex ?? GridLayout.defaultZoomIndex
+        config.zoomIndex = zoom
+        tabCoordinator.config.zoomIndex = zoom
         saveConfig()
     }
 
     @objc func dashboardZoomOut() {
         dashboardVC?.zoomOut()
-        config.zoomIndex = dashboardVC?.zoomIndex ?? GridLayout.defaultZoomIndex
+        let zoom = dashboardVC?.zoomIndex ?? GridLayout.defaultZoomIndex
+        config.zoomIndex = zoom
+        tabCoordinator.config.zoomIndex = zoom
         saveConfig()
     }
 
@@ -420,16 +438,12 @@ class MainWindowController: NSWindowController {
 
     private func updateTitleBar() {
         let isGrid = tabCoordinator.dashboardVC?.currentLayout == .grid
-        let agent = tabCoordinator.selectedAgent
 
-        titleBar.updateWorktreeInfo(
-            branch: agent?.name,
-            repo: agent?.project,
-            status: agent?.paneStatuses.first,
-            agentName: nil,
+        titleBar.updateChromeState(
             isGridLayout: isGrid,
             hasWorkspaces: !tabCoordinator.workspaceManager.tabs.isEmpty
         )
+        updatePrimaryCapsuleNotification()
     }
 
 
@@ -453,7 +467,9 @@ class MainWindowController: NSWindowController {
     }
 
     deinit {
+        primaryCapsuleDismissWorkItem?.cancel()
         NotificationCenter.default.removeObserver(self, name: .navigateToWorktree, object: nil)
+        NotificationCenter.default.removeObserver(self, name: .notificationHistoryDidChange, object: nil)
     }
 
     // MARK: - Split Pane Actions (forwarded to TerminalCoordinator)
@@ -659,8 +675,10 @@ extension MainWindowController: TitleBarDelegate {
         updateTitleBar()
     }
 
-    func titleBarDidToggleNotifications() {
-        panelCoordinator.toggleNotificationPanel()
+    func titleBarDidActivatePrimaryCapsule() {
+        guard let entry = primaryCapsuleNotification else { return }
+        panelCoordinator.notificationPanelDidSelectItem(entry)
+        schedulePrimaryCapsuleDismissal(for: entry)
     }
 
     func titleBarDidToggleTheme() {
@@ -685,6 +703,10 @@ extension MainWindowController: TitleBarDelegate {
         NSAppearance.current = window?.effectiveAppearance ?? NSApp.effectiveAppearance
         applyWindowBackgroundStyle()
     }
+
+    func titleBarDidRequestCollapseSidebar() {
+        tabCoordinator.dashboardVC?.toggleSidebarCollapse()
+    }
 }
 
 // MARK: - DashboardDelegate
@@ -699,8 +721,8 @@ extension MainWindowController: DashboardDelegate {
     }
 
     func dashboardDidReorderCards(order: [String]) {
-        let paths = order.compactMap { AgentHead.shared.agent(for: $0)?.worktreePath }
-        config.cardOrder = paths
+        config.cardOrder = order
+        tabCoordinator.config.cardOrder = order
         saveConfig()
     }
 
@@ -754,8 +776,8 @@ extension MainWindowController: SplitContainerDelegate {
 // MARK: - PanelCoordinatorDelegate
 
 extension MainWindowController: PanelCoordinatorDelegate {
-    func panelCoordinator(_ coordinator: PanelCoordinator, navigateToWorktreePath path: String) {
-        // Navigation handled by NotificationCenter .navigateToWorktree
+    func panelCoordinator(_ coordinator: PanelCoordinator, navigateToWorktreePath path: String, paneIndex: Int?) {
+        tabCoordinator.handleNavigateToWorktree(worktreePath: path, paneIndex: paneIndex)
     }
 }
 
@@ -786,6 +808,107 @@ extension MainWindowController {
         guard let worktreePath = notification.userInfo?["worktreePath"] as? String else { return }
         let paneIndex = notification.userInfo?["paneIndex"] as? Int
         tabCoordinator.handleNavigateToWorktree(worktreePath: worktreePath, paneIndex: paneIndex)
+    }
+
+    @objc private func handleNotificationHistoryDidChange(_ notification: Notification?) {
+        updatePrimaryCapsuleNotification()
+    }
+
+    private func updatePrimaryCapsuleNotification() {
+        pruneDismissedPrimaryCapsuleNotificationIDs()
+        let entry = Self.selectPrimaryCapsuleNotification(
+            from: NotificationHistory.shared.entries,
+            excluding: dismissedPrimaryCapsuleNotificationIDs
+        )
+        let previousID = primaryCapsuleNotification?.id
+        primaryCapsuleNotification = entry
+        if let entry, entry.id != previousID {
+            schedulePrimaryCapsuleAutoDismiss(for: entry)
+        } else if entry == nil {
+            primaryCapsuleDismissWorkItem?.cancel()
+            primaryCapsuleDismissWorkItem = nil
+        }
+        titleBar.updateNotificationSummary(
+            entry: entry,
+            unreadCount: NotificationHistory.shared.unreadCount
+        )
+    }
+
+    static func selectPrimaryCapsuleNotification(
+        from entries: [NotificationEntry],
+        excluding excludedIDs: Set<UUID> = []
+    ) -> NotificationEntry? {
+        let unreadEntries = entries.filter { !$0.isRead }
+        let visibleEntries = unreadEntries.filter { !excludedIDs.contains($0.id) }
+        guard !visibleEntries.isEmpty else { return nil }
+        return highestPriorityNotification(in: visibleEntries)
+    }
+
+    private static func highestPriorityNotification(in entries: [NotificationEntry]) -> NotificationEntry? {
+        entries.max { lhs, rhs in
+            let left = notificationPriorityScore(for: lhs)
+            let right = notificationPriorityScore(for: rhs)
+            if left == right {
+                return lhs.timestamp < rhs.timestamp
+            }
+            return left < right
+        }
+    }
+
+    private static func notificationPriorityScore(for entry: NotificationEntry) -> Int {
+        switch entry.status {
+        case .error, .exited:
+            return 4
+        case .waiting:
+            return 3
+        case .idle:
+            return entry.isRead ? 1 : 2
+        default:
+            return entry.isRead ? 0 : 1
+        }
+    }
+
+    private func schedulePrimaryCapsuleDismissal(for entry: NotificationEntry) {
+        primaryCapsuleDismissWorkItem?.cancel()
+        dismissedPrimaryCapsuleNotificationIDs.insert(entry.id)
+        primaryCapsuleNotification = nil
+        titleBar.updateNotificationSummary(
+            entry: nil,
+            unreadCount: NotificationHistory.shared.unreadCount
+        )
+        let workItem = DispatchWorkItem {
+            NotificationHistory.shared.markRead(id: entry.id)
+        }
+        primaryCapsuleDismissWorkItem = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.primaryCapsuleDismissDelay,
+            execute: workItem
+        )
+    }
+
+    private func schedulePrimaryCapsuleAutoDismiss(for entry: NotificationEntry) {
+        primaryCapsuleDismissWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.dismissedPrimaryCapsuleNotificationIDs.insert(entry.id)
+            if self.primaryCapsuleNotification?.id == entry.id {
+                self.primaryCapsuleNotification = nil
+                self.titleBar.updateNotificationSummary(
+                    entry: nil,
+                    unreadCount: NotificationHistory.shared.unreadCount
+                )
+            }
+        }
+        primaryCapsuleDismissWorkItem = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.primaryCapsuleDisplayDuration,
+            execute: workItem
+        )
+    }
+
+    private func pruneDismissedPrimaryCapsuleNotificationIDs() {
+        let validIDs = Set(NotificationHistory.shared.entries.map(\.id))
+        dismissedPrimaryCapsuleNotificationIDs.formIntersection(validIDs)
     }
 }
 

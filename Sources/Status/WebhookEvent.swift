@@ -17,11 +17,11 @@ enum WebhookEventType: String {
 
     func agentStatus(data: [String: Any]?) -> AgentStatus {
         switch self {
-        case .sessionStart, .toolUseStart, .toolUseEnd, .subagentStart, .userPrompt:
+        case .sessionStart, .toolUseStart, .toolUseEnd, .subagentStart, .userPrompt, .toolUseFailed:
             return .running
         case .agentStop:
             return .idle
-        case .error, .toolUseFailed, .stopFailure:
+        case .error, .stopFailure:
             return .error
         case .prompt:
             return .waiting

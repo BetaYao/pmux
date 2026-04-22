@@ -106,8 +106,10 @@ final class WebhookEventTests: XCTestCase {
         XCTAssertEqual(WebhookEventType.sessionStart.agentStatus(data: nil), .running)
         XCTAssertEqual(WebhookEventType.toolUseStart.agentStatus(data: nil), .running)
         XCTAssertEqual(WebhookEventType.toolUseEnd.agentStatus(data: nil), .running)
+        XCTAssertEqual(WebhookEventType.toolUseFailed.agentStatus(data: nil), .running)
         XCTAssertEqual(WebhookEventType.agentStop.agentStatus(data: nil), .idle)
         XCTAssertEqual(WebhookEventType.error.agentStatus(data: nil), .error)
+        XCTAssertEqual(WebhookEventType.stopFailure.agentStatus(data: nil), .error)
         XCTAssertEqual(WebhookEventType.prompt.agentStatus(data: nil), .waiting)
     }
 

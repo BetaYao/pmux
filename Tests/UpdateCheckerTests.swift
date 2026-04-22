@@ -118,7 +118,7 @@ class UpdateCheckerTests: XCTestCase {
             "assets": [
                 [
                     "name": assetName,
-                    "browser_download_url": "https://github.com/user/amux/releases/download/\(tag)/\(assetName)"
+                    "browser_download_url": "https://github.com/\(UpdateChecker.repositoryOwner)/\(UpdateChecker.repositoryName)/releases/download/\(tag)/\(assetName)"
                 ]
             ]
         ]

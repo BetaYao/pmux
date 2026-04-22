@@ -21,6 +21,11 @@ ghostty/.zig-cache/
 # SPM
 .build/
 .superpowers/
+dist/
+*.profraw
+*.profdata
+*.xccovreport
+*.xccovarchive
 
 # Git worktrees
 .worktrees/

@@ -24,13 +24,13 @@ class SessionManagerTests: XCTestCase {
     }
 
     func testLongSessionNameIsTruncatedWithHash() {
-        let name = SessionManager.persistentSessionName(for: "/Volumes/openbeta/workspace/pmux-swift/pmux-swift-dashboard-consolidation")
+        let name = SessionManager.persistentSessionName(for: "/Users/dev/workspace/amux/amux-dashboard-consolidation")
         XCTAssertTrue(name.count <= 40, "Session name '\(name)' exceeds 40 chars (\(name.count))")
         XCTAssertTrue(name.hasPrefix("amux-"))
     }
 
     func testTruncatedSessionNameIsDeterministic() {
-        let path = "/Volumes/openbeta/workspace/pmux-swift/pmux-swift-dashboard-consolidation"
+        let path = "/Users/dev/workspace/amux/amux-dashboard-consolidation"
         let a = SessionManager.persistentSessionName(for: path)
         let b = SessionManager.persistentSessionName(for: path)
         XCTAssertEqual(a, b)

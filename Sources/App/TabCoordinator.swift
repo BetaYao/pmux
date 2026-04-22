@@ -706,8 +706,14 @@ class TabCoordinator {
 
     func handlePaneStatusChange(worktreePath: String, paneIndex: Int, oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String) {
         let branch = allWorktrees.first(where: { $0.info.path == worktreePath })?.info.branch ?? ""
-        let paneCount = statusAggregator.status(for: worktreePath)?.panes.count ?? 1
-        let terminalID = statusAggregator.status(for: worktreePath)?.panes.first(where: { $0.paneIndex == paneIndex })?.terminalID ?? ""
+        let repoPath = worktreeRepoCache[worktreePath] ?? WorktreeDiscovery.findRepoRoot(from: worktreePath) ?? worktreePath
+        let workspaceName = workspaceManager.tabs.first(where: { $0.repoPath == repoPath })?.displayName
+            ?? URL(fileURLWithPath: repoPath).lastPathComponent
+        let worktreeStatus = statusAggregator.status(for: worktreePath)
+        let paneCount = worktreeStatus?.panes.count ?? 1
+        let paneStatus = worktreeStatus?.panes.first(where: { $0.paneIndex == paneIndex })
+        let terminalID = paneStatus?.terminalID ?? ""
+        let lastUserPrompt = paneStatus?.lastUserPrompt ?? ""
 
         // Determine if this pane is the currently focused one
         let isFocused = isFocusedPane(worktreePath: worktreePath, paneIndex: paneIndex)
@@ -715,12 +721,14 @@ class TabCoordinator {
         NotificationManager.shared.notify(
             terminalID: terminalID,
             worktreePath: worktreePath,
+            workspaceName: workspaceName,
             branch: branch,
             paneIndex: paneIndex,
             paneCount: paneCount,
             oldStatus: oldStatus,
             newStatus: newStatus,
             lastMessage: lastMessage,
+            lastUserPrompt: lastUserPrompt,
             isFocusedPane: isFocused
         )
     }
@@ -746,6 +754,9 @@ class TabCoordinator {
             tab.worktrees.contains(where: { $0.path == worktreePath })
         }) {
             dashboardVC?.updateAgents(buildAgentDisplayInfos())
+            dashboardVC?.selectAgent(byWorktreePath: worktreePath)
+            saveSelectedWorktree()
+            delegate?.tabCoordinatorRequestUpdateTitleBar(self)
             return
         }
 
@@ -762,7 +773,13 @@ class TabCoordinator {
             }
             DispatchQueue.main.async {
                 guard let self, let repoPath = foundRepoPath else { return }
-                self.openRepoTab(repoPath: repoPath)
+                self.openRepoTab(repoPath: repoPath) { [weak self] in
+                    self?.dashboardVC?.selectAgent(byWorktreePath: worktreePath)
+                    self?.saveSelectedWorktree()
+                    if let self {
+                        self.delegate?.tabCoordinatorRequestUpdateTitleBar(self)
+                    }
+                }
             }
         }
     }

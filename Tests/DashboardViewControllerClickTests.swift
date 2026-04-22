@@ -57,6 +57,7 @@ private class DashboardDelegateSpy: DashboardDelegate {
     func dashboardDidRequestEnterProject(_ project: String) {}
     func dashboardDidReorderCards(order: [String]) {}
     func dashboardDidRequestDelete(_ terminalID: String) {}
+    func dashboardDidRequestCloseRepo(_ project: String) {}
     func dashboardDidRequestAddProject() {}
     func dashboardDidChangeSelection(_ dashboard: DashboardViewController) {}
 }

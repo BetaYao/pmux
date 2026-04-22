@@ -45,6 +45,64 @@ final class WebhookStatusProviderTests: XCTestCase {
         XCTAssertEqual(provider.status(for: "/projects/repo/main"), .waiting)
     }
 
+    func testAgentStopUsesReadableCompletionMessage() {
+        provider.handleEvent(makeEvent(sessionId: "s1", event: .agentStop, cwd: "/projects/repo/main"))
+
+        XCTAssertEqual(provider.lastMessage(for: "/projects/repo/main"), "Task completed")
+    }
+
+    func testStatusChangedCallbackFiresForMatchedWorktree() {
+        let callback = expectation(description: "status changed callback")
+        provider.onStatusChanged = { worktreePath in
+            XCTAssertEqual(worktreePath, "/projects/repo/main")
+            callback.fulfill()
+        }
+
+        provider.handleEvent(makeEvent(sessionId: "s1", event: .sessionStart, cwd: "/projects/repo/main"))
+
+        wait(for: [callback], timeout: 1.0)
+    }
+
+    func testCodexUserPromptFallsBackToSessionLookup() {
+        provider.codexPromptLookup = { sessionId in
+            XCTAssertEqual(sessionId, "codex-session")
+            return "show me the latest failing test"
+        }
+
+        let event = WebhookEvent(
+            source: "codex",
+            sessionId: "codex-session",
+            event: .userPrompt,
+            cwd: "/projects/repo/main",
+            timestamp: nil,
+            data: nil
+        )
+
+        provider.handleEvent(event)
+
+        XCTAssertEqual(provider.lastUserPrompt(for: "/projects/repo/main"), "show me the latest failing test")
+    }
+
+    func testClaudeUserPromptDoesNotUseCodexFallback() {
+        var lookupCallCount = 0
+        provider.codexPromptLookup = { _ in
+            lookupCallCount += 1
+            return "should not be used"
+        }
+
+        provider.handleEvent(
+            makeEvent(
+                sessionId: "s1",
+                event: .userPrompt,
+                cwd: "/projects/repo/main",
+                data: ["prompt": "fix the dashboard layout"]
+            )
+        )
+
+        XCTAssertEqual(provider.lastUserPrompt(for: "/projects/repo/main"), "fix the dashboard layout")
+        XCTAssertEqual(lookupCallCount, 0)
+    }
+
     // MARK: - cwd matching
 
     func testExactCwdMatch() {

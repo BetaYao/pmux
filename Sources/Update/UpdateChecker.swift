@@ -13,8 +13,8 @@ protocol UpdateCheckerDelegate: AnyObject {
 
 /// Checks GitHub Releases API for new versions of amux.
 class UpdateChecker {
-    static let repoOwner = "user"   // TODO: set to real GitHub owner
-    static let repoName = "amux"
+    static let repositoryOwner = "nicematt"
+    static let repositoryName = "amux"
 
     #if arch(arm64)
     static let assetSuffix = "arm64.zip"
@@ -59,8 +59,8 @@ class UpdateChecker {
             throw UpdateError.rateLimited(retryAfter: resetDate)
         }
 
-        let url = URL(string: "https://api.github.com/repos/\(Self.repoOwner)/\(Self.repoName)/releases/latest")!
-        var request = URLRequest(url: url)
+        let releasesLatestEndpoint = URL(string: "https://api.github.com/repos/\(Self.repositoryOwner)/\(Self.repositoryName)/releases/latest")!
+        var request = URLRequest(url: releasesLatestEndpoint)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
 
         let (data, response) = try await URLSession.shared.data(for: request)

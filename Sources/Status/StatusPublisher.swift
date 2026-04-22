@@ -32,6 +32,9 @@ class StatusPublisher {
     init(agentConfig: AgentDetectConfig = .default) {
         self.agentConfig = agentConfig
         rebuildAgentNameCache()
+        webhookProvider.onStatusChanged = { [weak self] worktreePath in
+            self?.scheduleWebhookRefresh(for: worktreePath)
+        }
     }
 
     private func rebuildAgentNameCache() {
@@ -128,6 +131,70 @@ class StatusPublisher {
         let preferredSnapshot = preferredPaths
         pollQueue.async { [weak self] in
             self?.pollAll(surfaceSnapshot, preferredPaths: preferredSnapshot, pollCycle: cycle, paths: pathSnapshot)
+        }
+    }
+
+    private func scheduleWebhookRefresh(for worktreePath: String) {
+        lock.lock()
+        let pathSnapshot = worktreePaths
+        lock.unlock()
+        pollQueue.async { [weak self] in
+            self?.refreshWebhookDrivenStatus(for: worktreePath, paths: pathSnapshot)
+        }
+    }
+
+    private func refreshWebhookDrivenStatus(for worktreePath: String, paths: [String: String]) {
+        let terminalIDs = paths.compactMap { terminalID, path in
+            path == worktreePath ? terminalID : nil
+        }
+        guard !terminalIDs.isEmpty else { return }
+
+        let hookStatus = webhookProvider.status(for: worktreePath)
+        guard hookStatus != .unknown else { return }
+
+        let lastMessage = webhookProvider.lastMessage(for: worktreePath) ?? ""
+        let webhookTasks = webhookProvider.tasks(for: worktreePath)
+        let lastUserPrompt = webhookProvider.lastUserPrompt(for: worktreePath) ?? ""
+
+        for terminalID in terminalIDs {
+            lock.lock()
+            let tracker = trackers[terminalID] ?? {
+                let t = DebouncedStatusTracker()
+                trackers[terminalID] = t
+                return t
+            }()
+            let oldStatus = tracker.currentStatus
+            let statusChanged = tracker.update(status: hookStatus)
+            lastMessages[terminalID] = lastMessage
+            let roundDur = runningStartTimes[terminalID].map { Date().timeIntervalSince($0) } ?? 0
+            if statusChanged {
+                if hookStatus == .running && oldStatus != .running {
+                    runningStartTimes[terminalID] = Date()
+                } else if hookStatus != .running && oldStatus == .running {
+                    runningStartTimes[terminalID] = nil
+                }
+            }
+            lock.unlock()
+
+            let existingAgentType = AgentHead.shared.agent(for: terminalID)?.agentType ?? .unknown
+            AgentHead.shared.updateDetection(terminalID: terminalID, commandLine: nil, agentType: existingAgentType)
+            AgentHead.shared.updateStatus(
+                terminalID: terminalID,
+                status: hookStatus,
+                lastMessage: lastMessage,
+                roundDuration: roundDur,
+                tasks: webhookTasks,
+                lastUserPrompt: lastUserPrompt
+            )
+
+            DispatchQueue.main.async { [weak self] in
+                self?.aggregator?.agentDidUpdate(
+                    terminalID: terminalID,
+                    status: hookStatus,
+                    lastMessage: lastMessage,
+                    lastUserPrompt: lastUserPrompt
+                )
+            }
         }
     }
 

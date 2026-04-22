@@ -28,6 +28,14 @@ class GhosttyBridge {
             return
         }
         ghostty_config_load_default_files(config)
+
+        // Load amux-specific overrides (e.g. copy-on-select = false)
+        let amuxConfigPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config/amux/ghostty.conf").path
+        if FileManager.default.fileExists(atPath: amuxConfigPath) {
+            ghostty_config_load_file(config, amuxConfigPath)
+        }
+
         ghostty_config_finalize(config)
 
         // Always free config — ghostty_app_new copies what it needs
@@ -91,7 +99,6 @@ class GhosttyBridge {
         self.app = ghosttyApp
         self.isInitialized = true
 
-        NSLog("Ghostty initialized successfully")
     }
 
     func tick() {
