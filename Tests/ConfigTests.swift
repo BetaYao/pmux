@@ -105,6 +105,42 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(config.agentDetect.agents.contains(where: { $0.name == "codex" }))
     }
 
+    func testDecodeExistingAgentDetectMergesMissingDefaultRulePatterns() throws {
+        let json = """
+        {
+            "agent_detect": {
+                "agents": [
+                    {
+                        "name": "codex",
+                        "rules": [
+                            {"status": "Running", "patterns": ["to interrupt", "custom running"]},
+                            {"status": "Waiting", "patterns": ["custom waiting"]}
+                        ],
+                        "default_status": "Idle",
+                        "message_skip_patterns": ["custom skip"]
+                    }
+                ]
+            }
+        }
+        """.data(using: .utf8)!
+
+        let config = try JSONDecoder().decode(Config.self, from: json)
+        let codex = try XCTUnwrap(config.agentDetect.agents.first { $0.name == "codex" })
+        let running = try XCTUnwrap(codex.rules.first { $0.status == "Running" })
+        let waiting = try XCTUnwrap(codex.rules.first { $0.status == "Waiting" })
+        let error = try XCTUnwrap(codex.rules.first { $0.status == "Error" })
+
+        XCTAssertTrue(running.patterns.contains("custom running"))
+        XCTAssertTrue(running.patterns.contains("to interrupt"))
+        XCTAssertTrue(running.patterns.contains("(thinking)"))
+        XCTAssertTrue(running.patterns.contains("moving to task"))
+        XCTAssertTrue(waiting.patterns.contains("custom waiting"))
+        XCTAssertTrue(waiting.patterns.contains("would you like to run the following command?"))
+        XCTAssertTrue(error.patterns.contains("error:"))
+        XCTAssertTrue(codex.messageSkipPatterns.contains("custom skip"))
+        XCTAssertTrue(codex.messageSkipPatterns.contains("tip"))
+    }
+
     // MARK: - Save/Load to File
 
     func testSaveAndLoadFromFile() throws {

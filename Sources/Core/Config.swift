@@ -159,7 +159,7 @@ struct AgentDetectConfig: Codable {
                 "don't ask again",
                 "tell codex what to do differently",
             ]),
-            AgentRule(status: "Running", patterns: ["to interrupt"]),
+            AgentRule(status: "Running", patterns: ["to interrupt", "(thinking)", "moving to task"]),
             AgentRule(status: "Error", patterns: ["error:"]),
         ], defaultStatus: "Idle", messageSkipPatterns: ["tip", "shortcuts", "switch layout"]),
         AgentDef(name: "agent", rules: [
@@ -171,8 +171,12 @@ struct AgentDetectConfig: Codable {
 
     func includingMissingDefaultAgents() -> AgentDetectConfig {
         var merged = self
-        for agent in Self.default.agents where !merged.agents.contains(where: { $0.name == agent.name }) {
-            merged.agents.append(agent)
+        for defaultAgent in Self.default.agents {
+            if let index = merged.agents.firstIndex(where: { $0.name == defaultAgent.name }) {
+                merged.agents[index].mergeMissingDefaults(from: defaultAgent)
+            } else {
+                merged.agents.append(defaultAgent)
+            }
         }
         return merged
     }
@@ -194,6 +198,35 @@ struct AgentDef: Codable {
 struct AgentRule: Codable {
     var status: String
     var patterns: [String]
+}
+
+private extension AgentDef {
+    mutating func mergeMissingDefaults(from defaultAgent: AgentDef) {
+        for defaultRule in defaultAgent.rules {
+            if let index = rules.firstIndex(where: { $0.status.lowercased() == defaultRule.status.lowercased() }) {
+                rules[index].appendMissingPatterns(defaultRule.patterns)
+            } else {
+                rules.append(defaultRule)
+            }
+        }
+        messageSkipPatterns.appendMissingCaseInsensitive(defaultAgent.messageSkipPatterns)
+    }
+}
+
+private extension AgentRule {
+    mutating func appendMissingPatterns(_ defaults: [String]) {
+        patterns.appendMissingCaseInsensitive(defaults)
+    }
+}
+
+private extension Array where Element == String {
+    mutating func appendMissingCaseInsensitive(_ defaults: [String]) {
+        var existing = Set(map { $0.lowercased() })
+        for value in defaults where !existing.contains(value.lowercased()) {
+            append(value)
+            existing.insert(value.lowercased())
+        }
+    }
 }
 
 struct WebhookConfig: Codable {
