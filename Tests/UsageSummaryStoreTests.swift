@@ -34,6 +34,39 @@ final class UsageSummaryStoreTests: XCTestCase {
         XCTAssertTrue(result.snapshot.isStale)
     }
 
+    func testResolveSnapshotKeepsCachedWeeklyRateLimitWhenRefreshMissesIt() {
+        var cache = UsageSummaryStore.ProviderSnapshotCache(provider: .claude)
+        let cachedSnapshot = UsageSnapshot(
+            provider: .claude,
+            rateLimit: UsageRateLimitWindow(usedPercent: 10, resetsAt: Date(timeIntervalSince1970: 1_777_270_800)),
+            weeklyRateLimit: UsageRateLimitWindow(usedPercent: 13, resetsAt: Date(timeIntervalSince1970: 1_777_759_200)),
+            todayTokens: nil,
+            updatedAt: Date(timeIntervalSince1970: 1_772_523_000),
+            isStale: false
+        )
+        cache.ingest(cachedSnapshot, now: Date(timeIntervalSince1970: 1_772_523_000))
+        let candidate = UsageSnapshot(
+            provider: .claude,
+            rateLimit: cachedSnapshot.rateLimit,
+            weeklyRateLimit: nil,
+            todayTokens: nil,
+            updatedAt: Date(timeIntervalSince1970: 1_772_523_600),
+            isStale: false
+        )
+
+        let result = UsageSummaryStore.resolveSnapshotForDisplay(
+            candidate: candidate,
+            cached: cache,
+            now: Date(timeIntervalSince1970: 1_772_523_600),
+            maxCacheAge: 10 * 60
+        )
+
+        XCTAssertEqual(result.snapshot.rateLimit, candidate.rateLimit)
+        XCTAssertEqual(result.snapshot.weeklyRateLimit, cachedSnapshot.weeklyRateLimit)
+        XCTAssertEqual(result.snapshot.updatedAt, candidate.updatedAt)
+        XCTAssertFalse(result.snapshot.isStale)
+    }
+
     func testResolveSnapshotKeepsCachedTodayTokensWhenRefreshMissesThem() {
         var cache = UsageSummaryStore.ProviderSnapshotCache(provider: .codex)
         let cachedSnapshot = UsageSnapshot(

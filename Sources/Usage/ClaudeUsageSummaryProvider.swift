@@ -18,22 +18,51 @@ struct ClaudeStatuslineRateLimit: Equatable {
     let resetsAt: Date?
 }
 
+struct ClaudeStatuslineRateLimits: Equatable {
+    let fiveHour: ClaudeStatuslineRateLimit?
+    let sevenDay: ClaudeStatuslineRateLimit?
+}
+
 struct ClaudeStatuslineCacheReader {
     let cacheURL: URL
     let staleInterval: TimeInterval
 
-    func read(now: Date = Date()) throws -> ClaudeStatuslineRateLimit? {
+    func read(now: Date = Date()) throws -> ClaudeStatuslineRateLimits? {
         let values = try cacheURL.resourceValues(forKeys: [.contentModificationDateKey])
         guard let modified = values.contentModificationDate,
               now.timeIntervalSince(modified) <= staleInterval else { return nil }
         let data = try Data(contentsOf: cacheURL)
         let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         let rateLimits = root?["rate_limits"] as? [String: Any]
-        let window = rateLimits?["five_hour"] as? [String: Any]
-            ?? rateLimits?["seven_day"] as? [String: Any]
-        guard let used = window?["used_percentage"] as? Int else { return nil }
-        let resetsAt = (window?["resets_at"] as? String).flatMap { ClaudeISO8601Parser.date(from: $0) }
+        let fiveHour = Self.parseWindow(rateLimits?["five_hour"] as? [String: Any])
+        let sevenDay = Self.parseWindow(rateLimits?["seven_day"] as? [String: Any])
+        guard fiveHour != nil || sevenDay != nil else { return nil }
+        return ClaudeStatuslineRateLimits(fiveHour: fiveHour, sevenDay: sevenDay)
+    }
+
+    private static func parseWindow(_ window: [String: Any]?) -> ClaudeStatuslineRateLimit? {
+        guard let used = intValue(window?["used_percentage"]) else { return nil }
+        let resetsAt = dateValue(window?["resets_at"])
         return ClaudeStatuslineRateLimit(usedPercent: used, resetsAt: resetsAt)
+    }
+
+    private static func intValue(_ value: Any?) -> Int? {
+        if let int = value as? Int { return int }
+        if let number = value as? NSNumber { return number.intValue }
+        return nil
+    }
+
+    private static func dateValue(_ value: Any?) -> Date? {
+        if let string = value as? String {
+            if let date = ClaudeISO8601Parser.date(from: string) {
+                return date
+            }
+            return TimeInterval(string).map { Date(timeIntervalSince1970: $0) }
+        }
+        if let number = value as? NSNumber {
+            return Date(timeIntervalSince1970: number.doubleValue)
+        }
+        return nil
     }
 }
 
@@ -100,14 +129,17 @@ struct ClaudeUsageSummaryProvider {
     let transcriptAggregator: ClaudeTranscriptUsageAggregator
 
     func snapshot(now: Date = Date()) -> UsageSnapshot {
-        let rateLimit = try? cacheReader.read(now: now)
+        let rateLimits = try? cacheReader.read(now: now)
+        let fiveHour = rateLimits?.fiveHour
+        let sevenDay = rateLimits?.sevenDay
         let tokens = try? transcriptAggregator.todayTokens(now: now)
         return UsageSnapshot(
             provider: .claude,
-            rateLimit: rateLimit.map { UsageRateLimitWindow(usedPercent: $0.usedPercent, resetsAt: $0.resetsAt) },
+            rateLimit: fiveHour.map { UsageRateLimitWindow(usedPercent: $0.usedPercent, resetsAt: $0.resetsAt) },
+            weeklyRateLimit: sevenDay.map { UsageRateLimitWindow(usedPercent: $0.usedPercent, resetsAt: $0.resetsAt) },
             todayTokens: tokens,
             updatedAt: now,
-            isStale: rateLimit == nil && tokens == nil
+            isStale: fiveHour == nil && sevenDay == nil && tokens == nil
         )
     }
 }

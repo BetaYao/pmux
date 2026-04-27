@@ -22,10 +22,10 @@ Usage frames follow the compact reference style: a short label, a horizontal usa
 The primary capsule rotates through these frames on the existing timer:
 
 - Shortcut frame: keeps the current shortcut-tip behavior and copy style.
-- Claude frame: shows `Claude`, a usage bar, remaining/used percentage and reset window when available, plus today's token total in compact form.
+- Claude frame: shows `Claude`, 5-hour remaining, weekly remaining, and the 5-hour reset countdown when available.
 - Codex frame: shows `Codex`, a usage bar, remaining/used percentage and reset window when available, plus today's token total in compact form.
 
-For the usage bar, filled width represents used percentage. The text communicates remaining amount, for example `剩余 72%`, while the bar itself visually matches the reference's usage-progress style. If reset data is available, show a short form such as `2h 19m`. If today's token count is available, show a compact count such as `Today 5.7M`.
+For the usage bar, filled width represents used percentage. The text communicates remaining amount, for example `剩余 72%`, while the bar itself visually matches the reference's usage-progress style. For Claude, the bar represents the 5-hour window and the compact text is `5h 剩余 90% · 周剩余 87% · 重置 3h 11m`. For Codex, if reset data is available, show a short form such as `2h 19m`; if today's token count is available, show a compact count such as `Today 5.7M`.
 
 When space is tight, the priority order is:
 
@@ -61,7 +61,7 @@ For plan remaining, add a statusline wrapper script:
 - Writes a small JSON cache in an amux-owned cache path.
 - Forwards the same stdin payload to the user's current Claude HUD command so existing HUD behavior continues.
 
-The app reads only the cache written by the wrapper. If the wrapper has not been installed, has not seen `rate_limits`, or the cache is stale, Claude remaining displays `--`.
+The app reads only the cache written by the wrapper. It uses `rate_limits.five_hour` for the 5-hour bar/remaining/reset and `rate_limits.seven_day` for weekly remaining. If the wrapper has not been installed, has not seen `rate_limits`, or the cache is stale, Claude remaining displays `--`.
 
 For today's token usage, scan Claude transcript JSONL files under `~/.claude/projects`. Count `message.usage` fields for messages in the current local day and dedupe repeated request/message identifiers where present. Include:
 

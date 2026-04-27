@@ -139,6 +139,8 @@ extension UsageSummaryStore {
         let provider: UsageProvider
         private(set) var rateLimit: UsageRateLimitWindow?
         private(set) var rateLimitUpdatedAt: Date?
+        private(set) var weeklyRateLimit: UsageRateLimitWindow?
+        private(set) var weeklyRateLimitUpdatedAt: Date?
         private(set) var todayTokens: Int?
         private(set) var todayTokensUpdatedAt: Date?
         private(set) var isStale = true
@@ -149,6 +151,10 @@ extension UsageSummaryStore {
                 self.rateLimit = rateLimit
                 self.rateLimitUpdatedAt = snapshotTime
             }
+            if let weeklyRateLimit = snapshot.weeklyRateLimit {
+                self.weeklyRateLimit = weeklyRateLimit
+                self.weeklyRateLimitUpdatedAt = snapshotTime
+            }
             if let todayTokens = snapshot.todayTokens {
                 self.todayTokens = todayTokens
                 self.todayTokensUpdatedAt = snapshotTime
@@ -158,14 +164,17 @@ extension UsageSummaryStore {
 
         func displaySnapshot(now: Date = Date(), maxCacheAge: TimeInterval) -> UsageSnapshot {
             let displayRateLimit = isFresh(rateLimitUpdatedAt, now: now, maxCacheAge: maxCacheAge) ? rateLimit : nil
+            let displayWeeklyRateLimit = isFresh(weeklyRateLimitUpdatedAt, now: now, maxCacheAge: maxCacheAge) ? weeklyRateLimit : nil
             let displayTodayTokens = isFreshForToday(todayTokensUpdatedAt, now: now, maxCacheAge: maxCacheAge) ? todayTokens : nil
             let displayUpdatedAt = [displayRateLimit == nil ? nil : rateLimitUpdatedAt,
+                                    displayWeeklyRateLimit == nil ? nil : weeklyRateLimitUpdatedAt,
                                     displayTodayTokens == nil ? nil : todayTokensUpdatedAt]
                 .compactMap { $0 }
                 .max()
             return UsageSnapshot(
                 provider: provider,
                 rateLimit: displayRateLimit,
+                weeklyRateLimit: displayWeeklyRateLimit,
                 todayTokens: displayTodayTokens,
                 updatedAt: displayUpdatedAt,
                 isStale: isStale || displayUpdatedAt == nil
