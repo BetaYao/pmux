@@ -145,11 +145,7 @@ struct CodexSessionUsageAggregator {
     func todayTokens(now: Date = Date()) throws -> Int {
         let start = calendar.startOfDay(for: now)
         let end = calendar.date(byAdding: .day, value: 1, to: start)!
-        let files = FileManager.default.enumerator(
-            at: rootURL,
-            includingPropertiesForKeys: [.contentModificationDateKey]
-        )?.compactMap { $0 as? URL }
-            .filter { $0.pathExtension == "jsonl" && shouldReadFile($0, dayStart: start) } ?? []
+        let files = try sessionFiles(dayStart: start)
 
         var total = 0
         for file in files {
@@ -171,6 +167,23 @@ struct CodexSessionUsageAggregator {
             }
         }
         return total
+    }
+
+    private func sessionFiles(dayStart: Date) throws -> [URL] {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: rootURL.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            throw CocoaError(.fileReadNoSuchFile)
+        }
+        guard let enumerator = FileManager.default.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.contentModificationDateKey]
+        ) else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        return enumerator
+            .compactMap { $0 as? URL }
+            .filter { $0.pathExtension == "jsonl" && shouldReadFile($0, dayStart: dayStart) }
     }
 
     private func shouldReadFile(_ file: URL, dayStart: Date) -> Bool {

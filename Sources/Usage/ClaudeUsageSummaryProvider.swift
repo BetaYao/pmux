@@ -47,12 +47,7 @@ struct ClaudeTranscriptUsageAggregator {
         let end = calendar.date(byAdding: .day, value: 1, to: start)!
         var seen = Set<String>()
         var total = 0
-        let files = FileManager.default.enumerator(
-            at: rootURL,
-            includingPropertiesForKeys: [.contentModificationDateKey]
-        )?
-            .compactMap { $0 as? URL }
-            .filter { $0.pathExtension == "jsonl" && shouldReadFile($0, dayStart: start) } ?? []
+        let files = try transcriptFiles(dayStart: start)
         for file in files {
             let text = try String(contentsOf: file, encoding: .utf8)
             for (lineIndex, line) in text.split(separator: "\n").enumerated() {
@@ -72,6 +67,23 @@ struct ClaudeTranscriptUsageAggregator {
             }
         }
         return total
+    }
+
+    private func transcriptFiles(dayStart: Date) throws -> [URL] {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: rootURL.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            throw CocoaError(.fileReadNoSuchFile)
+        }
+        guard let enumerator = FileManager.default.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.contentModificationDateKey]
+        ) else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        return enumerator
+            .compactMap { $0 as? URL }
+            .filter { $0.pathExtension == "jsonl" && shouldReadFile($0, dayStart: dayStart) }
     }
 
     private func shouldReadFile(_ file: URL, dayStart: Date) -> Bool {
@@ -95,7 +107,7 @@ struct ClaudeUsageSummaryProvider {
             rateLimit: rateLimit.map { UsageRateLimitWindow(usedPercent: $0.usedPercent, resetsAt: $0.resetsAt) },
             todayTokens: tokens,
             updatedAt: now,
-            isStale: rateLimit == nil
+            isStale: rateLimit == nil && tokens == nil
         )
     }
 }

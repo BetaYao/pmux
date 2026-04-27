@@ -42,7 +42,6 @@ enum WindowStyling {
 }
 
 class MainWindowController: NSWindowController {
-    private static let primaryCapsuleDismissDelay: TimeInterval = 1.0
     private static let primaryCapsuleDisplayDuration: TimeInterval = 8.0
 
     private let titleBar = TitleBarView()
@@ -867,24 +866,6 @@ extension MainWindowController {
         default:
             return entry.isRead ? 0 : 1
         }
-    }
-
-    private func schedulePrimaryCapsuleDismissal(for entry: NotificationEntry) {
-        primaryCapsuleDismissWorkItem?.cancel()
-        dismissedPrimaryCapsuleNotificationIDs.insert(entry.id)
-        primaryCapsuleNotification = nil
-        titleBar.updateNotificationSummary(
-            entry: nil,
-            unreadCount: NotificationHistory.shared.unreadCount
-        )
-        let workItem = DispatchWorkItem {
-            NotificationHistory.shared.markRead(id: entry.id)
-        }
-        primaryCapsuleDismissWorkItem = workItem
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + Self.primaryCapsuleDismissDelay,
-            execute: workItem
-        )
     }
 
     private func schedulePrimaryCapsuleAutoDismiss(for entry: NotificationEntry) {
