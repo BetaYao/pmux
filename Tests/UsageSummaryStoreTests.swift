@@ -98,4 +98,41 @@ final class UsageSummaryStoreTests: XCTestCase {
         XCTAssertNil(result.snapshot.updatedAt)
         XCTAssertTrue(result.snapshot.isStale)
     }
+
+    func testResolveSnapshotDoesNotCarryTodayTokensAcrossLocalDayBoundary() {
+        var cache = UsageSummaryStore.ProviderSnapshotCache(provider: .codex)
+        let localDay = Calendar.current.startOfDay(for: Date(timeIntervalSince1970: 1_772_524_800))
+        let nextLocalDay = Calendar.current.date(byAdding: .day, value: 1, to: localDay)!
+        let cachedAt = Calendar.current.date(byAdding: .minute, value: -1, to: nextLocalDay)!
+        cache.ingest(
+            UsageSnapshot(
+                provider: .codex,
+                rateLimit: UsageRateLimitWindow(usedPercent: 40, resetsAt: nil),
+                todayTokens: 34_000,
+                updatedAt: cachedAt,
+                isStale: false
+            ),
+            now: cachedAt
+        )
+        let now = Calendar.current.date(byAdding: .minute, value: 1, to: nextLocalDay)!
+        let candidate = UsageSnapshot(
+            provider: .codex,
+            rateLimit: UsageRateLimitWindow(usedPercent: 42, resetsAt: nil),
+            todayTokens: nil,
+            updatedAt: now,
+            isStale: false
+        )
+
+        let result = UsageSummaryStore.resolveSnapshotForDisplay(
+            candidate: candidate,
+            cached: cache,
+            now: now,
+            maxCacheAge: 10 * 60
+        )
+
+        XCTAssertEqual(result.snapshot.rateLimit, candidate.rateLimit)
+        XCTAssertNil(result.snapshot.todayTokens)
+        XCTAssertEqual(result.snapshot.updatedAt, candidate.updatedAt)
+        XCTAssertFalse(result.snapshot.isStale)
+    }
 }

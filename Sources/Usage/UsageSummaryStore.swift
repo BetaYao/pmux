@@ -158,7 +158,7 @@ extension UsageSummaryStore {
 
         func displaySnapshot(now: Date = Date(), maxCacheAge: TimeInterval) -> UsageSnapshot {
             let displayRateLimit = isFresh(rateLimitUpdatedAt, now: now, maxCacheAge: maxCacheAge) ? rateLimit : nil
-            let displayTodayTokens = isFresh(todayTokensUpdatedAt, now: now, maxCacheAge: maxCacheAge) ? todayTokens : nil
+            let displayTodayTokens = isFreshForToday(todayTokensUpdatedAt, now: now, maxCacheAge: maxCacheAge) ? todayTokens : nil
             let displayUpdatedAt = [displayRateLimit == nil ? nil : rateLimitUpdatedAt,
                                     displayTodayTokens == nil ? nil : todayTokensUpdatedAt]
                 .compactMap { $0 }
@@ -175,6 +175,12 @@ extension UsageSummaryStore {
         private func isFresh(_ date: Date?, now: Date, maxCacheAge: TimeInterval) -> Bool {
             guard let date else { return false }
             return now.timeIntervalSince(date) <= maxCacheAge
+        }
+
+        private func isFreshForToday(_ date: Date?, now: Date, maxCacheAge: TimeInterval) -> Bool {
+            guard isFresh(date, now: now, maxCacheAge: maxCacheAge),
+                  let date else { return false }
+            return Calendar.current.isDate(date, inSameDayAs: now)
         }
     }
 }
