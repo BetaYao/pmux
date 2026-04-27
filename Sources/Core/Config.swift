@@ -147,7 +147,7 @@ struct AgentDetectConfig: Codable {
 
     static let `default` = AgentDetectConfig(agents: [
         AgentDef(name: "claude", rules: [
-            AgentRule(status: "Running", patterns: ["to interrupt"]),
+            AgentRule(status: "Running", patterns: ["to interrupt", "(thinking)", "moving to task"]),
             AgentRule(status: "Error", patterns: ["ERROR", "error:"]),
             AgentRule(status: "Waiting", patterns: ["?", "(y/n)", "(yes/no)"]),
         ], defaultStatus: "Idle", messageSkipPatterns: ["shift+tab", "accept edits", "to interrupt"]),

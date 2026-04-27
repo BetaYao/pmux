@@ -124,6 +124,41 @@ final class StatusDetectorTests: XCTestCase {
         XCTAssertEqual(result, .idle)
     }
 
+    func testTextPattern_ClaudeTaskProgressThinkingIsRunning() throws {
+        let claude = try XCTUnwrap(AgentDetectConfig.default.agents.first { $0.name == "claude" })
+        let content = """
+        superpowers:code-reviewer(Code quality review Task 1)
+        |_ Done (18 tool uses * 61.8k tokens * 1m 15s)
+
+        * Task 2: Add insert_session_from_supabase to SessionManager... (thinking)
+          - Task 2: Add insert_session_from_supabase to SessionManager
+          - Task 3: Wire fetch+insert into apply_start_runtime
+        """
+
+        let result = detector.detect(
+            processStatus: .running,
+            shellInfo: nil,
+            content: content,
+            agentDef: claude
+        )
+
+        XCTAssertEqual(result, .running)
+    }
+
+    func testTextPattern_ClaudeTaskTransitionIsRunning() throws {
+        let claude = try XCTUnwrap(AgentDetectConfig.default.agents.first { $0.name == "claude" })
+        let content = "Task 1 approved. Moving to Task 2."
+
+        let result = detector.detect(
+            processStatus: .running,
+            shellInfo: nil,
+            content: content,
+            agentDef: claude
+        )
+
+        XCTAssertEqual(result, .running)
+    }
+
     func testTextPattern_CodexApprovalPromptIsWaiting() throws {
         let codex = try XCTUnwrap(AgentDetectConfig.default.agents.first { $0.name == "codex" })
         let content = """

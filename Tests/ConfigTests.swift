@@ -141,6 +141,30 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(codex.messageSkipPatterns.contains("tip"))
     }
 
+    func testDecodeExistingClaudeAgentDetectMergesTaskProgressRunningPatterns() throws {
+        let json = """
+        {
+            "agent_detect": {
+                "agents": [
+                    {
+                        "name": "claude",
+                        "rules": [{"status": "Running", "patterns": ["to interrupt"]}],
+                        "default_status": "Idle",
+                        "message_skip_patterns": []
+                    }
+                ]
+            }
+        }
+        """.data(using: .utf8)!
+
+        let config = try JSONDecoder().decode(Config.self, from: json)
+        let claude = try XCTUnwrap(config.agentDetect.agents.first { $0.name == "claude" })
+        let running = try XCTUnwrap(claude.rules.first { $0.status == "Running" })
+
+        XCTAssertTrue(running.patterns.contains("(thinking)"))
+        XCTAssertTrue(running.patterns.contains("moving to task"))
+    }
+
     // MARK: - Save/Load to File
 
     func testSaveAndLoadFromFile() throws {
