@@ -75,7 +75,8 @@ struct Config: Codable {
         }
         backend = rawBackend
         terminalRowCacheSize = try container.decodeIfPresent(Int.self, forKey: .terminalRowCacheSize) ?? 200
-        agentDetect = try container.decodeIfPresent(AgentDetectConfig.self, forKey: .agentDetect) ?? .default
+        agentDetect = (try container.decodeIfPresent(AgentDetectConfig.self, forKey: .agentDetect) ?? .default)
+            .includingMissingDefaultAgents()
         webhook = try container.decodeIfPresent(WebhookConfig.self, forKey: .webhook) ?? WebhookConfig()
         autoUpdate = try container.decodeIfPresent(UpdateConfig.self, forKey: .autoUpdate) ?? UpdateConfig()
         cardOrder = try container.decodeIfPresent([String].self, forKey: .cardOrder) ?? []
@@ -150,12 +151,31 @@ struct AgentDetectConfig: Codable {
             AgentRule(status: "Error", patterns: ["ERROR", "error:"]),
             AgentRule(status: "Waiting", patterns: ["?", "(y/n)", "(yes/no)"]),
         ], defaultStatus: "Idle", messageSkipPatterns: ["shift+tab", "accept edits", "to interrupt"]),
+        AgentDef(name: "codex", rules: [
+            AgentRule(status: "Waiting", patterns: [
+                "would you like to run the following command?",
+                "would you like to proceed?",
+                "yes, proceed",
+                "don't ask again",
+                "tell codex what to do differently",
+            ]),
+            AgentRule(status: "Running", patterns: ["to interrupt"]),
+            AgentRule(status: "Error", patterns: ["error:"]),
+        ], defaultStatus: "Idle", messageSkipPatterns: ["tip", "shortcuts", "switch layout"]),
         AgentDef(name: "agent", rules: [
             AgentRule(status: "Running", patterns: ["to interrupt"]),
             AgentRule(status: "Error", patterns: ["error"]),
             AgentRule(status: "Waiting", patterns: ["?", "> "]),
         ], defaultStatus: "Idle", messageSkipPatterns: ["shift+tab", "accept edits", "to interrupt"]),
     ])
+
+    func includingMissingDefaultAgents() -> AgentDetectConfig {
+        var merged = self
+        for agent in Self.default.agents where !merged.agents.contains(where: { $0.name == agent.name }) {
+            merged.agents.append(agent)
+        }
+        return merged
+    }
 }
 
 struct AgentDef: Codable {

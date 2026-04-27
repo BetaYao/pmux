@@ -30,6 +30,62 @@ enum SessionManager {
         "\(base)-\(index)"
     }
 
+    static func sessionNames(in layout: CodableSplitNode) -> [String] {
+        switch layout {
+        case .leaf(let sessionName):
+            return [sessionName]
+        case .split(_, _, let first, let second):
+            return sessionNames(in: first) + sessionNames(in: second)
+        }
+    }
+
+    static func expectedSessionNames(config: Config, discoveredWorktreePaths: [String]) -> Set<String> {
+        var names = Set(discoveredWorktreePaths.map { persistentSessionName(for: $0) })
+        for layout in config.splitLayouts.values {
+            names.formUnion(sessionNames(in: layout))
+        }
+        return names.filter { $0.hasPrefix("amux-") }
+    }
+
+    static func parseZmxSessionNames(listOutput: String) -> [String] {
+        listOutput
+            .components(separatedBy: .newlines)
+            .compactMap { line in
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return nil }
+
+                if let range = trimmed.range(of: "name=") {
+                    let suffix = trimmed[range.upperBound...]
+                    let end = suffix.firstIndex(where: \.isWhitespace) ?? suffix.endIndex
+                    let name = String(suffix[..<end])
+                    return name.isEmpty ? nil : name
+                }
+
+                let fields = trimmed.split(whereSeparator: \.isWhitespace)
+                guard let first = fields.first else { return nil }
+                let candidate = String(first)
+                return candidate.isEmpty ? nil : candidate
+            }
+    }
+
+    static func orphanZmxSessionNames(activeSessionNames: Set<String>, listOutput: String) -> [String] {
+        parseZmxSessionNames(listOutput: listOutput)
+            .filter { $0.hasPrefix("amux-") && !activeSessionNames.contains($0) }
+    }
+
+    @discardableResult
+    static func cleanupOrphanZmxSessions(
+        activeSessionNames: Set<String>,
+        listOutput: String? = nil
+    ) -> [String] {
+        let output = listOutput ?? ProcessRunner.output(["zmx", "list"]) ?? ""
+        let orphaned = orphanZmxSessionNames(activeSessionNames: activeSessionNames, listOutput: output)
+        for sessionName in orphaned {
+            TerminalSurface.forceKillZmxSession(sessionName)
+        }
+        return orphaned
+    }
+
     /// Kill a persistent session (tmux or zmx)
     static func killSession(_ name: String, backend: String) {
         DispatchQueue.global(qos: .utility).async {

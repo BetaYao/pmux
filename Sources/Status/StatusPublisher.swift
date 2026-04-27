@@ -228,7 +228,8 @@ class StatusPublisher {
 
             // Lowercase once, reuse for both agent matching and status detection
             let lowerContent = content.lowercased()
-            let agentDef = findAgentDef(inLowercased: lowerContent)
+            let existingAgentType = AgentHead.shared.agent(for: terminalID)?.agentType ?? .unknown
+            let agentDef = findAgentDef(inLowercased: lowerContent, existingAgentType: existingAgentType)
 
             // detector.detect() can be slow — do NOT hold the lock here
             let textStatus = detector.detect(
@@ -249,7 +250,8 @@ class StatusPublisher {
             let lastUserPrompt = webhookProvider.lastUserPrompt(for: worktreePath) ?? ""
 
             // Feed AgentHead with structured data on every poll
-            let agentType = AgentType.detect(fromLowercased: lowerContent)
+            let detectedAgentType = AgentType.detect(fromLowercased: lowerContent)
+            let agentType = detectedAgentType == .unknown ? existingAgentType : detectedAgentType
 
             lock.lock()
             let oldStatus = tracker.currentStatus
@@ -292,8 +294,27 @@ class StatusPublisher {
     }
 
     /// Find agent definition using pre-lowercased content and names
-    private func findAgentDef(inLowercased lowerContent: String) -> AgentDef? {
-        for (name, def) in lowercasedAgentNames {
+    private func findAgentDef(inLowercased lowerContent: String, existingAgentType: AgentType) -> AgentDef? {
+        Self.findAgentDef(
+            inLowercased: lowerContent,
+            existingAgentType: existingAgentType,
+            candidates: lowercasedAgentNames
+        )
+    }
+
+    static func findAgentDef(
+        inLowercased lowerContent: String,
+        existingAgentType: AgentType,
+        candidates: [(name: String, def: AgentDef)]
+    ) -> AgentDef? {
+        if existingAgentType.isAIAgent {
+            let name = existingAgentType.displayName.lowercased()
+            if let def = candidates.first(where: { $0.name == name })?.def {
+                return def
+            }
+        }
+
+        for (name, def) in candidates {
             if lowerContent.contains(name) {
                 return def
             }

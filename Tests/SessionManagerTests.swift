@@ -41,4 +41,45 @@ class SessionManagerTests: XCTestCase {
         let b = SessionManager.persistentSessionName(for: "/workspace/very-long-repo-name-here/very-long-branch-name-beta")
         XCTAssertNotEqual(a, b)
     }
+
+    func testSessionNamesExtractedFromSplitLayout() {
+        let layout = CodableSplitNode.split(
+            axis: "horizontal",
+            ratio: 0.5,
+            first: .leaf(sessionName: "amux-repo-main"),
+            second: .leaf(sessionName: "amux-repo-main-1")
+        )
+
+        XCTAssertEqual(
+            SessionManager.sessionNames(in: layout),
+            ["amux-repo-main", "amux-repo-main-1"]
+        )
+    }
+
+    func testParseZmxSessionNamesReadsNameEqualsFormat() {
+        let output = """
+        name=amux-repo-main pid=123 cwd=/tmp/repo
+        name=amux-repo-main-1 pid=456 cwd=/tmp/repo
+        """
+
+        XCTAssertEqual(
+            SessionManager.parseZmxSessionNames(listOutput: output),
+            ["amux-repo-main", "amux-repo-main-1"]
+        )
+    }
+
+    func testOrphanZmxSessionNamesOnlyReturnsAmuxSessionsNotInActiveSet() {
+        let output = """
+        name=amux-repo-main pid=123 cwd=/tmp/repo
+        name=amux-repo-main-1 pid=456 cwd=/tmp/repo
+        name=third-party pid=789 cwd=/tmp/other
+        """
+
+        let orphaned = SessionManager.orphanZmxSessionNames(
+            activeSessionNames: ["amux-repo-main"],
+            listOutput: output
+        )
+
+        XCTAssertEqual(orphaned, ["amux-repo-main-1"])
+    }
 }

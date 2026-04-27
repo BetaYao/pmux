@@ -83,6 +83,28 @@ final class ConfigTests: XCTestCase {
         XCTAssertFalse(claude.messageSkipPatterns.isEmpty)
     }
 
+    func testDecodeExistingAgentDetectAddsMissingDefaultAgents() throws {
+        let json = """
+        {
+            "agent_detect": {
+                "agents": [
+                    {
+                        "name": "claude",
+                        "rules": [{"status": "Running", "patterns": ["to interrupt"]}],
+                        "default_status": "Idle",
+                        "message_skip_patterns": []
+                    }
+                ]
+            }
+        }
+        """.data(using: .utf8)!
+
+        let config = try JSONDecoder().decode(Config.self, from: json)
+
+        XCTAssertTrue(config.agentDetect.agents.contains(where: { $0.name == "claude" }))
+        XCTAssertTrue(config.agentDetect.agents.contains(where: { $0.name == "codex" }))
+    }
+
     // MARK: - Save/Load to File
 
     func testSaveAndLoadFromFile() throws {

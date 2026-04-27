@@ -247,6 +247,45 @@ class MainWindowController: NSWindowController {
         NSWorkspace.shared.open(repositoryURL)
     }
 
+    @objc func cleanOrphanSessions() {
+        let configSnapshot = config
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard ProcessRunner.commandExists("zmx") else {
+                DispatchQueue.main.async {
+                    let alert = NSAlert()
+                    alert.messageText = "zmx is not available"
+                    alert.informativeText = "Install zmx first to clean orphan sessions."
+                    alert.runModal()
+                }
+                return
+            }
+
+            let worktreePaths = configSnapshot.workspacePaths.flatMap { repoPath in
+                WorktreeDiscovery.discover(repoPath: repoPath).map(\.path)
+            }
+            let activeSessionNames = SessionManager.expectedSessionNames(
+                config: configSnapshot,
+                discoveredWorktreePaths: worktreePaths
+            )
+            let cleaned = SessionManager.cleanupOrphanZmxSessions(activeSessionNames: activeSessionNames)
+
+            DispatchQueue.main.async {
+                guard let self else { return }
+                let alert = NSAlert()
+                alert.messageText = cleaned.isEmpty
+                    ? "No orphan sessions found"
+                    : "Cleaned \(cleaned.count) orphan session(s)"
+                if cleaned.isEmpty {
+                    alert.informativeText = "All amux zmx sessions are still referenced by the current config and worktrees."
+                } else {
+                    alert.informativeText = cleaned.joined(separator: "\n")
+                }
+                alert.runModal()
+                self.handleNotificationHistoryDidChange(nil)
+            }
+        }
+    }
+
     @objc func dashboardZoomIn() {
         dashboardVC?.zoomIn()
         let zoom = dashboardVC?.zoomIndex ?? GridLayout.defaultZoomIndex

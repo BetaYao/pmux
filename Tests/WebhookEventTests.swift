@@ -116,8 +116,8 @@ final class WebhookEventTests: XCTestCase {
     func testNotificationLevelMapping() {
         XCTAssertEqual(WebhookEventType.notification.agentStatus(data: ["level": "error"]), .error)
         XCTAssertEqual(WebhookEventType.notification.agentStatus(data: ["level": "warning"]), .waiting)
-        XCTAssertEqual(WebhookEventType.notification.agentStatus(data: ["level": "info"]), .idle)
-        XCTAssertEqual(WebhookEventType.notification.agentStatus(data: nil), .idle)
+        XCTAssertEqual(WebhookEventType.notification.agentStatus(data: ["level": "info"]), .unknown)
+        XCTAssertEqual(WebhookEventType.notification.agentStatus(data: nil), .unknown)
     }
 
     func testParseClaudeCodeSubagentStop() throws {

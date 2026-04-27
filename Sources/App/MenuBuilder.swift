@@ -16,6 +16,9 @@ enum MenuBuilder {
         checkUpdateItem.keyEquivalentModifierMask = .command
         checkUpdateItem.target = target
         appMenu.addItem(checkUpdateItem)
+        let cleanOrphanSessionsItem = NSMenuItem(title: "Clean Orphan Sessions", action: #selector(MainWindowController.cleanOrphanSessions), keyEquivalent: "")
+        cleanOrphanSessionsItem.target = target
+        appMenu.addItem(cleanOrphanSessionsItem)
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Quit amux", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenuItem.submenu = appMenu

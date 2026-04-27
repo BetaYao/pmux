@@ -124,6 +124,30 @@ final class StatusDetectorTests: XCTestCase {
         XCTAssertEqual(result, .idle)
     }
 
+    func testTextPattern_CodexApprovalPromptIsWaiting() throws {
+        let codex = try XCTUnwrap(AgentDetectConfig.default.agents.first { $0.name == "codex" })
+        let content = """
+        Would you like to run the following command?
+
+        Reason: Allow activating the current AMUX Tauri smoke window by pid?
+
+        $ osascript -e 'tell application "System Events" to set frontmost of first process whose unix id is 51869 to true'
+
+        1. Yes, proceed (y)
+        2. Yes, and don't ask again for commands that start with ...
+        3. No, and tell Codex what to do differently (esc)
+        """
+
+        let result = detector.detect(
+            processStatus: .running,
+            shellInfo: nil,
+            content: content,
+            agentDef: codex
+        )
+
+        XCTAssertEqual(result, .waiting)
+    }
+
     func testNoShellInfo_NoAgent_ReturnsUnknown() {
         let result = detector.detect(
             processStatus: .running,

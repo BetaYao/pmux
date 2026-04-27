@@ -32,7 +32,7 @@ enum WebhookEventType: String {
             switch level {
             case "error": return .error
             case "warning": return .waiting
-            default: return .idle
+            default: return .unknown
             }
         }
     }

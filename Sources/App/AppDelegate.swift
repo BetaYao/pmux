@@ -12,6 +12,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // NSColor(name:) dynamic colors resolve correctly even for views
         // not yet added to a window (e.g. during init/setup).
         let config = Config.load()
+        cleanOrphanZmxSessionsOnLaunch(config: config)
         let mode = ThemeMode(rawValue: config.themeMode) ?? .dark
         ThemeMode.applyAppearance(mode)
 
@@ -49,6 +50,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Create and show main window
         mainWindowController = MainWindowController()
         mainWindowController?.showWindow(nil)
+    }
+
+    private func cleanOrphanZmxSessionsOnLaunch(config: Config) {
+        DispatchQueue.global(qos: .utility).async {
+            guard ProcessRunner.commandExists("zmx") else { return }
+            let worktreePaths = config.workspacePaths.flatMap { repoPath in
+                WorktreeDiscovery.discover(repoPath: repoPath).map(\.path)
+            }
+            let activeSessionNames = SessionManager.expectedSessionNames(
+                config: config,
+                discoveredWorktreePaths: worktreePaths
+            )
+            let cleaned = SessionManager.cleanupOrphanZmxSessions(activeSessionNames: activeSessionNames)
+            if !cleaned.isEmpty {
+                NSLog("[App] Cleaned %d orphan zmx session(s) on launch", cleaned.count)
+            }
+        }
     }
 
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
