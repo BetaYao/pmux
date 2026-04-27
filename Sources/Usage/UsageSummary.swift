@@ -63,6 +63,33 @@ struct PrimaryCapsuleFrame: Equatable {
     let trailingText: String
     let usageProgress: Double?
     let resetText: String?
+    let secondaryText: String
+    let secondaryUsageProgress: Double?
+    let secondaryTrailingText: String
+
+    init(
+        kind: PrimaryCapsuleFrameKind,
+        iconName: String,
+        leadingText: String,
+        bodyText: String,
+        trailingText: String,
+        usageProgress: Double?,
+        resetText: String?,
+        secondaryText: String = "",
+        secondaryUsageProgress: Double? = nil,
+        secondaryTrailingText: String = ""
+    ) {
+        self.kind = kind
+        self.iconName = iconName
+        self.leadingText = leadingText
+        self.bodyText = bodyText
+        self.trailingText = trailingText
+        self.usageProgress = usageProgress
+        self.resetText = resetText
+        self.secondaryText = secondaryText
+        self.secondaryUsageProgress = secondaryUsageProgress
+        self.secondaryTrailingText = secondaryTrailingText
+    }
 
     static func shortcut(leading: String, body: String) -> PrimaryCapsuleFrame {
         PrimaryCapsuleFrame(
@@ -114,21 +141,29 @@ enum UsageSummaryFormatter {
     }
 
     private static func formatClaudeUsageFrame(_ snapshot: UsageSnapshot, now: Date) -> PrimaryCapsuleFrame {
-        let fiveHourRemaining = snapshot.rateLimit.map { "\($0.remainingPercent)%" } ?? "--"
-        let weeklyRemaining = snapshot.weeklyRateLimit.map { "\($0.remainingPercent)%" } ?? "--"
-        var trailingParts = ["周剩余 \(weeklyRemaining)"]
-        if let reset = snapshot.rateLimit?.resetsAt.flatMap({ compactResetText(until: $0, now: now) }) {
-            trailingParts.append("重置 \(reset)")
-        }
+        let sessionStatus = usageStatus(for: snapshot.rateLimit, now: now)
+        let weeklyStatus = usageStatus(for: snapshot.weeklyRateLimit, now: now)
         return PrimaryCapsuleFrame(
             kind: .usage,
             iconName: "sparkles",
             leadingText: snapshot.provider.displayName,
-            bodyText: "5h 剩余 \(fiveHourRemaining)",
-            trailingText: trailingParts.joined(separator: " · "),
+            bodyText: "Current session:",
+            trailingText: sessionStatus,
             usageProgress: snapshot.rateLimit?.progress,
-            resetText: nil
+            resetText: nil,
+            secondaryText: "Weekly limits:",
+            secondaryUsageProgress: snapshot.weeklyRateLimit?.progress,
+            secondaryTrailingText: weeklyStatus
         )
+    }
+
+    private static func usageStatus(for window: UsageRateLimitWindow?, now: Date) -> String {
+        guard let window else { return "--" }
+        var text = "\(window.usedPercent)%"
+        if let reset = window.resetsAt.flatMap({ compactResetText(until: $0, now: now) }) {
+            text += ", Resets \(reset)"
+        }
+        return text
     }
 
     static func compactTokenCount(_ count: Int) -> String {
@@ -144,8 +179,12 @@ enum UsageSummaryFormatter {
     private static func compactResetText(until resetsAt: Date, now: Date) -> String? {
         let seconds = max(0, Int(resetsAt.timeIntervalSince(now)))
         guard seconds > 0 else { return nil }
-        let hours = seconds / 3600
+        let days = seconds / 86_400
+        let hours = (seconds % 86_400) / 3600
         let minutes = (seconds % 3600) / 60
+        if days > 0 {
+            return "\(days)d \(hours)h \(minutes)m"
+        }
         if hours > 0 {
             return "\(hours)h \(minutes)m"
         }

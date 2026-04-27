@@ -22,10 +22,10 @@ Usage frames follow the compact reference style: a short label, a horizontal usa
 The primary capsule rotates through these frames on the existing timer:
 
 - Shortcut frame: keeps the current shortcut-tip behavior and copy style.
-- Claude frame: shows `Claude`, 5-hour remaining, weekly remaining, and the 5-hour reset countdown when available.
+- Claude frame: shows `Claude`, a Current session usage bar with used percentage and reset countdown, plus a Weekly limits usage bar with used percentage and reset countdown.
 - Codex frame: shows `Codex`, a usage bar, remaining/used percentage and reset window when available, plus today's token total in compact form.
 
-For the usage bar, filled width represents used percentage. The text communicates remaining amount, for example `剩余 72%`, while the bar itself visually matches the reference's usage-progress style. For Claude, the bar represents the 5-hour window and the compact text is `5h 剩余 90% · 周剩余 87% · 重置 3h 11m`. For Codex, if reset data is available, show a short form such as `2h 19m`; if today's token count is available, show a compact count such as `Today 5.7M`.
+For the usage bar, filled width represents used percentage. The text communicates remaining amount, for example `剩余 72%`, while the bar itself visually matches the reference's usage-progress style. For Claude, the compact text is `Current session: <bar> 11%, Resets 2h 57m · Weekly limits: <bar> 14%, Resets 3d 23h 35m`. For Codex, if reset data is available, show a short form such as `2h 19m`; if today's token count is available, show a compact count such as `Today 5.7M`.
 
 When space is tight, the priority order is:
 

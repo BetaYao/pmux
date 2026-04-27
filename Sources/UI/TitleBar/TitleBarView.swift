@@ -31,12 +31,18 @@ final class TitleBarView: NSView {
     private let capsuleLeadingLabel = NSTextField(labelWithString: "")
     private let capsuleBodyLabel = NSTextField(labelWithString: "")
     private let capsuleTrailingLabel = NSTextField(labelWithString: "")
+    private let capsuleSecondaryLabel = NSTextField(labelWithString: "")
+    private let capsuleSecondaryTrailingLabel = NSTextField(labelWithString: "")
     private let capsuleSep1Label = NSTextField(labelWithString: "\u{00B7}")
     private let capsuleSep2Label = NSTextField(labelWithString: "\u{00B7}")
+    private let capsuleSep3Label = NSTextField(labelWithString: "\u{00B7}")
     private let primaryCapsuleStack = NSStackView()
     private let usageProgressTrack = NSView()
     private let usageProgressFill = NSView()
     private var usageProgressWidthConstraint: NSLayoutConstraint?
+    private let secondaryUsageProgressTrack = NSView()
+    private let secondaryUsageProgressFill = NSView()
+    private var secondaryUsageProgressWidthConstraint: NSLayoutConstraint?
 
     // Right controls — layout group
     private let gridLayoutButton = NSButton()
@@ -182,6 +188,18 @@ final class TitleBarView: NSView {
         capsuleTrailingLabel.setContentHuggingPriority(.required, for: .horizontal)
         capsuleTrailingLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
+        capsuleSecondaryLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+        capsuleSecondaryLabel.textColor = SemanticColors.muted
+        capsuleSecondaryLabel.lineBreakMode = .byTruncatingTail
+        capsuleSecondaryLabel.setContentHuggingPriority(.required, for: .horizontal)
+        capsuleSecondaryLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        capsuleSecondaryTrailingLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+        capsuleSecondaryTrailingLabel.textColor = SemanticColors.muted
+        capsuleSecondaryTrailingLabel.lineBreakMode = .byTruncatingTail
+        capsuleSecondaryTrailingLabel.setContentHuggingPriority(.required, for: .horizontal)
+        capsuleSecondaryTrailingLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
         capsuleSep1Label.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         capsuleSep1Label.textColor = SemanticColors.muted
         capsuleSep1Label.setContentHuggingPriority(.required, for: .horizontal)
@@ -189,6 +207,10 @@ final class TitleBarView: NSView {
         capsuleSep2Label.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         capsuleSep2Label.textColor = SemanticColors.muted
         capsuleSep2Label.setContentHuggingPriority(.required, for: .horizontal)
+
+        capsuleSep3Label.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        capsuleSep3Label.textColor = SemanticColors.muted
+        capsuleSep3Label.setContentHuggingPriority(.required, for: .horizontal)
 
         usageProgressTrack.wantsLayer = true
         usageProgressTrack.layer?.cornerRadius = 3
@@ -212,6 +234,28 @@ final class TitleBarView: NSView {
         usageProgressWidthConstraint = usageProgressFill.widthAnchor.constraint(equalToConstant: 0)
         usageProgressWidthConstraint?.isActive = true
 
+        secondaryUsageProgressTrack.wantsLayer = true
+        secondaryUsageProgressTrack.layer?.cornerRadius = 3
+        secondaryUsageProgressTrack.layer?.backgroundColor = NSColor(hex: 0x5E6A75).withAlphaComponent(0.35).cgColor
+        secondaryUsageProgressTrack.translatesAutoresizingMaskIntoConstraints = false
+        secondaryUsageProgressTrack.isHidden = true
+
+        secondaryUsageProgressFill.wantsLayer = true
+        secondaryUsageProgressFill.layer?.cornerRadius = 3
+        secondaryUsageProgressFill.layer?.backgroundColor = SemanticColors.accent.cgColor
+        secondaryUsageProgressFill.translatesAutoresizingMaskIntoConstraints = false
+        secondaryUsageProgressTrack.addSubview(secondaryUsageProgressFill)
+
+        NSLayoutConstraint.activate([
+            secondaryUsageProgressTrack.widthAnchor.constraint(equalToConstant: Layout.usageProgressWidth),
+            secondaryUsageProgressTrack.heightAnchor.constraint(equalToConstant: 10),
+            secondaryUsageProgressFill.leadingAnchor.constraint(equalTo: secondaryUsageProgressTrack.leadingAnchor),
+            secondaryUsageProgressFill.topAnchor.constraint(equalTo: secondaryUsageProgressTrack.topAnchor),
+            secondaryUsageProgressFill.bottomAnchor.constraint(equalTo: secondaryUsageProgressTrack.bottomAnchor),
+        ])
+        secondaryUsageProgressWidthConstraint = secondaryUsageProgressFill.widthAnchor.constraint(equalToConstant: 0)
+        secondaryUsageProgressWidthConstraint?.isActive = true
+
         primaryCapsuleStack.orientation = .horizontal
         primaryCapsuleStack.spacing = 5
         primaryCapsuleStack.alignment = .centerY
@@ -223,6 +267,10 @@ final class TitleBarView: NSView {
         primaryCapsuleStack.addArrangedSubview(usageProgressTrack)
         primaryCapsuleStack.addArrangedSubview(capsuleSep2Label)
         primaryCapsuleStack.addArrangedSubview(capsuleTrailingLabel)
+        primaryCapsuleStack.addArrangedSubview(capsuleSep3Label)
+        primaryCapsuleStack.addArrangedSubview(capsuleSecondaryLabel)
+        primaryCapsuleStack.addArrangedSubview(secondaryUsageProgressTrack)
+        primaryCapsuleStack.addArrangedSubview(capsuleSecondaryTrailingLabel)
         leftArcBlock.addSubview(primaryCapsuleStack)
 
         NSLayoutConstraint.activate([
@@ -476,10 +524,18 @@ final class TitleBarView: NSView {
     private func updatePrimaryCapsuleSeparators() {
         let hasBodyText = !capsuleBodyLabel.stringValue.isEmpty
         let hasTrailingText = !capsuleTrailingLabel.stringValue.isEmpty
+        let hasSecondaryText = (
+            !capsuleSecondaryLabel.stringValue.isEmpty
+                || !capsuleSecondaryTrailingLabel.stringValue.isEmpty
+                || !secondaryUsageProgressTrack.isHidden
+        )
         capsuleSep1Label.isHidden = !hasBodyText
         capsuleBodyLabel.isHidden = !hasBodyText
         capsuleSep2Label.isHidden = !hasBodyText || !hasTrailingText
         capsuleTrailingLabel.isHidden = !hasTrailingText
+        capsuleSep3Label.isHidden = !hasSecondaryText || (!hasBodyText && !hasTrailingText)
+        capsuleSecondaryLabel.isHidden = capsuleSecondaryLabel.stringValue.isEmpty
+        capsuleSecondaryTrailingLabel.isHidden = capsuleSecondaryTrailingLabel.stringValue.isEmpty
     }
 
     private func showCurrentPrimaryCapsuleFrame() {
@@ -499,8 +555,12 @@ final class TitleBarView: NSView {
             .compactMap { $0 }
             .filter { !$0.isEmpty }
             .joined(separator: "  ")
+        capsuleSecondaryLabel.stringValue = frame.secondaryText
+        capsuleSecondaryTrailingLabel.stringValue = frame.secondaryTrailingText
         usageProgressTrack.isHidden = frame.usageProgress == nil
         usageProgressWidthConstraint?.constant = Layout.usageProgressWidth * CGFloat(frame.usageProgress ?? 0)
+        secondaryUsageProgressTrack.isHidden = frame.secondaryUsageProgress == nil
+        secondaryUsageProgressWidthConstraint?.constant = Layout.usageProgressWidth * CGFloat(frame.secondaryUsageProgress ?? 0)
         updatePrimaryCapsuleSeparators()
         updateArcBlockColors()
     }
@@ -532,10 +592,15 @@ final class TitleBarView: NSView {
         capsuleLeadingLabel.textColor = SemanticColors.text
         capsuleBodyLabel.textColor = SemanticColors.muted
         capsuleTrailingLabel.textColor = SemanticColors.muted
+        capsuleSecondaryLabel.textColor = SemanticColors.muted
+        capsuleSecondaryTrailingLabel.textColor = SemanticColors.muted
         capsuleSep1Label.textColor = SemanticColors.muted
         capsuleSep2Label.textColor = SemanticColors.muted
+        capsuleSep3Label.textColor = SemanticColors.muted
         usageProgressTrack.layer?.backgroundColor = NSColor(hex: 0x5E6A75).withAlphaComponent(0.35).cgColor
         usageProgressFill.layer?.backgroundColor = SemanticColors.accent.cgColor
+        secondaryUsageProgressTrack.layer?.backgroundColor = NSColor(hex: 0x5E6A75).withAlphaComponent(0.35).cgColor
+        secondaryUsageProgressFill.layer?.backgroundColor = SemanticColors.accent.cgColor
         NSAppearance.current = saved
     }
 

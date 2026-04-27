@@ -24,11 +24,11 @@ final class UsageSummaryFormatterTests: XCTestCase {
         XCTAssertEqual(frame.resetText, "2h 19m")
     }
 
-    func testFormatsClaudeUsageWithFiveHourWeeklyAndReset() {
+    func testFormatsClaudeUsageWithSessionAndWeeklyBars() {
         let snapshot = UsageSnapshot(
             provider: .claude,
             rateLimit: UsageRateLimitWindow(usedPercent: 10, resetsAt: Date(timeIntervalSince1970: 11_460)),
-            weeklyRateLimit: UsageRateLimitWindow(usedPercent: 13, resetsAt: Date(timeIntervalSince1970: 86_400)),
+            weeklyRateLimit: UsageRateLimitWindow(usedPercent: 14, resetsAt: Date(timeIntervalSince1970: 345_300)),
             todayTokens: 16_000_000,
             updatedAt: Date(timeIntervalSince1970: 0),
             isStale: false
@@ -41,9 +41,12 @@ final class UsageSummaryFormatterTests: XCTestCase {
 
         XCTAssertEqual(frame.kind, .usage)
         XCTAssertEqual(frame.leadingText, "Claude")
-        XCTAssertEqual(frame.bodyText, "5h 剩余 90%")
-        XCTAssertEqual(frame.trailingText, "周剩余 87% · 重置 3h 11m")
+        XCTAssertEqual(frame.bodyText, "Current session:")
+        XCTAssertEqual(frame.trailingText, "10%, Resets 3h 11m")
+        XCTAssertEqual(frame.secondaryText, "Weekly limits:")
+        XCTAssertEqual(frame.secondaryTrailingText, "14%, Resets 3d 23h 55m")
         XCTAssertEqual(frame.usageProgress ?? -1, 0.10, accuracy: 0.001)
+        XCTAssertEqual(frame.secondaryUsageProgress ?? -1, 0.14, accuracy: 0.001)
         XCTAssertNil(frame.resetText)
     }
 
@@ -59,9 +62,12 @@ final class UsageSummaryFormatterTests: XCTestCase {
         let frame = UsageSummaryFormatter.formatUsageFrame(snapshot, now: Date())
 
         XCTAssertEqual(frame.leadingText, "Claude")
-        XCTAssertEqual(frame.bodyText, "5h 剩余 --")
-        XCTAssertEqual(frame.trailingText, "周剩余 --")
+        XCTAssertEqual(frame.bodyText, "Current session:")
+        XCTAssertEqual(frame.trailingText, "--")
+        XCTAssertEqual(frame.secondaryText, "Weekly limits:")
+        XCTAssertEqual(frame.secondaryTrailingText, "--")
         XCTAssertNil(frame.usageProgress)
+        XCTAssertNil(frame.secondaryUsageProgress)
         XCTAssertNil(frame.resetText)
     }
 
@@ -98,11 +104,16 @@ final class UsageSummaryFormatterTests: XCTestCase {
         XCTAssertEqual(frames[7].bodyText, "Cmd+Shift+F show diff")
         XCTAssertEqual(frames[8].kind, .usage)
         XCTAssertEqual(frames[8].leadingText, "Claude")
-        XCTAssertEqual(frames[8].bodyText, "5h 剩余 81%")
-        XCTAssertEqual(frames[8].trailingText, "周剩余 86% · 重置 2h 9m")
+        XCTAssertEqual(frames[8].bodyText, "Current session:")
+        XCTAssertEqual(frames[8].trailingText, "19%, Resets 2h 9m")
+        XCTAssertEqual(frames[8].secondaryText, "Weekly limits:")
+        XCTAssertEqual(frames[8].secondaryTrailingText, "14%, Resets 5d 14h 59m")
         XCTAssertEqual(frames[9].kind, .usage)
         XCTAssertEqual(frames[9].leadingText, "Codex")
         XCTAssertEqual(frames[9].bodyText, "剩余 72%")
         XCTAssertEqual(frames[9].trailingText, "Today 5.7M")
+        XCTAssertEqual(frames[9].secondaryText, "")
+        XCTAssertNil(frames[9].secondaryUsageProgress)
+        XCTAssertEqual(frames[9].secondaryTrailingText, "")
     }
 }
