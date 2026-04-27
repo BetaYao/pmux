@@ -61,6 +61,22 @@ struct PrimaryCapsuleFrame: Equatable {
 }
 
 enum UsageSummaryFormatter {
+    static let shortcutTips: [(leading: String, body: String)] = [
+        ("Tip", "Cmd+1..4 switch layout"),
+        ("Tip", "Cmd+J toggle dashboard focus"),
+        ("Tip", "Cmd+B toggle sidebar"),
+        ("Tip", "Cmd+D split horizontally"),
+        ("Tip", "Cmd+Shift+D split vertically"),
+        ("Tip", "Cmd+Option+Arrow move focus"),
+        ("Tip", "Cmd+Ctrl+Arrow resize split"),
+        ("Tip", "Cmd+Shift+F show diff"),
+    ]
+
+    static func rotationFrames(claude: UsageSnapshot, codex: UsageSnapshot, now: Date = Date()) -> [PrimaryCapsuleFrame] {
+        shortcutTips.map { PrimaryCapsuleFrame.shortcut(leading: $0.leading, body: $0.body) }
+            + [formatUsageFrame(claude, now: now), formatUsageFrame(codex, now: now)]
+    }
+
     static func formatUsageFrame(_ snapshot: UsageSnapshot, now: Date = Date()) -> PrimaryCapsuleFrame {
         let remaining = snapshot.rateLimit.map { "\($0.remainingPercent)%" } ?? "--"
         let today = snapshot.todayTokens.map(compactTokenCount) ?? "--"

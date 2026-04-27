@@ -17,23 +17,8 @@ final class TitleBarView: NSView {
         static let dashboardLeadingInset: CGFloat = 16
         static let dashboardHorizontalPadding: CGFloat = 10
         static let tipRotationInterval: TimeInterval = 7.0
+        static let usageProgressWidth: CGFloat = 78
     }
-
-    private enum PrimaryCapsuleMode {
-        case tips
-        case notification(NotificationEntry)
-    }
-
-    private static let tips: [(leading: String, body: String)] = [
-        ("Tip", "Cmd+1..4 switch layout"),
-        ("Tip", "Cmd+J toggle dashboard focus"),
-        ("Tip", "Cmd+B toggle sidebar"),
-        ("Tip", "Cmd+D split horizontally"),
-        ("Tip", "Cmd+Shift+D split vertically"),
-        ("Tip", "Cmd+Option+Arrow move focus"),
-        ("Tip", "Cmd+Ctrl+Arrow resize split"),
-        ("Tip", "Cmd+Shift+F show diff"),
-    ]
 
     weak var delegate: TitleBarDelegate?
 
@@ -50,6 +35,9 @@ final class TitleBarView: NSView {
     private let capsuleSep1Label = NSTextField(labelWithString: "\u{00B7}")
     private let capsuleSep2Label = NSTextField(labelWithString: "\u{00B7}")
     private let primaryCapsuleStack = NSStackView()
+    private let usageProgressTrack = NSView()
+    private let usageProgressFill = NSView()
+    private var usageProgressWidthConstraint: NSLayoutConstraint?
 
     // Right controls — layout group
     private let gridLayoutButton = NSButton()
@@ -69,8 +57,11 @@ final class TitleBarView: NSView {
     // State
     private var isWindowHovered = false
     private var highlightedNotificationStatus: AgentStatus?
-    private var primaryCapsuleMode: PrimaryCapsuleMode = .tips
-    private var currentTipIndex = 0
+    private var primaryCapsuleFrames: [PrimaryCapsuleFrame] = UsageSummaryFormatter.rotationFrames(
+        claude: UsageSnapshot(provider: .claude, rateLimit: nil, todayTokens: nil, updatedAt: nil, isStale: true),
+        codex: UsageSnapshot(provider: .codex, rateLimit: nil, todayTokens: nil, updatedAt: nil, isStale: true)
+    )
+    private var currentPrimaryCapsuleIndex = 0
     private var tipRotationTimer: Timer?
     private var isPrimaryCapsuleHovered = false
     private var hoverTrackingArea: NSTrackingArea?
@@ -107,17 +98,17 @@ final class TitleBarView: NSView {
     }
 
     func updateNotificationSummary(entry: NotificationEntry?, unreadCount: Int) {
-        highlightedNotificationStatus = entry?.status
+        highlightedNotificationStatus = nil
+        updateArcBlockColors()
+        startTipRotationIfNeeded()
+    }
 
-        if let entry {
-            primaryCapsuleMode = .notification(entry)
-            showNotification(entry, unreadCount: unreadCount)
-            stopTipRotation()
-        } else {
-            primaryCapsuleMode = .tips
-            showCurrentTip()
-            startTipRotationIfNeeded()
-        }
+    func updatePrimaryCapsuleFrames(_ frames: [PrimaryCapsuleFrame]) {
+        guard !frames.isEmpty else { return }
+        primaryCapsuleFrames = frames
+        currentPrimaryCapsuleIndex = min(currentPrimaryCapsuleIndex, frames.count - 1)
+        showCurrentPrimaryCapsuleFrame()
+        startTipRotationIfNeeded()
     }
 
     func setCurrentLayout(_ layout: DashboardLayout) {
@@ -152,7 +143,7 @@ final class TitleBarView: NSView {
             leftArcBlock.trailingAnchor.constraint(equalTo: rightArcBlock.leadingAnchor, constant: -8),
         ])
 
-        showCurrentTip()
+        showCurrentPrimaryCapsuleFrame()
         startTipRotationIfNeeded()
         updateArcBlockColors()
     }
@@ -164,9 +155,6 @@ final class TitleBarView: NSView {
         leftArcBlock.translatesAutoresizingMaskIntoConstraints = false
         leftArcBlock.setAccessibilityIdentifier("titlebar.primaryCapsule")
         addSubview(leftArcBlock)
-
-        let click = NSClickGestureRecognizer(target: self, action: #selector(primaryCapsuleClicked))
-        leftArcBlock.addGestureRecognizer(click)
 
         capsuleIconView.translatesAutoresizingMaskIntoConstraints = false
         capsuleIconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
@@ -203,6 +191,28 @@ final class TitleBarView: NSView {
         capsuleSep2Label.textColor = SemanticColors.muted
         capsuleSep2Label.setContentHuggingPriority(.required, for: .horizontal)
 
+        usageProgressTrack.wantsLayer = true
+        usageProgressTrack.layer?.cornerRadius = 3
+        usageProgressTrack.layer?.backgroundColor = NSColor(hex: 0x5E6A75).withAlphaComponent(0.35).cgColor
+        usageProgressTrack.translatesAutoresizingMaskIntoConstraints = false
+        usageProgressTrack.isHidden = true
+
+        usageProgressFill.wantsLayer = true
+        usageProgressFill.layer?.cornerRadius = 3
+        usageProgressFill.layer?.backgroundColor = SemanticColors.accent.cgColor
+        usageProgressFill.translatesAutoresizingMaskIntoConstraints = false
+        usageProgressTrack.addSubview(usageProgressFill)
+
+        NSLayoutConstraint.activate([
+            usageProgressTrack.widthAnchor.constraint(equalToConstant: Layout.usageProgressWidth),
+            usageProgressTrack.heightAnchor.constraint(equalToConstant: 10),
+            usageProgressFill.leadingAnchor.constraint(equalTo: usageProgressTrack.leadingAnchor),
+            usageProgressFill.topAnchor.constraint(equalTo: usageProgressTrack.topAnchor),
+            usageProgressFill.bottomAnchor.constraint(equalTo: usageProgressTrack.bottomAnchor),
+        ])
+        usageProgressWidthConstraint = usageProgressFill.widthAnchor.constraint(equalToConstant: 0)
+        usageProgressWidthConstraint?.isActive = true
+
         primaryCapsuleStack.orientation = .horizontal
         primaryCapsuleStack.spacing = 5
         primaryCapsuleStack.alignment = .centerY
@@ -211,6 +221,7 @@ final class TitleBarView: NSView {
         primaryCapsuleStack.addArrangedSubview(capsuleLeadingLabel)
         primaryCapsuleStack.addArrangedSubview(capsuleSep1Label)
         primaryCapsuleStack.addArrangedSubview(capsuleBodyLabel)
+        primaryCapsuleStack.addArrangedSubview(usageProgressTrack)
         primaryCapsuleStack.addArrangedSubview(capsuleSep2Label)
         primaryCapsuleStack.addArrangedSubview(capsuleTrailingLabel)
         leftArcBlock.addSubview(primaryCapsuleStack)
@@ -422,12 +433,6 @@ final class TitleBarView: NSView {
         }
     }
 
-    @objc private func primaryCapsuleClicked() {
-        if case .notification = primaryCapsuleMode {
-            delegate?.titleBarDidActivatePrimaryCapsule()
-        }
-    }
-
     @objc private func themeClicked() {
         delegate?.titleBarDidToggleTheme()
     }
@@ -478,113 +483,40 @@ final class TitleBarView: NSView {
         capsuleTrailingLabel.isHidden = !hasTrailingText
     }
 
-    private func notificationMetaText(for entry: NotificationEntry, unreadCount: Int) -> String {
-        var parts: [String] = [entry.status.rawValue]
-        if let paneIndex = entry.paneIndex {
-            parts.append("Pane \(paneIndex)")
-        }
-        if unreadCount > 1 {
-            parts.append("\(unreadCount) unread")
-        } else if unreadCount == 1 {
-            parts.append("1 unread")
-        }
-        return parts.joined(separator: " \u{00B7} ")
-    }
-
-    private func showNotification(_ entry: NotificationEntry, unreadCount: Int) {
-        capsuleIconView.image = NSImage(systemSymbolName: "bell.fill", accessibilityDescription: "Notification")
-        capsuleIconView.contentTintColor = statusColor(for: entry.status)
-        capsuleLeadingLabel.attributedStringValue = notificationTargetText(for: entry)
-        capsuleBodyLabel.stringValue = Self.sanitizedNotificationMessage(entry.message)
-        capsuleTrailingLabel.stringValue = notificationMetaText(for: entry, unreadCount: unreadCount)
-        updatePrimaryCapsuleSeparators()
-        updateArcBlockColors()
-    }
-
-    private func showCurrentTip() {
-        let tip = Self.tips[currentTipIndex]
-        capsuleIconView.image = NSImage(systemSymbolName: "command", accessibilityDescription: "Tip")
-        capsuleIconView.contentTintColor = SemanticColors.muted
+    private func showCurrentPrimaryCapsuleFrame() {
+        guard !primaryCapsuleFrames.isEmpty else { return }
+        let frame = primaryCapsuleFrames[currentPrimaryCapsuleIndex]
+        capsuleIconView.image = NSImage(systemSymbolName: frame.iconName, accessibilityDescription: frame.leadingText)
+        capsuleIconView.contentTintColor = frame.kind == .usage ? SemanticColors.accent : SemanticColors.muted
         capsuleLeadingLabel.attributedStringValue = NSAttributedString(
-            string: tip.leading,
+            string: frame.leadingText,
             attributes: [
                 .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
                 .foregroundColor: SemanticColors.text
             ]
         )
-        capsuleBodyLabel.stringValue = tip.body
-        capsuleTrailingLabel.stringValue = "Shortcuts"
+        capsuleBodyLabel.stringValue = frame.bodyText
+        capsuleTrailingLabel.stringValue = [frame.resetText, frame.trailingText]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: "  ")
+        usageProgressTrack.isHidden = frame.usageProgress == nil
+        usageProgressWidthConstraint?.constant = Layout.usageProgressWidth * CGFloat(frame.usageProgress ?? 0)
         updatePrimaryCapsuleSeparators()
         updateArcBlockColors()
     }
 
-    private func notificationTargetText(for entry: NotificationEntry) -> NSAttributedString {
-        let workspaceFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
-        let branchFont = NSFont.systemFont(ofSize: 11, weight: .regular)
-
-        if entry.workspaceName.isEmpty {
-            return NSAttributedString(
-                string: entry.branch,
-                attributes: [
-                    .font: workspaceFont,
-                    .foregroundColor: SemanticColors.text
-                ]
-            )
-        }
-
-        let result = NSMutableAttributedString(
-            string: entry.workspaceName,
-            attributes: [
-                .font: workspaceFont,
-                .foregroundColor: SemanticColors.text
-            ]
-        )
-        result.append(NSAttributedString(
-            string: " / \(entry.branch)",
-            attributes: [
-                .font: branchFont,
-                .foregroundColor: SemanticColors.subtle
-            ]
-        ))
-        return result
-    }
-
     private func startTipRotationIfNeeded() {
-        guard tipRotationTimer == nil, case .tips = primaryCapsuleMode else { return }
+        guard tipRotationTimer == nil else { return }
         tipRotationTimer = Timer.scheduledTimer(withTimeInterval: Layout.tipRotationInterval, repeats: true) { [weak self] _ in
             self?.advanceTipIfNeeded()
         }
     }
 
-    private func stopTipRotation() {
-        tipRotationTimer?.invalidate()
-        tipRotationTimer = nil
-    }
-
     private func advanceTipIfNeeded() {
-        guard case .tips = primaryCapsuleMode, !isPrimaryCapsuleHovered else { return }
-        currentTipIndex = (currentTipIndex + 1) % Self.tips.count
-        showCurrentTip()
-    }
-
-    private func statusColor(for status: AgentStatus) -> NSColor {
-        switch status {
-        case .running:
-            return SemanticColors.running
-        case .waiting:
-            return SemanticColors.waiting
-        case .error, .exited:
-            return SemanticColors.danger
-        default:
-            return SemanticColors.idle
-        }
-    }
-
-    private static func sanitizedNotificationMessage(_ message: String) -> String {
-        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "Open workspace" }
-        let firstLine = trimmed.components(separatedBy: .newlines).first ?? trimmed
-        return firstLine
+        guard !isPrimaryCapsuleHovered, !primaryCapsuleFrames.isEmpty else { return }
+        currentPrimaryCapsuleIndex = (currentPrimaryCapsuleIndex + 1) % primaryCapsuleFrames.count
+        showCurrentPrimaryCapsuleFrame()
     }
 
     // MARK: - Theme
@@ -603,6 +535,8 @@ final class TitleBarView: NSView {
         capsuleTrailingLabel.textColor = SemanticColors.muted
         capsuleSep1Label.textColor = SemanticColors.muted
         capsuleSep2Label.textColor = SemanticColors.muted
+        usageProgressTrack.layer?.backgroundColor = NSColor(hex: 0x5E6A75).withAlphaComponent(0.35).cgColor
+        usageProgressFill.layer?.backgroundColor = SemanticColors.accent.cgColor
         NSAppearance.current = saved
     }
 
