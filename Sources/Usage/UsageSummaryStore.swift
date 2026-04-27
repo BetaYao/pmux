@@ -2,16 +2,18 @@ import Foundation
 
 final class UsageSummaryStore {
     typealias UpdateHandler = ([PrimaryCapsuleFrame]) -> Void
+    private static let defaultCacheFallbackMaxAge: TimeInterval = 10 * 60
 
     private let claudeProvider: ClaudeUsageSummaryProvider
     private let codexProvider: CodexUsageSummaryProvider
     private let refreshInterval: TimeInterval
+    private let cacheFallbackMaxAge: TimeInterval
     private let queue = DispatchQueue(label: "usage-summary-store", qos: .utility)
     private let lock = NSLock()
     private var timer: DispatchSourceTimer?
     private var isRefreshing = false
-    private var cachedClaudeSnapshot: UsageSnapshot?
-    private var cachedCodexSnapshot: UsageSnapshot?
+    private var cachedClaudeSnapshot: ProviderSnapshotCache?
+    private var cachedCodexSnapshot: ProviderSnapshotCache?
 
     var onUpdate: UpdateHandler?
 
@@ -27,24 +29,32 @@ final class UsageSummaryStore {
                 ),
                 transcriptAggregator: ClaudeTranscriptUsageAggregator(
                     rootURL: home.appendingPathComponent(".claude/projects"),
-                    calendar: calendar
+                    calendar: calendar,
+                    modificationGraceInterval: 24 * 60 * 60
                 )
             ),
             codexProvider: CodexUsageSummaryProvider(
                 rateLimitClient: CodexAppServerRateLimitClient(),
-                dailyUsageReader: CodexSQLiteDailyUsageReader(
-                    databaseURL: home.appendingPathComponent(".codex/state_5.sqlite"),
-                    calendar: calendar
+                sessionUsageAggregator: CodexSessionUsageAggregator(
+                    rootURL: home.appendingPathComponent(".codex/sessions"),
+                    calendar: calendar,
+                    modificationGraceInterval: 24 * 60 * 60
                 )
             ),
             refreshInterval: refreshInterval
         )
     }
 
-    init(claudeProvider: ClaudeUsageSummaryProvider, codexProvider: CodexUsageSummaryProvider, refreshInterval: TimeInterval = 60) {
+    init(
+        claudeProvider: ClaudeUsageSummaryProvider,
+        codexProvider: CodexUsageSummaryProvider,
+        refreshInterval: TimeInterval = 60,
+        cacheFallbackMaxAge: TimeInterval = UsageSummaryStore.defaultCacheFallbackMaxAge
+    ) {
         self.claudeProvider = claudeProvider
         self.codexProvider = codexProvider
         self.refreshInterval = refreshInterval
+        self.cacheFallbackMaxAge = cacheFallbackMaxAge
     }
 
     deinit {
@@ -88,26 +98,83 @@ final class UsageSummaryStore {
         let codexCandidate = codexProvider.snapshot()
 
         lock.lock()
-        let claude = Self.resolveSnapshotForDisplay(candidate: claudeCandidate, cached: cachedClaudeSnapshot)
-        let codex = Self.resolveSnapshotForDisplay(candidate: codexCandidate, cached: cachedCodexSnapshot)
-        cachedClaudeSnapshot = claude
-        cachedCodexSnapshot = codex
+        let now = Date()
+        let claudeResult = Self.resolveSnapshotForDisplay(
+            candidate: claudeCandidate,
+            cached: cachedClaudeSnapshot,
+            now: now,
+            maxCacheAge: cacheFallbackMaxAge
+        )
+        let codexResult = Self.resolveSnapshotForDisplay(
+            candidate: codexCandidate,
+            cached: cachedCodexSnapshot,
+            now: now,
+            maxCacheAge: cacheFallbackMaxAge
+        )
+        cachedClaudeSnapshot = claudeResult.cache
+        cachedCodexSnapshot = codexResult.cache
         isRefreshing = false
         lock.unlock()
 
-        let frames = UsageSummaryFormatter.rotationFrames(claude: claude, codex: codex)
+        let frames = UsageSummaryFormatter.rotationFrames(claude: claudeResult.snapshot, codex: codexResult.snapshot)
         DispatchQueue.main.async { [weak self] in
             self?.onUpdate?(frames)
         }
     }
 
-    static func resolveSnapshotForDisplay(candidate: UsageSnapshot, cached: UsageSnapshot?) -> UsageSnapshot {
-        UsageSnapshot(
-            provider: candidate.provider,
-            rateLimit: candidate.rateLimit ?? cached?.rateLimit,
-            todayTokens: candidate.todayTokens ?? cached?.todayTokens,
-            updatedAt: candidate.updatedAt ?? cached?.updatedAt,
-            isStale: candidate.isStale
-        )
+    static func resolveSnapshotForDisplay(
+        candidate: UsageSnapshot,
+        cached: ProviderSnapshotCache?,
+        now: Date = Date(),
+        maxCacheAge: TimeInterval = defaultCacheFallbackMaxAge
+    ) -> (snapshot: UsageSnapshot, cache: ProviderSnapshotCache) {
+        var cache = cached ?? ProviderSnapshotCache(provider: candidate.provider)
+        cache.ingest(candidate, now: now)
+        return (cache.displaySnapshot(now: now, maxCacheAge: maxCacheAge), cache)
+    }
+}
+
+extension UsageSummaryStore {
+    struct ProviderSnapshotCache: Equatable {
+        let provider: UsageProvider
+        private(set) var rateLimit: UsageRateLimitWindow?
+        private(set) var rateLimitUpdatedAt: Date?
+        private(set) var todayTokens: Int?
+        private(set) var todayTokensUpdatedAt: Date?
+        private(set) var isStale = true
+
+        mutating func ingest(_ snapshot: UsageSnapshot, now: Date = Date()) {
+            let snapshotTime = snapshot.updatedAt ?? now
+            if let rateLimit = snapshot.rateLimit {
+                self.rateLimit = rateLimit
+                self.rateLimitUpdatedAt = snapshotTime
+            }
+            if let todayTokens = snapshot.todayTokens {
+                self.todayTokens = todayTokens
+                self.todayTokensUpdatedAt = snapshotTime
+            }
+            isStale = snapshot.isStale
+        }
+
+        func displaySnapshot(now: Date = Date(), maxCacheAge: TimeInterval) -> UsageSnapshot {
+            let displayRateLimit = isFresh(rateLimitUpdatedAt, now: now, maxCacheAge: maxCacheAge) ? rateLimit : nil
+            let displayTodayTokens = isFresh(todayTokensUpdatedAt, now: now, maxCacheAge: maxCacheAge) ? todayTokens : nil
+            let displayUpdatedAt = [displayRateLimit == nil ? nil : rateLimitUpdatedAt,
+                                    displayTodayTokens == nil ? nil : todayTokensUpdatedAt]
+                .compactMap { $0 }
+                .max()
+            return UsageSnapshot(
+                provider: provider,
+                rateLimit: displayRateLimit,
+                todayTokens: displayTodayTokens,
+                updatedAt: displayUpdatedAt,
+                isStale: isStale || displayUpdatedAt == nil
+            )
+        }
+
+        private func isFresh(_ date: Date?, now: Date, maxCacheAge: TimeInterval) -> Bool {
+            guard let date else { return false }
+            return now.timeIntervalSince(date) <= maxCacheAge
+        }
     }
 }

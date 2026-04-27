@@ -40,15 +40,19 @@ struct ClaudeStatuslineCacheReader {
 struct ClaudeTranscriptUsageAggregator {
     let rootURL: URL
     let calendar: Calendar
+    var modificationGraceInterval: TimeInterval? = nil
 
     func todayTokens(now: Date = Date()) throws -> Int {
         let start = calendar.startOfDay(for: now)
         let end = calendar.date(byAdding: .day, value: 1, to: start)!
         var seen = Set<String>()
         var total = 0
-        let files = FileManager.default.enumerator(at: rootURL, includingPropertiesForKeys: nil)?
+        let files = FileManager.default.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.contentModificationDateKey]
+        )?
             .compactMap { $0 as? URL }
-            .filter { $0.pathExtension == "jsonl" } ?? []
+            .filter { $0.pathExtension == "jsonl" && shouldReadFile($0, dayStart: start) } ?? []
         for file in files {
             let text = try String(contentsOf: file, encoding: .utf8)
             for (lineIndex, line) in text.split(separator: "\n").enumerated() {
@@ -68,6 +72,14 @@ struct ClaudeTranscriptUsageAggregator {
             }
         }
         return total
+    }
+
+    private func shouldReadFile(_ file: URL, dayStart: Date) -> Bool {
+        guard let modificationGraceInterval else { return true }
+        guard let modified = try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate else {
+            return true
+        }
+        return modified >= dayStart.addingTimeInterval(-modificationGraceInterval)
     }
 }
 

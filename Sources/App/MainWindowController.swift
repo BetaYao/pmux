@@ -682,12 +682,6 @@ extension MainWindowController: TitleBarDelegate {
         updateTitleBar()
     }
 
-    func titleBarDidActivatePrimaryCapsule() {
-        guard let entry = primaryCapsuleNotification else { return }
-        panelCoordinator.notificationPanelDidSelectItem(entry)
-        schedulePrimaryCapsuleDismissal(for: entry)
-    }
-
     func titleBarDidToggleTheme() {
         let isDark = window?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let next: ThemeMode = isDark ? .light : .dark

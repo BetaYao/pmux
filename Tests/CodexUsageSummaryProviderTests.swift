@@ -45,30 +45,52 @@ final class CodexUsageSummaryProviderTests: XCTestCase {
         XCTAssertEqual(parsed?.resetsAt, Date(timeIntervalSince1970: 1_772_532_000))
     }
 
-    func testBuildsDailyTokenQueryWithLocalDayBounds() {
+    func testAggregatesSessionTokenDeltasForLocalDay() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let daySession = dir.appendingPathComponent("rollout-today.jsonl")
+        try [
+            #"{"timestamp":"2026-04-27T01:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":999999},"last_token_usage":{"total_tokens":100}}}}"#,
+            #"{"timestamp":"2026-04-27T02:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":50}}}}"#,
+            #"{"timestamp":"2026-04-27T03:00:00Z","type":"event_msg","payload":{"type":"task_started"}}"#,
+            #"{"timestamp":"2026-04-26T23:59:59Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":1000}}}}"#
+        ].joined(separator: "\n").write(to: daySession, atomically: true, encoding: .utf8)
+
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-        let query = CodexSQLiteDailyUsageReader.query(
-            now: ISO8601DateFormatter().date(from: "2026-04-27T08:00:00Z")!,
+        let aggregator = CodexSessionUsageAggregator(
+            rootURL: dir,
             calendar: calendar
         )
 
-        XCTAssertTrue(query.contains("updated_at >= 1777248000"))
-        XCTAssertTrue(query.contains("updated_at < 1777334400"))
-        XCTAssertTrue(query.contains("sum(tokens_used)"))
+        let tokens = try aggregator.todayTokens(now: ISO8601DateFormatter().date(from: "2026-04-27T08:00:00Z")!)
+
+        XCTAssertEqual(tokens, 150)
     }
 
-    func testBuildsDailyTokenQueryWithNonUTCLocalDayBounds() {
+    func testAggregatesSessionTokenDeltasWithNonUTCLocalDayBounds() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let daySession = dir.appendingPathComponent("rollout-today.jsonl")
+        try [
+            #"{"timestamp":"2026-04-26T15:59:59Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":1000}}}}"#,
+            #"{"timestamp":"2026-04-26T16:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":25}}}}"#,
+            #"{"timestamp":"2026-04-27T15:59:59Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":75}}}}"#,
+            #"{"timestamp":"2026-04-27T16:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":1000}}}}"#
+        ].joined(separator: "\n").write(to: daySession, atomically: true, encoding: .utf8)
+
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 8 * 3600)!
-        let query = CodexSQLiteDailyUsageReader.query(
-            now: ISO8601DateFormatter().date(from: "2026-04-27T08:00:00Z")!,
+        let aggregator = CodexSessionUsageAggregator(
+            rootURL: dir,
             calendar: calendar
         )
 
-        XCTAssertTrue(query.contains("updated_at >= 1777219200"))
-        XCTAssertTrue(query.contains("updated_at < 1777305600"))
-        XCTAssertTrue(query.contains("sum(tokens_used)"))
+        let tokens = try aggregator.todayTokens(now: ISO8601DateFormatter().date(from: "2026-04-27T08:00:00Z")!)
+
+        XCTAssertEqual(tokens, 100)
     }
 
     func testReadRateLimitTimesOutAndTerminatesSlowCodexProcess() throws {

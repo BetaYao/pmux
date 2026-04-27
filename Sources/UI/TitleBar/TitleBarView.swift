@@ -4,7 +4,6 @@ protocol TitleBarDelegate: AnyObject {
     func titleBarDidRequestNewThread()
     func titleBarDidRequestAddProject()
     func titleBarDidSelectLayout(_ layout: DashboardLayout)
-    func titleBarDidActivatePrimaryCapsule()
     func titleBarDidToggleTheme()
     func titleBarDidRequestCollapseSidebar()
 }

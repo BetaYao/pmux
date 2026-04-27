@@ -1,6 +1,19 @@
 import Foundation
 import Darwin
 
+private enum CodexISO8601Parser {
+    private static let defaultFormatter = ISO8601DateFormatter()
+    private static let fractionalSecondsFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    static func date(from string: String) -> Date? {
+        defaultFormatter.date(from: string) ?? fractionalSecondsFormatter.date(from: string)
+    }
+}
+
 enum CodexRateLimitParser {
     static func parseResponse(_ data: Data) throws -> UsageRateLimitWindow? {
         let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -124,33 +137,70 @@ struct CodexAppServerRateLimitClient {
     }
 }
 
-struct CodexSQLiteDailyUsageReader {
-    let databaseURL: URL
+struct CodexSessionUsageAggregator {
+    let rootURL: URL
     let calendar: Calendar
+    var modificationGraceInterval: TimeInterval? = nil
 
-    static func query(now: Date, calendar: Calendar) -> String {
-        let start = Int(calendar.startOfDay(for: now).timeIntervalSince1970)
-        let end = Int(calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now))!.timeIntervalSince1970)
-        return "select coalesce(sum(tokens_used),0) from threads where updated_at >= \(start) and updated_at < \(end);"
+    func todayTokens(now: Date = Date()) throws -> Int {
+        let start = calendar.startOfDay(for: now)
+        let end = calendar.date(byAdding: .day, value: 1, to: start)!
+        let files = FileManager.default.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.contentModificationDateKey]
+        )?.compactMap { $0 as? URL }
+            .filter { $0.pathExtension == "jsonl" && shouldReadFile($0, dayStart: start) } ?? []
+
+        var total = 0
+        for file in files {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            for line in text.split(separator: "\n") {
+                guard let data = String(line).data(using: .utf8),
+                      let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      object["type"] as? String == "event_msg",
+                      let timestamp = object["timestamp"] as? String,
+                      let date = CodexISO8601Parser.date(from: timestamp),
+                      date >= start && date < end,
+                      let payload = object["payload"] as? [String: Any],
+                      payload["type"] as? String == "token_count",
+                      let info = payload["info"] as? [String: Any],
+                      let lastUsage = info["last_token_usage"] as? [String: Any],
+                      let totalTokens = intValue(lastUsage["total_tokens"])
+                else { continue }
+                total += totalTokens
+            }
+        }
+        return total
     }
 
-    func todayTokens(now: Date = Date()) -> Int? {
-        let output = ProcessRunner.output(["sqlite3", databaseURL.path, Self.query(now: now, calendar: calendar)])
-        return output.flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    private func shouldReadFile(_ file: URL, dayStart: Date) -> Bool {
+        guard let modificationGraceInterval else { return true }
+        guard let modified = try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate else {
+            return true
+        }
+        return modified >= dayStart.addingTimeInterval(-modificationGraceInterval)
+    }
+
+    private func intValue(_ value: Any?) -> Int? {
+        if let int = value as? Int { return int }
+        if let number = value as? NSNumber { return number.intValue }
+        return nil
     }
 }
 
 struct CodexUsageSummaryProvider {
     let rateLimitClient: CodexAppServerRateLimitClient
-    let dailyUsageReader: CodexSQLiteDailyUsageReader
+    let sessionUsageAggregator: CodexSessionUsageAggregator
 
     func snapshot(now: Date = Date()) -> UsageSnapshot {
-        UsageSnapshot(
+        let rateLimit = rateLimitClient.readRateLimit()
+        let todayTokens = try? sessionUsageAggregator.todayTokens(now: now)
+        return UsageSnapshot(
             provider: .codex,
-            rateLimit: rateLimitClient.readRateLimit(),
-            todayTokens: dailyUsageReader.todayTokens(now: now),
+            rateLimit: rateLimit,
+            todayTokens: todayTokens,
             updatedAt: now,
-            isStale: false
+            isStale: rateLimit == nil && todayTokens == nil
         )
     }
 }
