@@ -63,6 +63,7 @@ class MainWindowController: NSWindowController {
     private var primaryCapsuleNotification: NotificationEntry?
     private var dismissedPrimaryCapsuleNotificationIDs: Set<UUID> = []
     private var primaryCapsuleDismissWorkItem: DispatchWorkItem?
+    private lazy var usageSummaryStore = UsageSummaryStore()
 
     // Terminal management
     private lazy var terminalCoordinator: TerminalCoordinator = {
@@ -159,6 +160,10 @@ class MainWindowController: NSWindowController {
             name: .notificationHistoryDidChange, object: nil
         )
         handleNotificationHistoryDidChange(nil)
+        usageSummaryStore.onUpdate = { [weak self] frames in
+            self?.titleBar.updatePrimaryCapsuleFrames(frames)
+        }
+        usageSummaryStore.start()
     }
 
     /// Sync split layouts from TerminalCoordinator before saving config.
@@ -639,6 +644,7 @@ extension MainWindowController: NSWindowDelegate {
 
 
     func windowWillClose(_ notification: Notification) {
+        usageSummaryStore.stop()
         statusPublisher.stop()
         tabCoordinator.branchRefreshTimer?.invalidate()
         tabCoordinator.branchRefreshTimer = nil
@@ -646,6 +652,7 @@ extension MainWindowController: NSWindowDelegate {
     }
 
     func cleanupBeforeTermination() {
+        usageSummaryStore.stop()
         statusPublisher.stop()
         tabCoordinator.branchRefreshTimer?.invalidate()
         tabCoordinator.branchRefreshTimer = nil

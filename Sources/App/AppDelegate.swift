@@ -18,6 +18,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Ensure supported CLI hook integrations are configured
         if config.webhook.enabled {
             ClaudeHooksSetup.ensureHooksConfigured(port: config.webhook.port)
+            ClaudeStatuslineBridgeInstaller.ensureInstalled()
             CodexHooksSetup.ensureHooksConfigured(port: config.webhook.port)
         }
         NSAppearance.current = NSApp.effectiveAppearance
