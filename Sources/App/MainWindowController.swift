@@ -313,6 +313,11 @@ class MainWindowController: NSWindowController {
         dialogPresenter.presentSheetOnActiveVC(diffVC, tabCoordinator: tabCoordinator, dashboardVC: dashboardVC)
     }
 
+    private func presentWorktreeInspector(for worktreePath: String, initialTab: WorktreeInspectorInitialTab) {
+        let inspector = WorktreeInspectorViewController(worktreePath: worktreePath, initialTab: initialTab)
+        dialogPresenter.presentSheetOnActiveVC(inspector, tabCoordinator: tabCoordinator, dashboardVC: dashboardVC)
+    }
+
     // MARK: - Layout
 
     private func setupLayout() {
@@ -782,6 +787,14 @@ extension MainWindowController: DashboardDelegate {
         tabCoordinator.saveSelectedWorktree()
         config.selectedWorktreePath = tabCoordinator.config.selectedWorktreePath
         saveConfig()
+    }
+
+    func dashboardDidRequestBrowseFiles(worktreePath: String) {
+        presentWorktreeInspector(for: worktreePath, initialTab: .files)
+    }
+
+    func dashboardDidRequestShowChanges(worktreePath: String) {
+        presentWorktreeInspector(for: worktreePath, initialTab: .changes)
     }
 }
 

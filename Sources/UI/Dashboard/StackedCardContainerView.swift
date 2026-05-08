@@ -213,6 +213,13 @@ final class StackedCardContainerView: NSView, NSGestureRecognizerDelegate {
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let menu = NSMenu()
+        let browseItem = NSMenuItem(title: "Browse Files...", action: #selector(browseFilesAction), keyEquivalent: "")
+        browseItem.target = self
+        menu.addItem(browseItem)
+        let showChangesItem = NSMenuItem(title: "Show Changes...", action: #selector(showChangesAction), keyEquivalent: "")
+        showChangesItem.target = self
+        menu.addItem(showChangesItem)
+        menu.addItem(NSMenuItem.separator())
         let deleteItem = NSMenuItem(title: "Delete Worktree", action: #selector(deleteWorktreeAction), keyEquivalent: "")
         deleteItem.target = self
         menu.addItem(deleteItem)
@@ -221,6 +228,14 @@ final class StackedCardContainerView: NSView, NSGestureRecognizerDelegate {
         closeRepoItem.target = self
         menu.addItem(closeRepoItem)
         return menu
+    }
+
+    @objc private func browseFilesAction() {
+        delegate?.agentCardDidRequestBrowseFiles(agentId: cardView.agentId)
+    }
+
+    @objc private func showChangesAction() {
+        delegate?.agentCardDidRequestShowChanges(agentId: cardView.agentId)
     }
 
     @objc private func deleteWorktreeAction() {

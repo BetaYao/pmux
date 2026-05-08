@@ -11,6 +11,8 @@ protocol DashboardDelegate: AnyObject {
     func dashboardDidRequestCloseRepo(_ project: String)
     func dashboardDidRequestAddProject()
     func dashboardDidChangeSelection(_ dashboard: DashboardViewController)
+    func dashboardDidRequestBrowseFiles(worktreePath: String)
+    func dashboardDidRequestShowChanges(worktreePath: String)
 }
 
 // MARK: - AgentDisplayInfo
@@ -1140,6 +1142,16 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
     func agentCardDidRequestCloseRepo(agentId: String) {
         guard let agent = agents.first(where: { $0.id == agentId }) else { return }
         dashboardDelegate?.dashboardDidRequestCloseRepo(agent.project)
+    }
+
+    func agentCardDidRequestBrowseFiles(agentId: String) {
+        guard let agent = agents.first(where: { $0.id == agentId }) else { return }
+        dashboardDelegate?.dashboardDidRequestBrowseFiles(worktreePath: agent.worktreePath)
+    }
+
+    func agentCardDidRequestShowChanges(agentId: String) {
+        guard let agent = agents.first(where: { $0.id == agentId }) else { return }
+        dashboardDelegate?.dashboardDidRequestShowChanges(worktreePath: agent.worktreePath)
     }
 
     private func updateMiniCardSelection() {

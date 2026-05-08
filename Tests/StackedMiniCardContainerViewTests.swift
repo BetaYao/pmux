@@ -77,4 +77,74 @@ final class StackedMiniCardContainerViewTests: XCTestCase {
         container.isSelected = false
         XCTAssertFalse(container.miniCardView.isSelected)
     }
+
+    func testContextMenuContainsInspectorActionsBeforeDeleteWorktree() throws {
+        let container = StackedMiniCardContainerView()
+
+        let menu = try XCTUnwrap(container.menu(for: makeRightClickEvent()))
+        let titles = menu.items.map(\.title)
+
+        XCTAssertEqual(titles.prefix(4), ["Browse Files...", "Show Changes...", "", "Delete Worktree"])
+    }
+
+    func testBrowseFilesMenuActionForwardsAgentId() throws {
+        let container = StackedMiniCardContainerView()
+        let spy = InspectorDelegateSpy()
+        container.delegate = spy
+        container.miniCardView.configure(
+            id: "agent-1", project: "proj", thread: "main",
+            status: "idle", lastMessage: "", totalDuration: "", roundDuration: ""
+        )
+
+        try performMenuItem(title: "Browse Files...", in: container)
+
+        XCTAssertEqual(spy.browseIds, ["agent-1"])
+        XCTAssertTrue(spy.showChangesIds.isEmpty)
+    }
+
+    func testShowChangesMenuActionForwardsAgentId() throws {
+        let container = StackedMiniCardContainerView()
+        let spy = InspectorDelegateSpy()
+        container.delegate = spy
+        container.miniCardView.configure(
+            id: "agent-2", project: "proj", thread: "main",
+            status: "idle", lastMessage: "", totalDuration: "", roundDuration: ""
+        )
+
+        try performMenuItem(title: "Show Changes...", in: container)
+
+        XCTAssertEqual(spy.showChangesIds, ["agent-2"])
+        XCTAssertTrue(spy.browseIds.isEmpty)
+    }
+
+    private func performMenuItem(title: String, in container: StackedMiniCardContainerView) throws {
+        let menu = try XCTUnwrap(container.menu(for: makeRightClickEvent()))
+        let item = try XCTUnwrap(menu.item(withTitle: title))
+        let target = try XCTUnwrap(item.target as? NSObject)
+        let action = try XCTUnwrap(item.action)
+        target.perform(action, with: item)
+    }
+
+    private func makeRightClickEvent() -> NSEvent {
+        NSEvent.mouseEvent(
+            with: .rightMouseDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        )!
+    }
+}
+
+private final class InspectorDelegateSpy: AgentCardDelegate {
+    var browseIds: [String] = []
+    var showChangesIds: [String] = []
+
+    func agentCardClicked(agentId: String) {}
+    func agentCardDidRequestBrowseFiles(agentId: String) { browseIds.append(agentId) }
+    func agentCardDidRequestShowChanges(agentId: String) { showChangesIds.append(agentId) }
 }

@@ -40,14 +40,73 @@ final class DashboardViewControllerClickTests: XCTestCase {
         XCTAssertFalse(spy.didSelectProjectCalled,
                        "Double click on unknown agentId must not call delegate")
     }
+
+    func testBrowseFilesRequestUsesRightClickedAgentWorktreePath() {
+        let vc = DashboardViewController()
+        let spy = DashboardDelegateSpy()
+        vc.dashboardDelegate = spy
+        vc.loadViewIfNeeded()
+        vc.updateAgents([
+            makeAgent(id: "agent-a", worktreePath: "/repo/a"),
+            makeAgent(id: "agent-b", worktreePath: "/repo/b"),
+        ])
+        vc.agentCardClicked(agentId: "agent-a")
+
+        vc.agentCardDidRequestBrowseFiles(agentId: "agent-b")
+
+        XCTAssertEqual(spy.browsePath, "/repo/b")
+        XCTAssertNil(spy.changesPath)
+    }
+
+    func testShowChangesRequestUsesRightClickedAgentWorktreePath() {
+        let vc = DashboardViewController()
+        let spy = DashboardDelegateSpy()
+        vc.dashboardDelegate = spy
+        vc.loadViewIfNeeded()
+        vc.updateAgents([
+            makeAgent(id: "agent-a", worktreePath: "/repo/a"),
+            makeAgent(id: "agent-b", worktreePath: "/repo/b"),
+        ])
+        vc.agentCardClicked(agentId: "agent-a")
+
+        vc.agentCardDidRequestShowChanges(agentId: "agent-b")
+
+        XCTAssertEqual(spy.changesPath, "/repo/b")
+        XCTAssertNil(spy.browsePath)
+    }
 }
 
 // MARK: - Test helpers
+
+private func makeAgent(id: String, worktreePath: String) -> AgentDisplayInfo {
+    let surface = TerminalSurface()
+    return AgentDisplayInfo(
+        id: id,
+        name: id,
+        project: "proj",
+        thread: "main",
+        paneStatuses: [.idle],
+        mostRecentMessage: "No active task.",
+        lastUserPrompt: "",
+        mostRecentPaneIndex: 1,
+        totalDuration: "00:00:00",
+        roundDuration: "00:00:00",
+        surface: surface,
+        worktreePath: worktreePath,
+        paneCount: 1,
+        paneSurfaces: [surface],
+        isMainWorktree: false,
+        tasks: [],
+        activityEvents: []
+    )
+}
 
 private class DashboardDelegateSpy: DashboardDelegate {
     var didSelectProjectCalled = false
     var lastProject: String?
     var lastThread: String?
+    var browsePath: String?
+    var changesPath: String?
 
     func dashboardDidSelectProject(_ project: String, thread: String) {
         didSelectProjectCalled = true
@@ -60,4 +119,6 @@ private class DashboardDelegateSpy: DashboardDelegate {
     func dashboardDidRequestCloseRepo(_ project: String) {}
     func dashboardDidRequestAddProject() {}
     func dashboardDidChangeSelection(_ dashboard: DashboardViewController) {}
+    func dashboardDidRequestBrowseFiles(worktreePath: String) { browsePath = worktreePath }
+    func dashboardDidRequestShowChanges(worktreePath: String) { changesPath = worktreePath }
 }
