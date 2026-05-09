@@ -2,6 +2,10 @@ import XCTest
 @testable import amux
 
 final class WorktreeInspectorViewControllerTests: XCTestCase {
+    func testYaziCommandUsesCurrentDirectory() {
+        XCTAssertEqual(WorktreeInspectorViewController.yaziCommand, "yazi .")
+    }
+
     func testInitialTabFilesSelectsFilesSegment() {
         let vc = WorktreeInspectorViewController(
             worktreePath: "/repo/project",
@@ -51,6 +55,54 @@ final class WorktreeInspectorViewControllerTests: XCTestCase {
         vc.loadViewIfNeeded()
 
         XCTAssertNotNil(vc.view.viewWithAccessibilityIdentifier("diffReview"))
+    }
+
+    func testFilesTabShowsYaziContainerWhenAvailable() {
+        var capturedPath: String?
+        var capturedCommand: String?
+
+        let vc = WorktreeInspectorViewController(
+            worktreePath: "/repo/project",
+            initialTab: .files,
+            yaziAvailability: { true },
+            makeDiffReviewView: { path in
+                DiffReviewView(
+                    worktreePath: path,
+                    loadSnapshot: { GitDiffSnapshot(changedFiles: [], files: []) }
+                )
+            },
+            createYaziSurface: { _, path, command in
+                capturedPath = path
+                capturedCommand = command
+                return true
+            }
+        )
+
+        vc.loadViewIfNeeded()
+
+        XCTAssertNotNil(vc.view.viewWithAccessibilityIdentifier("worktreeInspector.yaziContainer"))
+        XCTAssertEqual(capturedPath, "/repo/project")
+        XCTAssertEqual(capturedCommand, "yazi .")
+    }
+
+    func testFilesTabShowsFailureMessageWhenYaziSurfaceCannotStart() {
+        let vc = WorktreeInspectorViewController(
+            worktreePath: "/repo/project",
+            initialTab: .files,
+            yaziAvailability: { true },
+            makeDiffReviewView: { path in
+                DiffReviewView(
+                    worktreePath: path,
+                    loadSnapshot: { GitDiffSnapshot(changedFiles: [], files: []) }
+                )
+            },
+            createYaziSurface: { _, _, _ in false }
+        )
+
+        vc.loadViewIfNeeded()
+
+        XCTAssertNil(vc.view.viewWithAccessibilityIdentifier("worktreeInspector.yaziContainer"))
+        XCTAssertNotNil(vc.view.viewWithAccessibilityIdentifier("worktreeInspector.filesYaziFailed"))
     }
 }
 

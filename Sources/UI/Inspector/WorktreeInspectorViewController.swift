@@ -6,9 +6,12 @@ enum WorktreeInspectorInitialTab: Int {
 }
 
 final class WorktreeInspectorViewController: NSViewController {
+    static let yaziCommand = "yazi ."
+
     private let worktreePath: String
     private let yaziAvailability: () -> Bool
     private let makeDiffReviewView: (String) -> DiffReviewView
+    private let createYaziSurface: ((NSView, String, String) -> Bool)?
     private let segmentedControl = NSSegmentedControl(
         labels: ["Files", "Changes"],
         trackingMode: .selectOne,
@@ -17,6 +20,7 @@ final class WorktreeInspectorViewController: NSViewController {
     )
     private let contentView = NSView()
     private var selectedTab: WorktreeInspectorInitialTab
+    private var yaziSurface: TerminalSurface?
 
     var selectedTabForTesting: WorktreeInspectorInitialTab { selectedTab }
 
@@ -24,17 +28,23 @@ final class WorktreeInspectorViewController: NSViewController {
         worktreePath: String,
         initialTab: WorktreeInspectorInitialTab,
         yaziAvailability: @escaping () -> Bool = { ProcessRunner.commandExists("yazi") },
-        makeDiffReviewView: @escaping (String) -> DiffReviewView = { DiffReviewView(worktreePath: $0) }
+        makeDiffReviewView: @escaping (String) -> DiffReviewView = { DiffReviewView(worktreePath: $0) },
+        createYaziSurface: ((NSView, String, String) -> Bool)? = nil
     ) {
         self.worktreePath = worktreePath
         self.selectedTab = initialTab
         self.yaziAvailability = yaziAvailability
         self.makeDiffReviewView = makeDiffReviewView
+        self.createYaziSurface = createYaziSurface
         super.init(nibName: nil, bundle: nil)
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) not supported")
+    }
+
+    deinit {
+        yaziSurface?.destroy()
     }
 
     override func loadView() {
@@ -84,7 +94,10 @@ final class WorktreeInspectorViewController: NSViewController {
     }
 
     private func showSelectedTab() {
+        yaziSurface?.destroy()
+        yaziSurface = nil
         contentView.subviews.forEach { $0.removeFromSuperview() }
+
         switch selectedTab {
         case .files:
             showFilesTab()
@@ -102,7 +115,27 @@ final class WorktreeInspectorViewController: NSViewController {
             return
         }
 
-        showMessage("Yazi file browser will appear here.", identifier: "worktreeInspector.filesPlaceholder")
+        let terminalContainer = NSView()
+        terminalContainer.wantsLayer = true
+        terminalContainer.layer?.backgroundColor = Theme.background.cgColor
+        terminalContainer.setAccessibilityIdentifier("worktreeInspector.yaziContainer")
+        terminalContainer.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(terminalContainer)
+
+        NSLayoutConstraint.activate([
+            terminalContainer.topAnchor.constraint(equalTo: contentView.topAnchor),
+            terminalContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            terminalContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            terminalContainer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+        ])
+
+        if !startYazi(in: terminalContainer) {
+            terminalContainer.removeFromSuperview()
+            showMessage(
+                "Could not start yazi for this worktree.",
+                identifier: "worktreeInspector.filesYaziFailed"
+            )
+        }
     }
 
     private func showChangesTab() {
@@ -135,5 +168,19 @@ final class WorktreeInspectorViewController: NSViewController {
             label.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 24),
             label.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -24),
         ])
+    }
+
+    private func startYazi(in container: NSView) -> Bool {
+        if let createYaziSurface {
+            return createYaziSurface(container, worktreePath, Self.yaziCommand)
+        }
+
+        let surface = TerminalSurface()
+        yaziSurface = surface
+        let started = surface.createEphemeral(in: container, workingDirectory: worktreePath, command: Self.yaziCommand)
+        if !started {
+            yaziSurface = nil
+        }
+        return started
     }
 }

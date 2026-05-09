@@ -71,6 +71,17 @@ class TerminalSurface {
         return surface != nil
     }
 
+    @discardableResult
+    func createEphemeral(in container: NSView, workingDirectory: String? = nil, command: String) -> Bool {
+        guard let app = GhosttyBridge.shared.app else {
+            NSLog("GhosttyBridge not initialized")
+            return false
+        }
+
+        _createWithCommand(app: app, container: container, workingDirectory: workingDirectory, command: command)
+        return surface != nil
+    }
+
     private func _createWithCommand(app: ghostty_app_t, container: NSView, workingDirectory: String?, command: String?) {
         let termView = GhosttyNSView(frame: container.bounds)
         termView.wantsLayer = true
