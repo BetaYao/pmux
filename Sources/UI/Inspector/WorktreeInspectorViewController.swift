@@ -12,6 +12,7 @@ final class WorktreeInspectorViewController: NSViewController {
     private let yaziAvailability: () -> Bool
     private let makeDiffReviewView: (String) -> DiffReviewView
     private let createYaziSurface: ((NSView, String, String) -> Bool)?
+    private let closeButton = NSButton()
     private let segmentedControl = NSSegmentedControl(
         labels: ["Files", "Changes"],
         trackingMode: .selectOne,
@@ -60,6 +61,14 @@ final class WorktreeInspectorViewController: NSViewController {
         title.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(title)
 
+        closeButton.title = "Close"
+        closeButton.bezelStyle = .rounded
+        closeButton.target = self
+        closeButton.action = #selector(closeClicked)
+        closeButton.setAccessibilityIdentifier("worktreeInspector.closeButton")
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(closeButton)
+
         segmentedControl.target = self
         segmentedControl.action = #selector(tabChanged)
         segmentedControl.selectedSegment = selectedTab.rawValue
@@ -74,8 +83,11 @@ final class WorktreeInspectorViewController: NSViewController {
             title.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16),
             title.trailingAnchor.constraint(lessThanOrEqualTo: segmentedControl.leadingAnchor, constant: -16),
 
+            closeButton.topAnchor.constraint(equalTo: root.topAnchor, constant: 8),
+            closeButton.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -16),
+
             segmentedControl.topAnchor.constraint(equalTo: root.topAnchor, constant: 8),
-            segmentedControl.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -16),
+            segmentedControl.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -8),
             segmentedControl.widthAnchor.constraint(equalToConstant: 180),
 
             contentView.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 12),
@@ -91,6 +103,10 @@ final class WorktreeInspectorViewController: NSViewController {
     @objc private func tabChanged() {
         selectedTab = WorktreeInspectorInitialTab(rawValue: segmentedControl.selectedSegment) ?? .files
         showSelectedTab()
+    }
+
+    @objc private func closeClicked() {
+        dismiss(nil)
     }
 
     private func showSelectedTab() {

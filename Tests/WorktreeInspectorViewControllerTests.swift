@@ -6,6 +6,21 @@ final class WorktreeInspectorViewControllerTests: XCTestCase {
         XCTAssertEqual(WorktreeInspectorViewController.yaziCommand, "yazi .")
     }
 
+    func testInspectorShowsCloseButton() {
+        let vc = WorktreeInspectorViewController(
+            worktreePath: "/repo/project",
+            initialTab: .files,
+            yaziAvailability: { false }
+        )
+
+        vc.loadViewIfNeeded()
+
+        let closeButton = vc.view.viewWithAccessibilityIdentifier("worktreeInspector.closeButton") as? NSButton
+        XCTAssertEqual(closeButton?.title, "Close")
+        XCTAssertTrue(closeButton?.target === vc)
+        XCTAssertEqual(closeButton?.action, NSSelectorFromString("closeClicked"))
+    }
+
     func testInitialTabFilesSelectsFilesSegment() {
         let vc = WorktreeInspectorViewController(
             worktreePath: "/repo/project",
