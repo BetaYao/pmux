@@ -19,13 +19,38 @@ final class WorktreeInspectorViewControllerTests: XCTestCase {
         let vc = WorktreeInspectorViewController(
             worktreePath: "/repo/project",
             initialTab: .changes,
-            yaziAvailability: { false }
+            yaziAvailability: { false },
+            makeDiffReviewView: { path in
+                DiffReviewView(
+                    worktreePath: path,
+                    loadSnapshot: { GitDiffSnapshot(changedFiles: [], files: []) }
+                )
+            }
         )
 
         vc.loadViewIfNeeded()
 
         XCTAssertEqual(vc.selectedTabForTesting, .changes)
-        XCTAssertNotNil(vc.view.viewWithAccessibilityIdentifier("worktreeInspector.changesPlaceholder"))
+        XCTAssertNotNil(vc.view.viewWithAccessibilityIdentifier("diffReview"))
+    }
+
+    func testChangesTabEmbedsDiffReviewView() {
+        let vc = WorktreeInspectorViewController(
+            worktreePath: "/repo/project",
+            initialTab: .changes,
+            yaziAvailability: { false },
+            makeDiffReviewView: { path in
+                XCTAssertEqual(path, "/repo/project")
+                return DiffReviewView(
+                    worktreePath: path,
+                    loadSnapshot: { GitDiffSnapshot(changedFiles: [], files: []) }
+                )
+            }
+        )
+
+        vc.loadViewIfNeeded()
+
+        XCTAssertNotNil(vc.view.viewWithAccessibilityIdentifier("diffReview"))
     }
 }
 

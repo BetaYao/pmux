@@ -8,6 +8,7 @@ enum WorktreeInspectorInitialTab: Int {
 final class WorktreeInspectorViewController: NSViewController {
     private let worktreePath: String
     private let yaziAvailability: () -> Bool
+    private let makeDiffReviewView: (String) -> DiffReviewView
     private let segmentedControl = NSSegmentedControl(
         labels: ["Files", "Changes"],
         trackingMode: .selectOne,
@@ -22,11 +23,13 @@ final class WorktreeInspectorViewController: NSViewController {
     init(
         worktreePath: String,
         initialTab: WorktreeInspectorInitialTab,
-        yaziAvailability: @escaping () -> Bool = { ProcessRunner.commandExists("yazi") }
+        yaziAvailability: @escaping () -> Bool = { ProcessRunner.commandExists("yazi") },
+        makeDiffReviewView: @escaping (String) -> DiffReviewView = { DiffReviewView(worktreePath: $0) }
     ) {
         self.worktreePath = worktreePath
         self.selectedTab = initialTab
         self.yaziAvailability = yaziAvailability
+        self.makeDiffReviewView = makeDiffReviewView
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -103,7 +106,16 @@ final class WorktreeInspectorViewController: NSViewController {
     }
 
     private func showChangesTab() {
-        showMessage("Changes will appear here.", identifier: "worktreeInspector.changesPlaceholder")
+        let review = makeDiffReviewView(worktreePath)
+        review.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(review)
+
+        NSLayoutConstraint.activate([
+            review.topAnchor.constraint(equalTo: contentView.topAnchor),
+            review.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            review.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            review.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+        ])
     }
 
     private func showMessage(_ message: String, identifier: String) {
