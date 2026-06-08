@@ -223,8 +223,10 @@ class MainWindowController: NSWindowController {
     }
 
     @objc func showNewBranchDialog() {
-        let dialog = dialogPresenter.makeNewBranchDialog(repoPaths: config.workspacePaths, dialogDelegate: self)
-        dialogPresenter.presentSheetOnActiveVC(dialog, tabCoordinator: tabCoordinator, dashboardVC: dashboardVC)
+        // Cmd+N now focuses the inline worktree creator in the sidebar instead of
+        // presenting the modal dialog. The modal builder (makeNewBranchDialog) and
+        // NewBranchDialog remain available but are no longer triggered here.
+        dashboardVC?.focusInlineCreate()
     }
 
     @objc func closeCurrentTab() {
@@ -388,6 +390,22 @@ class MainWindowController: NSWindowController {
         dashboard.splitContainerDelegate = self
         dashboardVC = dashboard
         tabCoordinator.dashboardVC = dashboard
+
+        dashboard.setupInlineCreate(repoPaths: config.workspacePaths) { [weak self] name, repoPath, reuseEnv in
+            guard let self else { return }
+            let currentPath = self.tabCoordinator.selectedAgent?.worktreePath
+            DispatchQueue.global(qos: .userInitiated).async {
+                let branches = WorktreeCreator.listBranches(repoPath: repoPath)
+                let base = branches.contains("main") ? "main" : (branches.contains("master") ? "master" : (branches.first ?? "main"))
+                do {
+                    let info = try WorktreeCreator.createWorktree(repoPath: repoPath, branchName: name, baseBranch: base)
+                    if reuseEnv, let currentPath { WorktreeCreator.copyEnvironmentFiles(from: currentPath, to: info.path) }
+                    DispatchQueue.main.async { self.tabCoordinator.handleNewBranch(info: info, repoPath: repoPath) }
+                } catch {
+                    DispatchQueue.main.async { NSSound.beep() }
+                }
+            }
+        }
 
         embedViewController(dashboard)
         updateTitleBar()
@@ -711,14 +729,6 @@ extension MainWindowController: NSWindowDelegate {
 // MARK: - TitleBarDelegate
 
 extension MainWindowController: TitleBarDelegate {
-    func titleBarDidRequestNewThread() {
-        tabCoordinator.showNewThreadModal(window: window)
-    }
-
-    func titleBarDidRequestAddProject() {
-        tabCoordinator.addRepoViaOpenPanel(window: window)
-    }
-
     func titleBarDidToggleTheme() {
         let isDark = window?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let next: ThemeMode = isDark ? .light : .dark

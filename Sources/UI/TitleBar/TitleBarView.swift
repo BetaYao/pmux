@@ -1,8 +1,6 @@
 import AppKit
 
 protocol TitleBarDelegate: AnyObject {
-    func titleBarDidRequestNewThread()
-    func titleBarDidRequestAddProject()
     func titleBarDidToggleTheme()
     func titleBarDidRequestCollapseSidebar()
 }
@@ -44,8 +42,6 @@ final class TitleBarView: NSView {
     private var secondaryUsageProgressWidthConstraint: NSLayoutConstraint?
 
     // Right controls — action group
-    private let addProjectButton = NSButton()
-    private let newWorktreeButton = NSButton()
     private let themeButton = NSButton()
     private let collapseSidebarButton = NSButton()
 
@@ -87,7 +83,6 @@ final class TitleBarView: NSView {
     }
 
     func updateChromeState(isGridLayout: Bool, hasWorkspaces: Bool = true) {
-        newWorktreeButton.isHidden = !hasWorkspaces
         collapseSidebarButton.isHidden = !hasWorkspaces
         collapseSidebarButton.isEnabled = !isGridLayout
         collapseSidebarButton.alphaValue = isGridLayout ? 0.3 : 1.0
@@ -298,16 +293,6 @@ final class TitleBarView: NSView {
         actionStack.spacing = 2
         actionStack.alignment = .centerY
 
-        configureArcIconButton(addProjectButton, symbol: "plus.rectangle",
-                               identifier: "titlebar.addProject", label: "Add Project",
-                               action: #selector(addProjectClicked))
-        actionStack.addArrangedSubview(addProjectButton)
-
-        configureArcIconButton(newWorktreeButton, symbol: "plus",
-                               identifier: "titlebar.newWorktree", label: "New Worktree",
-                               action: #selector(newWorktreeClicked))
-        actionStack.addArrangedSubview(newWorktreeButton)
-
         configureArcIconButton(themeButton, symbol: "circle.lefthalf.filled",
                                identifier: "titlebar.themeToggle", label: "Toggle Theme",
                                action: #selector(themeClicked))
@@ -410,14 +395,6 @@ final class TitleBarView: NSView {
     }
 
     // MARK: - Actions
-
-    @objc private func newWorktreeClicked() {
-        delegate?.titleBarDidRequestNewThread()
-    }
-
-    @objc private func addProjectClicked() {
-        delegate?.titleBarDidRequestAddProject()
-    }
 
     @objc private func themeClicked() {
         delegate?.titleBarDidToggleTheme()

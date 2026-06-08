@@ -141,6 +141,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
     private let leftRightSidebarScroll = NonFirstResponderScrollView()
     private let leftRightSidebarStack = FlippedStackView()
     private var leftRightMiniCards: [StackedMiniCardContainerView] = []
+    private let inlineCreateView = InlineWorktreeCreateView()
 
     // Top-Small layout
     private let topSmallContainer = NSView()
@@ -378,6 +379,15 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
             self.view.layoutSubtreeIfNeeded()
         }
     }
+
+    // MARK: - Inline worktree creation
+
+    func setupInlineCreate(repoPaths: [String], onCreate: @escaping (String, String, Bool) -> Void) {
+        inlineCreateView.configure(repoPaths: repoPaths)
+        inlineCreateView.onCreate = onCreate
+    }
+
+    func focusInlineCreate() { inlineCreateView.focusNameField() }
 
     private func resetSidebarConstraints() {
         leftRightFocusWidthExpanded?.isActive = true
@@ -621,6 +631,12 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
 
         leftRightContainer.addSubview(leftRightSidebarScroll)
 
+        // Sticky inline worktree creator, pinned to the bottom of the sidebar.
+        // Added to the stable container (not the cleared mini-card stack) so it
+        // survives sidebar relayout.
+        inlineCreateView.translatesAutoresizingMaskIntoConstraints = false
+        leftRightContainer.addSubview(inlineCreateView)
+
         let spacing: CGFloat = 8
 
         NSLayoutConstraint.activate([
@@ -635,8 +651,13 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
 
             leftRightSidebarScroll.topAnchor.constraint(equalTo: leftRightContainer.topAnchor),
             leftRightSidebarScroll.trailingAnchor.constraint(equalTo: leftRightContainer.trailingAnchor, constant: -LayoutMetrics.leftRightSidebarTrailingInset),
-            leftRightSidebarScroll.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor),
             leftRightSidebarScroll.leadingAnchor.constraint(equalTo: leftRightFocusPanel.trailingAnchor, constant: spacing),
+            leftRightSidebarScroll.bottomAnchor.constraint(equalTo: inlineCreateView.topAnchor),
+
+            inlineCreateView.leadingAnchor.constraint(equalTo: leftRightSidebarScroll.leadingAnchor),
+            inlineCreateView.trailingAnchor.constraint(equalTo: leftRightSidebarScroll.trailingAnchor),
+            inlineCreateView.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor),
+            inlineCreateView.heightAnchor.constraint(greaterThanOrEqualToConstant: 36),
         ])
 
         // Sidebar collapse constraints for left-right
