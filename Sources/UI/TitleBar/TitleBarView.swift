@@ -59,6 +59,7 @@ final class TitleBarView: NSView {
     private var currentPrimaryCapsuleIndex = 0
     private var tipRotationTimer: Timer?
     private var isPrimaryCapsuleHovered = false
+    private var usesFocusedWorktreeMode = false
     private var hoverTrackingArea: NSTrackingArea?
     private var primaryCapsuleTrackingArea: NSTrackingArea?
 
@@ -98,7 +99,28 @@ final class TitleBarView: NSView {
         startTipRotationIfNeeded()
     }
 
+    /// Show the focused worktree's title on the left and a token placeholder on the right.
+    func updateFocusedWorktree(title: String, tokenText: String = "\u{2014}") {
+        tipRotationTimer?.invalidate()
+        tipRotationTimer = nil
+        usesFocusedWorktreeMode = true
+        capsuleIconView.isHidden = true
+        capsuleLeadingLabel.stringValue = title
+        capsuleLeadingLabel.lineBreakMode = .byTruncatingTail
+        capsuleBodyLabel.isHidden = true
+        capsuleTrailingLabel.stringValue = tokenText
+        capsuleTrailingLabel.isHidden = false
+        capsuleSecondaryLabel.isHidden = true
+        capsuleSecondaryTrailingLabel.isHidden = true
+        capsuleSep1Label.isHidden = true
+        capsuleSep2Label.isHidden = true
+        capsuleSep3Label.isHidden = true
+        usageProgressTrack.isHidden = true
+        secondaryUsageProgressTrack.isHidden = true
+    }
+
     func updatePrimaryCapsuleFrames(_ frames: [PrimaryCapsuleFrame]) {
+        guard !usesFocusedWorktreeMode else { return }
         guard !frames.isEmpty else { return }
         primaryCapsuleFrames = frames
         currentPrimaryCapsuleIndex = min(currentPrimaryCapsuleIndex, frames.count - 1)
@@ -483,16 +505,9 @@ final class TitleBarView: NSView {
     }
 
     private func startTipRotationIfNeeded() {
-        guard tipRotationTimer == nil else { return }
-        tipRotationTimer = Timer.scheduledTimer(withTimeInterval: Layout.tipRotationInterval, repeats: true) { [weak self] _ in
-            self?.advanceTipIfNeeded()
-        }
-    }
-
-    private func advanceTipIfNeeded() {
-        guard !isPrimaryCapsuleHovered, !primaryCapsuleFrames.isEmpty else { return }
-        currentPrimaryCapsuleIndex = (currentPrimaryCapsuleIndex + 1) % primaryCapsuleFrames.count
-        showCurrentPrimaryCapsuleFrame()
+        // Rotation disabled: the primary capsule now shows the focused worktree
+        // title + token placeholder via updateFocusedWorktree(title:tokenText:).
+        // Global usage/tips will live in a bottom status bar.
     }
 
     // MARK: - Theme

@@ -484,6 +484,22 @@ class MainWindowController: NSWindowController {
             hasWorkspaces: !tabCoordinator.workspaceManager.tabs.isEmpty
         )
         updatePrimaryCapsuleNotification()
+        refreshFocusedWorktreeCapsule()
+    }
+
+    private func refreshFocusedWorktreeCapsule() {
+        guard let agent = tabCoordinator.selectedAgent else {
+            titleBar.updateFocusedWorktree(title: "")
+            return
+        }
+        let path = agent.worktreePath
+        DispatchQueue.global(qos: .userInitiated).async {
+            let info = AgentHead.shared.agent(forWorktree: path)
+            let prompt = info?.lastUserPrompt ?? ""
+            let branch = info?.branch ?? ""
+            let title = WorktreeTitleResolver.resolve(worktreePath: path, lastUserPrompt: prompt, branch: branch)
+            DispatchQueue.main.async { self.titleBar.updateFocusedWorktree(title: title) }
+        }
     }
 
 
