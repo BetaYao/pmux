@@ -360,11 +360,9 @@ class MainWindowController: NSWindowController {
 
         panelCoordinator.setupPopovers()
 
-        // Create dashboard
-        let savedLayout = DashboardLayout(rawValue: config.dashboardLayout) ?? .leftRight
+        // Create dashboard — single permanent LeftRight layout
         let dashboard = DashboardViewController()
         dashboard.dashboardDelegate = self
-        dashboard.currentLayout = savedLayout
         dashboard.setZoomIndex(config.zoomIndex)
         dashboard.surfaceManager = terminalCoordinator.surfaceManager
         dashboard.splitContainerDelegate = self
@@ -373,10 +371,6 @@ class MainWindowController: NSWindowController {
 
         embedViewController(dashboard)
         updateTitleBar()
-
-
-        // Set title bar layout state
-        titleBar.setCurrentLayout(savedLayout)
 
         applyWindowBackgroundStyle()
         positionStandardWindowButtons()
@@ -485,10 +479,8 @@ class MainWindowController: NSWindowController {
     }
 
     private func updateTitleBar() {
-        let isGrid = tabCoordinator.dashboardVC?.currentLayout == .grid
-
         titleBar.updateChromeState(
-            isGridLayout: isGrid,
+            isGridLayout: false,
             hasWorkspaces: !tabCoordinator.workspaceManager.tabs.isEmpty
         )
         updatePrimaryCapsuleNotification()
@@ -616,32 +608,9 @@ class AmuxWindow: NSWindow {
             return true
         }
 
-        // Cmd+1..4: switch dashboard layout.
-        if flags == .command, let chars = event.charactersIgnoringModifiers {
-            let layoutMap: [String: DashboardLayout] = [
-                "1": .grid,
-                "2": .leftRight,
-                "3": .topSmall,
-                "4": .topLarge
-            ]
-            if let target = layoutMap[chars], let dashVC = mwc.tabCoordinator.dashboardVC {
-                if dashVC.isInDStateForWindow {
-                    dashVC.exitDashboardNavigation(restoreSnapshot: true)
-                }
-                dashVC.setLayout(target)
-                if target == .grid {
-                    dashVC.enterDashboardNavigation()
-                }
-                return true
-            }
-        }
-
-        // Cmd+J: toggle D-state in focus layouts. No-op in grid (already in D).
+        // Cmd+J: toggle D-state in the focus layout.
         if flags == .command && event.charactersIgnoringModifiers == "j" {
             if let dashVC = mwc.tabCoordinator.dashboardVC {
-                if dashVC.currentLayout == .grid {
-                    return true  // swallow, no-op
-                }
                 if dashVC.isInDStateForWindow {
                     dashVC.exitDashboardNavigation(restoreSnapshot: true)
                 } else {
@@ -712,17 +681,6 @@ extension MainWindowController: TitleBarDelegate {
 
     func titleBarDidRequestAddProject() {
         tabCoordinator.addRepoViaOpenPanel(window: window)
-    }
-
-    func titleBarDidSelectLayout(_ layout: DashboardLayout) {
-        dashboardVC?.setLayout(layout)
-        config.dashboardLayout = layout.rawValue
-        tabCoordinator.config.dashboardLayout = layout.rawValue
-        terminalCoordinator.config.dashboardLayout = layout.rawValue
-        updateCoordinator.config.dashboardLayout = layout.rawValue
-        saveConfig()
-        titleBar.setCurrentLayout(layout)
-        updateTitleBar()
     }
 
     func titleBarDidToggleTheme() {

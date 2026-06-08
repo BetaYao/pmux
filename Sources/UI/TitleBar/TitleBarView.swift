@@ -3,7 +3,6 @@ import AppKit
 protocol TitleBarDelegate: AnyObject {
     func titleBarDidRequestNewThread()
     func titleBarDidRequestAddProject()
-    func titleBarDidSelectLayout(_ layout: DashboardLayout)
     func titleBarDidToggleTheme()
     func titleBarDidRequestCollapseSidebar()
 }
@@ -44,20 +43,11 @@ final class TitleBarView: NSView {
     private let secondaryUsageProgressFill = NSView()
     private var secondaryUsageProgressWidthConstraint: NSLayoutConstraint?
 
-    // Right controls — layout group
-    private let gridLayoutButton = NSButton()
-    private let leftLayoutButton = NSButton()
-    private let topSmallLayoutButton = NSButton()
-    private let topLargeLayoutButton = NSButton()
-    private var layoutButtons: [DashboardLayout: NSButton] = [:]
-
     // Right controls — action group
     private let addProjectButton = NSButton()
     private let newWorktreeButton = NSButton()
     private let themeButton = NSButton()
     private let collapseSidebarButton = NSButton()
-
-    private var currentLayout: DashboardLayout = .grid
 
     // State
     private var isWindowHovered = false
@@ -114,11 +104,6 @@ final class TitleBarView: NSView {
         currentPrimaryCapsuleIndex = min(currentPrimaryCapsuleIndex, frames.count - 1)
         showCurrentPrimaryCapsuleFrame()
         startTipRotationIfNeeded()
-    }
-
-    func setCurrentLayout(_ layout: DashboardLayout) {
-        currentLayout = layout
-        updateLayoutButtonHighlight()
     }
 
     func aiAnchorView() -> NSView {
@@ -286,51 +271,6 @@ final class TitleBarView: NSView {
         rightArcBlock.translatesAutoresizingMaskIntoConstraints = false
         addSubview(rightArcBlock)
 
-        let layoutStack = NSStackView()
-        layoutStack.orientation = .horizontal
-        layoutStack.spacing = 2
-        layoutStack.alignment = .centerY
-
-        configureArcIconButton(gridLayoutButton, symbol: "square.grid.2x2",
-                               identifier: "titlebar.layout.grid", label: "Grid",
-                               action: #selector(layoutButtonClicked(_:)))
-        gridLayoutButton.tag = 0
-        layoutStack.addArrangedSubview(gridLayoutButton)
-
-        configureArcIconButton(leftLayoutButton, symbol: "rectangle.split.2x1",
-                               identifier: "titlebar.layout.left", label: "Left Right",
-                               action: #selector(layoutButtonClicked(_:)))
-        leftLayoutButton.tag = 1
-        layoutStack.addArrangedSubview(leftLayoutButton)
-
-        configureArcIconButton(topSmallLayoutButton, symbol: "rectangle.split.1x2",
-                               identifier: "titlebar.layout.topSmall", label: "Top Small",
-                               action: #selector(layoutButtonClicked(_:)))
-        topSmallLayoutButton.tag = 2
-        layoutStack.addArrangedSubview(topSmallLayoutButton)
-
-        configureArcIconButton(topLargeLayoutButton, symbol: "rectangle.tophalf.filled",
-                               identifier: "titlebar.layout.topLarge", label: "Top Large",
-                               action: #selector(layoutButtonClicked(_:)))
-        topLargeLayoutButton.tag = 3
-        layoutStack.addArrangedSubview(topLargeLayoutButton)
-
-        layoutButtons = [
-            .grid: gridLayoutButton,
-            .leftRight: leftLayoutButton,
-            .topSmall: topSmallLayoutButton,
-            .topLarge: topLargeLayoutButton,
-        ]
-
-        let divider = NSView()
-        divider.wantsLayer = true
-        divider.layer?.backgroundColor = NSColor(hex: 0x888888).withAlphaComponent(0.3).cgColor
-        divider.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            divider.widthAnchor.constraint(equalToConstant: 1),
-            divider.heightAnchor.constraint(equalToConstant: 16),
-        ])
-
         let actionStack = NSStackView()
         actionStack.orientation = .horizontal
         actionStack.spacing = 2
@@ -361,8 +301,6 @@ final class TitleBarView: NSView {
         rightStack.spacing = 6
         rightStack.alignment = .centerY
         rightStack.translatesAutoresizingMaskIntoConstraints = false
-        rightStack.addArrangedSubview(layoutStack)
-        rightStack.addArrangedSubview(divider)
         rightStack.addArrangedSubview(actionStack)
         rightArcBlock.addSubview(rightStack)
 
@@ -371,8 +309,6 @@ final class TitleBarView: NSView {
             rightStack.trailingAnchor.constraint(equalTo: rightArcBlock.trailingAnchor, constant: -4),
             rightStack.centerYAnchor.constraint(equalTo: rightArcBlock.centerYAnchor),
         ])
-
-        updateLayoutButtonHighlight()
     }
 
     // MARK: - Arc Icon Button Helper
@@ -459,25 +395,6 @@ final class TitleBarView: NSView {
 
     @objc private func addProjectClicked() {
         delegate?.titleBarDidRequestAddProject()
-    }
-
-    private static let tagToLayout: [Int: DashboardLayout] = [
-        0: .grid, 1: .leftRight, 2: .topSmall, 3: .topLarge,
-    ]
-
-    @objc private func layoutButtonClicked(_ sender: NSButton) {
-        guard let layout = Self.tagToLayout[sender.tag] else { return }
-        currentLayout = layout
-        updateLayoutButtonHighlight()
-        delegate?.titleBarDidSelectLayout(layout)
-    }
-
-    private func updateLayoutButtonHighlight() {
-        let activeTint = SemanticColors.accent
-        let inactiveTint = NSColor(hex: 0x888888)
-        for (layout, button) in layoutButtons {
-            button.contentTintColor = (layout == currentLayout) ? activeTint : inactiveTint
-        }
     }
 
     @objc private func themeClicked() {
