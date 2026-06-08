@@ -1,34 +1,29 @@
 import XCTest
-import AppKit
 @testable import amux
 
 final class MiniCardViewTests: XCTestCase {
-
-    func testMiniCardShowsPromptAndNewestToolOnly() {
-        let card = MiniCardView(frame: NSRect(x: 0, y: 0, width: 320, height: 180))
-        let events = [
-            ActivityEvent(tool: "Bash", detail: "swift test", isError: false, timestamp: Date()),
-            ActivityEvent(tool: "Read", detail: "main.swift", isError: false, timestamp: Date(timeIntervalSinceNow: -5)),
-        ]
-
+    func testConfigureSetsTitleAndRepoWorktree() {
+        let card = MiniCardView(frame: NSRect(x: 0, y: 0, width: 220, height: 80))
         card.configure(
-            id: "agent-1",
-            project: "repo",
-            thread: "main",
-            status: "running",
-            lastMessage: "fallback",
-            lastUserPrompt: "fix the failing tests",
-            totalDuration: "00:10:00",
-            roundDuration: "00:00:10",
-            activityEvents: events
+            id: "t1", project: "teamclaw-next", thread: "test-trsyt",
+            status: "running", lastMessage: "ignored",
+            lastUserPrompt: "Why are classics unread?",
+            totalDuration: "120", roundDuration: "30"
         )
+        XCTAssertEqual(card.agentId, "t1")
+        XCTAssertEqual(card.titleTextForTesting, "Why are classics unread?")
+        XCTAssertTrue(card.repoWorktreeTextForTesting.contains("teamclaw-next"))
+        XCTAssertTrue(card.repoWorktreeTextForTesting.contains("test-trsyt"))
+    }
 
-        let labels = card.subviews.compactMap { $0 as? NSTextField }
-        XCTAssertTrue(labels.contains { $0.stringValue.contains("fix the failing tests") })
-
-        let toolLabels = labels.filter { $0.attributedStringValue.string.contains("swift test") }
-        XCTAssertEqual(toolLabels.count, 1)
-        XCTAssertFalse(toolLabels[0].attributedStringValue.string.contains("\n"))
-        XCTAssertFalse(labels.contains { $0.attributedStringValue.string.contains("main.swift") })
+    func testTitleFallsBackToProject() {
+        let card = MiniCardView(frame: .zero)
+        card.configure(
+            id: "t2", project: "repo", thread: "wt",
+            status: "idle", lastMessage: "",
+            lastUserPrompt: "",
+            totalDuration: "0", roundDuration: "0"
+        )
+        XCTAssertEqual(card.titleTextForTesting, "repo")
     }
 }
