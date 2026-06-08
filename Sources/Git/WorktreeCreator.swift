@@ -87,6 +87,25 @@ enum WorktreeCreator {
         )
     }
 
+    /// Copy environment files (.env, .env.*, .envrc) from one worktree root to
+    /// another. Best-effort: missing files and copy failures are ignored.
+    static func copyEnvironmentFiles(from sourcePath: String, to destPath: String) {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(atPath: sourcePath) else { return }
+        for name in entries where isEnvironmentFile(name) {
+            let srcFile = (sourcePath as NSString).appendingPathComponent(name)
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: srcFile, isDirectory: &isDir), !isDir.boolValue else { continue }
+            let dstFile = (destPath as NSString).appendingPathComponent(name)
+            try? fm.removeItem(atPath: dstFile)
+            try? fm.copyItem(atPath: srcFile, toPath: dstFile)
+        }
+    }
+
+    private static func isEnvironmentFile(_ name: String) -> Bool {
+        name == ".env" || name == ".envrc" || name.hasPrefix(".env.")
+    }
+
     private static func runGit(args: [String], in directory: String) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
