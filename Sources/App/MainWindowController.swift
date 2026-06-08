@@ -47,6 +47,7 @@ class MainWindowController: NSWindowController {
     private let titleBar = TitleBarView()
     private let backgroundEffectView = NSVisualEffectView()
     private let contentContainer = NSView()
+    private let statusBar = StatusBarView()
     private var windowTrackingArea: NSTrackingArea?
     private lazy var panelCoordinator: PanelCoordinator = {
         let pc = PanelCoordinator()
@@ -161,6 +162,16 @@ class MainWindowController: NSWindowController {
         handleNotificationHistoryDidChange(nil)
         usageSummaryStore.onUpdate = { [weak self] frames in
             self?.titleBar.updatePrimaryCapsuleFrames(frames)
+            let usageText = frames
+                .filter { $0.kind == .usage }
+                .map { frame in
+                    [frame.leadingText, frame.bodyText, frame.trailingText]
+                        .filter { !$0.isEmpty }
+                        .joined(separator: " ")
+                }
+                .filter { !$0.isEmpty }
+                .joined(separator: "  \u{00B7}  ")
+            self?.statusBar.updateUsage(text: usageText)
         }
         usageSummaryStore.start()
     }
@@ -339,6 +350,10 @@ class MainWindowController: NSWindowController {
         contentContainer.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(contentContainer)
 
+        // Fixed-height bottom status bar
+        statusBar.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(statusBar)
+
         NSLayoutConstraint.activate([
             backgroundEffectView.topAnchor.constraint(equalTo: contentView.topAnchor),
             backgroundEffectView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
@@ -352,7 +367,12 @@ class MainWindowController: NSWindowController {
             contentContainer.topAnchor.constraint(equalTo: updateCoordinator.banner.bottomAnchor),
             contentContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             contentContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            contentContainer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            contentContainer.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
+
+            statusBar.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            statusBar.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            statusBar.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            statusBar.heightAnchor.constraint(equalToConstant: StatusBarView.height),
         ])
 
         // Window hover tracking for arc block styling
@@ -854,10 +874,12 @@ extension MainWindowController {
             primaryCapsuleDismissWorkItem?.cancel()
             primaryCapsuleDismissWorkItem = nil
         }
+        let unreadCount = NotificationHistory.shared.unreadCount
         titleBar.updateNotificationSummary(
             entry: entry,
-            unreadCount: NotificationHistory.shared.unreadCount
+            unreadCount: unreadCount
         )
+        statusBar.updateNotification(text: unreadCount > 0 ? "\(unreadCount) unread" : "")
     }
 
     static func selectPrimaryCapsuleNotification(
@@ -901,10 +923,12 @@ extension MainWindowController {
             self.dismissedPrimaryCapsuleNotificationIDs.insert(entry.id)
             if self.primaryCapsuleNotification?.id == entry.id {
                 self.primaryCapsuleNotification = nil
+                let unreadCount = NotificationHistory.shared.unreadCount
                 self.titleBar.updateNotificationSummary(
                     entry: nil,
-                    unreadCount: NotificationHistory.shared.unreadCount
+                    unreadCount: unreadCount
                 )
+                self.statusBar.updateNotification(text: unreadCount > 0 ? "\(unreadCount) unread" : "")
             }
         }
         primaryCapsuleDismissWorkItem = workItem
