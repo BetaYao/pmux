@@ -8,7 +8,7 @@ protocol QuickSwitcherDelegate: AnyObject {
 class QuickSwitcherViewController: NSViewController, NSSearchFieldDelegate {
     weak var quickSwitcherDelegate: QuickSwitcherDelegate?
 
-    private let searchField = NSSearchField()
+    private let searchField = NSTextField()
     private let resultsTableView = NSTableView()
     private let resultsScrollView = NSScrollView()
 
@@ -39,22 +39,39 @@ class QuickSwitcherViewController: NSViewController, NSSearchFieldDelegate {
         container.setAccessibilityRole(.group)
         self.view = container
 
-        // Search field
+        // Search bar: subtle rounded container with a magnifier + borderless field.
+        let searchBar = NSView()
+        searchBar.wantsLayer = true
+        searchBar.layer?.cornerRadius = 10
+        searchBar.layer?.backgroundColor = SemanticColors.panel2.cgColor
+        searchBar.layer?.borderWidth = 1
+        searchBar.layer?.borderColor = SemanticColors.lineAlpha45.cgColor
+        searchBar.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(searchBar)
+
+        let magnifier = NSImageView()
+        magnifier.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 14, weight: .regular))
+        magnifier.contentTintColor = SemanticColors.muted
+        magnifier.translatesAutoresizingMaskIntoConstraints = false
+        searchBar.addSubview(magnifier)
+
         searchField.placeholderString = "Search worktrees..."
         searchField.font = NSFont.systemFont(ofSize: 15)
-        searchField.isBordered = true
-        searchField.bezelStyle = .roundedBezel
+        searchField.isBordered = false
+        searchField.drawsBackground = false
         searchField.focusRingType = .none
-        searchField.sendsWholeSearchString = true
+        searchField.lineBreakMode = .byTruncatingTail
+        searchField.cell?.usesSingleLineMode = true
         searchField.delegate = self
         searchField.setAccessibilityIdentifier("dialog.quickSwitcher.searchField")
         searchField.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(searchField)
+        searchBar.addSubview(searchField)
 
         // Separator under search
         let separator = NSView()
         separator.wantsLayer = true
-        separator.layer?.backgroundColor = SemanticColors.line.cgColor
+        separator.layer?.backgroundColor = SemanticColors.lineAlpha45.cgColor
         separator.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(separator)
 
@@ -90,17 +107,26 @@ class QuickSwitcherViewController: NSViewController, NSSearchFieldDelegate {
         container.addSubview(hintLabel)
 
         NSLayoutConstraint.activate([
-            searchField.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
-            searchField.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            searchField.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
-            searchField.heightAnchor.constraint(equalToConstant: 32),
+            searchBar.topAnchor.constraint(equalTo: container.topAnchor, constant: 14),
+            searchBar.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 14),
+            searchBar.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -14),
+            searchBar.heightAnchor.constraint(equalToConstant: 42),
 
-            separator.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 10),
+            magnifier.leadingAnchor.constraint(equalTo: searchBar.leadingAnchor, constant: 12),
+            magnifier.centerYAnchor.constraint(equalTo: searchBar.centerYAnchor),
+            magnifier.widthAnchor.constraint(equalToConstant: 16),
+            magnifier.heightAnchor.constraint(equalToConstant: 16),
+
+            searchField.leadingAnchor.constraint(equalTo: magnifier.trailingAnchor, constant: 8),
+            searchField.trailingAnchor.constraint(equalTo: searchBar.trailingAnchor, constant: -10),
+            searchField.centerYAnchor.constraint(equalTo: searchBar.centerYAnchor),
+
+            separator.topAnchor.constraint(equalTo: searchBar.bottomAnchor, constant: 12),
             separator.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             separator.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             separator.heightAnchor.constraint(equalToConstant: 1),
 
-            resultsScrollView.topAnchor.constraint(equalTo: separator.bottomAnchor, constant: 4),
+            resultsScrollView.topAnchor.constraint(equalTo: separator.bottomAnchor, constant: 6),
             resultsScrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             resultsScrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             resultsScrollView.bottomAnchor.constraint(equalTo: hintLabel.topAnchor, constant: -4),
