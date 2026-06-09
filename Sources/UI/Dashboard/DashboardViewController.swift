@@ -668,7 +668,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
             leftRightSidebarScroll.topAnchor.constraint(equalTo: leftRightContainer.topAnchor),
             leftRightSidebarScroll.trailingAnchor.constraint(equalTo: leftRightContainer.trailingAnchor, constant: -LayoutMetrics.leftRightSidebarTrailingInset),
             leftRightSidebarScroll.leadingAnchor.constraint(equalTo: leftRightFocusPanel.trailingAnchor, constant: spacing),
-            leftRightSidebarScroll.bottomAnchor.constraint(equalTo: inlineCreateView.topAnchor),
+            leftRightSidebarScroll.bottomAnchor.constraint(equalTo: inlineCreateView.topAnchor, constant: -10),
 
             inlineCreateView.leadingAnchor.constraint(equalTo: leftRightSidebarScroll.leadingAnchor),
             inlineCreateView.trailingAnchor.constraint(equalTo: leftRightSidebarScroll.trailingAnchor),

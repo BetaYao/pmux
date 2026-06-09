@@ -24,6 +24,15 @@ final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
     // Kept for test-target compatibility (no longer a focus-driven mode).
     var isExpandedForTesting = false
 
+    /// A clearly-elevated fill so the input reads as a distinct box, not the
+    /// same surface as the cards above it.
+    private static let inputBg = NSColor(name: nil) { a in
+        a.isDark ? NSColor(hex: 0x24262b) : NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.98)
+    }
+    private static let inputBorder = NSColor(name: nil) { a in
+        a.isDark ? NSColor(hex: 0x3d4047) : NSColor(hex: 0xc6cfdb)
+    }
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setup()
@@ -169,8 +178,8 @@ final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
 
     // MARK: - Appearance
     private func applyColors() {
-        layer?.backgroundColor = resolvedCGColor(SemanticColors.tileBarBg)
-        layer?.borderColor = resolvedCGColor(SemanticColors.lineAlpha45)
+        layer?.backgroundColor = resolvedCGColor(Self.inputBg)
+        layer?.borderColor = resolvedCGColor(Self.inputBorder)
     }
 
     override func viewDidChangeEffectiveAppearance() {
