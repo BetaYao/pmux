@@ -282,13 +282,14 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         for (index, agent) in sorted.enumerated() {
             miniCards[index].configure(paneCount: agent.paneCount)
             miniCards[index].layoutChildren()
+            WorktreeTitleCache.shared.title(worktreePath: agent.worktreePath, lastUserPrompt: agent.lastUserPrompt, branch: agent.thread) { _ in }
             miniCards[index].miniCardView.configure(
                 id: agent.id,
                 project: agent.project,
                 thread: agent.thread,
                 status: agent.status,
                 lastMessage: agent.lastMessage,
-                lastUserPrompt: agent.lastUserPrompt,
+                lastUserPrompt: WorktreeTitleCache.shared.cachedTitle(worktreePath: agent.worktreePath) ?? agent.lastUserPrompt,
                 totalDuration: agent.totalDuration,
                 roundDuration: agent.roundDuration,
                 paneStatuses: agent.paneStatuses,
@@ -471,10 +472,11 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
             container.delegate = self
             container.reorderDelegate = self
             container.configure(paneCount: agent.paneCount)
+            WorktreeTitleCache.shared.title(worktreePath: agent.worktreePath, lastUserPrompt: agent.lastUserPrompt, branch: agent.thread) { _ in }
             container.miniCardView.configure(
                 id: agent.id, project: agent.project, thread: agent.thread,
                 status: agent.status, lastMessage: agent.lastMessage,
-                lastUserPrompt: agent.lastUserPrompt,
+                lastUserPrompt: WorktreeTitleCache.shared.cachedTitle(worktreePath: agent.worktreePath) ?? agent.lastUserPrompt,
                 totalDuration: agent.totalDuration, roundDuration: agent.roundDuration,
                 paneStatuses: agent.paneStatuses,
                 isMainWorktree: agent.isMainWorktree,
