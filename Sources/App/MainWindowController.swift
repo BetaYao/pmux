@@ -227,6 +227,7 @@ class MainWindowController: NSWindowController {
         // Cmd+N now focuses the inline worktree creator in the sidebar instead of
         // presenting the modal dialog. The modal builder (makeNewBranchDialog) and
         // NewBranchDialog remain available but are no longer triggered here.
+        tabCoordinator.switchToTab(0)
         dashboardVC?.focusInlineCreate()
     }
 
