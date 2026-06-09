@@ -50,7 +50,7 @@ final class MiniCardView: NSView {
 
         // Agent badge (AI agents only) sits before the repo name.
         if let style = Self.badgeStyle(for: agentType) {
-            agentBadge.configure(text: style.label, color: style.color)
+            agentBadge.configure(text: style.label, color: style.color, symbol: style.symbol)
             agentBadge.isHidden = false
             repoLeadingDefault.isActive = false
             repoLeadingAfterBadge.isActive = true
@@ -238,26 +238,27 @@ final class MiniCardView: NSView {
         repoWorktreeLabel.textColor = SemanticColors.muted
     }
 
-    /// Label + brand color for an agent badge, or nil for non-AI / unknown types.
-    static func badgeStyle(for type: AgentType) -> (label: String, color: NSColor)? {
+    /// Label + brand color + SF Symbol for an agent badge, or nil for non-AI types.
+    static func badgeStyle(for type: AgentType) -> (label: String, color: NSColor, symbol: String)? {
         switch type {
-        case .claudeCode: return ("Claude", NSColor(hex: 0xd97757))
-        case .codex:      return ("Codex", NSColor(hex: 0x10a37f))
-        case .openCode:   return ("opencode", NSColor(hex: 0x8b7fd9))
-        case .gemini:     return ("Gemini", NSColor(hex: 0x4285f4))
-        case .cline:      return ("Cline", NSColor(hex: 0x6aa84f))
-        case .goose:      return ("Goose", NSColor(hex: 0xb07ad9))
-        case .amp:        return ("Amp", NSColor(hex: 0xe0a030))
-        case .aider:      return ("Aider", NSColor(hex: 0x4aa3a3))
-        case .cursor:     return ("Cursor", NSColor(hex: 0x9aa0a6))
-        case .kiro:       return ("Kiro", NSColor(hex: 0x7a9bd9))
+        case .claudeCode: return ("Claude", NSColor(hex: 0xd97757), "sparkle")
+        case .codex:      return ("Codex", NSColor(hex: 0x10a37f), "diamond")
+        case .openCode:   return ("opencode", NSColor(hex: 0x8b7fd9), "diamond")
+        case .gemini:     return ("Gemini", NSColor(hex: 0x4285f4), "sparkles")
+        case .cline:      return ("Cline", NSColor(hex: 0x6aa84f), "terminal")
+        case .goose:      return ("Goose", NSColor(hex: 0xb07ad9), "bird")
+        case .amp:        return ("Amp", NSColor(hex: 0xe0a030), "bolt")
+        case .aider:      return ("Aider", NSColor(hex: 0x4aa3a3), "wand.and.stars")
+        case .cursor:     return ("Cursor", NSColor(hex: 0x9aa0a6), "cursorarrow")
+        case .kiro:       return ("Kiro", NSColor(hex: 0x7a9bd9), "diamond")
         default:          return nil
         }
     }
 }
 
-/// Small rounded pill showing an agent's name in its brand color.
+/// Small rounded pill showing an agent's icon + name in its brand color.
 final class AgentBadgeView: NSView {
+    private let icon = NSImageView()
     private let label = NSTextField(labelWithString: "")
 
     override init(frame frameRect: NSRect) {
@@ -265,13 +266,24 @@ final class AgentBadgeView: NSView {
         wantsLayer = true
         layer?.cornerRadius = 4
         layer?.borderWidth = 1
+
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.setContentHuggingPriority(.required, for: .horizontal)
+        addSubview(icon)
+
         label.font = .systemFont(ofSize: 9.5, weight: .semibold)
         label.translatesAutoresizingMaskIntoConstraints = false
         label.setContentHuggingPriority(.required, for: .horizontal)
         label.setContentCompressionResistancePriority(.required, for: .horizontal)
         addSubview(label)
+
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 9),
+            icon.heightAnchor.constraint(equalToConstant: 9),
+
+            label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 3),
             label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
             label.topAnchor.constraint(equalTo: topAnchor, constant: 2),
             label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
@@ -280,9 +292,12 @@ final class AgentBadgeView: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
-    func configure(text: String, color: NSColor) {
+    func configure(text: String, color: NSColor, symbol: String) {
         label.stringValue = text
         label.textColor = color
+        icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 8.5, weight: .semibold))
+        icon.contentTintColor = color
         layer?.borderColor = color.withAlphaComponent(0.55).cgColor
         layer?.backgroundColor = color.withAlphaComponent(0.12).cgColor
     }
