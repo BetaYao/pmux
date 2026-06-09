@@ -402,9 +402,15 @@ class MainWindowController: NSWindowController {
                 do {
                     let info = try WorktreeCreator.createWorktree(repoPath: repoPath, branchName: name, baseBranch: base)
                     if reuseEnv, let currentPath { WorktreeCreator.copyEnvironmentFiles(from: currentPath, to: info.path) }
-                    DispatchQueue.main.async { self.tabCoordinator.handleNewBranch(info: info, repoPath: repoPath) }
+                    DispatchQueue.main.async {
+                        self.tabCoordinator.handleNewBranch(info: info, repoPath: repoPath)
+                        self.dashboardVC?.inlineCreateReportSuccess()
+                    }
                 } catch {
-                    DispatchQueue.main.async { NSSound.beep() }
+                    DispatchQueue.main.async {
+                        NSSound.beep()
+                        self.dashboardVC?.inlineCreateReportFailure(error.localizedDescription)
+                    }
                 }
             }
         }

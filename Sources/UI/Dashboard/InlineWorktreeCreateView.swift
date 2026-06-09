@@ -9,6 +9,7 @@ final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
     private let nameField = NSTextField()
     private let repoPopup = NSPopUpButton()
     private let reuseEnvCheckbox = NSButton(checkboxWithTitle: "Reuse env", target: nil, action: nil)
+    private let errorLabel = NSTextField(labelWithString: "")
     private let secondRow = NSStackView()
     private var repoPaths: [String] = []
     private var secondRowHeight: NSLayoutConstraint!
@@ -58,6 +59,14 @@ final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
         secondRow.alphaValue = 0
         addSubview(secondRow)
 
+        errorLabel.maximumNumberOfLines = 2
+        errorLabel.font = NSFont.systemFont(ofSize: 10)
+        errorLabel.textColor = .systemRed
+        errorLabel.isHidden = true
+        errorLabel.lineBreakMode = .byWordWrapping
+        errorLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(errorLabel)
+
         secondRowHeight = secondRow.heightAnchor.constraint(equalToConstant: 0)
 
         NSLayoutConstraint.activate([
@@ -68,9 +77,24 @@ final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
             secondRow.topAnchor.constraint(equalTo: nameField.bottomAnchor, constant: 6),
             secondRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             secondRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            secondRow.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
+            secondRow.bottomAnchor.constraint(equalTo: errorLabel.topAnchor, constant: -6),
             secondRowHeight,
+
+            errorLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            errorLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            errorLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
         ])
+    }
+
+    func reportCreateSuccess() {
+        nameField.stringValue = ""
+        errorLabel.isHidden = true
+        errorLabel.stringValue = ""
+    }
+
+    func reportCreateFailure(_ message: String) {
+        errorLabel.stringValue = message
+        errorLabel.isHidden = false
     }
 
     private func setExpanded(_ expanded: Bool) {
@@ -84,7 +108,6 @@ final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
         guard !name.isEmpty, !repoPaths.isEmpty else { return }
         let repo = repoPaths[max(0, repoPopup.indexOfSelectedItem)]
         onCreate?(name, repo, reuseEnvCheckbox.state == .on)
-        nameField.stringValue = ""
     }
 
     func controlTextDidBeginEditing(_ obj: Notification) { setExpanded(true) }

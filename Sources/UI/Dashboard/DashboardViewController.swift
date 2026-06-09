@@ -390,6 +390,9 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
 
     func focusInlineCreate() { inlineCreateView.focusNameField() }
 
+    func inlineCreateReportSuccess() { inlineCreateView.reportCreateSuccess() }
+    func inlineCreateReportFailure(_ message: String) { inlineCreateView.reportCreateFailure(message) }
+
     private func resetSidebarConstraints() {
         leftRightFocusWidthExpanded?.isActive = true
         leftRightFocusWidthCollapsed?.isActive = false
