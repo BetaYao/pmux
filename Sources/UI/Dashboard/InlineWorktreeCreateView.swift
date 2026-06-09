@@ -1,19 +1,27 @@
 import AppKit
 
-/// Sticky single-line worktree creator at the bottom of the sidebar. Expands to
-/// a second row (repo popup + reuse-environment toggle) on focus.
+/// ChatGPT-style sticky worktree creator at the bottom of the sidebar: a tall
+/// rounded prompt box with the name field on top and a bottom row showing the
+/// target repo (tap to switch or add) plus the reuse-environment toggle.
 final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
     /// (name, repoPath, reuseEnvironment)
     var onCreate: ((String, String, Bool) -> Void)?
+    /// Invoked when the user picks "Add repo…" — should open a picker and add a workspace.
+    var onAddRepo: (() -> Void)?
+    /// Live source of the current repo paths, read fresh whenever the menu opens
+    /// so newly-added repos appear without re-configuring.
+    var repoPathsProvider: (() -> [String])?
 
     private let nameField = NSTextField()
-    private let repoPopup = NSPopUpButton()
+    private let repoButton = NSButton()
     private let reuseEnvCheckbox = NSButton(checkboxWithTitle: "Reuse env", target: nil, action: nil)
     private let errorLabel = NSTextField(labelWithString: "")
-    private let secondRow = NSStackView()
-    private var repoPaths: [String] = []
-    private var secondRowHeight: NSLayoutConstraint!
+    private var errorHeight: NSLayoutConstraint!
 
+    private var repoPaths: [String] = []
+    private var selectedRepoPath: String?
+
+    // Kept for test-target compatibility (no longer a focus-driven mode).
     var isExpandedForTesting = false
 
     override init(frame frameRect: NSRect) {
@@ -25,9 +33,10 @@ final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
 
     func configure(repoPaths: [String]) {
         self.repoPaths = repoPaths
-        repoPopup.removeAllItems()
-        repoPopup.addItems(withTitles: repoPaths.map { URL(fileURLWithPath: $0).lastPathComponent })
-        if !repoPaths.isEmpty { repoPopup.selectItem(at: 0) }
+        if selectedRepoPath == nil || !(repoPaths.contains(selectedRepoPath ?? "")) {
+            selectedRepoPath = repoPaths.first
+        }
+        updateRepoButtonTitle()
     }
 
     func focusNameField() { window?.makeFirstResponder(nameField) }
@@ -35,29 +44,25 @@ final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
     // MARK: Test hooks
     func setNameForTesting(_ s: String) { nameField.stringValue = s }
     func setReuseEnvForTesting(_ on: Bool) { reuseEnvCheckbox.state = on ? .on : .off }
-    func setExpandedForTesting(_ on: Bool) { setExpanded(on) }
+    func setExpandedForTesting(_ on: Bool) { isExpandedForTesting = on }
     func submitForTesting() { submit() }
 
     private func setup() {
         wantsLayer = true
+        layer?.cornerRadius = 12
+        layer?.borderWidth = 1
+        applyColors()
 
         nameField.placeholderString = "New worktree name…"
-        nameField.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        nameField.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        nameField.isBordered = false
+        nameField.drawsBackground = false
+        nameField.focusRingType = .none
         nameField.delegate = self
         nameField.target = self
         nameField.action = #selector(submit)
         nameField.translatesAutoresizingMaskIntoConstraints = false
         addSubview(nameField)
-
-        reuseEnvCheckbox.translatesAutoresizingMaskIntoConstraints = false
-        repoPopup.translatesAutoresizingMaskIntoConstraints = false
-        secondRow.orientation = .horizontal
-        secondRow.spacing = 8
-        secondRow.translatesAutoresizingMaskIntoConstraints = false
-        secondRow.addArrangedSubview(repoPopup)
-        secondRow.addArrangedSubview(reuseEnvCheckbox)
-        secondRow.alphaValue = 0
-        addSubview(secondRow)
 
         errorLabel.maximumNumberOfLines = 2
         errorLabel.font = NSFont.systemFont(ofSize: 10)
@@ -67,52 +72,109 @@ final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
         errorLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(errorLabel)
 
-        secondRowHeight = secondRow.heightAnchor.constraint(equalToConstant: 0)
+        // Repo chip: shows the repo name, opens a fresh menu (switch + add).
+        repoButton.bezelStyle = .inline
+        repoButton.isBordered = false
+        repoButton.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        repoButton.contentTintColor = SemanticColors.muted
+        repoButton.imagePosition = .imageRight
+        if let chevron = NSImage(systemSymbolName: "chevron.up.chevron.down", accessibilityDescription: "Switch repo") {
+            repoButton.image = chevron.withSymbolConfiguration(.init(pointSize: 9, weight: .semibold))
+        }
+        repoButton.target = self
+        repoButton.action = #selector(repoButtonClicked)
+        repoButton.translatesAutoresizingMaskIntoConstraints = false
+        repoButton.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        addSubview(repoButton)
+
+        reuseEnvCheckbox.font = NSFont.systemFont(ofSize: 11)
+        reuseEnvCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        reuseEnvCheckbox.setContentHuggingPriority(.required, for: .horizontal)
+        addSubview(reuseEnvCheckbox)
+
+        errorHeight = errorLabel.heightAnchor.constraint(equalToConstant: 0)
 
         NSLayoutConstraint.activate([
-            // Span the full card-box width (the view is pinned to the card edges).
-            nameField.topAnchor.constraint(equalTo: topAnchor, constant: 10),
-            nameField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 0),
-            nameField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: 0),
+            nameField.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            nameField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            nameField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            nameField.heightAnchor.constraint(greaterThanOrEqualToConstant: 22),
 
-            secondRow.topAnchor.constraint(equalTo: nameField.bottomAnchor, constant: 6),
-            secondRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            secondRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            secondRow.bottomAnchor.constraint(equalTo: errorLabel.topAnchor, constant: -6),
-            secondRowHeight,
+            errorLabel.topAnchor.constraint(equalTo: nameField.bottomAnchor, constant: 6),
+            errorLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            errorLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            errorHeight,
 
-            errorLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            errorLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            errorLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
+            repoButton.topAnchor.constraint(equalTo: errorLabel.bottomAnchor, constant: 10),
+            repoButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            repoButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
+
+            reuseEnvCheckbox.centerYAnchor.constraint(equalTo: repoButton.centerYAnchor),
+            reuseEnvCheckbox.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            reuseEnvCheckbox.leadingAnchor.constraint(greaterThanOrEqualTo: repoButton.trailingAnchor, constant: 8),
         ])
     }
+
+    private func updateRepoButtonTitle() {
+        let name = selectedRepoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Select repo"
+        repoButton.title = name + " "
+    }
+
+    @objc private func repoButtonClicked() {
+        let menu = NSMenu()
+        let paths = repoPathsProvider?() ?? repoPaths
+        repoPaths = paths
+        for path in paths {
+            let item = NSMenuItem(title: URL(fileURLWithPath: path).lastPathComponent,
+                                  action: #selector(selectRepo(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = path
+            item.state = (path == selectedRepoPath) ? .on : .off
+            menu.addItem(item)
+        }
+        if !paths.isEmpty { menu.addItem(.separator()) }
+        let add = NSMenuItem(title: "Add repo…", action: #selector(addRepoClicked), keyEquivalent: "")
+        add.target = self
+        menu.addItem(add)
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: repoButton.bounds.height + 4), in: repoButton)
+    }
+
+    @objc private func selectRepo(_ sender: NSMenuItem) {
+        selectedRepoPath = sender.representedObject as? String
+        updateRepoButtonTitle()
+    }
+
+    @objc private func addRepoClicked() { onAddRepo?() }
 
     func reportCreateSuccess() {
         nameField.stringValue = ""
         errorLabel.isHidden = true
         errorLabel.stringValue = ""
+        errorHeight.constant = 0
     }
 
     func reportCreateFailure(_ message: String) {
         errorLabel.stringValue = message
         errorLabel.isHidden = false
-    }
-
-    private func setExpanded(_ expanded: Bool) {
-        isExpandedForTesting = expanded
-        secondRowHeight.constant = expanded ? 24 : 0
-        secondRow.alphaValue = expanded ? 1 : 0
+        errorHeight.constant = errorLabel.intrinsicContentSize.height
     }
 
     @objc private func submit() {
         let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, !repoPaths.isEmpty else { return }
-        let repo = repoPaths[max(0, repoPopup.indexOfSelectedItem)]
+        guard !name.isEmpty, let repo = selectedRepoPath else { return }
         onCreate?(name, repo, reuseEnvCheckbox.state == .on)
     }
 
-    func controlTextDidBeginEditing(_ obj: Notification) { setExpanded(true) }
-    func controlTextDidEndEditing(_ obj: Notification) {
-        if nameField.stringValue.trimmingCharacters(in: .whitespaces).isEmpty { setExpanded(false) }
+    func controlTextDidEndEditing(_ obj: Notification) {}
+
+    // MARK: - Appearance
+    private func applyColors() {
+        layer?.backgroundColor = resolvedCGColor(SemanticColors.tileBarBg)
+        layer?.borderColor = resolvedCGColor(SemanticColors.lineAlpha45)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyColors()
     }
 }

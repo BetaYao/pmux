@@ -383,9 +383,19 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
 
     // MARK: - Inline worktree creation
 
-    func setupInlineCreate(repoPaths: [String], onCreate: @escaping (String, String, Bool) -> Void) {
+    func setupInlineCreate(repoPaths: [String],
+                           repoPathsProvider: @escaping () -> [String],
+                           onAddRepo: @escaping () -> Void,
+                           onCreate: @escaping (String, String, Bool) -> Void) {
         inlineCreateView.configure(repoPaths: repoPaths)
+        inlineCreateView.repoPathsProvider = repoPathsProvider
+        inlineCreateView.onAddRepo = onAddRepo
         inlineCreateView.onCreate = onCreate
+    }
+
+    /// Refresh the inline creator's repo list (e.g. after a repo was added).
+    func refreshInlineCreateRepos(_ repoPaths: [String]) {
+        inlineCreateView.configure(repoPaths: repoPaths)
     }
 
     func focusInlineCreate() { inlineCreateView.focusNameField() }

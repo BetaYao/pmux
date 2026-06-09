@@ -393,7 +393,11 @@ class MainWindowController: NSWindowController {
         dashboardVC = dashboard
         tabCoordinator.dashboardVC = dashboard
 
-        dashboard.setupInlineCreate(repoPaths: config.workspacePaths) { [weak self] name, repoPath, reuseEnv in
+        dashboard.setupInlineCreate(
+            repoPaths: config.workspacePaths,
+            repoPathsProvider: { [weak self] in self?.tabCoordinator.config.workspacePaths ?? [] },
+            onAddRepo: { [weak self] in self?.tabCoordinator.addRepoViaOpenPanel(window: self?.window) }
+        ) { [weak self] name, repoPath, reuseEnv in
             guard let self else { return }
             let currentPath = self.tabCoordinator.selectedAgent?.worktreePath
             DispatchQueue.global(qos: .userInitiated).async {
