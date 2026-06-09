@@ -63,6 +63,7 @@ class MainWindowController: NSWindowController {
     private var primaryCapsuleNotification: NotificationEntry?
     private var dismissedPrimaryCapsuleNotificationIDs: Set<UUID> = []
     private var primaryCapsuleDismissWorkItem: DispatchWorkItem?
+    private var capsuleToken = 0
     private lazy var usageSummaryStore = UsageSummaryStore()
 
     // Terminal management
@@ -531,12 +532,15 @@ class MainWindowController: NSWindowController {
             return
         }
         let path = agent.worktreePath
-        DispatchQueue.global(qos: .userInitiated).async {
-            let info = AgentHead.shared.agent(forWorktree: path)
-            let prompt = info?.lastUserPrompt ?? ""
-            let branch = info?.branch ?? ""
-            let title = WorktreeTitleResolver.resolve(worktreePath: path, lastUserPrompt: prompt, branch: branch)
-            DispatchQueue.main.async { self.titleBar.updateFocusedWorktree(title: title) }
+        // Prefer prompt/branch already on the display info; fall back to AgentHead.
+        let info = AgentHead.shared.agent(forWorktree: path)
+        let prompt = info?.lastUserPrompt ?? ""
+        let branch = info?.branch ?? ""
+        capsuleToken += 1
+        let token = capsuleToken
+        WorktreeTitleCache.shared.title(worktreePath: path, lastUserPrompt: prompt, branch: branch) { [weak self] title in
+            guard let self, token == self.capsuleToken else { return }
+            self.titleBar.updateFocusedWorktree(title: title)
         }
     }
 
