@@ -70,9 +70,10 @@ final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
         secondRowHeight = secondRow.heightAnchor.constraint(equalToConstant: 0)
 
         NSLayoutConstraint.activate([
-            nameField.topAnchor.constraint(equalTo: topAnchor, constant: 6),
-            nameField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            nameField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            // Span the full card-box width (the view is pinned to the card edges).
+            nameField.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+            nameField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 0),
+            nameField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: 0),
 
             secondRow.topAnchor.constraint(equalTo: nameField.bottomAnchor, constant: 6),
             secondRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),

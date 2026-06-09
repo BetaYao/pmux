@@ -495,7 +495,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
             case .fixed:
                 NSLayoutConstraint.activate([
                     container.widthAnchor.constraint(equalToConstant: fixedWidth),
-                    container.heightAnchor.constraint(equalTo: container.widthAnchor, multiplier: 9.0 / 16.0),
+                    // Compact card: hug the 3–4 lines of content instead of a 16:9 box.
+                    container.heightAnchor.constraint(equalToConstant: 84),
                 ])
             case .flexible:
                 let w = container.widthAnchor.constraint(equalToConstant: 220)
@@ -662,7 +663,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
             inlineCreateView.leadingAnchor.constraint(equalTo: leftRightSidebarScroll.leadingAnchor),
             inlineCreateView.trailingAnchor.constraint(equalTo: leftRightSidebarScroll.trailingAnchor),
             inlineCreateView.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor),
-            inlineCreateView.heightAnchor.constraint(greaterThanOrEqualToConstant: 36),
+            inlineCreateView.heightAnchor.constraint(greaterThanOrEqualToConstant: 48),
         ])
 
         // Sidebar collapse constraints for left-right

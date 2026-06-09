@@ -139,7 +139,8 @@ final class MiniCardView: NSView {
             repoWorktreeLabel.topAnchor.constraint(equalTo: durationLabel.bottomAnchor, constant: 4),
             repoWorktreeLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
             repoWorktreeLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padding),
-            repoWorktreeLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -padding),
+            // Top-anchored chain; don't force the card to a tall height.
+            repoWorktreeLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -padding),
         ])
 
         let click = NSClickGestureRecognizer(target: self, action: #selector(handleClick))
