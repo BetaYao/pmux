@@ -267,6 +267,8 @@ final class AgentBadgeView: NSView {
         layer?.borderWidth = 1
         label.font = .systemFont(ofSize: 9.5, weight: .semibold)
         label.translatesAutoresizingMaskIntoConstraints = false
+        label.setContentHuggingPriority(.required, for: .horizontal)
+        label.setContentCompressionResistancePriority(.required, for: .horizontal)
         addSubview(label)
         NSLayoutConstraint.activate([
             label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
