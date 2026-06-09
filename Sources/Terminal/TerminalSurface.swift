@@ -256,6 +256,15 @@ class TerminalSurface {
     }
 
     /// Read visible terminal text from the viewport
+    /// Type text into the terminal (e.g. an initial agent command). Include a
+    /// trailing "\r" to run it. Mirrors the paste path's `ghostty_surface_text`.
+    func sendText(_ text: String) {
+        guard let surface, !text.isEmpty else { return }
+        text.withCString { ptr in
+            ghostty_surface_text(surface, ptr, UInt(strlen(ptr)))
+        }
+    }
+
     func readViewportText() -> String? {
         guard let surface else { return nil }
 

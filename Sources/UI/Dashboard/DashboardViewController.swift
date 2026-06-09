@@ -386,7 +386,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
     func setupInlineCreate(repoPaths: [String],
                            repoPathsProvider: @escaping () -> [String],
                            onAddRepo: @escaping () -> Void,
-                           onCreate: @escaping (String, String, Bool) -> Void) {
+                           onCreate: @escaping (String, String, AgentType, Bool) -> Void) {
         inlineCreateView.configure(repoPaths: repoPaths)
         inlineCreateView.repoPathsProvider = repoPathsProvider
         inlineCreateView.onAddRepo = onAddRepo

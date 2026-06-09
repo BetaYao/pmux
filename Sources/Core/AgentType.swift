@@ -57,6 +57,33 @@ enum AgentType: String, Codable, CaseIterable {
         }
     }
 
+    /// CLI command that launches this agent, for auto-starting it in a new
+    /// worktree terminal. Nil for non-AI / shell types.
+    var launchCommand: String? {
+        switch self {
+        case .claudeCode: return "claude"
+        case .codex:      return "codex"
+        case .openCode:   return "opencode"
+        case .gemini:     return "gemini"
+        case .cline:      return "cline"
+        case .goose:      return "goose"
+        case .amp:        return "amp"
+        case .aider:      return "aider"
+        case .cursor:     return "cursor"
+        case .kiro:       return "kiro"
+        default:          return nil
+        }
+    }
+
+    /// Short label for compact UI (the picker chip).
+    var shortName: String {
+        switch self {
+        case .claudeCode: return "Claude"
+        case .openCode:   return "OpenCode"
+        default:          return displayName
+        }
+    }
+
     var isAIAgent: Bool {
         switch self {
         case .claudeCode, .codex, .openCode, .gemini, .cline,

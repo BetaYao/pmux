@@ -397,7 +397,7 @@ class MainWindowController: NSWindowController {
             repoPaths: config.workspacePaths,
             repoPathsProvider: { [weak self] in self?.tabCoordinator.config.workspacePaths ?? [] },
             onAddRepo: { [weak self] in self?.tabCoordinator.addRepoViaOpenPanel(window: self?.window) }
-        ) { [weak self] name, repoPath, reuseEnv in
+        ) { [weak self] name, repoPath, agentType, reuseEnv in
             guard let self else { return }
             let currentPath = self.tabCoordinator.selectedAgent?.worktreePath
             DispatchQueue.global(qos: .userInitiated).async {
@@ -409,6 +409,7 @@ class MainWindowController: NSWindowController {
                     DispatchQueue.main.async {
                         self.tabCoordinator.handleNewBranch(info: info, repoPath: repoPath)
                         self.dashboardVC?.inlineCreateReportSuccess()
+                        self.launchAgent(agentType, inWorktree: info.path)
                     }
                 } catch {
                     DispatchQueue.main.async {
@@ -552,6 +553,16 @@ class MainWindowController: NSWindowController {
         WorktreeTitleCache.shared.title(worktreePath: path, lastUserPrompt: prompt, branch: branch) { [weak self] title in
             guard let self, token == self.capsuleToken else { return }
             self.titleBar.updateFocusedWorktree(title: title)
+        }
+    }
+
+    /// Best-effort: type the selected agent's launch command into the new
+    /// worktree's terminal once its session has had a moment to attach.
+    private func launchAgent(_ agentType: AgentType, inWorktree path: String) {
+        guard let command = agentType.launchCommand else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            guard let surface = AgentHead.shared.agent(forWorktree: path)?.surface else { return }
+            surface.sendText(command + "\r")
         }
     }
 

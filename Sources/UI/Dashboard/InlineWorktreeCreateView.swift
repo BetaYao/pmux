@@ -4,16 +4,20 @@ import AppKit
 /// rounded prompt box with the name field on top and a bottom row showing the
 /// target repo (tap to switch or add) plus the reuse-environment toggle.
 final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
-    /// (name, repoPath, reuseEnvironment)
-    var onCreate: ((String, String, Bool) -> Void)?
+    /// (name, repoPath, agentType, reuseEnvironment)
+    var onCreate: ((String, String, AgentType, Bool) -> Void)?
     /// Invoked when the user picks "Add repo…" — should open a picker and add a workspace.
     var onAddRepo: (() -> Void)?
     /// Live source of the current repo paths, read fresh whenever the menu opens
     /// so newly-added repos appear without re-configuring.
     var repoPathsProvider: (() -> [String])?
 
+    private static let agentChoices = AgentType.allCases.filter { $0.isAIAgent }
+    private var selectedAgentType: AgentType = .claudeCode
+
     private let nameField = NSTextField()
     private let repoButton = NSButton()
+    private let agentButton = NSButton()
     private let reuseEnvCheckbox = NSButton(checkboxWithTitle: "Reuse env", target: nil, action: nil)
     private let errorLabel = NSTextField(labelWithString: "")
     private var errorHeight: NSLayoutConstraint!
@@ -87,19 +91,13 @@ final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
         addSubview(errorLabel)
 
         // Repo chip: shows the repo name, opens a fresh menu (switch + add).
-        repoButton.bezelStyle = .inline
-        repoButton.isBordered = false
-        repoButton.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        repoButton.contentTintColor = SemanticColors.muted
-        repoButton.imagePosition = .imageRight
-        if let chevron = NSImage(systemSymbolName: "chevron.up.chevron.down", accessibilityDescription: "Switch repo") {
-            repoButton.image = chevron.withSymbolConfiguration(.init(pointSize: 9, weight: .semibold))
-        }
-        repoButton.target = self
-        repoButton.action = #selector(repoButtonClicked)
-        repoButton.translatesAutoresizingMaskIntoConstraints = false
-        repoButton.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        styleChip(repoButton, action: #selector(repoButtonClicked), accessibility: "Switch repo")
         addSubview(repoButton)
+
+        // Agent chip: pick which AI agent to launch in the new worktree.
+        styleChip(agentButton, action: #selector(agentButtonClicked), accessibility: "Select agent")
+        agentButton.title = selectedAgentType.shortName + " "
+        addSubview(agentButton)
 
         reuseEnvCheckbox.font = NSFont.systemFont(ofSize: 11)
         reuseEnvCheckbox.translatesAutoresizingMaskIntoConstraints = false
@@ -123,10 +121,47 @@ final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
             repoButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             repoButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
 
+            agentButton.centerYAnchor.constraint(equalTo: repoButton.centerYAnchor),
+            agentButton.leadingAnchor.constraint(equalTo: repoButton.trailingAnchor, constant: 10),
+
             reuseEnvCheckbox.centerYAnchor.constraint(equalTo: repoButton.centerYAnchor),
             reuseEnvCheckbox.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            reuseEnvCheckbox.leadingAnchor.constraint(greaterThanOrEqualTo: repoButton.trailingAnchor, constant: 8),
+            reuseEnvCheckbox.leadingAnchor.constraint(greaterThanOrEqualTo: agentButton.trailingAnchor, constant: 8),
         ])
+    }
+
+    private func styleChip(_ button: NSButton, action: Selector, accessibility: String) {
+        button.bezelStyle = .inline
+        button.isBordered = false
+        button.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        button.contentTintColor = SemanticColors.muted
+        button.imagePosition = .imageRight
+        if let chevron = NSImage(systemSymbolName: "chevron.up.chevron.down", accessibilityDescription: accessibility) {
+            button.image = chevron.withSymbolConfiguration(.init(pointSize: 9, weight: .semibold))
+        }
+        button.target = self
+        button.action = action
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+    }
+
+    @objc private func agentButtonClicked() {
+        let menu = NSMenu()
+        for type in Self.agentChoices {
+            let item = NSMenuItem(title: type.displayName, action: #selector(selectAgent(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = type.rawValue
+            item.state = (type == selectedAgentType) ? .on : .off
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: agentButton.bounds.height + 4), in: agentButton)
+    }
+
+    @objc private func selectAgent(_ sender: NSMenuItem) {
+        if let raw = sender.representedObject as? String, let type = AgentType(rawValue: raw) {
+            selectedAgentType = type
+            agentButton.title = type.shortName + " "
+        }
     }
 
     private func updateRepoButtonTitle() {
@@ -176,7 +211,7 @@ final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
     @objc private func submit() {
         let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, let repo = selectedRepoPath else { return }
-        onCreate?(name, repo, reuseEnvCheckbox.state == .on)
+        onCreate?(name, repo, selectedAgentType, reuseEnvCheckbox.state == .on)
     }
 
     func controlTextDidEndEditing(_ obj: Notification) {}
