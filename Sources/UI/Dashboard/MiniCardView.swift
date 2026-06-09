@@ -18,8 +18,11 @@ final class MiniCardView: NSView {
     private let statusTextLabel = NSTextField(labelWithString: "")
     private var statusDots: [NSView] = []
     private var durationLeadingConstraint: NSLayoutConstraint?
-    // Line 4: repo · worktree
+    // Line 4: agent badge + repo · worktree
+    private let agentBadge = AgentBadgeView()
     private let repoWorktreeLabel = NSTextField(labelWithString: "")
+    private var repoLeadingDefault: NSLayoutConstraint!
+    private var repoLeadingAfterBadge: NSLayoutConstraint!
 
     private var isHovered = false
     private var dimOverlayLayer: CALayer?
@@ -35,7 +38,7 @@ final class MiniCardView: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
-    func configure(id: String, project: String, thread: String, status: String, lastMessage: String, lastUserPrompt: String = "", totalDuration: String, roundDuration: String, paneStatuses: [AgentStatus] = [], isMainWorktree: Bool = false, tasks: [TaskItem] = [], activityEvents: [ActivityEvent] = []) {
+    func configure(id: String, project: String, thread: String, status: String, lastMessage: String, lastUserPrompt: String = "", totalDuration: String, roundDuration: String, paneStatuses: [AgentStatus] = [], isMainWorktree: Bool = false, tasks: [TaskItem] = [], activityEvents: [ActivityEvent] = [], agentType: AgentType = .unknown) {
         agentId = id
         setAccessibilityIdentifier("dashboard.miniCard.\(id)")
 
@@ -44,6 +47,18 @@ final class MiniCardView: NSView {
 
         // Line 4: repo · worktree
         repoWorktreeLabel.stringValue = "\(project)  \u{00B7}  \(thread)"
+
+        // Agent badge (AI agents only) sits before the repo name.
+        if let style = Self.badgeStyle(for: agentType) {
+            agentBadge.configure(text: style.label, color: style.color)
+            agentBadge.isHidden = false
+            repoLeadingDefault.isActive = false
+            repoLeadingAfterBadge.isActive = true
+        } else {
+            agentBadge.isHidden = true
+            repoLeadingAfterBadge.isActive = false
+            repoLeadingDefault.isActive = true
+        }
 
         // Status dots before the duration line
         statusDots.forEach { $0.removeFromSuperview() }
@@ -120,9 +135,17 @@ final class MiniCardView: NSView {
         repoWorktreeLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(repoWorktreeLabel)
 
+        agentBadge.translatesAutoresizingMaskIntoConstraints = false
+        agentBadge.isHidden = true
+        agentBadge.setContentHuggingPriority(.required, for: .horizontal)
+        addSubview(agentBadge)
+
         let padding: CGFloat = 8
         let durationFallbackLeading = durationLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding)
         durationFallbackLeading.priority = .defaultLow
+
+        repoLeadingDefault = repoWorktreeLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding)
+        repoLeadingAfterBadge = repoWorktreeLabel.leadingAnchor.constraint(equalTo: agentBadge.trailingAnchor, constant: 6)
 
         NSLayoutConstraint.activate([
             titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: padding),
@@ -136,8 +159,11 @@ final class MiniCardView: NSView {
             statusTextLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padding),
             statusTextLabel.centerYAnchor.constraint(equalTo: durationLabel.centerYAnchor),
 
+            agentBadge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
+            agentBadge.centerYAnchor.constraint(equalTo: repoWorktreeLabel.centerYAnchor),
+
             repoWorktreeLabel.topAnchor.constraint(equalTo: durationLabel.bottomAnchor, constant: 4),
-            repoWorktreeLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
+            repoLeadingDefault,
             repoWorktreeLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padding),
             // Top-anchored chain; don't force the card to a tall height.
             repoWorktreeLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -padding),
@@ -210,5 +236,52 @@ final class MiniCardView: NSView {
         }
         titleLabel.textColor = SemanticColors.text
         repoWorktreeLabel.textColor = SemanticColors.muted
+    }
+
+    /// Label + brand color for an agent badge, or nil for non-AI / unknown types.
+    static func badgeStyle(for type: AgentType) -> (label: String, color: NSColor)? {
+        switch type {
+        case .claudeCode: return ("Claude", NSColor(hex: 0xd97757))
+        case .codex:      return ("Codex", NSColor(hex: 0x10a37f))
+        case .openCode:   return ("opencode", NSColor(hex: 0x8b7fd9))
+        case .gemini:     return ("Gemini", NSColor(hex: 0x4285f4))
+        case .cline:      return ("Cline", NSColor(hex: 0x6aa84f))
+        case .goose:      return ("Goose", NSColor(hex: 0xb07ad9))
+        case .amp:        return ("Amp", NSColor(hex: 0xe0a030))
+        case .aider:      return ("Aider", NSColor(hex: 0x4aa3a3))
+        case .cursor:     return ("Cursor", NSColor(hex: 0x9aa0a6))
+        case .kiro:       return ("Kiro", NSColor(hex: 0x7a9bd9))
+        default:          return nil
+        }
+    }
+}
+
+/// Small rounded pill showing an agent's name in its brand color.
+final class AgentBadgeView: NSView {
+    private let label = NSTextField(labelWithString: "")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 4
+        layer?.borderWidth = 1
+        label.font = .systemFont(ofSize: 9.5, weight: .semibold)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            label.topAnchor.constraint(equalTo: topAnchor, constant: 2),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
+
+    func configure(text: String, color: NSColor) {
+        label.stringValue = text
+        label.textColor = color
+        layer?.borderColor = color.withAlphaComponent(0.55).cgColor
+        layer?.backgroundColor = color.withAlphaComponent(0.12).cgColor
     }
 }

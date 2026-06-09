@@ -295,7 +295,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
                 paneStatuses: agent.paneStatuses,
                 isMainWorktree: agent.isMainWorktree,
                 tasks: agent.tasks,
-                activityEvents: agent.activityEvents
+                activityEvents: agent.activityEvents,
+                agentType: AgentHead.shared.agent(forWorktree: agent.worktreePath)?.agentType ?? .unknown
             )
             miniCards[index].isSelected = (agent.id == selectedAgentId)
         }
@@ -494,7 +495,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
                 paneStatuses: agent.paneStatuses,
                 isMainWorktree: agent.isMainWorktree,
                 tasks: agent.tasks,
-                activityEvents: agent.activityEvents
+                activityEvents: agent.activityEvents,
+                agentType: AgentHead.shared.agent(forWorktree: agent.worktreePath)?.agentType ?? .unknown
             )
             container.isSelected = (agent.id == selectedAgentId)
             container.translatesAutoresizingMaskIntoConstraints = false
