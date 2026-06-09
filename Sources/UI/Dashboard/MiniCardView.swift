@@ -147,8 +147,18 @@ final class MiniCardView: NSView {
         repoLeadingDefault = repoWorktreeLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding)
         repoLeadingAfterBadge = repoWorktreeLabel.leadingAnchor.constraint(equalTo: agentBadge.trailingAnchor, constant: 6)
 
+        // Layout guide spanning the content block (title → repo), centered
+        // vertically so a 1-line title gets balanced top/bottom margins instead
+        // of dumping all the slack at the bottom of the fixed-height card.
+        let contentGuide = NSLayoutGuide()
+        addLayoutGuide(contentGuide)
+
         NSLayoutConstraint.activate([
-            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: padding),
+            contentGuide.topAnchor.constraint(equalTo: titleLabel.topAnchor),
+            contentGuide.bottomAnchor.constraint(equalTo: repoWorktreeLabel.bottomAnchor),
+            contentGuide.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            titleLabel.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: padding),
             titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
             titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padding),
 
@@ -165,7 +175,6 @@ final class MiniCardView: NSView {
             repoWorktreeLabel.topAnchor.constraint(equalTo: durationLabel.bottomAnchor, constant: 4),
             repoLeadingDefault,
             repoWorktreeLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padding),
-            // Top-anchored chain; don't force the card to a tall height.
             repoWorktreeLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -padding),
         ])
 
