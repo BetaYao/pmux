@@ -27,10 +27,10 @@ final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
     /// A clearly-elevated fill so the input reads as a distinct box, not the
     /// same surface as the cards above it.
     private static let inputBg = NSColor(name: nil) { a in
-        a.isDark ? NSColor(hex: 0x24262b) : NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.98)
+        a.isDark ? NSColor(hex: 0x2b2e35) : NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.99)
     }
     private static let inputBorder = NSColor(name: nil) { a in
-        a.isDark ? NSColor(hex: 0x3d4047) : NSColor(hex: 0xc6cfdb)
+        a.isDark ? NSColor(hex: 0x4a4e57) : NSColor(hex: 0xb9c3d1)
     }
 
     override init(frame frameRect: NSRect) {
@@ -59,7 +59,12 @@ final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
     private func setup() {
         wantsLayer = true
         layer?.cornerRadius = 12
-        layer?.borderWidth = 1
+        layer?.borderWidth = 1.5
+        layer?.masksToBounds = false
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = 0.35
+        layer?.shadowRadius = 10
+        layer?.shadowOffset = NSSize(width: 0, height: -3)
         applyColors()
 
         nameField.placeholderString = "New worktree name…"

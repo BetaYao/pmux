@@ -672,7 +672,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
 
             inlineCreateView.leadingAnchor.constraint(equalTo: leftRightSidebarScroll.leadingAnchor),
             inlineCreateView.trailingAnchor.constraint(equalTo: leftRightSidebarScroll.trailingAnchor),
-            inlineCreateView.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor),
+            inlineCreateView.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor, constant: -8),
             inlineCreateView.heightAnchor.constraint(greaterThanOrEqualToConstant: 48),
         ])
 
