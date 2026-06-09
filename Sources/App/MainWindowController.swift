@@ -405,6 +405,7 @@ class MainWindowController: NSWindowController {
                 let base = branches.contains("main") ? "main" : (branches.contains("master") ? "master" : (branches.first ?? "main"))
                 do {
                     let info = try WorktreeCreator.createWorktree(repoPath: repoPath, branchName: name, baseBranch: base)
+                    WorktreeAgentTypeStore.shared.set(agentType, forWorktree: info.path)
                     if reuseEnv, let currentPath { WorktreeCreator.copyEnvironmentFiles(from: currentPath, to: info.path) }
                     DispatchQueue.main.async {
                         self.tabCoordinator.handleNewBranch(info: info, repoPath: repoPath)
