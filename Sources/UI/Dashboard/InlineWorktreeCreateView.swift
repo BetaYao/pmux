@@ -77,7 +77,7 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
         if selectedRepoPath == nil || !(repoPaths.contains(selectedRepoPath ?? "")) {
             selectedRepoPath = repoPaths.first
         }
-        updateRepoButtonTitle()
+        applySelectedRepo()
     }
 
     func focusNameField() { window?.makeFirstResponder(promptTextView) }
@@ -183,13 +183,21 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
     @objc private func selectAgent(_ sender: NSMenuItem) {
         if let raw = sender.representedObject as? String, let type = AgentType(rawValue: raw) {
             selectedAgentType = type
-            agentChip.setIcon(svgString: type.inlinePickerLogoSVG,
-                              symbolName: type.inlinePickerSymbolName,
-                              accessibilityLabel: type.displayName)
+            refreshAgentChip()
         }
     }
 
-    private func updateRepoButtonTitle() {
+    /// Updates the agent chip icon/label from `selectedAgentType`. Shared by the
+    /// menu action and the arrow-key cycling path.
+    private func refreshAgentChip() {
+        agentChip.setIcon(svgString: selectedAgentType.inlinePickerLogoSVG,
+                          symbolName: selectedAgentType.inlinePickerSymbolName,
+                          accessibilityLabel: selectedAgentType.displayName)
+    }
+
+    /// Updates the repo chip title from `selectedRepoPath`. Shared by the menu
+    /// action and the arrow-key cycling path.
+    private func applySelectedRepo() {
         let name = selectedRepoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Select repo"
         repoChip.setTitle(name)
     }
@@ -215,7 +223,7 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
 
     @objc private func selectRepo(_ sender: NSMenuItem) {
         selectedRepoPath = sender.representedObject as? String
-        updateRepoButtonTitle()
+        applySelectedRepo()
     }
 
     @objc private func addRepoClicked() { onAddRepo?() }
@@ -260,7 +268,7 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
         return false
     }
 
-    // MARK: - Keyboard ring
+    // MARK: - Keyboard ring & in-place cycling
 
     /// Focus ring order: name → repo → agent → reuse → name.
     private func focusRingNext(after responder: NSView) {
@@ -296,6 +304,8 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
 
     private func handleRepoChipKey(_ event: NSEvent) -> Bool {
         switch event.keyCode {
+        case 123: cycleRepo(-1); return true   // Left
+        case 124: cycleRepo(+1); return true   // Right
         case 49, 36: repoButtonClicked(); return true  // Space/Return → menu
         default: return handleRingKey(event, on: repoChip)
         }
@@ -303,6 +313,8 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
 
     private func handleAgentChipKey(_ event: NSEvent) -> Bool {
         switch event.keyCode {
+        case 123: cycleAgent(-1); return true  // Left
+        case 124: cycleAgent(+1); return true  // Right
         case 49, 36: agentButtonClicked(); return true  // Space/Return → menu
         default: return handleRingKey(event, on: agentChip)
         }
@@ -310,6 +322,29 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
 
     private func handleReuseCheckboxKey(_ event: NSEvent) -> Bool {
         return handleRingKey(event, on: reuseEnvCheckbox)
+    }
+
+    /// Cycle the selected repo by `delta` with modular wraparound over the live
+    /// repo paths, then refresh the chip via the shared update path.
+    private func cycleRepo(_ delta: Int) {
+        let paths = repoPathsProvider?() ?? repoPaths
+        repoPaths = paths
+        guard !paths.isEmpty else { return }
+        let current = selectedRepoPath.flatMap { paths.firstIndex(of: $0) } ?? 0
+        let next = (current + delta + paths.count) % paths.count
+        selectedRepoPath = paths[next]
+        applySelectedRepo()
+    }
+
+    /// Cycle the selected agent by `delta` with modular wraparound over the AI
+    /// agent choices, then refresh the chip via the shared update path.
+    private func cycleAgent(_ delta: Int) {
+        let all = Self.agentChoices
+        guard !all.isEmpty else { return }
+        let current = all.firstIndex(of: selectedAgentType) ?? 0
+        let next = (current + delta + all.count) % all.count
+        selectedAgentType = all[next]
+        refreshAgentChip()
     }
 
     func controlTextDidBeginEditing(_ obj: Notification) {
