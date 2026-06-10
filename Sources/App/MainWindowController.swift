@@ -48,6 +48,7 @@ class MainWindowController: NSWindowController {
     private let backgroundEffectView = NSVisualEffectView()
     private let contentContainer = NSView()
     private let statusBar = StatusBarView()
+    let keyboardMode = KeyboardModeController()
     private var windowTrackingArea: NSTrackingArea?
     private lazy var panelCoordinator: PanelCoordinator = {
         let pc = PanelCoordinator()
@@ -357,6 +358,8 @@ class MainWindowController: NSWindowController {
         // Fixed-height bottom status bar
         statusBar.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(statusBar)
+        keyboardMode.delegate = self
+        statusBar.updateMode(keyboardMode.mode, hint: keyboardMode.hintText)
 
         NSLayoutConstraint.activate([
             backgroundEffectView.topAnchor.constraint(equalTo: contentView.topAnchor),
@@ -392,6 +395,12 @@ class MainWindowController: NSWindowController {
         dashboard.splitContainerDelegate = self
         dashboardVC = dashboard
         tabCoordinator.dashboardVC = dashboard
+
+        dashboard.onEnterTerminal = { [weak self] in self?.keyboardMode.enterInsert() }
+        dashboard.onRequestNewWorktree = { [weak self] in
+            self?.keyboardMode.beginCreateForm()
+            self?.tabCoordinator.dashboardVC?.focusInlineCreate()
+        }
 
         dashboard.setupInlineCreate(
             repoPaths: config.workspacePaths,
@@ -696,14 +705,10 @@ class AmuxWindow: NSWindow {
             return true
         }
 
-        // Cmd+J: toggle D-state in the focus layout.
-        if flags == .command && event.charactersIgnoringModifiers == "j" {
-            if let dashVC = mwc.tabCoordinator.dashboardVC {
-                if dashVC.isInDStateForWindow {
-                    dashVC.exitDashboardNavigation(restoreSnapshot: true)
-                } else {
-                    dashVC.enterDashboardNavigation()
-                }
+        // Cmd+Esc: exit insert mode → normal (Cmd is intercepted before terminal)
+        if flags == .command && event.keyCode == 53 {
+            if mwc.keyboardMode.handleEsc(hasCommand: true, now: ProcessInfo.processInfo.systemUptime) {
+                mwc.tabCoordinator.dashboardVC?.enterDashboardNavigation()
                 return true
             }
         }
@@ -716,6 +721,20 @@ class AmuxWindow: NSWindow {
             // Escape: exit spotlight (existing)
             if event.keyCode == 53, WindowStyling.shouldHandleEscShortcut() {
                 return
+            }
+            // Double-Esc in insert mode → normal (first Esc passes to terminal).
+            if event.keyCode == 53,
+               let mwc = windowController as? MainWindowController,
+               mwc.keyboardMode.mode == .insert {
+                let consumed = mwc.keyboardMode.handleEsc(
+                    hasCommand: false,
+                    now: ProcessInfo.processInfo.systemUptime
+                )
+                if consumed {
+                    mwc.tabCoordinator.dashboardVC?.enterDashboardNavigation()
+                    return
+                }
+                // first Esc: fall through to terminal
             }
         }
         super.sendEvent(event)
@@ -1155,6 +1174,17 @@ extension MainWindowController: TerminalCoordinatorDelegate {
 
     func terminalCoordinator(_ coordinator: TerminalCoordinator, didDeleteWorktree info: WorktreeInfo) {
         worktreeDidDelete(info)
+    }
+}
+
+// MARK: - KeyboardModeDelegate
+
+extension MainWindowController: KeyboardModeDelegate {
+    func keyboardModeDidChange(_ mode: KeyboardMode, substate: KeyboardSubstate) {
+        statusBar.updateMode(mode, hint: keyboardMode.hintText)
+    }
+    func keyboardHintDidChange(_ hint: String) {
+        statusBar.updateMode(keyboardMode.mode, hint: hint)
     }
 }
 
