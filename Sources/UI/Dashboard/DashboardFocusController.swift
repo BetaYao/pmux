@@ -127,6 +127,33 @@ final class DashboardFocusController {
         }
     }
 
+    func jump(toIndex index: Int) {
+        guard mode != .idle, cardIds.indices.contains(index) else { return }
+        focusedTarget = .card(cardIds[index])
+    }
+
+    /// Grid-aware directional move. `columns` is the number of cards per row in the
+    /// current grid layout (callers pass 1 for focus layouts → up/down behave as prev/next,
+    /// left/right are no-ops).
+    func move(_ direction: FocusDirection, columns: Int) {
+        guard mode != .idle else { return }
+        guard case .card(let id) = focusedTarget, let idx = cardIds.firstIndex(of: id) else {
+            // No card focused yet: any move selects the first card.
+            if let first = cardIds.first { focusedTarget = .card(first) }
+            return
+        }
+        let cols = max(1, columns)
+        let col = idx % cols
+        var target = idx
+        switch direction {
+        case .left:  if col > 0 { target = idx - 1 }
+        case .right: if col < cols - 1 && idx + 1 < cardIds.count { target = idx + 1 }
+        case .up:    if idx - cols >= 0 { target = idx - cols }
+        case .down:  if idx + cols < cardIds.count { target = idx + cols }
+        }
+        focusedTarget = .card(cardIds[target])
+    }
+
     // MARK: - Mutation
 
     /// Remove the currently focused card from the ring and advance focus.
