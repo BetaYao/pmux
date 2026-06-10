@@ -58,6 +58,12 @@ final class KeyboardModeController {
         setMode(.normal, substate: .none)
     }
 
+    func beginCreateForm() { setMode(.normal, substate: .createForm) }
+    func endCreateForm() {
+        guard case .createForm = substate else { return }
+        setMode(.normal, substate: .none)
+    }
+
     private func setMode(_ newMode: KeyboardMode, substate newSub: KeyboardSubstate) {
         let changed = newMode != mode || newSub != substate
         mode = newMode
@@ -68,6 +74,19 @@ final class KeyboardModeController {
         }
     }
 
-    // Placeholder; replaced with real hints in Task 4.
-    var hintText: String { mode == .insert ? "INSERT" : "NORMAL" }
+    var hintText: String {
+        switch substate {
+        case .deletePending:
+            return "DELETE?  ·  d / y confirm  ·  esc cancel"
+        case .createForm:
+            return "CREATE  ·  tab field  ·  \u{2190}\u{2192} change  ·  \u{2318}\u{23CE} create  ·  esc cancel"
+        case .none:
+            switch mode {
+            case .insert:
+                return "INSERT  ·  \u{2318}esc / esc\u{00B7}esc \u{2192} normal"
+            case .normal:
+                return "NORMAL  ·  hjkl move  ·  \u{23CE} enter  ·  d del  ·  c diff  ·  f files  ·  n new"
+            }
+        }
+    }
 }

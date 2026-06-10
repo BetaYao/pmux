@@ -95,6 +95,40 @@ extension KeyboardModeControllerTests {
     }
 }
 
+extension KeyboardModeControllerTests {
+    func testHintNormal() {
+        let c = KeyboardModeController()
+        XCTAssertTrue(c.hintText.contains("hjkl"))
+        XCTAssertTrue(c.hintText.contains("⏎"))
+    }
+
+    func testHintInsert() {
+        let c = KeyboardModeController()
+        c.enterInsert()
+        XCTAssertTrue(c.hintText.contains("⌘esc"))
+    }
+
+    func testHintDeletePending() {
+        let c = KeyboardModeController()
+        c.beginDelete(agentId: "a1")
+        XCTAssertTrue(c.hintText.uppercased().contains("DELETE?"))
+    }
+
+    func testHintCreateForm() {
+        let c = KeyboardModeController()
+        c.beginCreateForm()
+        XCTAssertEqual(c.substate, .createForm)
+        XCTAssertTrue(c.hintText.contains("tab"))
+    }
+
+    func testEndCreateFormReturnsNormal() {
+        let c = KeyboardModeController()
+        c.beginCreateForm()
+        c.endCreateForm()
+        XCTAssertEqual(c.substate, .none)
+    }
+}
+
 final class ModeSpy: KeyboardModeDelegate {
     var modeChangeCount = 0
     var lastMode: KeyboardMode?
