@@ -108,7 +108,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
 
     let focusController = DashboardFocusController()
     private var isInDState: Bool { focusController.mode != .idle }
-    var isInDStateForWindow: Bool { isInDState }
 
     // Constraints swapped when sidebar collapses/expands
     private var leftRightFocusWidthExpanded: NSLayoutConstraint?   // 0.78 multiplier
@@ -993,6 +992,9 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
     func enterDashboardNavigation() {
         guard !isInDState else { return }
 
+        // Nav ring active ⇔ keyboardMode .normal. Idempotent; also clears any stale substate.
+        windowKeyboardMode?.enterNormal()
+
         let snapshot = DashboardFocusController.Snapshot(
             firstResponder: view.window?.firstResponder,
             focusedWorktreePath: agents.first(where: { $0.id == selectedAgentId })?.worktreePath,
@@ -1022,6 +1024,11 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
 
     func exitDashboardNavigation(restoreSnapshot: Bool) {
         guard isInDState else { return }
+
+        // Ring is going away: clear any pending delete (guarded no-op otherwise), then
+        // assert insert since focus lands on a terminal. Do NOT clear .createForm here.
+        windowKeyboardMode?.cancelDelete()
+        windowKeyboardMode?.enterInsert()
 
         let snapshot = focusController.snapshot
         focusController.exit()
@@ -1134,6 +1141,12 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         (view.window?.windowController as? MainWindowController)?.keyboardMode
     }
 
+    /// The agent currently focused by the nav ring, if a card is focused.
+    private var focusedAgent: AgentDisplayInfo? {
+        guard case .card(let agentId) = focusController.focusedTarget else { return nil }
+        return agents.first(where: { $0.id == agentId })
+    }
+
     private func dispatch(_ action: KeyboardAction) {
         switch action {
         case .moveFocus(let dir):
@@ -1146,20 +1159,17 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
             onEnterTerminal?()
             handleReturnInDState()
         case .deleteFocused:
-            guard case .card(let agentId) = focusController.focusedTarget,
-                  let agent = agents.first(where: { $0.id == agentId }) else { return }
+            guard let agent = focusedAgent else { return }
             guard !agent.isMainWorktree else {
                 windowKeyboardMode?.flashHint("main worktree 不可删除")
                 return
             }
-            windowKeyboardMode?.beginDelete(agentId: agentId)
+            windowKeyboardMode?.beginDelete(agentId: agent.id)
         case .showChanges:
-            guard case .card(let agentId) = focusController.focusedTarget,
-                  let agent = agents.first(where: { $0.id == agentId }) else { return }
+            guard let agent = focusedAgent else { return }
             dashboardDelegate?.dashboardDidRequestShowChanges(worktreePath: agent.worktreePath)
         case .browseFiles:
-            guard case .card(let agentId) = focusController.focusedTarget,
-                  let agent = agents.first(where: { $0.id == agentId }) else { return }
+            guard let agent = focusedAgent else { return }
             dashboardDelegate?.dashboardDidRequestBrowseFiles(worktreePath: agent.worktreePath)
         case .newWorktree:
             onRequestNewWorktree?()
