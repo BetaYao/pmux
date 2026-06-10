@@ -157,6 +157,7 @@
 		AC12EFA38D938519EE095E73 /* DraggableGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BADA07A3BC0F02C284B4A731 /* DraggableGridView.swift */; };
 		AC3C005E9B943E2C5022B6B8 /* WeComFrameParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FD74DC269CC1047CDF533BE /* WeComFrameParser.swift */; };
 		AC9EC42BD91EDA2CDEC27051 /* TitleBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 361A0F8BDCB80ABFEE51ABEF /* TitleBarView.swift */; };
+		ADADFDC868327D94A0CA7D6C /* KeymapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B01560D2FEF8B2588A08D57 /* KeymapTests.swift */; };
 		ADB81EEAFF7EA9C2FA9D0F21 /* CodexHooksSetupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 771E165C5872C71BDCC8EAD9 /* CodexHooksSetupTests.swift */; };
 		AE9B93B0BBC931C5924D6BF5 /* AgentInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = F42BCDD26B5C7A3C19FA2BA2 /* AgentInfo.swift */; };
 		B0353B00FE3B01DC533A34DD /* ActivityEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87E655A9B71966964CDA9A63 /* ActivityEvent.swift */; };
@@ -195,6 +196,7 @@
 		E90720F1B287FCBE0801B69A /* SplitContainerLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82F193B30AFAE7A7BE99A4F9 /* SplitContainerLayoutTests.swift */; };
 		E99A130A952F3E32612B1D37 /* UnifiedModalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E6B44D8A76C5067BB0C0C29 /* UnifiedModalView.swift */; };
 		EBD010AF007094117E941F9C /* CommandParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 442E7AA73798474882C87ACF /* CommandParserTests.swift */; };
+		EED5DA34BC7DBD2B988800D7 /* Keymap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 294127A73C574D21CC67BCF3 /* Keymap.swift */; };
 		EFA4EB82886EDA8D76395152 /* WebhookEventTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8B6404259E0B809868659FD /* WebhookEventTests.swift */; };
 		F146A8C3B20F6B1565C32F11 /* GhosttyBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48C4B02FAF458184FCA375F5 /* GhosttyBridge.swift */; };
 		F2316900C73E55C0C563FA4E /* UpdateCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 377C75E3CFF0B2C35DE644FE /* UpdateCoordinator.swift */; };
@@ -251,6 +253,7 @@
 		25E577FC36336F11D39C3AFB /* WorktreeStatusAggregator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeStatusAggregator.swift; sourceTree = "<group>"; };
 		271AB089E64947C58BC542B4 /* AgentTypeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentTypeTests.swift; sourceTree = "<group>"; };
 		28CD13E21F4488DDB4FB4E32 /* KeyboardMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardMode.swift; sourceTree = "<group>"; };
+		294127A73C574D21CC67BCF3 /* Keymap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keymap.swift; sourceTree = "<group>"; };
 		298964B2A8466D6994AC4EDB /* DiffReviewViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffReviewViewTests.swift; sourceTree = "<group>"; };
 		2A7117694C539894ADFDC8FE /* SemVer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SemVer.swift; sourceTree = "<group>"; };
 		2C3E24772AF8A133D557A8EF /* XCUIElementExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XCUIElementExtensions.swift; sourceTree = "<group>"; };
@@ -278,6 +281,7 @@
 		486CC42818703C3DBDE79145 /* TaskListRenderingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskListRenderingTests.swift; sourceTree = "<group>"; };
 		48C4B02FAF458184FCA375F5 /* GhosttyBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyBridge.swift; sourceTree = "<group>"; };
 		4993D01FF97C414264153CED /* UpdateCheckerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCheckerTests.swift; sourceTree = "<group>"; };
+		4B01560D2FEF8B2588A08D57 /* KeymapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeymapTests.swift; sourceTree = "<group>"; };
 		4C8C1C62BF62C18F2B901A35 /* DashboardViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardViewController.swift; sourceTree = "<group>"; };
 		4D524A46AAB1A6EBBE431255 /* DiffSyntaxHighlighter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffSyntaxHighlighter.swift; sourceTree = "<group>"; };
 		4D718460AD9491F743280FE5 /* ConfigTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigTests.swift; sourceTree = "<group>"; };
@@ -523,6 +527,7 @@
 				71246792B8CA4D8013FF1143 /* IdeaStoreTests.swift */,
 				84FF44BB626DC0F7DDB24CF8 /* InlineWorktreeCreateViewTests.swift */,
 				849173ABD41AEF636ACEE6FD /* KeyboardModeControllerTests.swift */,
+				4B01560D2FEF8B2588A08D57 /* KeymapTests.swift */,
 				FFF5BA737F79040AFA9C9425 /* MiniCardViewTests.swift */,
 				B3B57F3281531D53602F0B9B /* NotificationHistoryTests.swift */,
 				3F03B8ADAABD9E98BB306A06 /* NotificationManagerTests.swift */,
@@ -636,6 +641,7 @@
 				7B4EDE03C0B059F18636D7A1 /* DialogPresenter.swift */,
 				28CD13E21F4488DDB4FB4E32 /* KeyboardMode.swift */,
 				F5BBDF7E6BC806E050180AFB /* KeyboardModeController.swift */,
+				294127A73C574D21CC67BCF3 /* Keymap.swift */,
 				A514581BBC2450AB4E0413FA /* main.swift */,
 				90AF598DFE449A8C4E256799 /* MainWindowController.swift */,
 				10A9CA5A8238F664ACD3EB68 /* MenuBuilder.swift */,
@@ -1008,6 +1014,7 @@
 				0E5CA3A2B1400AC1E572661B /* InlineWorktreeCreateView.swift in Sources */,
 				A202F9469D2AA17D7122ED4E /* KeyboardMode.swift in Sources */,
 				E28B8FDB9098722147F71C26 /* KeyboardModeController.swift in Sources */,
+				EED5DA34BC7DBD2B988800D7 /* Keymap.swift in Sources */,
 				7F7C728569955A4EE8D977DB /* LayoutPopoverView.swift in Sources */,
 				40EDD13764893EE79C3C2935 /* MainWindowController.swift in Sources */,
 				4457220CF1D043B972484F7F /* MenuBuilder.swift in Sources */,
@@ -1134,6 +1141,7 @@
 				548EF49CEC589A3EB592667B /* IdeaStoreTests.swift in Sources */,
 				6B28EE6CCBBE71A257E92D9C /* InlineWorktreeCreateViewTests.swift in Sources */,
 				D48CA0BE14A16B719B2B1FC8 /* KeyboardModeControllerTests.swift in Sources */,
+				ADADFDC868327D94A0CA7D6C /* KeymapTests.swift in Sources */,
 				1F5F8067DB0A7178F52FF70D /* MiniCardViewTests.swift in Sources */,
 				A1732F15A7B30266203BE663 /* NotificationHistoryTests.swift in Sources */,
 				35E3EB79BBAABAF0A19F373D /* NotificationManagerTests.swift in Sources */,
