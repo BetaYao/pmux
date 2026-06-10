@@ -22,7 +22,12 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
     private let promptTextView = PromptTextView()
     private let repoChip = DropdownChip()
     private let agentChip = DropdownChip()
-    private let reuseEnvCheckbox = NSButton(checkboxWithTitle: "Reuse env", target: nil, action: nil)
+    private let reuseEnvCheckbox: KeyCheckbox = {
+        let b = KeyCheckbox()
+        b.setButtonType(.switch)
+        b.title = "Reuse env"
+        return b
+    }()
     private let errorLabel = NSTextField(labelWithString: "")
     private var errorHeight: NSLayoutConstraint!
     private var promptHeight: NSLayoutConstraint!
@@ -114,11 +119,13 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
         // Repo chip: shows the repo name, opens a fresh menu (switch + add).
         repoChip.translatesAutoresizingMaskIntoConstraints = false
         repoChip.onClick = { [weak self] in self?.repoButtonClicked() }
+        repoChip.onKeyDown = { [weak self] event in self?.handleRepoChipKey(event) ?? false }
         addSubview(repoChip)
 
         // Agent chip: pick which AI agent to launch in the new worktree.
         agentChip.translatesAutoresizingMaskIntoConstraints = false
         agentChip.onClick = { [weak self] in self?.agentButtonClicked() }
+        agentChip.onKeyDown = { [weak self] event in self?.handleAgentChipKey(event) ?? false }
         agentChip.setIcon(svgString: selectedAgentType.inlinePickerLogoSVG,
                           symbolName: selectedAgentType.inlinePickerSymbolName,
                           accessibilityLabel: selectedAgentType.displayName)
@@ -127,6 +134,7 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
         reuseEnvCheckbox.font = NSFont.systemFont(ofSize: 11)
         reuseEnvCheckbox.translatesAutoresizingMaskIntoConstraints = false
         reuseEnvCheckbox.setContentHuggingPriority(.required, for: .horizontal)
+        reuseEnvCheckbox.onKeyDown = { [weak self] event in self?.handleReuseCheckboxKey(event) ?? false }
         addSubview(reuseEnvCheckbox)
 
         errorHeight = errorLabel.heightAnchor.constraint(equalToConstant: 0)
@@ -241,7 +249,67 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
             }
             return false
         }
+        if commandSelector == #selector(NSResponder.insertTab(_:)) {
+            window?.makeFirstResponder(repoChip)
+            return true
+        }
+        if commandSelector == #selector(NSResponder.insertBacktab(_:)) {
+            window?.makeFirstResponder(reuseEnvCheckbox)
+            return true
+        }
         return false
+    }
+
+    // MARK: - Keyboard ring
+
+    /// Focus ring order: name → repo → agent → reuse → name.
+    private func focusRingNext(after responder: NSView) {
+        switch responder {
+        case repoChip:          window?.makeFirstResponder(agentChip)
+        case agentChip:         window?.makeFirstResponder(reuseEnvCheckbox)
+        case reuseEnvCheckbox:  window?.makeFirstResponder(promptTextView)
+        default:                window?.makeFirstResponder(repoChip)
+        }
+    }
+
+    private func focusRingPrev(before responder: NSView) {
+        switch responder {
+        case repoChip:          window?.makeFirstResponder(promptTextView)
+        case agentChip:         window?.makeFirstResponder(repoChip)
+        case reuseEnvCheckbox:  window?.makeFirstResponder(agentChip)
+        default:                window?.makeFirstResponder(reuseEnvCheckbox)
+        }
+    }
+
+    /// Tab(48)/Shift+Tab and Esc handling shared by the chip & checkbox controls.
+    /// Returns true if the key was consumed.
+    private func handleRingKey(_ event: NSEvent, on view: NSView) -> Bool {
+        switch event.keyCode {
+        case 48: // Tab
+            if event.modifierFlags.contains(.shift) { focusRingPrev(before: view) }
+            else { focusRingNext(after: view) }
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func handleRepoChipKey(_ event: NSEvent) -> Bool {
+        switch event.keyCode {
+        case 49, 36: repoButtonClicked(); return true  // Space/Return → menu
+        default: return handleRingKey(event, on: repoChip)
+        }
+    }
+
+    private func handleAgentChipKey(_ event: NSEvent) -> Bool {
+        switch event.keyCode {
+        case 49, 36: agentButtonClicked(); return true  // Space/Return → menu
+        default: return handleRingKey(event, on: agentChip)
+        }
+    }
+
+    private func handleReuseCheckboxKey(_ event: NSEvent) -> Bool {
+        return handleRingKey(event, on: reuseEnvCheckbox)
     }
 
     func controlTextDidBeginEditing(_ obj: Notification) {
@@ -459,6 +527,8 @@ private final class PromptTextView: NSTextView {
 /// A bordered, rounded dropdown chip: title + down-chevron, opens a menu on click.
 final class DropdownChip: NSView {
     var onClick: (() -> Void)?
+    /// Keyboard handler invoked from `keyDown(with:)`. Return true if consumed.
+    var onKeyDown: ((NSEvent) -> Bool)?
     var titleForTesting: String { titleLabel.stringValue }
     var showsIconForTesting: Bool { !iconView.isHidden }
     var borderWidthForTesting: CGFloat { layer?.borderWidth ?? 0 }
@@ -537,6 +607,34 @@ final class DropdownChip: NSView {
 
     @objc private func clicked() { onClick?() }
 
+    // MARK: Keyboard focus
+    override var acceptsFirstResponder: Bool { true }
+
+    override func becomeFirstResponder() -> Bool {
+        needsDisplay = true
+        return super.becomeFirstResponder()
+    }
+
+    override func resignFirstResponder() -> Bool {
+        needsDisplay = true
+        return super.resignFirstResponder()
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if onKeyDown?(event) == true { return }
+        super.keyDown(with: event)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard window?.firstResponder === self else { return }
+        let ringRect = bounds.insetBy(dx: 1, dy: 1)
+        let path = NSBezierPath(roundedRect: ringRect, xRadius: 5, yRadius: 5)
+        SemanticColors.accent.setStroke()
+        path.lineWidth = 1.5
+        path.stroke()
+    }
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let trackingAreaRef {
@@ -603,5 +701,39 @@ final class DropdownChip: NSView {
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         applyColors()
+    }
+}
+
+/// A checkbox button that participates in the form's keyboard ring: it accepts
+/// first responder, draws a focus ring, and forwards keyDown to a handler.
+final class KeyCheckbox: NSButton {
+    /// Keyboard handler invoked from `keyDown(with:)`. Return true if consumed.
+    var onKeyDown: ((NSEvent) -> Bool)?
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func becomeFirstResponder() -> Bool {
+        needsDisplay = true
+        return super.becomeFirstResponder()
+    }
+
+    override func resignFirstResponder() -> Bool {
+        needsDisplay = true
+        return super.resignFirstResponder()
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if onKeyDown?(event) == true { return }
+        super.keyDown(with: event)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard window?.firstResponder === self else { return }
+        let ringRect = bounds.insetBy(dx: 1, dy: 1)
+        let path = NSBezierPath(roundedRect: ringRect, xRadius: 5, yRadius: 5)
+        SemanticColors.accent.setStroke()
+        path.lineWidth = 1.5
+        path.stroke()
     }
 }
