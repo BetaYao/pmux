@@ -65,6 +65,17 @@ extension KeyboardModeControllerTests {
         XCTAssertFalse(handled)
         XCTAssertEqual(c.mode, .insert)
     }
+
+    func testEscTimerResetsOnInsertReentry() {
+        let c = KeyboardModeController()
+        c.enterInsert()
+        _ = c.handleEsc(hasCommand: false, now: 0.0)   // first esc, recorded
+        c.enterNormal()
+        c.enterInsert()                                 // re-enter insert
+        let handled = c.handleEsc(hasCommand: false, now: 0.10)  // should be treated as a FIRST esc
+        XCTAssertFalse(handled)
+        XCTAssertEqual(c.mode, .insert)
+    }
 }
 
 extension KeyboardModeControllerTests {

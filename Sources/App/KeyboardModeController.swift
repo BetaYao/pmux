@@ -12,6 +12,7 @@ final class KeyboardModeController {
     private(set) var substate: KeyboardSubstate = .none
 
     func enterInsert() {
+        lastEscTime = -1
         setMode(.insert, substate: .none)
     }
 
