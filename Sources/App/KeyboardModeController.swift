@@ -42,6 +42,22 @@ final class KeyboardModeController {
         return false   // first Esc passes through to the terminal
     }
 
+    func beginDelete(agentId: String) {
+        setMode(.normal, substate: .deletePending(agentId: agentId))
+    }
+
+    @discardableResult
+    func confirmDelete() -> String? {
+        guard case .deletePending(let agentId) = substate else { return nil }
+        setMode(.normal, substate: .none)
+        return agentId
+    }
+
+    func cancelDelete() {
+        guard case .deletePending = substate else { return }
+        setMode(.normal, substate: .none)
+    }
+
     private func setMode(_ newMode: KeyboardMode, substate newSub: KeyboardSubstate) {
         let changed = newMode != mode || newSub != substate
         mode = newMode

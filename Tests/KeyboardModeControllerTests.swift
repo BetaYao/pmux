@@ -67,6 +67,34 @@ extension KeyboardModeControllerTests {
     }
 }
 
+extension KeyboardModeControllerTests {
+    func testBeginDeleteEntersPending() {
+        let c = KeyboardModeController()
+        c.beginDelete(agentId: "a1")
+        XCTAssertEqual(c.substate, .deletePending(agentId: "a1"))
+    }
+
+    func testConfirmDeleteReturnsAgentAndClears() {
+        let c = KeyboardModeController()
+        c.beginDelete(agentId: "a1")
+        let confirmed = c.confirmDelete()
+        XCTAssertEqual(confirmed, "a1")
+        XCTAssertEqual(c.substate, .none)
+    }
+
+    func testConfirmDeleteWithoutPendingReturnsNil() {
+        let c = KeyboardModeController()
+        XCTAssertNil(c.confirmDelete())
+    }
+
+    func testCancelDeleteClearsPending() {
+        let c = KeyboardModeController()
+        c.beginDelete(agentId: "a1")
+        c.cancelDelete()
+        XCTAssertEqual(c.substate, .none)
+    }
+}
+
 final class ModeSpy: KeyboardModeDelegate {
     var modeChangeCount = 0
     var lastMode: KeyboardMode?
