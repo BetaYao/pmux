@@ -162,7 +162,9 @@ final class WebhookStatusProviderTests: XCTestCase {
     func testNotificationInfoLevel() {
         let event = makeEvent(sessionId: "s1", event: .notification, cwd: "/projects/repo/main", data: ["level": "info"])
         provider.handleEvent(event)
-        XCTAssertEqual(provider.status(for: "/projects/repo/main"), .idle)
+        // An info-level notification is not a definitive idle signal, so it maps
+        // to .unknown rather than overriding the session's detected status.
+        XCTAssertEqual(provider.status(for: "/projects/repo/main"), .unknown)
     }
 
     // MARK: - Path normalization
