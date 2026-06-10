@@ -87,6 +87,12 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
 
     weak var dashboardDelegate: DashboardDelegate?
 
+    /// Set by MainWindowController. Called when the user drills into a terminal so the
+    /// keyboard mode can switch to .insert.
+    var onEnterTerminal: (() -> Void)?
+    /// Set by MainWindowController. Called when the user requests the new-worktree creator.
+    var onRequestNewWorktree: (() -> Void)?
+
     /// Set by TabCoordinator during setup
     weak var surfaceManager: TerminalSurfaceManager?
 
@@ -1090,28 +1096,86 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
 
     override func keyDown(with event: NSEvent) {
         guard isInDState else { super.keyDown(with: event); return }
+        let mode = windowKeyboardMode
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
-        switch event.keyCode {
-        case 48: // Tab
-            if flags.contains(.shift) { focusController.prev() } else { focusController.next() }
-            applyKeyboardFocusVisuals()
-            scrollFocusedIntoView()
-            return
-        case 36: // Return
-            handleReturnInDState()
-            return
-        case 53: // Escape
-            exitDashboardNavigation(restoreSnapshot: true)
-            return
-        case 51: // Backspace
-            if flags.contains(.command) { handleDeleteInDState(); return }
-        case 117: // Forward Delete
-            handleDeleteInDState()
-            return
-        default: break
+        // deletePending: d/y confirm, esc/other cancel
+        if case .deletePending(let agentId) = mode?.substate {
+            if event.keyCode == 53 { mode?.cancelDelete(); applyKeyboardFocusVisuals(); return }
+            if let ch = event.charactersIgnoringModifiers, ch == "d" || ch == "y" {
+                if mode?.confirmDelete() == agentId { performDelete(agentId: agentId) }
+                return
+            }
+            mode?.cancelDelete(); applyKeyboardFocusVisuals(); return
         }
-        super.keyDown(with: event)
+
+        // Escape with no pending → exit nav (legacy behavior)
+        if event.keyCode == 53 && flags.isEmpty {
+            exitDashboardNavigation(restoreSnapshot: true); return
+        }
+
+        // Build chord: printable char with no command/control/option, else keyCode.
+        let chord: KeyChord
+        if flags.isDisjoint(with: [.command, .control, .option]),
+           let ch = event.charactersIgnoringModifiers, ch.count == 1,
+           ch.rangeOfCharacter(from: .alphanumerics) != nil {
+            chord = KeyChord(char: ch)
+        } else {
+            chord = KeyChord(keyCode: event.keyCode)
+        }
+
+        guard let action = Keymap.action(mode: .normal, chord: chord) else {
+            super.keyDown(with: event); return
+        }
+        dispatch(action)
+    }
+
+    private var windowKeyboardMode: KeyboardModeController? {
+        (view.window?.windowController as? MainWindowController)?.keyboardMode
+    }
+
+    private func dispatch(_ action: KeyboardAction) {
+        switch action {
+        case .moveFocus(let dir):
+            focusController.move(dir, columns: currentGridColumns)
+            applyKeyboardFocusVisuals(); scrollFocusedIntoView()
+        case .jumpToCard(let idx):
+            focusController.jump(toIndex: idx)
+            applyKeyboardFocusVisuals(); scrollFocusedIntoView()
+        case .enterTerminal:
+            onEnterTerminal?()
+            handleReturnInDState()
+        case .deleteFocused:
+            guard case .card(let agentId) = focusController.focusedTarget,
+                  let agent = agents.first(where: { $0.id == agentId }) else { return }
+            guard !agent.isMainWorktree else {
+                windowKeyboardMode?.flashHint("main worktree 不可删除")
+                return
+            }
+            windowKeyboardMode?.beginDelete(agentId: agentId)
+        case .showChanges:
+            guard case .card(let agentId) = focusController.focusedTarget,
+                  let agent = agents.first(where: { $0.id == agentId }) else { return }
+            dashboardDelegate?.dashboardDidRequestShowChanges(worktreePath: agent.worktreePath)
+        case .browseFiles:
+            guard case .card(let agentId) = focusController.focusedTarget,
+                  let agent = agents.first(where: { $0.id == agentId }) else { return }
+            dashboardDelegate?.dashboardDidRequestBrowseFiles(worktreePath: agent.worktreePath)
+        case .newWorktree:
+            onRequestNewWorktree?()
+        }
+    }
+
+    private func performDelete(agentId: String) {
+        dashboardDelegate?.dashboardDidRequestDelete(agentId)
+        focusController.removeCurrentCard()
+        applyKeyboardFocusVisuals()
+    }
+
+    /// Columns per row for the current grid layout. Focus layouts return 1 (vertical list).
+    private var currentGridColumns: Int {
+        guard currentLayout == .grid else { return 1 }
+        return max(1, currentGridLayout.columns)
     }
 
     private func handleReturnInDState() {
@@ -1133,17 +1197,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
                 exitDashboardNavigation(restoreSnapshot: false)
             }
         }
-    }
-
-    private func handleDeleteInDState() {
-        guard case .card(let agentId) = focusController.focusedTarget,
-              let agent = agents.first(where: { $0.id == agentId }) else { return }
-        guard !agent.isMainWorktree else { return }
-
-        dashboardDelegate?.dashboardDidRequestDelete(agentId)
-
-        focusController.removeCurrentCard()
-        applyKeyboardFocusVisuals()
     }
 
     private func scrollFocusedIntoView() {
