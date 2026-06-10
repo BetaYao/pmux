@@ -5,12 +5,15 @@ import AppKit
 final class StatusBarView: NSView {
     static let height: CGFloat = 26
 
+    private let modeLabel = NSTextField(labelWithString: "NORMAL")
     private let usageLabel = NSTextField(labelWithString: "")
     private let notificationLabel = NSTextField(labelWithString: "")
     private let shortcutsLabel = NSTextField(labelWithString: "")
 
     var usageTextForTesting: String { usageLabel.stringValue }
     var notificationTextForTesting: String { notificationLabel.stringValue }
+    var modeTextForTesting: String { modeLabel.stringValue }
+    var shortcutsTextForTesting: String { shortcutsLabel.stringValue }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -22,6 +25,17 @@ final class StatusBarView: NSView {
     func updateUsage(text: String) { usageLabel.stringValue = text }
     func updateNotification(text: String) { notificationLabel.stringValue = text }
     func updateShortcuts(text: String) { shortcutsLabel.stringValue = text }
+
+    func updateMode(_ mode: KeyboardMode, hint: String) {
+        modeLabel.stringValue = (mode == .insert) ? "INSERT" : "NORMAL"
+        // strip the leading "NORMAL/INSERT  ·  " prefix so the chip isn't duplicated in the hint
+        if let range = hint.range(of: "·") {
+            shortcutsLabel.stringValue = String(hint[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+        } else {
+            shortcutsLabel.stringValue = hint
+        }
+        modeLabel.textColor = (mode == .insert) ? SemanticColors.accent : SemanticColors.muted
+    }
 
     private func setup() {
         wantsLayer = true
@@ -38,10 +52,17 @@ final class StatusBarView: NSView {
         shortcutsLabel.alignment = .right
         notificationLabel.alignment = .center
 
+        modeLabel.font = NSFont.systemFont(ofSize: 10, weight: .bold)
+        modeLabel.textColor = SemanticColors.muted
+        modeLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(modeLabel)
+
         shortcutsLabel.stringValue = "\u{2318}N New  \u{00B7}  \u{2318}D Split  \u{00B7}  \u{2318}P Switch"
 
         NSLayoutConstraint.activate([
-            usageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            modeLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            modeLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            usageLabel.leadingAnchor.constraint(equalTo: modeLabel.trailingAnchor, constant: 10),
             usageLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             notificationLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
             notificationLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
