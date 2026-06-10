@@ -15,6 +15,10 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
     /// Live source of the current repo paths, read fresh whenever the menu opens
     /// so newly-added repos appear without re-configuring.
     var repoPathsProvider: (() -> [String])?
+    /// Called when the create form is dismissed — on successful submit OR cancel —
+    /// so the keyboard-mode controller can exit `.createForm` and return the
+    /// dashboard nav ring to `.normal`.
+    var onFormEnd: (() -> Void)?
 
     private static let agentChoices = AgentType.allCases.filter { $0.isAIAgent }
     private var selectedAgentType: AgentType = .claudeCode
@@ -106,6 +110,7 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
         promptTextView.onFocusChange = { [weak self] focused in
             self?.setExpanded(focused, animated: true)
         }
+        promptTextView.onCancel = { [weak self] in self?.cancelForm() }
         addSubview(promptTextView)
 
         errorLabel.maximumNumberOfLines = 2
@@ -247,6 +252,13 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
         let taskDescription = promptTextView.plainText.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
         guard !taskDescription.isEmpty, let repo = selectedRepoPath else { return }
         onCreate?(taskDescription, repo, selectedAgentType, reuseEnvCheckbox.state == .on)
+        onFormEnd?()
+    }
+
+    /// Cancels/collapses the form and notifies the keyboard-mode controller.
+    private func cancelForm() {
+        window?.makeFirstResponder(nil)
+        onFormEnd?()
     }
 
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
@@ -297,6 +309,9 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
             if event.modifierFlags.contains(.shift) { focusRingPrev(before: view) }
             else { focusRingNext(after: view) }
             return true
+        case 53: // Esc
+            cancelForm()
+            return true
         default:
             return false
         }
@@ -321,7 +336,13 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
     }
 
     private func handleReuseCheckboxKey(_ event: NSEvent) -> Bool {
-        return handleRingKey(event, on: reuseEnvCheckbox)
+        switch event.keyCode {
+        case 49: // Space → toggle
+            reuseEnvCheckbox.state = (reuseEnvCheckbox.state == .on) ? .off : .on
+            return true
+        default:
+            return handleRingKey(event, on: reuseEnvCheckbox)
+        }
     }
 
     /// Cycle the selected repo by `delta` with modular wraparound over the live
@@ -479,6 +500,8 @@ private final class PromptTextView: NSTextView {
         didSet { needsDisplay = true }
     }
     var onFocusChange: ((Bool) -> Void)?
+    /// Invoked when the user presses Esc in the name field (cancel the form).
+    var onCancel: (() -> Void)?
 
     convenience init() {
         let storage = NSTextStorage()
@@ -530,6 +553,10 @@ private final class PromptTextView: NSTextView {
     override func didChangeText() {
         super.didChangeText()
         needsDisplay = true
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        onCancel?()
     }
 
     override func becomeFirstResponder() -> Bool {

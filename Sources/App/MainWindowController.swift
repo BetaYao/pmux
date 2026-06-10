@@ -401,6 +401,10 @@ class MainWindowController: NSWindowController {
             self?.keyboardMode.beginCreateForm()
             self?.tabCoordinator.dashboardVC?.focusInlineCreate()
         }
+        dashboard.onInlineCreateFormEnd = { [weak self] in
+            self?.keyboardMode.endCreateForm()
+            self?.tabCoordinator.dashboardVC?.enterDashboardNavigation()
+        }
 
         dashboard.setupInlineCreate(
             repoPaths: config.workspacePaths,

@@ -408,6 +408,12 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
 
     func focusInlineCreate() { inlineCreateView.focusNameField() }
 
+    /// Called when the inline create form ends (submit or cancel) so the owner
+    /// can exit `.createForm` and restore the nav ring.
+    var onInlineCreateFormEnd: (() -> Void)? {
+        didSet { inlineCreateView.onFormEnd = onInlineCreateFormEnd }
+    }
+
     func inlineCreateReportSuccess() { inlineCreateView.reportCreateSuccess() }
     func inlineCreateReportFailure(_ message: String) { inlineCreateView.reportCreateFailure(message) }
 
