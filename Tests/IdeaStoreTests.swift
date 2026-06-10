@@ -40,14 +40,18 @@ final class IdeaStoreTests: XCTestCase {
         let loaded = IdeaStore(directory: tempDir)
         loaded.load()
         XCTAssertEqual(loaded.allItems().count, 2)
-        // Idea B was added second, inserted at front
-        XCTAssertEqual(loaded.allItems().first?.text, "Idea B")
+        // New items are appended to the end (chronological order), so the
+        // first item is the oldest one added.
+        XCTAssertEqual(loaded.allItems().first?.text, "Idea A")
+        XCTAssertEqual(loaded.allItems().last?.text, "Idea B")
     }
 
-    func testNewItemsInsertAtFront() {
+    func testNewItemsAppendToEnd() {
         _ = store.add(text: "First", project: "p", source: "manual", tags: [])
         _ = store.add(text: "Second", project: "p", source: "manual", tags: [])
-        XCTAssertEqual(store.allItems().first?.text, "Second")
+        // Items are appended in chronological order.
+        XCTAssertEqual(store.allItems().first?.text, "First")
+        XCTAssertEqual(store.allItems().last?.text, "Second")
     }
 
     func testLoadMissingFileReturnsEmpty() {
