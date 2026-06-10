@@ -3,6 +3,11 @@ import AppKit
 class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var mainWindowController: MainWindowController?
 
+    /// Periodically sweeps zmx sessions whose worktree no longer exists.
+    private var orphanCleanupTimer: Timer?
+    /// How often to clean up orphan zmx sessions (5 minutes).
+    private let orphanCleanupInterval: TimeInterval = 300
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Ensure notification delegate is set before any notification response arrives
         _ = NotificationManager.shared
@@ -12,7 +17,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // NSColor(name:) dynamic colors resolve correctly even for views
         // not yet added to a window (e.g. during init/setup).
         let config = Config.load()
-        cleanOrphanZmxSessionsOnLaunch(config: config)
+        cleanOrphanZmxSessions()
+        scheduleOrphanZmxCleanup()
         let mode = ThemeMode(rawValue: config.themeMode) ?? .dark
         ThemeMode.applyAppearance(mode)
 
@@ -52,9 +58,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         mainWindowController?.showWindow(nil)
     }
 
-    private func cleanOrphanZmxSessionsOnLaunch(config: Config) {
+    /// Schedule periodic cleanup of zmx sessions whose worktree no longer exists.
+    private func scheduleOrphanZmxCleanup() {
+        orphanCleanupTimer?.invalidate()
+        orphanCleanupTimer = Timer.scheduledTimer(
+            withTimeInterval: orphanCleanupInterval,
+            repeats: true
+        ) { [weak self] _ in
+            self?.cleanOrphanZmxSessions()
+        }
+    }
+
+    /// Sweep orphan zmx sessions on a background queue. Config is reloaded each
+    /// call so newly added/removed worktrees and split layouts are reflected.
+    private func cleanOrphanZmxSessions() {
         DispatchQueue.global(qos: .utility).async {
             guard ProcessRunner.commandExists("zmx") else { return }
+            let config = Config.load()
             let worktreePaths = config.workspacePaths.flatMap { repoPath in
                 WorktreeDiscovery.discover(repoPath: repoPath).map(\.path)
             }
@@ -64,7 +84,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             )
             let cleaned = SessionManager.cleanupOrphanZmxSessions(activeSessionNames: activeSessionNames)
             if !cleaned.isEmpty {
-                NSLog("[App] Cleaned %d orphan zmx session(s) on launch", cleaned.count)
+                NSLog("[App] Cleaned %d orphan zmx session(s)", cleaned.count)
             }
         }
     }
@@ -98,6 +118,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        orphanCleanupTimer?.invalidate()
+        orphanCleanupTimer = nil
         mainWindowController?.cleanupBeforeTermination()
         GhosttyBridge.shared.shutdown()
     }
