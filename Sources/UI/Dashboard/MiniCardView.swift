@@ -42,7 +42,7 @@ final class MiniCardView: NSView {
         agentId = id
         setAccessibilityIdentifier("dashboard.miniCard.\(id)")
 
-        let title = lastUserPrompt.isEmpty ? thread : lastUserPrompt
+        let title = lastUserPrompt.isEmpty ? project : lastUserPrompt
         titleLabel.stringValue = title
 
         // Line 4: repo · worktree
