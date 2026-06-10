@@ -31,6 +31,42 @@ final class KeyboardModeControllerTests: XCTestCase {
     }
 }
 
+extension KeyboardModeControllerTests {
+    func testCmdEscFromInsertGoesNormal() {
+        let c = KeyboardModeController()
+        c.enterInsert()
+        let handled = c.handleEsc(hasCommand: true, now: 0)
+        XCTAssertTrue(handled)
+        XCTAssertEqual(c.mode, .normal)
+    }
+
+    func testSingleEscInInsertDoesNotExit() {
+        let c = KeyboardModeController()
+        c.enterInsert()
+        let handled = c.handleEsc(hasCommand: false, now: 0)
+        XCTAssertFalse(handled)          // passes through to terminal
+        XCTAssertEqual(c.mode, .insert)
+    }
+
+    func testDoubleEscWithinWindowExits() {
+        let c = KeyboardModeController()
+        c.enterInsert()
+        _ = c.handleEsc(hasCommand: false, now: 0.0)
+        let handled = c.handleEsc(hasCommand: false, now: 0.30)   // within 0.4s
+        XCTAssertTrue(handled)
+        XCTAssertEqual(c.mode, .normal)
+    }
+
+    func testDoubleEscTooSlowDoesNotExit() {
+        let c = KeyboardModeController()
+        c.enterInsert()
+        _ = c.handleEsc(hasCommand: false, now: 0.0)
+        let handled = c.handleEsc(hasCommand: false, now: 0.80)   // outside 0.4s
+        XCTAssertFalse(handled)
+        XCTAssertEqual(c.mode, .insert)
+    }
+}
+
 final class ModeSpy: KeyboardModeDelegate {
     var modeChangeCount = 0
     var lastMode: KeyboardMode?
