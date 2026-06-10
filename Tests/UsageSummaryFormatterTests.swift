@@ -97,23 +97,27 @@ final class UsageSummaryFormatterTests: XCTestCase {
 
         let frames = UsageSummaryFormatter.rotationFrames(claude: claude, codex: codex, now: now)
 
-        XCTAssertEqual(frames.count, 10)
-        XCTAssertEqual(frames.prefix(8).map(\.kind), Array(repeating: .shortcut, count: 8))
+        // 9 shortcut tips (keyboard-mode model: nav + leave-terminal tips) + 2 usage frames.
+        let shortcutCount = UsageSummaryFormatter.shortcutTips.count
+        XCTAssertEqual(frames.count, shortcutCount + 2)
+        XCTAssertEqual(frames.prefix(shortcutCount).map(\.kind), Array(repeating: .shortcut, count: shortcutCount))
         XCTAssertEqual(frames[0].leadingText, "Tip")
         XCTAssertEqual(frames[0].bodyText, "Cmd+1..4 switch layout")
-        XCTAssertEqual(frames[7].bodyText, "Cmd+Shift+F show diff")
-        XCTAssertEqual(frames[8].kind, .usage)
-        XCTAssertEqual(frames[8].leadingText, "Claude")
-        XCTAssertEqual(frames[8].bodyText, "Current session:")
-        XCTAssertEqual(frames[8].trailingText, "19%, Resets 2h 9m")
-        XCTAssertEqual(frames[8].secondaryText, "Weekly limits:")
-        XCTAssertEqual(frames[8].secondaryTrailingText, "14%, Resets 5d 14h 59m")
-        XCTAssertEqual(frames[9].kind, .usage)
-        XCTAssertEqual(frames[9].leadingText, "Codex")
-        XCTAssertEqual(frames[9].bodyText, "剩余 72%")
-        XCTAssertEqual(frames[9].trailingText, "Today 5.7M")
-        XCTAssertEqual(frames[9].secondaryText, "")
-        XCTAssertNil(frames[9].secondaryUsageProgress)
-        XCTAssertEqual(frames[9].secondaryTrailingText, "")
+        XCTAssertEqual(frames[shortcutCount - 1].bodyText, "Cmd+Shift+F show diff")
+        let claudeIdx = shortcutCount
+        let codexIdx = shortcutCount + 1
+        XCTAssertEqual(frames[claudeIdx].kind, .usage)
+        XCTAssertEqual(frames[claudeIdx].leadingText, "Claude")
+        XCTAssertEqual(frames[claudeIdx].bodyText, "Current session:")
+        XCTAssertEqual(frames[claudeIdx].trailingText, "19%, Resets 2h 9m")
+        XCTAssertEqual(frames[claudeIdx].secondaryText, "Weekly limits:")
+        XCTAssertEqual(frames[claudeIdx].secondaryTrailingText, "14%, Resets 5d 14h 59m")
+        XCTAssertEqual(frames[codexIdx].kind, .usage)
+        XCTAssertEqual(frames[codexIdx].leadingText, "Codex")
+        XCTAssertEqual(frames[codexIdx].bodyText, "剩余 72%")
+        XCTAssertEqual(frames[codexIdx].trailingText, "Today 5.7M")
+        XCTAssertEqual(frames[codexIdx].secondaryText, "")
+        XCTAssertNil(frames[codexIdx].secondaryUsageProgress)
+        XCTAssertEqual(frames[codexIdx].secondaryTrailingText, "")
     }
 }
