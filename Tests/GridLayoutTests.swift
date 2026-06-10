@@ -345,31 +345,11 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertEqual(TitleBarView.Layout.dashboardHorizontalPadding, 10)
     }
 
-    func testTitleBar_DashboardLabelUsesSemanticTextNotSpacePadding() {
-        let titleBar = TitleBarView()
-        titleBar.layoutSubtreeIfNeeded()
-
-        let dashboard = titleBar.subviews
-            .flatMap { $0.subviews }
-            .compactMap { $0 as? NSButton }
-            .first { $0.accessibilityIdentifier() == "titlebar.dashboardTab" }
-
-        XCTAssertNotNil(dashboard)
-        XCTAssertEqual(dashboard?.attributedTitle.string, "\u{FFFC} Dashboard")
-    }
-
-    func testTitleBar_DashboardTabUsesCenteredAlignment() {
-        let titleBar = TitleBarView()
-        titleBar.layoutSubtreeIfNeeded()
-
-        let dashboard = titleBar.subviews
-            .flatMap { $0.subviews }
-            .compactMap { $0 as? NSButton }
-            .first { $0.accessibilityIdentifier() == "titlebar.dashboardTab" }
-
-        XCTAssertNotNil(dashboard)
-        XCTAssertEqual(dashboard?.alignment, .center)
-    }
+    // Note: the single-layout redesign removed the dedicated "Dashboard" tab
+    // button from the title bar (the dashboard is now the primary, always-on
+    // UI). The former testTitleBar_DashboardLabelUsesSemanticTextNotSpacePadding
+    // and testTitleBar_DashboardTabUsesCenteredAlignment tests asserted on that
+    // removed `titlebar.dashboardTab` button and have been deleted accordingly.
 
     func testTitleBar_CleanButtonRepresentsGlobalLinkedWorktreeCleanup() {
         let titleBar = TitleBarView()
