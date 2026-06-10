@@ -1037,17 +1037,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         windowKeyboardMode?.enterInsert()
 
         let snapshot = focusController.snapshot
-        focusController.exit()
-
-        clearKeyboardFocusVisuals()
-        clearDimOverlay()
-
-        // Restore mouse-selection visual on the selected card.
-        if currentLayout == .grid {
-            for container in gridCards {
-                container.isSelected = (container.agentId == selectedAgentId)
-            }
-        }
+        tearDownNavVisuals()
 
         if restoreSnapshot, let snap = snapshot, let responder = snap.firstResponder,
            (responder as? NSView)?.window != nil {
@@ -1060,6 +1050,33 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
                    let termView = container.surfaceViews[leaf.surfaceId] {
                     self.view.window?.makeFirstResponder(termView)
                 }
+            }
+        }
+    }
+
+    /// Leave the nav focus ring WITHOUT touching `windowKeyboardMode`: opens the inline
+    /// create form. `beginCreateForm()` has already set `.normal` + `.createForm`; we only
+    /// drop the D-state focus ring so a stray key in the form can't be read as a nav chord
+    /// (e.g. `d` starting a delete). On form end, `enterDashboardNavigation()` re-enters.
+    func exitNavForCreateForm() {
+        guard isInDState else { return }
+        tearDownNavVisuals()
+    }
+
+    /// Visual/state teardown shared by `exitDashboardNavigation` and `exitNavForCreateForm`.
+    /// Drops the focus ring, dim overlays, restores grid mouse-selection visuals, and exits
+    /// the focus controller. Deliberately does NOT touch `windowKeyboardMode` or restore the
+    /// first responder — callers own those decisions.
+    private func tearDownNavVisuals() {
+        focusController.exit()
+
+        clearKeyboardFocusVisuals()
+        clearDimOverlay()
+
+        // Restore mouse-selection visual on the selected card.
+        if currentLayout == .grid {
+            for container in gridCards {
+                container.isSelected = (container.agentId == selectedAgentId)
             }
         }
     }
@@ -1178,6 +1195,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
             guard let agent = focusedAgent else { return }
             dashboardDelegate?.dashboardDidRequestBrowseFiles(worktreePath: agent.worktreePath)
         case .newWorktree:
+            // Leave the D-state focus ring before opening the form so no stale card
+            // visuals remain and a stray key in the form isn't read as a nav chord.
+            // keyboardMode stays .normal + .createForm (set by beginCreateForm()).
+            exitNavForCreateForm()
             onRequestNewWorktree?()
         }
     }
