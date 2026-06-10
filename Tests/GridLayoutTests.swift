@@ -279,9 +279,8 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertEqual(AgentCardView.Typography.bodyPointSize, 12)
         XCTAssertEqual(AgentCardView.Typography.secondaryPointSize, 11)
 
-        XCTAssertEqual(MiniCardView.Typography.primaryPointSize, 13)
-        XCTAssertEqual(MiniCardView.Typography.bodyPointSize, 12)
-        XCTAssertEqual(MiniCardView.Typography.secondaryPointSize, 11)
+        XCTAssertEqual(MiniCardView.Typography.primaryPointSize, 12)
+        XCTAssertEqual(MiniCardView.Typography.secondaryPointSize, 10)
 
     }
 
@@ -370,6 +369,26 @@ final class GridLayoutTests: XCTestCase {
 
         XCTAssertNotNil(dashboard)
         XCTAssertEqual(dashboard?.alignment, .center)
+    }
+
+    func testTitleBar_CleanButtonRepresentsGlobalLinkedWorktreeCleanup() {
+        let titleBar = TitleBarView()
+        titleBar.layoutSubtreeIfNeeded()
+
+        let clean = findButton(in: titleBar, identifier: "titlebar.cleanWorktree")
+        XCTAssertNotNil(clean)
+
+        titleBar.updateChromeState(isGridLayout: false, hasWorkspaces: true, canCleanWorktrees: false)
+        XCTAssertTrue(clean?.isHidden == true)
+        XCTAssertFalse(clean?.isEnabled == true)
+
+        titleBar.updateChromeState(isGridLayout: false, hasWorkspaces: true, canCleanWorktrees: true)
+        XCTAssertFalse(clean?.isHidden == true)
+        XCTAssertTrue(clean?.isEnabled == true)
+        XCTAssertEqual(clean?.title, "")
+        XCTAssertEqual(clean?.imagePosition, .imageOnly)
+        XCTAssertEqual(clean?.accessibilityLabel(), "Clean merged worktrees")
+        XCTAssertEqual(TitleBarView.Layout.rightCapsuleCleanWidth, 112)
     }
 
     func testMainWindowController_TrafficLightsAlignWithCapsuleCenter() {

@@ -3,17 +3,29 @@ import Foundation
 enum ProcessRunner {
     /// Check if a command exists on PATH using login shell
     static func commandExists(_ command: String) -> Bool {
+        commandPath(command) != nil
+    }
+
+    /// Resolve a command using the user's login shell PATH.
+    static func commandPath(_ command: String) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["bash", "-lc", "command -v \(command)"]
-        process.standardOutput = Pipe()
+        process.arguments = ["bash", "-lc", "command -v \(shellQuote(command))"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
         process.standardError = Pipe()
         do {
             try process.run()
             process.waitUntilExit()
-            return process.terminationStatus == 0
+            guard process.terminationStatus == 0 else { return nil }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            guard let output = String(data: data, encoding: .utf8) else { return nil }
+            return output
+                .components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .first { !$0.isEmpty }
         } catch {
-            return false
+            return nil
         }
     }
 
@@ -80,5 +92,9 @@ enum ProcessRunner {
         } catch {
             NSLog("ProcessRunner: failed to run \(args.first ?? "?"): \(error)")
         }
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 }

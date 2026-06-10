@@ -1,11 +1,15 @@
 import AppKit
+import QuartzCore
 
 /// ChatGPT-style sticky worktree creator at the bottom of the sidebar: a tall
 /// rounded prompt box with the name field on top and a bottom row showing the
 /// target repo (tap to switch or add) plus the reuse-environment toggle.
-final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
-    /// (name, repoPath, agentType, reuseEnvironment)
+final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
+    /// (taskDescription, repoPath, agentType, reuseEnvironment)
     var onCreate: ((String, String, AgentType, Bool) -> Void)?
+    /// Requests an outer height constraint update. The dashboard owns the
+    /// constraint so the sidebar can animate around the sticky creator.
+    var onPreferredHeightChange: ((CGFloat, Bool) -> Void)?
     /// Invoked when the user picks "Add repo…" — should open a picker and add a workspace.
     var onAddRepo: (() -> Void)?
     /// Live source of the current repo paths, read fresh whenever the menu opens
@@ -15,18 +19,37 @@ final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
     private static let agentChoices = AgentType.allCases.filter { $0.isAIAgent }
     private var selectedAgentType: AgentType = .claudeCode
 
-    private let nameField = NSTextField()
+    private let promptTextView = PromptTextView()
     private let repoChip = DropdownChip()
     private let agentChip = DropdownChip()
     private let reuseEnvCheckbox = NSButton(checkboxWithTitle: "Reuse env", target: nil, action: nil)
     private let errorLabel = NSTextField(labelWithString: "")
     private var errorHeight: NSLayoutConstraint!
+    private var promptHeight: NSLayoutConstraint!
 
     private var repoPaths: [String] = []
     private var selectedRepoPath: String?
 
-    // Kept for test-target compatibility (no longer a focus-driven mode).
+    private static let collapsedHeight: CGFloat = 84
+    private static let expandedHeight: CGFloat = 120
+    private static let collapsedFieldHeight: CGFloat = 24
+    private static let expandedFieldHeight: CGFloat = 58
+    private static let controlRowHeight: CGFloat = 24
+    private static let controlRowBottomPadding: CGFloat = 10
+    private static let expansionDuration: TimeInterval = 0.22
+
     var isExpandedForTesting = false
+    var preferredHeightForTesting: CGFloat { preferredHeight }
+    var agentChipTitleForTesting: String { agentChip.titleForTesting }
+    var agentChipShowsIconForTesting: Bool { agentChip.showsIconForTesting }
+    var agentChipBorderWidthForTesting: CGFloat { agentChip.borderWidthForTesting }
+    var repoChipPreferredHeightForTesting: CGFloat { Self.controlRowHeight }
+    var controlRowBottomPaddingForTesting: CGFloat { Self.controlRowBottomPadding }
+
+    var preferredHeight: CGFloat {
+        let base = isExpandedForTesting ? Self.expandedHeight : Self.collapsedHeight
+        return base + (errorLabel.isHidden ? 0 : errorHeight.constant + 6)
+    }
 
     /// A clearly-elevated fill so the input reads as a distinct box, not the
     /// same surface as the cards above it.
@@ -52,12 +75,12 @@ final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
         updateRepoButtonTitle()
     }
 
-    func focusNameField() { window?.makeFirstResponder(nameField) }
+    func focusNameField() { window?.makeFirstResponder(promptTextView) }
 
     // MARK: Test hooks
-    func setNameForTesting(_ s: String) { nameField.stringValue = s }
+    func setNameForTesting(_ s: String) { promptTextView.setPlainText(s) }
     func setReuseEnvForTesting(_ on: Bool) { reuseEnvCheckbox.state = on ? .on : .off }
-    func setExpandedForTesting(_ on: Bool) { isExpandedForTesting = on }
+    func setExpandedForTesting(_ on: Bool) { setExpanded(on, animated: false) }
     func submitForTesting() { submit() }
 
     private func setup() {
@@ -71,16 +94,14 @@ final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
         layer?.shadowOffset = NSSize(width: 0, height: -3)
         applyColors()
 
-        nameField.placeholderString = "New worktree name…"
-        nameField.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-        nameField.isBordered = false
-        nameField.drawsBackground = false
-        nameField.focusRingType = .none
-        nameField.delegate = self
-        nameField.target = self
-        nameField.action = #selector(submit)
-        nameField.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(nameField)
+        promptTextView.placeholderString = "Describe the task…"
+        promptTextView.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        promptTextView.delegate = self
+        promptTextView.translatesAutoresizingMaskIntoConstraints = false
+        promptTextView.onFocusChange = { [weak self] focused in
+            self?.setExpanded(focused, animated: true)
+        }
+        addSubview(promptTextView)
 
         errorLabel.maximumNumberOfLines = 2
         errorLabel.font = NSFont.systemFont(ofSize: 10)
@@ -98,7 +119,9 @@ final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
         // Agent chip: pick which AI agent to launch in the new worktree.
         agentChip.translatesAutoresizingMaskIntoConstraints = false
         agentChip.onClick = { [weak self] in self?.agentButtonClicked() }
-        agentChip.setTitle(selectedAgentType.shortName)
+        agentChip.setIcon(svgString: selectedAgentType.inlinePickerLogoSVG,
+                          symbolName: selectedAgentType.inlinePickerSymbolName,
+                          accessibilityLabel: selectedAgentType.displayName)
         addSubview(agentChip)
 
         reuseEnvCheckbox.font = NSFont.systemFont(ofSize: 11)
@@ -107,24 +130,29 @@ final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
         addSubview(reuseEnvCheckbox)
 
         errorHeight = errorLabel.heightAnchor.constraint(equalToConstant: 0)
+        promptHeight = promptTextView.heightAnchor.constraint(equalToConstant: Self.collapsedFieldHeight)
+        promptHeight.priority = .init(999)
 
         NSLayoutConstraint.activate([
-            nameField.topAnchor.constraint(equalTo: topAnchor, constant: 12),
-            nameField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            nameField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            nameField.heightAnchor.constraint(greaterThanOrEqualToConstant: 22),
+            promptTextView.topAnchor.constraint(equalTo: topAnchor, constant: 14),
+            promptTextView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 18),
+            promptTextView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -18),
+            promptHeight,
 
-            errorLabel.topAnchor.constraint(equalTo: nameField.bottomAnchor, constant: 6),
+            errorLabel.topAnchor.constraint(equalTo: promptTextView.bottomAnchor, constant: 4),
             errorLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
             errorLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             errorHeight,
+            errorLabel.bottomAnchor.constraint(lessThanOrEqualTo: repoChip.topAnchor),
 
-            repoChip.topAnchor.constraint(equalTo: errorLabel.bottomAnchor, constant: 10),
             repoChip.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            repoChip.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
+            repoChip.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.controlRowBottomPadding),
+            repoChip.heightAnchor.constraint(equalToConstant: Self.controlRowHeight),
 
             agentChip.centerYAnchor.constraint(equalTo: repoChip.centerYAnchor),
             agentChip.leadingAnchor.constraint(equalTo: repoChip.trailingAnchor, constant: 10),
+            agentChip.heightAnchor.constraint(equalToConstant: Self.controlRowHeight),
+            agentChip.widthAnchor.constraint(equalToConstant: 40),
 
             reuseEnvCheckbox.centerYAnchor.constraint(equalTo: repoChip.centerYAnchor),
             reuseEnvCheckbox.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
@@ -147,7 +175,9 @@ final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
     @objc private func selectAgent(_ sender: NSMenuItem) {
         if let raw = sender.representedObject as? String, let type = AgentType(rawValue: raw) {
             selectedAgentType = type
-            agentChip.setTitle(type.shortName)
+            agentChip.setIcon(svgString: type.inlinePickerLogoSVG,
+                              symbolName: type.inlinePickerSymbolName,
+                              accessibilityLabel: type.displayName)
         }
     }
 
@@ -183,30 +213,103 @@ final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
     @objc private func addRepoClicked() { onAddRepo?() }
 
     func reportCreateSuccess() {
-        nameField.stringValue = ""
+        promptTextView.setPlainText("")
         errorLabel.isHidden = true
         errorLabel.stringValue = ""
         errorHeight.constant = 0
+        onPreferredHeightChange?(preferredHeight, true)
     }
 
     func reportCreateFailure(_ message: String) {
         errorLabel.stringValue = message
         errorLabel.isHidden = false
         errorHeight.constant = errorLabel.intrinsicContentSize.height
+        onPreferredHeightChange?(preferredHeight, true)
     }
 
     @objc private func submit() {
-        let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, let repo = selectedRepoPath else { return }
-        onCreate?(name, repo, selectedAgentType, reuseEnvCheckbox.state == .on)
+        let taskDescription = promptTextView.plainText.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        guard !taskDescription.isEmpty, let repo = selectedRepoPath else { return }
+        onCreate?(taskDescription, repo, selectedAgentType, reuseEnvCheckbox.state == .on)
     }
 
-    func controlTextDidEndEditing(_ obj: Notification) {}
+    func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+            if NSEvent.modifierFlags.contains(.command) {
+                submit()
+                return true
+            }
+            return false
+        }
+        return false
+    }
+
+    func controlTextDidBeginEditing(_ obj: Notification) {
+        setExpanded(true, animated: true)
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        setExpanded(false, animated: true)
+    }
+
+    private func setExpanded(_ expanded: Bool, animated: Bool) {
+        guard isExpandedForTesting != expanded else { return }
+        isExpandedForTesting = expanded
+        applyColors(animated: animated)
+        onPreferredHeightChange?(preferredHeight, animated)
+        updateFieldHeight(animated: animated)
+    }
+
+    private func updateFieldHeight(animated: Bool) {
+        let nextHeight = isExpandedForTesting ? Self.expandedFieldHeight : Self.collapsedFieldHeight
+        guard abs(promptHeight.constant - nextHeight) > 0.5 else { return }
+
+        let update = {
+            self.promptHeight.constant = nextHeight
+            self.layoutSubtreeIfNeeded()
+        }
+
+        guard animated, window != nil else {
+            update()
+            return
+        }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Self.expansionDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            context.allowsImplicitAnimation = true
+            update()
+        }
+    }
 
     // MARK: - Appearance
-    private func applyColors() {
-        layer?.backgroundColor = resolvedCGColor(Self.inputBg)
-        layer?.borderColor = resolvedCGColor(Self.inputBorder)
+    private func applyColors(animated: Bool = false) {
+        let borderColor = isExpandedForTesting
+            ? NSColor.controlAccentColor.withAlphaComponent(0.72)
+            : Self.inputBorder
+        let backgroundColor = Self.inputBg
+        let shadowOpacity: Float = isExpandedForTesting ? 0.48 : 0.35
+        let shadowRadius: CGFloat = isExpandedForTesting ? 16 : 10
+        let borderWidth: CGFloat = isExpandedForTesting ? 1.8 : 1.5
+
+        let update = {
+            self.layer?.backgroundColor = self.resolvedCGColor(backgroundColor)
+            self.layer?.borderColor = self.resolvedCGColor(borderColor)
+            self.layer?.shadowOpacity = shadowOpacity
+            self.layer?.shadowRadius = shadowRadius
+            self.layer?.borderWidth = borderWidth
+        }
+
+        guard animated else {
+            update()
+            return
+        }
+
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(Self.expansionDuration)
+        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
+        update()
+        CATransaction.commit()
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -215,26 +318,184 @@ final class InlineWorktreeCreateView: NSView, NSTextFieldDelegate {
     }
 }
 
+private extension AgentType {
+    var inlinePickerLogoSVG: String? {
+        switch self {
+        case .claudeCode:
+            return """
+            <svg fill="#f3f4f6" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>
+            """
+        case .codex:
+            return """
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="#f3f4f6" d="M22.282 9.821a6 6 0 0 0-.516-4.91a6.05 6.05 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a6 6 0 0 0-3.998 2.9a6.05 6.05 0 0 0 .743 7.097a5.98 5.98 0 0 0 .51 4.911a6.05 6.05 0 0 0 6.515 2.9A6 6 0 0 0 13.26 24a6.06 6.06 0 0 0 5.772-4.206a6 6 0 0 0 3.997-2.9a6.06 6.06 0 0 0-.747-7.073M13.26 22.43a4.48 4.48 0 0 1-2.876-1.04l.141-.081l4.779-2.758a.8.8 0 0 0 .392-.681v-6.737l2.02 1.168a.07.07 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494M3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085l4.783 2.759a.77.77 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646M2.34 7.896a4.5 4.5 0 0 1 2.366-1.973V11.6a.77.77 0 0 0 .388.677l5.815 3.354l-2.02 1.168a.08.08 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.08.08 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667m2.01-3.023l-.141-.085l-4.774-2.782a.78.78 0 0 0-.785 0L9.409 9.23V6.897a.07.07 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.8.8 0 0 0-.393.681zm1.097-2.365l2.602-1.5l2.607 1.5v2.999l-2.597 1.5l-2.607-1.5Z"/></svg>
+            """
+        case .openCode:
+            return """
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="#f3f4f6" d="M22 24H2V0h20zM17 4.8H7v14.4h10z"/></svg>
+            """
+        case .gemini:
+            return """
+            <svg fill="#f3f4f6" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58a12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"/></svg>
+            """
+        case .cline:
+            return """
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="#f3f4f6" d="m23.365 13.556l-1.442-2.895V8.994c0-2.764-2.218-5.002-4.954-5.002h-2.464c.178-.367.276-.779.276-1.213A2.77 2.77 0 0 0 12.018 0a2.77 2.77 0 0 0-2.763 2.779c0 .434.098.846.276 1.213H7.067c-2.736 0-4.954 2.238-4.954 5.002v1.667L.64 13.549c-.149.29-.149.636 0 .927l1.472 2.855v1.667C2.113 21.762 4.33 24 7.067 24h9.902c2.736 0 4.954-2.238 4.954-5.002V17.33l1.44-2.865c.143-.286.143-.622.002-.91m-12.854 2.36a2.27 2.27 0 0 1-2.261 2.273a2.27 2.27 0 0 1-2.261-2.273v-4.042A2.27 2.27 0 0 1 8.249 9.6a2.267 2.267 0 0 1 2.262 2.274zm7.285 0a2.27 2.27 0 0 1-2.26 2.273a2.27 2.27 0 0 1-2.262-2.273v-4.042A2.267 2.267 0 0 1 15.535 9.6a2.267 2.267 0 0 1 2.261 2.274z"/></svg>
+            """
+        case .amp:
+            return """
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="#f3f4f6" d="M12 0c6.628 0 12 5.373 12 12s-5.372 12-12 12C5.373 24 0 18.627 0 12S5.373 0 12 0m-.92 19.278l5.034-8.377a.44.44 0 0 0 .097-.268a.455.455 0 0 0-.455-.455l-2.851.004l.924-5.468l-.927-.003l-5.018 8.367s-.1.183-.1.291c0 .251.204.455.455.455l2.831-.004l-.901 5.458z"/></svg>
+            """
+        case .cursor:
+            return """
+            <svg fill="#f3f4f6" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23"/></svg>
+            """
+        default:
+            return nil
+        }
+    }
+
+    var inlinePickerSymbolName: String {
+        switch self {
+        case .claudeCode: return "sparkle"
+        case .codex:      return "terminal"
+        case .openCode:   return "chevron.left.forwardslash.chevron.right"
+        case .gemini:     return "sparkles"
+        case .cline:      return "hammer"
+        case .goose:      return "paperplane"
+        case .amp:        return "bolt"
+        case .aider:      return "wrench.and.screwdriver"
+        case .cursor:     return "cursorarrow"
+        case .kiro:       return "k.circle"
+        default:          return "cpu"
+        }
+    }
+}
+
+private final class PromptTextView: NSTextView {
+    var placeholderString = "" {
+        didSet { needsDisplay = true }
+    }
+    var onFocusChange: ((Bool) -> Void)?
+
+    convenience init() {
+        let storage = NSTextStorage()
+        let layoutManager = NSLayoutManager()
+        let container = NSTextContainer(containerSize: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
+        container.widthTracksTextView = true
+        container.heightTracksTextView = false
+        storage.addLayoutManager(layoutManager)
+        layoutManager.addTextContainer(container)
+        self.init(frame: .zero, textContainer: container)
+    }
+
+    override init(frame frameRect: NSRect, textContainer container: NSTextContainer?) {
+        super.init(frame: frameRect, textContainer: container)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+    }
+
+    private func setup() {
+        drawsBackground = false
+        isRichText = false
+        isAutomaticQuoteSubstitutionEnabled = false
+        isAutomaticDashSubstitutionEnabled = false
+        isAutomaticTextReplacementEnabled = false
+        allowsUndo = true
+        textContainerInset = NSSize(width: 0, height: 0)
+        textContainer?.lineFragmentPadding = 0
+        insertionPointColor = NSColor.controlAccentColor
+        textColor = SemanticColors.text
+    }
+
+    var plainText: String {
+        textStorage?.string ?? string
+    }
+
+    func setPlainText(_ value: String) {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font ?? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular),
+            .foregroundColor: textColor ?? SemanticColors.text
+        ]
+        textStorage?.setAttributedString(NSAttributedString(string: value, attributes: attributes))
+        needsDisplay = true
+    }
+
+    override func didChangeText() {
+        super.didChangeText()
+        needsDisplay = true
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let didBecome = super.becomeFirstResponder()
+        if didBecome { onFocusChange?(true) }
+        return didBecome
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let didResign = super.resignFirstResponder()
+        if didResign { onFocusChange?(false) }
+        return didResign
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard plainText.isEmpty, !placeholderString.isEmpty else { return }
+
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font ?? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular),
+            .foregroundColor: SemanticColors.muted
+        ]
+        placeholderString.draw(
+            at: NSPoint(x: 0, y: 1),
+            withAttributes: attributes
+        )
+    }
+}
+
 /// A bordered, rounded dropdown chip: title + down-chevron, opens a menu on click.
 final class DropdownChip: NSView {
     var onClick: (() -> Void)?
+    var titleForTesting: String { titleLabel.stringValue }
+    var showsIconForTesting: Bool { !iconView.isHidden }
+    var borderWidthForTesting: CGFloat { layer?.borderWidth ?? 0 }
 
+    private let iconView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let chevron = NSImageView()
+    private var iconWidth: NSLayoutConstraint!
+    private var iconLeadingFromEdge: NSLayoutConstraint!
+    private var iconCenterX: NSLayoutConstraint!
+    private var titleLeadingFromIcon: NSLayoutConstraint!
+    private var titleLeadingFromEdge: NSLayoutConstraint!
+    private var chevronLeadingFromTitle: NSLayoutConstraint!
+    private var chevronLeadingFromIcon: NSLayoutConstraint!
+    private var trackingAreaRef: NSTrackingArea?
+    private var isHovering = false {
+        didSet { applyColors() }
+    }
 
     private static let chipBg = NSColor(name: nil) { a in
-        a.isDark ? NSColor(hex: 0x34373e) : NSColor(hex: 0xeef1f6)
+        a.isDark ? NSColor(hex: 0x34373e).withAlphaComponent(0.7) : NSColor(hex: 0xeef1f6).withAlphaComponent(0.9)
     }
-    private static let chipBorder = NSColor(name: nil) { a in
-        a.isDark ? NSColor(hex: 0x565a63) : NSColor(hex: 0xc6cfdb)
+    private static let chipBgIdle = NSColor(name: nil) { _ in
+        .clear
     }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.cornerRadius = 7
-        layer?.borderWidth = 1
+        layer?.cornerRadius = 5
+        layer?.borderWidth = 0
         applyColors()
+
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.contentTintColor = SemanticColors.text
+        iconView.symbolConfiguration = .init(pointSize: 13, weight: .semibold)
+        addSubview(iconView)
 
         titleLabel.font = .systemFont(ofSize: 11, weight: .medium)
         titleLabel.textColor = SemanticColors.text
@@ -250,12 +511,22 @@ final class DropdownChip: NSView {
         chevron.setContentHuggingPriority(.required, for: .horizontal)
         addSubview(chevron)
 
+        iconWidth = iconView.widthAnchor.constraint(equalToConstant: 0)
+        iconLeadingFromEdge = iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 11)
+        iconCenterX = iconView.centerXAnchor.constraint(equalTo: centerXAnchor, constant: -5)
+        titleLeadingFromIcon = titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 6)
+        titleLeadingFromEdge = titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10)
+        chevronLeadingFromTitle = chevron.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 6)
+        chevronLeadingFromIcon = chevron.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 5)
+        titleLeadingFromEdge.isActive = true
+        chevronLeadingFromTitle.isActive = true
+
         NSLayoutConstraint.activate([
-            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 5),
-            titleLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5),
-            chevron.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 6),
-            chevron.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconWidth,
+            iconView.heightAnchor.constraint(equalToConstant: 16),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            chevron.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
             chevron.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
 
@@ -266,11 +537,67 @@ final class DropdownChip: NSView {
 
     @objc private func clicked() { onClick?() }
 
-    func setTitle(_ s: String) { titleLabel.stringValue = s }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaRef {
+            removeTrackingArea(trackingAreaRef)
+        }
+        let area = NSTrackingArea(rect: bounds,
+                                  options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+                                  owner: self,
+                                  userInfo: nil)
+        addTrackingArea(area)
+        trackingAreaRef = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+    }
+
+    func setTitle(_ s: String) {
+        iconView.isHidden = true
+        iconView.image = nil
+        iconWidth.constant = 0
+        titleLabel.isHidden = false
+        titleLabel.stringValue = s
+        iconLeadingFromEdge.isActive = false
+        iconCenterX.isActive = false
+        titleLeadingFromIcon.isActive = false
+        titleLeadingFromEdge.isActive = true
+        chevronLeadingFromIcon.isActive = false
+        chevronLeadingFromTitle.isActive = true
+    }
+
+    func setIcon(svgString: String?, symbolName: String, accessibilityLabel: String) {
+        iconView.isHidden = false
+        if let svgString, let data = svgString.data(using: .utf8), let image = NSImage(data: data) {
+            iconView.image = image
+        } else {
+            iconView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: accessibilityLabel)?
+                .withSymbolConfiguration(.init(pointSize: 13, weight: .semibold))
+        }
+        iconWidth.constant = 16
+        titleLabel.isHidden = true
+        titleLabel.stringValue = ""
+        titleLeadingFromEdge.isActive = false
+        titleLeadingFromIcon.isActive = false
+        iconCenterX.isActive = false
+        iconLeadingFromEdge.isActive = true
+        chevronLeadingFromTitle.isActive = false
+        chevronLeadingFromIcon.isActive = true
+        setAccessibilityLabel(accessibilityLabel)
+    }
 
     private func applyColors() {
-        layer?.backgroundColor = resolvedCGColor(Self.chipBg)
-        layer?.borderColor = resolvedCGColor(Self.chipBorder)
+        layer?.backgroundColor = resolvedCGColor(isHovering ? Self.chipBg : Self.chipBgIdle)
+        layer?.borderColor = nil
+        iconView.contentTintColor = SemanticColors.text
+        titleLabel.textColor = SemanticColors.text
+        chevron.contentTintColor = SemanticColors.muted
     }
 
     override func viewDidChangeEffectiveAppearance() {

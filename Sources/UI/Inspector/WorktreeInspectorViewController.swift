@@ -6,10 +6,20 @@ enum WorktreeInspectorInitialTab: Int {
 }
 
 final class WorktreeInspectorViewController: NSViewController {
-    static let yaziCommand = "yazi ."
+    static func yaziCommand(yaziPath: String, configDirectory: URL) -> String? {
+        do {
+            try prepareYaziConfig(at: configDirectory)
+        } catch {
+            NSLog("WorktreeInspector: failed to prepare yazi config: \(error)")
+            return nil
+        }
+
+        return "/usr/bin/env YAZI_CONFIG_HOME=\(shellQuote(configDirectory.path)) \(shellQuote(yaziPath)) ."
+    }
 
     private let worktreePath: String
-    private let yaziAvailability: () -> Bool
+    private let yaziPathProvider: () -> String?
+    private let yaziConfigDirectoryProvider: () -> URL
     private let makeDiffReviewView: (String) -> DiffReviewView
     private let createYaziSurface: ((NSView, String, String) -> Bool)?
     private let closeButton = NSButton()
@@ -28,13 +38,25 @@ final class WorktreeInspectorViewController: NSViewController {
     init(
         worktreePath: String,
         initialTab: WorktreeInspectorInitialTab,
-        yaziAvailability: @escaping () -> Bool = { ProcessRunner.commandExists("yazi") },
+        yaziAvailability: (() -> Bool)? = nil,
+        yaziPathProvider: (() -> String?)? = nil,
+        yaziConfigDirectoryProvider: @escaping () -> URL = { WorktreeInspectorViewController.defaultYaziConfigDirectory() },
         makeDiffReviewView: @escaping (String) -> DiffReviewView = { DiffReviewView(worktreePath: $0) },
         createYaziSurface: ((NSView, String, String) -> Bool)? = nil
     ) {
         self.worktreePath = worktreePath
         self.selectedTab = initialTab
-        self.yaziAvailability = yaziAvailability
+        if let yaziPathProvider {
+            self.yaziPathProvider = yaziPathProvider
+        } else if let yaziAvailability {
+            self.yaziPathProvider = {
+                guard yaziAvailability() else { return nil }
+                return ProcessRunner.commandPath("yazi") ?? "yazi"
+            }
+        } else {
+            self.yaziPathProvider = { ProcessRunner.commandPath("yazi") }
+        }
+        self.yaziConfigDirectoryProvider = yaziConfigDirectoryProvider
         self.makeDiffReviewView = makeDiffReviewView
         self.createYaziSurface = createYaziSurface
         super.init(nibName: nil, bundle: nil)
@@ -123,10 +145,21 @@ final class WorktreeInspectorViewController: NSViewController {
     }
 
     private func showFilesTab() {
-        guard yaziAvailability() else {
+        guard let yaziPath = yaziPathProvider() else {
             showMessage(
                 "Yazi is not installed. Install yazi to browse files in this tab.",
                 identifier: "worktreeInspector.filesMissingYazi"
+            )
+            return
+        }
+
+        guard let command = Self.yaziCommand(
+            yaziPath: yaziPath,
+            configDirectory: yaziConfigDirectoryProvider()
+        ) else {
+            showMessage(
+                "Could not start yazi for this worktree.",
+                identifier: "worktreeInspector.filesYaziFailed"
             )
             return
         }
@@ -145,7 +178,7 @@ final class WorktreeInspectorViewController: NSViewController {
             terminalContainer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
         ])
 
-        if !startYazi(in: terminalContainer) {
+        if !startYazi(in: terminalContainer, command: command) {
             terminalContainer.removeFromSuperview()
             showMessage(
                 "Could not start yazi for this worktree.",
@@ -186,17 +219,35 @@ final class WorktreeInspectorViewController: NSViewController {
         ])
     }
 
-    private func startYazi(in container: NSView) -> Bool {
+    private func startYazi(in container: NSView, command: String) -> Bool {
         if let createYaziSurface {
-            return createYaziSurface(container, worktreePath, Self.yaziCommand)
+            return createYaziSurface(container, worktreePath, command)
         }
 
         let surface = TerminalSurface()
         yaziSurface = surface
-        let started = surface.createEphemeral(in: container, workingDirectory: worktreePath, command: Self.yaziCommand)
+        let started = surface.createEphemeral(in: container, workingDirectory: worktreePath, command: command)
         if !started {
             yaziSurface = nil
         }
         return started
+    }
+
+    private static func defaultYaziConfigDirectory() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("amux-yazi", isDirectory: true)
+    }
+
+    private static func prepareYaziConfig(at directory: URL) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let configURL = directory.appendingPathComponent("yazi.toml")
+        try """
+        [mgr]
+        show_hidden = true
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 }

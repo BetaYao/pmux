@@ -509,8 +509,14 @@ class TabCoordinator {
     // MARK: - Worktree Lifecycle
 
     func worktreeDidDelete(_ info: WorktreeInfo) {
+        let repoPath = worktreeRepoCache[info.path]
         allWorktrees.removeAll { $0.info.path == info.path }
         worktreeRepoCache.removeValue(forKey: info.path)
+        if let repoPath,
+           let tabIndex = workspaceManager.tabs.firstIndex(where: { $0.repoPath == repoPath }) {
+            let remaining = workspaceManager.tabs[tabIndex].worktrees.filter { $0.path != info.path }
+            workspaceManager.updateWorktrees(at: tabIndex, worktrees: remaining)
+        }
         if let agent = AgentHead.shared.agent(forWorktree: info.path) {
             AgentHead.shared.unregister(terminalID: agent.id)
         }
@@ -603,38 +609,53 @@ class TabCoordinator {
         for (tabIndex, tab) in tabs.enumerated() {
             WorktreeDiscovery.discoverAsync(repoPath: tab.repoPath) { [weak self] freshWorktrees in
                 guard let self else { return }
-                let oldWorktrees = tab.worktrees
-
-                // Detect new worktrees not yet tracked
-                let knownPaths = Set(self.allWorktrees.map { $0.info.path })
-                let newWorktrees = freshWorktrees.filter { !knownPaths.contains($0.path) }
-                if !newWorktrees.isEmpty {
-                    self.integrateNewWorktrees(repoRoot: tab.repoPath, allDiscovered: freshWorktrees, newWorktrees: newWorktrees)
-                    return  // integrateNewWorktrees already refreshes the dashboard
-                }
-
-                // Detect branch name changes (existing behavior)
-                var changed = false
-                for fresh in freshWorktrees {
-                    if let old = oldWorktrees.first(where: { $0.path == fresh.path }),
-                       old.branch != fresh.branch {
-                        changed = true
-                        break
-                    }
-                }
-                guard changed else { return }
-
-                self.workspaceManager.updateWorktrees(at: tabIndex, worktrees: freshWorktrees)
-
-                for (i, entry) in self.allWorktrees.enumerated() {
-                    if let fresh = freshWorktrees.first(where: { $0.path == entry.info.path }) {
-                        self.allWorktrees[i] = (info: fresh, tree: entry.tree)
-                    }
-                }
-
-                self.dashboardVC?.updateAgents(self.buildAgentDisplayInfos())
+                _ = self.reconcileDiscoveredWorktrees(tabIndex: tabIndex, oldWorktrees: tab.worktrees, freshWorktrees: freshWorktrees)
             }
         }
+    }
+
+    @discardableResult
+    func reconcileDiscoveredWorktrees(tabIndex: Int, oldWorktrees: [WorktreeInfo], freshWorktrees: [WorktreeInfo]) -> Bool {
+        guard !freshWorktrees.isEmpty else { return false }
+        guard let tab = workspaceManager.tab(at: tabIndex) else { return false }
+
+        let knownPaths = Set(allWorktrees.map { $0.info.path })
+        let freshPaths = Set(freshWorktrees.map(\.path))
+        let deletedWorktrees = oldWorktrees.filter { !freshPaths.contains($0.path) }
+
+        var changed = false
+        if !deletedWorktrees.isEmpty {
+            workspaceManager.updateWorktrees(at: tabIndex, worktrees: freshWorktrees)
+            for deleted in deletedWorktrees {
+                terminalCoordinator.surfaceManager.removeTree(forPath: deleted.path)
+                worktreeDidDelete(deleted)
+            }
+            changed = true
+        }
+
+        let newWorktrees = freshWorktrees.filter { !knownPaths.contains($0.path) }
+        if !newWorktrees.isEmpty {
+            integrateNewWorktrees(repoRoot: tab.repoPath, allDiscovered: freshWorktrees, newWorktrees: newWorktrees)
+            changed = true
+        }
+
+        let branchChanged = freshWorktrees.contains { fresh in
+            oldWorktrees.first(where: { $0.path == fresh.path })?.branch != fresh.branch
+        }
+
+        guard changed || branchChanged else { return false }
+
+        for (i, entry) in allWorktrees.enumerated() {
+            if let fresh = freshWorktrees.first(where: { $0.path == entry.info.path }) {
+                allWorktrees[i] = (info: fresh, tree: entry.tree)
+            }
+        }
+
+        workspaceManager.updateWorktrees(at: tabIndex, worktrees: freshWorktrees)
+        dashboardVC?.updateAgents(buildAgentDisplayInfos())
+        statusPublisher.updateSurfaces(terminalCoordinator.surfaceManager.all)
+        delegate?.tabCoordinatorRequestUpdateTitleBar(self)
+        return true
     }
 
     // MARK: - Session State Persistence

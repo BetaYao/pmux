@@ -3,12 +3,15 @@ import AppKit
 protocol TitleBarDelegate: AnyObject {
     func titleBarDidToggleTheme()
     func titleBarDidRequestCollapseSidebar()
+    func titleBarDidRequestCleanMergedWorktrees()
 }
 
 final class TitleBarView: NSView {
     enum Layout {
         static let barHeight: CGFloat = 45
         static let capsuleHeight: CGFloat = 37
+        static let rightCapsuleCompactWidth: CGFloat = 76
+        static let rightCapsuleCleanWidth: CGFloat = 112
         static let arcVerticalOffset: CGFloat = 2
         static let dashboardLeadingInset: CGFloat = 16
         static let dashboardHorizontalPadding: CGFloat = 10
@@ -42,8 +45,10 @@ final class TitleBarView: NSView {
     private var secondaryUsageProgressWidthConstraint: NSLayoutConstraint?
 
     // Right controls — action group
+    private let cleanWorktreeButton = NSButton()
     private let themeButton = NSButton()
     private let collapseSidebarButton = NSButton()
+    private var rightArcWidthConstraint: NSLayoutConstraint?
 
     // State
     private var isWindowHovered = false
@@ -82,10 +87,16 @@ final class TitleBarView: NSView {
         updateArcBlockColors()
     }
 
-    func updateChromeState(isGridLayout: Bool, hasWorkspaces: Bool = true) {
+    func updateChromeState(isGridLayout: Bool, hasWorkspaces: Bool = true, canCleanWorktrees: Bool = false) {
+        cleanWorktreeButton.isHidden = !canCleanWorktrees
+        cleanWorktreeButton.isEnabled = canCleanWorktrees
+        rightArcWidthConstraint?.constant = canCleanWorktrees
+            ? Layout.rightCapsuleCleanWidth
+            : Layout.rightCapsuleCompactWidth
         collapseSidebarButton.isHidden = !hasWorkspaces
         collapseSidebarButton.isEnabled = !isGridLayout
         collapseSidebarButton.alphaValue = isGridLayout ? 0.3 : 1.0
+        layoutSubtreeIfNeeded()
     }
 
     func updateNotificationSummary(entry: NotificationEntry?, unreadCount: Int) {
@@ -101,7 +112,11 @@ final class TitleBarView: NSView {
         usesFocusedWorktreeMode = true
         capsuleIconView.isHidden = true
         capsuleLeadingLabel.stringValue = title
-        capsuleLeadingLabel.lineBreakMode = .byTruncatingTail
+        capsuleLeadingLabel.lineBreakMode = .byWordWrapping
+        capsuleLeadingLabel.maximumNumberOfLines = 2
+        capsuleLeadingLabel.cell?.wraps = true
+        capsuleLeadingLabel.cell?.usesSingleLineMode = false
+        capsuleLeadingLabel.cell?.lineBreakMode = .byWordWrapping
         capsuleBodyLabel.isHidden = true
         capsuleTrailingLabel.stringValue = tokenText
         capsuleTrailingLabel.isHidden = false
@@ -138,6 +153,9 @@ final class TitleBarView: NSView {
         setupLeftArcBlock()
         setupRightArcBlock()
 
+        let rightWidth = rightArcBlock.widthAnchor.constraint(equalToConstant: Layout.rightCapsuleCompactWidth)
+        rightArcWidthConstraint = rightWidth
+
         NSLayoutConstraint.activate([
             leftArcBlock.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             leftArcBlock.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Layout.arcVerticalOffset),
@@ -146,6 +164,7 @@ final class TitleBarView: NSView {
             rightArcBlock.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             rightArcBlock.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Layout.arcVerticalOffset),
             rightArcBlock.heightAnchor.constraint(equalToConstant: Layout.capsuleHeight),
+            rightWidth,
 
             leftArcBlock.trailingAnchor.constraint(equalTo: rightArcBlock.leadingAnchor, constant: -8),
         ])
@@ -303,11 +322,14 @@ final class TitleBarView: NSView {
                                action: #selector(collapseSidebarClicked))
         actionStack.addArrangedSubview(collapseSidebarButton)
 
+        configureCleanWorktreeButton()
+
         let rightStack = NSStackView()
         rightStack.orientation = .horizontal
         rightStack.spacing = 6
         rightStack.alignment = .centerY
         rightStack.translatesAutoresizingMaskIntoConstraints = false
+        rightStack.addArrangedSubview(cleanWorktreeButton)
         rightStack.addArrangedSubview(actionStack)
         rightArcBlock.addSubview(rightStack)
 
@@ -343,6 +365,31 @@ final class TitleBarView: NSView {
             button.heightAnchor.constraint(equalToConstant: 30),
         ])
         setupHoverTracking(for: button)
+    }
+
+    private func configureCleanWorktreeButton() {
+        cleanWorktreeButton.title = ""
+        cleanWorktreeButton.bezelStyle = .recessed
+        cleanWorktreeButton.isBordered = false
+        cleanWorktreeButton.image = NSImage(systemSymbolName: "trash", accessibilityDescription: "Clean worktrees")?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 13, weight: .medium))
+        cleanWorktreeButton.imagePosition = .imageOnly
+        cleanWorktreeButton.contentTintColor = SemanticColors.muted
+        cleanWorktreeButton.isHidden = true
+        cleanWorktreeButton.isEnabled = false
+        cleanWorktreeButton.target = self
+        cleanWorktreeButton.action = #selector(cleanWorktreeClicked)
+        cleanWorktreeButton.translatesAutoresizingMaskIntoConstraints = false
+        cleanWorktreeButton.setAccessibilityIdentifier("titlebar.cleanWorktree")
+        cleanWorktreeButton.setAccessibilityLabel("Clean merged worktrees")
+        cleanWorktreeButton.wantsLayer = true
+        cleanWorktreeButton.layer?.cornerRadius = 7
+        cleanWorktreeButton.layer?.backgroundColor = NSColor.clear.cgColor
+        NSLayoutConstraint.activate([
+            cleanWorktreeButton.widthAnchor.constraint(equalToConstant: 30),
+            cleanWorktreeButton.heightAnchor.constraint(equalToConstant: 30),
+        ])
+        setupHoverTracking(for: cleanWorktreeButton)
     }
 
     // MARK: - Hover Tracking
@@ -404,6 +451,10 @@ final class TitleBarView: NSView {
         delegate?.titleBarDidRequestCollapseSidebar()
     }
 
+    @objc private func cleanWorktreeClicked() {
+        delegate?.titleBarDidRequestCleanMergedWorktrees()
+    }
+
     // MARK: - State
 
     private func updateArcBlockColors() {
@@ -459,6 +510,11 @@ final class TitleBarView: NSView {
         let frame = primaryCapsuleFrames[currentPrimaryCapsuleIndex]
         capsuleIconView.image = NSImage(systemSymbolName: frame.iconName, accessibilityDescription: frame.leadingText)
         capsuleIconView.contentTintColor = frame.kind == .usage ? SemanticColors.accent : SemanticColors.muted
+        capsuleLeadingLabel.lineBreakMode = .byTruncatingTail
+        capsuleLeadingLabel.maximumNumberOfLines = 1
+        capsuleLeadingLabel.cell?.wraps = false
+        capsuleLeadingLabel.cell?.usesSingleLineMode = true
+        capsuleLeadingLabel.cell?.lineBreakMode = .byTruncatingTail
         capsuleLeadingLabel.attributedStringValue = NSAttributedString(
             string: frame.leadingText,
             attributes: [

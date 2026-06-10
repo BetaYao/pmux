@@ -2,8 +2,23 @@ import XCTest
 @testable import amux
 
 final class WorktreeInspectorViewControllerTests: XCTestCase {
-    func testYaziCommandUsesCurrentDirectory() {
-        XCTAssertEqual(WorktreeInspectorViewController.yaziCommand, "yazi .")
+    func testYaziCommandUsesResolvedPathAndHiddenConfig() throws {
+        let configDir = try makeTempDirectory()
+
+        let command = try XCTUnwrap(WorktreeInspectorViewController.yaziCommand(
+            yaziPath: "/opt/homebrew/bin/yazi",
+            configDirectory: configDir
+        ))
+
+        XCTAssertEqual(
+            command,
+            "/usr/bin/env YAZI_CONFIG_HOME='\(configDir.path)' '/opt/homebrew/bin/yazi' ."
+        )
+
+        let configURL = configDir.appendingPathComponent("yazi.toml")
+        let config = try String(contentsOf: configURL, encoding: .utf8)
+        XCTAssertTrue(config.contains("[mgr]"))
+        XCTAssertTrue(config.contains("show_hidden = true"))
     }
 
     func testInspectorShowsCloseButton() {
@@ -75,11 +90,13 @@ final class WorktreeInspectorViewControllerTests: XCTestCase {
     func testFilesTabShowsYaziContainerWhenAvailable() {
         var capturedPath: String?
         var capturedCommand: String?
+        let configDir = try! makeTempDirectory()
 
         let vc = WorktreeInspectorViewController(
             worktreePath: "/repo/project",
             initialTab: .files,
-            yaziAvailability: { true },
+            yaziPathProvider: { "/opt/homebrew/bin/yazi" },
+            yaziConfigDirectoryProvider: { configDir },
             makeDiffReviewView: { path in
                 DiffReviewView(
                     worktreePath: path,
@@ -97,14 +114,31 @@ final class WorktreeInspectorViewControllerTests: XCTestCase {
 
         XCTAssertNotNil(vc.view.viewWithAccessibilityIdentifier("worktreeInspector.yaziContainer"))
         XCTAssertEqual(capturedPath, "/repo/project")
-        XCTAssertEqual(capturedCommand, "yazi .")
+        XCTAssertEqual(
+            capturedCommand,
+            "/usr/bin/env YAZI_CONFIG_HOME='\(configDir.path)' '/opt/homebrew/bin/yazi' ."
+        )
     }
 
-    func testFilesTabShowsFailureMessageWhenYaziSurfaceCannotStart() {
+    func testFilesTabShowsMissingYaziWhenPathCannotBeResolved() {
         let vc = WorktreeInspectorViewController(
             worktreePath: "/repo/project",
             initialTab: .files,
-            yaziAvailability: { true },
+            yaziPathProvider: { nil }
+        )
+
+        vc.loadViewIfNeeded()
+
+        XCTAssertNotNil(vc.view.viewWithAccessibilityIdentifier("worktreeInspector.filesMissingYazi"))
+    }
+
+    func testFilesTabShowsFailureMessageWhenYaziSurfaceCannotStart() {
+        let configDir = try! makeTempDirectory()
+        let vc = WorktreeInspectorViewController(
+            worktreePath: "/repo/project",
+            initialTab: .files,
+            yaziPathProvider: { "/opt/homebrew/bin/yazi" },
+            yaziConfigDirectoryProvider: { configDir },
             makeDiffReviewView: { path in
                 DiffReviewView(
                     worktreePath: path,
@@ -118,6 +152,13 @@ final class WorktreeInspectorViewControllerTests: XCTestCase {
 
         XCTAssertNil(vc.view.viewWithAccessibilityIdentifier("worktreeInspector.yaziContainer"))
         XCTAssertNotNil(vc.view.viewWithAccessibilityIdentifier("worktreeInspector.filesYaziFailed"))
+    }
+
+    private func makeTempDirectory() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("amux-yazi-test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
     }
 }
 

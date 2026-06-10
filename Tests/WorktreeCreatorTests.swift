@@ -72,6 +72,30 @@ final class WorktreeCreatorTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: filePath))
     }
 
+    func testBranchNameFromTaskDescriptionCreatesReadableSlug() {
+        let branch = WorktreeCreator.branchName(fromTaskDescription: "Fix flaky login redirect!!!")
+
+        XCTAssertEqual(branch, "task/fix-flaky-login-redirect")
+    }
+
+    func testBranchNameFromChineseTaskDescriptionIsGitSafe() {
+        let branch = WorktreeCreator.branchName(fromTaskDescription: "修复工作树卡片聚焦")
+
+        XCTAssertTrue(branch.hasPrefix("task/"))
+        XCTAssertFalse(branch.contains(" "))
+        XCTAssertFalse(branch.contains("修"))
+        XCTAssertGreaterThan(branch.count, "task/".count)
+    }
+
+    func testBranchNameFromTaskDescriptionAvoidsExistingBranches() {
+        let branch = WorktreeCreator.branchName(
+            fromTaskDescription: "Fix flaky login redirect",
+            existingBranches: ["main", "task/fix-flaky-login-redirect", "task/fix-flaky-login-redirect-2"]
+        )
+
+        XCTAssertEqual(branch, "task/fix-flaky-login-redirect-3")
+    }
+
     func testCreateWorktreeDuplicatePathThrows() throws {
         // Create first worktree
         _ = try WorktreeCreator.createWorktree(

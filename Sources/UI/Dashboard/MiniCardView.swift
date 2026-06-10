@@ -104,9 +104,11 @@ final class MiniCardView: NSView {
 
         titleLabel.font = NSFont.systemFont(ofSize: Typography.primaryPointSize, weight: .semibold)
         titleLabel.textColor = SemanticColors.text
-        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.lineBreakMode = .byWordWrapping
         titleLabel.maximumNumberOfLines = 2
         titleLabel.cell?.wraps = true
+        titleLabel.cell?.usesSingleLineMode = false
+        titleLabel.cell?.lineBreakMode = .byWordWrapping
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.setContentCompressionResistancePriority(.defaultHigh, for: .vertical)
         addSubview(titleLabel)

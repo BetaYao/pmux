@@ -397,20 +397,21 @@ class MainWindowController: NSWindowController {
             repoPaths: config.workspacePaths,
             repoPathsProvider: { [weak self] in self?.tabCoordinator.config.workspacePaths ?? [] },
             onAddRepo: { [weak self] in self?.tabCoordinator.addRepoViaOpenPanel(window: self?.window) }
-        ) { [weak self] name, repoPath, agentType, reuseEnv in
+        ) { [weak self] taskDescription, repoPath, agentType, reuseEnv in
             guard let self else { return }
             let currentPath = self.tabCoordinator.selectedAgent?.worktreePath
             DispatchQueue.global(qos: .userInitiated).async {
                 let branches = WorktreeCreator.listBranches(repoPath: repoPath)
                 let base = branches.contains("main") ? "main" : (branches.contains("master") ? "master" : (branches.first ?? "main"))
                 do {
-                    let info = try WorktreeCreator.createWorktree(repoPath: repoPath, branchName: name, baseBranch: base)
+                    let branchName = WorktreeCreator.branchName(fromTaskDescription: taskDescription, existingBranches: branches)
+                    let info = try WorktreeCreator.createWorktree(repoPath: repoPath, branchName: branchName, baseBranch: base)
                     WorktreeAgentTypeStore.shared.set(agentType, forWorktree: info.path)
                     if reuseEnv, let currentPath { WorktreeCreator.copyEnvironmentFiles(from: currentPath, to: info.path) }
                     DispatchQueue.main.async {
                         self.tabCoordinator.handleNewBranch(info: info, repoPath: repoPath)
                         self.dashboardVC?.inlineCreateReportSuccess()
-                        self.launchAgent(agentType, inWorktree: info.path)
+                        self.launchAgent(agentType, inWorktree: info.path, taskDescription: taskDescription)
                     }
                 } catch {
                     DispatchQueue.main.async {
@@ -533,7 +534,8 @@ class MainWindowController: NSWindowController {
     private func updateTitleBar() {
         titleBar.updateChromeState(
             isGridLayout: false,
-            hasWorkspaces: !tabCoordinator.workspaceManager.tabs.isEmpty
+            hasWorkspaces: !tabCoordinator.workspaceManager.tabs.isEmpty,
+            canCleanWorktrees: tabCoordinator.allWorktrees.contains { !$0.info.isMainWorktree }
         )
         updatePrimaryCapsuleNotification()
         refreshFocusedWorktreeCapsule()
@@ -559,11 +561,16 @@ class MainWindowController: NSWindowController {
 
     /// Best-effort: type the selected agent's launch command into the new
     /// worktree's terminal once its session has had a moment to attach.
-    private func launchAgent(_ agentType: AgentType, inWorktree path: String) {
+    private func launchAgent(_ agentType: AgentType, inWorktree path: String, taskDescription: String? = nil) {
         guard let command = agentType.launchCommand else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             guard let surface = AgentHead.shared.agent(forWorktree: path)?.surface else { return }
             surface.sendText(command + "\r")
+            if let taskDescription, !taskDescription.isEmpty {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    surface.sendText(taskDescription + "\r")
+                }
+            }
         }
     }
 
@@ -781,6 +788,71 @@ extension MainWindowController: TitleBarDelegate {
 
     func titleBarDidRequestCollapseSidebar() {
         tabCoordinator.dashboardVC?.toggleSidebarCollapse()
+    }
+
+    func titleBarDidRequestCleanMergedWorktrees() {
+        cleanMergedWorktrees()
+    }
+}
+
+private extension MainWindowController {
+    func cleanMergedWorktrees() {
+        let candidates = tabCoordinator.allWorktrees.map(\.info)
+        let repoCache = tabCoordinator.worktreeRepoCache
+        guard candidates.contains(where: { !$0.isMainWorktree }) else {
+            showWorktreeCleanupAlert(title: "No worktrees to clean", message: "There are no linked worktrees in the current workspace list.")
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let summary = WorktreeDeleter.cleanMergedWorktrees(worktrees: candidates) { info in
+                repoCache[info.path]
+                    ?? WorktreeDiscovery.findRepoRoot(from: info.path)
+            }
+
+            DispatchQueue.main.async {
+                for path in summary.deletedPaths {
+                    guard let item = self.tabCoordinator.allWorktrees.first(where: { $0.info.path == path }) else { continue }
+                    self.terminalCoordinator.surfaceManager.removeTree(forPath: path)
+                    self.tabCoordinator.worktreeDidDelete(item.info)
+                }
+                self.tabCoordinator.saveSelectedWorktree()
+                self.updateTitleBar()
+                self.showWorktreeCleanupSummary(summary)
+            }
+        }
+    }
+
+    func showWorktreeCleanupSummary(_ summary: WorktreeCleanupSummary) {
+        if summary.deletedPaths.isEmpty {
+            let message = summary.skipped.isEmpty
+                ? "No linked worktrees were found."
+                : summary.skipped.map { URL(fileURLWithPath: $0.path).lastPathComponent + ": " + $0.reason }.joined(separator: "\n")
+            showWorktreeCleanupAlert(title: "No merged worktrees cleaned", message: message)
+            return
+        }
+
+        let deletedNames = summary.deletedPaths
+            .map { URL(fileURLWithPath: $0).lastPathComponent }
+            .joined(separator: "\n")
+        showWorktreeCleanupAlert(
+            title: "Cleaned \(summary.deletedPaths.count) merged worktree\(summary.deletedPaths.count == 1 ? "" : "s")",
+            message: deletedNames
+        )
+    }
+
+    func showWorktreeCleanupAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        if let window {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
     }
 }
 

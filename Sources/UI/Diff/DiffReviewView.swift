@@ -215,7 +215,17 @@ final class DiffReviewView: NSView {
                     case .deletion: prefix = "-"; color = NSColor.systemRed
                     case .context: prefix = " "; color = Theme.textSecondary
                     }
-                    attributed.append(NSAttributedString(string: prefix + line.content + "\n", attributes: [
+                    attributed.append(NSAttributedString(string: prefix, attributes: [
+                        .font: monoFont,
+                        .foregroundColor: color,
+                    ]))
+                    attributed.append(DiffSyntaxHighlighter.attributedString(
+                        for: line.content,
+                        filePath: file.path,
+                        font: monoFont,
+                        baseColor: color
+                    ))
+                    attributed.append(NSAttributedString(string: "\n", attributes: [
                         .font: monoFont,
                         .foregroundColor: color,
                     ]))

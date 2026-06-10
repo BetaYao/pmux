@@ -64,4 +64,55 @@ final class TabCoordinatorTests: XCTestCase {
         coordinator.worktreeDidDelete(info)
         XCTAssertTrue(coordinator.allWorktrees.isEmpty)
     }
+
+    func testReconcileDiscoveredWorktreesRemovesDeletedWorktree() {
+        let coordinator = TabCoordinator(config: Config())
+        coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
+        coordinator.statusPublisher = StatusPublisher(agentConfig: Config().agentDetect)
+        coordinator.statusAggregator = WorktreeStatusAggregator()
+
+        let main = WorktreeInfo(path: "/repo", branch: "main", commitHash: "abc12345", isMainWorktree: true)
+        let deleted = WorktreeInfo(path: "/repo/.worktrees/feature", branch: "feature", commitHash: "def67890", isMainWorktree: false)
+        let mainTree = SplitTree(worktreePath: main.path, rootLeafId: "leaf-main", surfaceId: "surface-main", sessionName: "main")
+        let deletedTree = SplitTree(worktreePath: deleted.path, rootLeafId: "leaf-feature", surfaceId: "surface-feature", sessionName: "feature")
+
+        let tabIndex = coordinator.workspaceManager.addTab(repoPath: "/repo", worktrees: [main, deleted])
+        coordinator.allWorktrees.append((info: main, tree: mainTree))
+        coordinator.allWorktrees.append((info: deleted, tree: deletedTree))
+        coordinator.worktreeRepoCache[main.path] = "/repo"
+        coordinator.worktreeRepoCache[deleted.path] = "/repo"
+
+        let changed = coordinator.reconcileDiscoveredWorktrees(tabIndex: tabIndex, oldWorktrees: [main, deleted], freshWorktrees: [main])
+
+        XCTAssertTrue(changed)
+        XCTAssertEqual(coordinator.allWorktrees.map(\.info.path), [main.path])
+        XCTAssertNil(coordinator.worktreeRepoCache[deleted.path])
+        XCTAssertEqual(coordinator.workspaceManager.tabs[tabIndex].worktrees.map(\.path), [main.path])
+    }
+
+    func testReconcileDiscoveredWorktreesHandlesAddedAndDeletedInSameScan() {
+        let coordinator = TabCoordinator(config: Config())
+        coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
+        coordinator.statusPublisher = StatusPublisher(agentConfig: Config().agentDetect)
+        coordinator.statusAggregator = WorktreeStatusAggregator()
+
+        let main = WorktreeInfo(path: "/repo", branch: "main", commitHash: "abc12345", isMainWorktree: true)
+        let deleted = WorktreeInfo(path: "/repo/.worktrees/deleted", branch: "deleted", commitHash: "def67890", isMainWorktree: false)
+        let added = WorktreeInfo(path: "/repo/.worktrees/added", branch: "added", commitHash: "1234abcd", isMainWorktree: false)
+        let mainTree = SplitTree(worktreePath: main.path, rootLeafId: "leaf-main", surfaceId: "surface-main", sessionName: "main")
+        let deletedTree = SplitTree(worktreePath: deleted.path, rootLeafId: "leaf-deleted", surfaceId: "surface-deleted", sessionName: "deleted")
+
+        let tabIndex = coordinator.workspaceManager.addTab(repoPath: "/repo", worktrees: [main, deleted])
+        coordinator.allWorktrees.append((info: main, tree: mainTree))
+        coordinator.allWorktrees.append((info: deleted, tree: deletedTree))
+        coordinator.worktreeRepoCache[main.path] = "/repo"
+        coordinator.worktreeRepoCache[deleted.path] = "/repo"
+
+        let changed = coordinator.reconcileDiscoveredWorktrees(tabIndex: tabIndex, oldWorktrees: [main, deleted], freshWorktrees: [main, added])
+
+        XCTAssertTrue(changed)
+        XCTAssertEqual(Set(coordinator.allWorktrees.map(\.info.path)), Set([main.path, added.path]))
+        XCTAssertNil(coordinator.worktreeRepoCache[deleted.path])
+        XCTAssertEqual(Set(coordinator.workspaceManager.tabs[tabIndex].worktrees.map(\.path)), Set([main.path, added.path]))
+    }
 }

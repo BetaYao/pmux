@@ -142,6 +142,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
     private let leftRightSidebarStack = FlippedStackView()
     private var leftRightMiniCards: [StackedMiniCardContainerView] = []
     private let inlineCreateView = InlineWorktreeCreateView()
+    private var inlineCreateHeightConstraint: NSLayoutConstraint?
 
     // Top-Small layout
     private let topSmallContainer = NSView()
@@ -656,8 +657,13 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         // survives sidebar relayout.
         inlineCreateView.translatesAutoresizingMaskIntoConstraints = false
         leftRightContainer.addSubview(inlineCreateView)
+        inlineCreateView.onPreferredHeightChange = { [weak self] height, animated in
+            self?.setInlineCreateHeight(height, animated: animated)
+        }
 
         let spacing: CGFloat = 8
+        let inlineHeight = inlineCreateView.heightAnchor.constraint(equalToConstant: inlineCreateView.preferredHeight)
+        inlineCreateHeightConstraint = inlineHeight
 
         NSLayoutConstraint.activate([
             leftRightContainer.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: layoutTopInset),
@@ -677,13 +683,35 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
             inlineCreateView.leadingAnchor.constraint(equalTo: leftRightSidebarScroll.leadingAnchor),
             inlineCreateView.trailingAnchor.constraint(equalTo: leftRightSidebarScroll.trailingAnchor),
             inlineCreateView.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor, constant: -8),
-            inlineCreateView.heightAnchor.constraint(greaterThanOrEqualToConstant: 48),
+            inlineHeight,
         ])
 
         // Sidebar collapse constraints for left-right
         leftRightFocusWidthExpanded = leftRightFocusPanel.widthAnchor.constraint(equalTo: leftRightContainer.widthAnchor, multiplier: 0.78, constant: -spacing / 2)
         leftRightFocusWidthCollapsed = leftRightFocusPanel.trailingAnchor.constraint(equalTo: leftRightContainer.trailingAnchor)
         leftRightFocusWidthExpanded?.isActive = true
+    }
+
+    private func setInlineCreateHeight(_ height: CGFloat, animated: Bool) {
+        guard let constraint = inlineCreateHeightConstraint else { return }
+        guard abs(constraint.constant - height) > 0.5 else { return }
+
+        let layout = {
+            constraint.constant = height
+            self.view.layoutSubtreeIfNeeded()
+        }
+
+        guard animated, view.window != nil else {
+            layout()
+            return
+        }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.22
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            context.allowsImplicitAnimation = true
+            layout()
+        }
     }
 
     // MARK: - Setup: Top-Small

@@ -156,6 +156,64 @@ final class WorktreeDeleterTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: worktreePath))
     }
 
+    // MARK: - merge check
+
+    func testMergedWorktreeCanBeCleanedWhenHeadIsInOriginMain() throws {
+        let worktreePath = createWorktree(branch: "feature-merged")
+        let filePath = URL(fileURLWithPath: worktreePath).appendingPathComponent("merged.txt").path
+        try "merged".write(toFile: filePath, atomically: true, encoding: .utf8)
+        git(["add", "merged.txt"], in: worktreePath)
+        git(["-c", "user.email=test@test.com", "-c", "user.name=Test", "commit", "-m", "merged work"], in: worktreePath)
+        git(["merge", "--ff-only", "feature-merged"], in: repoPath)
+        git(["update-ref", "refs/remotes/origin/main", "main"], in: repoPath)
+
+        let check = WorktreeDeleter.mergeCheckForOnlineMainOrMaster(worktreePath: worktreePath, repoPath: repoPath)
+
+        XCTAssertTrue(check.canDelete, check.reason)
+        XCTAssertEqual(check.targetBranch, "origin/main")
+    }
+
+    func testUnmergedWorktreeCannotBeCleaned() throws {
+        git(["update-ref", "refs/remotes/origin/main", "main"], in: repoPath)
+        let worktreePath = createWorktree(branch: "feature-unmerged")
+        let filePath = URL(fileURLWithPath: worktreePath).appendingPathComponent("unmerged.txt").path
+        try "unmerged".write(toFile: filePath, atomically: true, encoding: .utf8)
+        git(["add", "unmerged.txt"], in: worktreePath)
+        git(["-c", "user.email=test@test.com", "-c", "user.name=Test", "commit", "-m", "unmerged work"], in: worktreePath)
+
+        let check = WorktreeDeleter.mergeCheckForOnlineMainOrMaster(worktreePath: worktreePath, repoPath: repoPath)
+
+        XCTAssertFalse(check.canDelete)
+        XCTAssertEqual(check.targetBranch, "origin/main")
+    }
+
+    func testCleanMergedWorktreesScansAllLinkedWorktrees() throws {
+        let mergedPath = createWorktree(branch: "feature-global-merged")
+        let mergedFile = URL(fileURLWithPath: mergedPath).appendingPathComponent("global-merged.txt").path
+        try "merged".write(toFile: mergedFile, atomically: true, encoding: .utf8)
+        git(["add", "global-merged.txt"], in: mergedPath)
+        git(["-c", "user.email=test@test.com", "-c", "user.name=Test", "commit", "-m", "global merged"], in: mergedPath)
+        git(["merge", "--ff-only", "feature-global-merged"], in: repoPath)
+        git(["update-ref", "refs/remotes/origin/main", "main"], in: repoPath)
+
+        let unmergedPath = createWorktree(branch: "feature-global-unmerged")
+        let unmergedFile = URL(fileURLWithPath: unmergedPath).appendingPathComponent("global-unmerged.txt").path
+        try "unmerged".write(toFile: unmergedFile, atomically: true, encoding: .utf8)
+        git(["add", "global-unmerged.txt"], in: unmergedPath)
+        git(["-c", "user.email=test@test.com", "-c", "user.name=Test", "commit", "-m", "global unmerged"], in: unmergedPath)
+
+        let worktrees = WorktreeDiscovery.discover(repoPath: repoPath)
+        let summary = WorktreeDeleter.cleanMergedWorktrees(
+            worktrees: worktrees,
+            repoPathForWorktree: { _ in repoPath }
+        )
+
+        XCTAssertEqual(summary.deletedPaths.map(lastPathComponent), ["feature-global-merged"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: mergedPath))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: unmergedPath))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: repoPath))
+    }
+
     // MARK: - Helpers
 
     private func createTestRepo() {
@@ -193,5 +251,9 @@ final class WorktreeDeleterTests: XCTestCase {
         try? process.run()
         process.waitUntilExit()
         return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    }
+
+    private func lastPathComponent(_ path: String) -> String {
+        URL(fileURLWithPath: path).lastPathComponent
     }
 }

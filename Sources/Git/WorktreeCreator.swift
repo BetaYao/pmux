@@ -15,6 +15,22 @@ enum WorktreeCreatorError: Error, LocalizedError {
 }
 
 enum WorktreeCreator {
+    static func branchName(fromTaskDescription description: String) -> String {
+        branchName(fromTaskDescription: description, existingBranches: [])
+    }
+
+    static func branchName(fromTaskDescription description: String, existingBranches: [String]) -> String {
+        let slug = slugFromTaskDescription(description)
+        let base = "task/\(slug)"
+        let existing = Set(existingBranches)
+        guard existing.contains(base) else { return base }
+
+        var suffix = 2
+        while existing.contains("\(base)-\(suffix)") {
+            suffix += 1
+        }
+        return "\(base)-\(suffix)"
+    }
 
     /// List remote and local branches for a repo
     static func listBranches(repoPath: String) -> [String] {
@@ -104,6 +120,36 @@ enum WorktreeCreator {
 
     private static func isEnvironmentFile(_ name: String) -> Bool {
         name == ".env" || name == ".envrc" || name.hasPrefix(".env.")
+    }
+
+    private static func slugFromTaskDescription(_ description: String) -> String {
+        let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let latinized = NSMutableString(string: trimmed) as CFMutableString
+        CFStringTransform(latinized, nil, kCFStringTransformToLatin, false)
+        CFStringTransform(latinized, nil, kCFStringTransformStripCombiningMarks, false)
+
+        var parts: [String] = []
+        var current = ""
+        for scalar in (latinized as String).lowercased().unicodeScalars {
+            if CharacterSet.alphanumerics.contains(scalar) {
+                current.unicodeScalars.append(scalar)
+            } else if !current.isEmpty {
+                parts.append(current)
+                current = ""
+            }
+        }
+        if !current.isEmpty { parts.append(current) }
+
+        let joined = parts.joined(separator: "-")
+        guard !joined.isEmpty else {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyyMMdd-HHmmss"
+            return "task-\(formatter.string(from: Date()))"
+        }
+
+        if joined.count <= 48 { return joined }
+        let end = joined.index(joined.startIndex, offsetBy: 48)
+        return String(joined[..<end]).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
     }
 
     private static func runGit(args: [String], in directory: String) -> String? {
