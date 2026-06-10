@@ -107,7 +107,7 @@ struct PrimaryCapsuleFrame: Equatable {
 enum UsageSummaryFormatter {
     static let shortcutTips: [(leading: String, body: String)] = [
         ("Tip", "Cmd+1..4 switch layout"),
-        ("Tip", "Cmd+J toggle dashboard focus"),
+        ("Tip", "Cmd+Esc to dashboard, hjkl to navigate"),
         ("Tip", "Cmd+B toggle sidebar"),
         ("Tip", "Cmd+D split horizontally"),
         ("Tip", "Cmd+Shift+D split vertically"),
