@@ -65,6 +65,15 @@ final class KeyboardModeController {
         setMode(.normal, substate: .none)
     }
 
+    /// Temporarily push a one-off hint to the delegate, then restore `hintText` after 1.5s.
+    func flashHint(_ text: String) {
+        delegate?.keyboardHintDidChange(text)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self else { return }
+            self.delegate?.keyboardHintDidChange(self.hintText)
+        }
+    }
+
     private func setMode(_ newMode: KeyboardMode, substate newSub: KeyboardSubstate) {
         let changed = newMode != mode || newSub != substate
         mode = newMode
