@@ -20,8 +20,8 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
     /// dashboard nav ring to `.normal`.
     var onFormEnd: (() -> Void)?
 
-    private static let agentChoices = AgentType.allCases.filter { $0.isAIAgent }
-    private var selectedAgentType: AgentType = .claudeCode
+    static let agentChoices = AgentType.allCases.filter { $0.isAIAgent }
+    var selectedAgentType: AgentType = .claudeCode
 
     private let promptTextView = PromptTextView()
     private let repoChip = DropdownChip()
@@ -37,7 +37,7 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
     private var promptHeight: NSLayoutConstraint!
 
     private var repoPaths: [String] = []
-    private var selectedRepoPath: String?
+    var selectedRepoPath: String?
 
     private static let collapsedHeight: CGFloat = 84
     private static let expandedHeight: CGFloat = 120
@@ -347,7 +347,7 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
 
     /// Cycle the selected repo by `delta` with modular wraparound over the live
     /// repo paths, then refresh the chip via the shared update path.
-    private func cycleRepo(_ delta: Int) {
+    func cycleRepo(_ delta: Int) {
         let paths = repoPathsProvider?() ?? repoPaths
         repoPaths = paths
         guard !paths.isEmpty else { return }
@@ -359,7 +359,7 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
 
     /// Cycle the selected agent by `delta` with modular wraparound over the AI
     /// agent choices, then refresh the chip via the shared update path.
-    private func cycleAgent(_ delta: Int) {
+    func cycleAgent(_ delta: Int) {
         let all = Self.agentChoices
         guard !all.isEmpty else { return }
         let current = all.firstIndex(of: selectedAgentType) ?? 0
