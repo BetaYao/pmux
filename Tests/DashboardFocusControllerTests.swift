@@ -46,6 +46,18 @@ final class DashboardFocusControllerTests: XCTestCase {
         XCTAssertEqual(ctrl.focusedTarget, .bigPanel)
     }
 
+    func testFocusLayoutStartsAtSelectedCard() {
+        let ctrl = DashboardFocusController()
+        ctrl.enterFocusLayout(cardIds: ["a", "b"], initialId: "b")
+        XCTAssertEqual(ctrl.focusedTarget, .card("b"))
+    }
+
+    func testFocusLayoutUnknownInitialFallsBackToBigPanel() {
+        let ctrl = DashboardFocusController()
+        ctrl.enterFocusLayout(cardIds: ["a", "b"], initialId: "z")
+        XCTAssertEqual(ctrl.focusedTarget, .bigPanel)
+    }
+
     func testFocusLayoutRingCyclesPanelThenCards() {
         let ctrl = DashboardFocusController()
         ctrl.enterFocusLayout(cardIds: ["a", "b"])

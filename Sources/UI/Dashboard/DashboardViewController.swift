@@ -1017,13 +1017,13 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         focusController.captureSnapshot(snapshot)
 
         let cardIds = agents.map { $0.id }
+        let initial = snapshot.focusedWorktreePath
+            .flatMap { path in agents.first(where: { $0.worktreePath == path })?.id }
+            ?? (selectedAgentId.isEmpty ? nil : selectedAgentId)
         if currentLayout == .grid {
-            let initial = snapshot.focusedWorktreePath
-                .flatMap { path in agents.first(where: { $0.worktreePath == path })?.id }
-                ?? (selectedAgentId.isEmpty ? nil : selectedAgentId)
             focusController.enterGrid(cardIds: cardIds, initialId: initial)
         } else {
-            focusController.enterFocusLayout(cardIds: cardIds)
+            focusController.enterFocusLayout(cardIds: cardIds, initialId: initial)
         }
 
         // Clear mouse-selection visuals so only the keyboard focus ring is visible.

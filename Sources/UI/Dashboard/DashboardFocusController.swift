@@ -44,10 +44,17 @@ final class DashboardFocusController {
         }
     }
 
-    func enterFocusLayout(cardIds: [String]) {
+    func enterFocusLayout(cardIds: [String], initialId: String? = nil) {
         mode = .focusLayout
         self.cardIds = cardIds
-        focusedTarget = .bigPanel
+        // Land on the currently-selected card so Cmd+Esc puts the ring straight on a
+        // mini card (the main panel already mirrors it). Fall back to the big panel
+        // only when there is no card to focus.
+        if let initial = initialId, cardIds.contains(initial) {
+            focusedTarget = .card(initial)
+        } else {
+            focusedTarget = .bigPanel
+        }
     }
 
     func exit() {
