@@ -119,6 +119,7 @@
 		718D81760B2F343314164B55 /* TabCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A2CD6BFC4EC79E9FC75D872 /* TabCoordinatorTests.swift */; };
 		722B2FE26406ACE23298D47C /* DialogPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B4EDE03C0B059F18636D7A1 /* DialogPresenter.swift */; };
 		72C6242F64072C1C357A051A /* HooksChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1675A2D7BE2F2A5B7BFB516 /* HooksChannel.swift */; };
+		74C4207A3F04363339D8D079 /* ShellEscapeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3FA8EB21D237D7506B81C96 /* ShellEscapeTests.swift */; };
 		752131689B28812DFF4AE341 /* SplitPanePage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F62EC00E9FFB06A073D640EB /* SplitPanePage.swift */; };
 		76F3D2F38EEEC53187965726 /* WorkspaceManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4050BBCF87128788FEA4DBD7 /* WorkspaceManagerTests.swift */; };
 		76F4404111DB70F4C0C4CF29 /* MiniCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6801CC6BC092B600544DE3F /* MiniCardView.swift */; };
@@ -138,6 +139,7 @@
 		8D33936FC4085708E96D6E94 /* TitleBarPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC33A591B00F33939740DD3D /* TitleBarPage.swift */; };
 		8E959C7E0D9ACDE8CD690281 /* IdeaStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20D2B334967F1BF44BF73E5 /* IdeaStore.swift */; };
 		8F8D593A4096CFCFDF6C4B52 /* UsageSummaryFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B2BE4EB4BC46E262467131B /* UsageSummaryFormatterTests.swift */; };
+		9194A7B30840E266CA159BCE /* ShellEscape.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E4BED112652CBAD8B17101D /* ShellEscape.swift */; };
 		91E7A931D46BEA6AB3697B8F /* GridLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D889DDFAC3CC9C0EACC3044D /* GridLayoutTests.swift */; };
 		937D18376DEC07514B18484E /* PanelCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADFFA224AF9666060F439050 /* PanelCoordinatorTests.swift */; };
 		949DE6883F7AEE1D91999921 /* GatewayState.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF00151674278A8ADACEE0DB /* GatewayState.swift */; };
@@ -267,6 +269,7 @@
 		39247E0AFC479057F44EA052 /* QuickSwitcherViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickSwitcherViewController.swift; sourceTree = "<group>"; };
 		3C5104151E0925770B36E4A0 /* StatusDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusDetector.swift; sourceTree = "<group>"; };
 		3CFD5E68972BBDDF4E6503B8 /* ActivityFeedRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityFeedRendererTests.swift; sourceTree = "<group>"; };
+		3E4BED112652CBAD8B17101D /* ShellEscape.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellEscape.swift; sourceTree = "<group>"; };
 		3F03B8ADAABD9E98BB306A06 /* NotificationManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManagerTests.swift; sourceTree = "<group>"; };
 		3F3EC147D39FE4E366B32F5C /* StatusBarViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarViewTests.swift; sourceTree = "<group>"; };
 		3F6FF5606A6EFD6385994381 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
@@ -362,6 +365,7 @@
 		A20D2B334967F1BF44BF73E5 /* IdeaStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdeaStore.swift; sourceTree = "<group>"; };
 		A216C6E480EEA731BD8903E5 /* UpdateBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateBanner.swift; sourceTree = "<group>"; };
 		A3F4ABE8A4CFEF7210DA1591 /* WorktreeTitleCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeTitleCache.swift; sourceTree = "<group>"; };
+		A3FA8EB21D237D7506B81C96 /* ShellEscapeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellEscapeTests.swift; sourceTree = "<group>"; };
 		A514581BBC2450AB4E0413FA /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		A65E7CD1819F4C3E75375C24 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		A68CD54222D73B026FD13DCE /* UsageSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageSummary.swift; sourceTree = "<group>"; };
@@ -541,6 +545,7 @@
 				D8717084986CFAE8E228120B /* SessionManagerTests.swift */,
 				749DF586568A05962185F5E5 /* SessionRestoreConfigTests.swift */,
 				00BDCFC9B4782218F096BFE2 /* SessionTitleLookupTests.swift */,
+				A3FA8EB21D237D7506B81C96 /* ShellEscapeTests.swift */,
 				82F193B30AFAE7A7BE99A4F9 /* SplitContainerLayoutTests.swift */,
 				5F72F18D660645D594320BB8 /* SplitNodeTests.swift */,
 				8AA434C4E814B13DBEB0F64B /* StackedCardContainerDoubleClickTests.swift */,
@@ -745,6 +750,7 @@
 				0C7B621A87E3D727BCBF4A77 /* ProcessRunner.swift */,
 				0935D46D032322E0AAD958B9 /* SessionManager.swift */,
 				955E9DCF86DE6F47F205ADDA /* SessionTitleLookup.swift */,
+				3E4BED112652CBAD8B17101D /* ShellEscape.swift */,
 				44410620EE5165E3D3BB3D25 /* SurfaceRegistry.swift */,
 				1ABC51595BC7B289F445A332 /* TerminalSurfaceManager.swift */,
 				7A98186BE8949B4F48EE4BF8 /* TmuxChannel.swift */,
@@ -1034,6 +1040,7 @@
 				42F15738CDD467055210F0BF /* SessionManager.swift in Sources */,
 				6C4E1EE6DC237C05FE4904FE /* SessionTitleLookup.swift in Sources */,
 				B48C76139ED957CCE626C610 /* SettingsViewController.swift in Sources */,
+				9194A7B30840E266CA159BCE /* ShellEscape.swift in Sources */,
 				D079CAA9645048AB3399149D /* SplitContainerView.swift in Sources */,
 				3DA77E8AB87A5F3726C07041 /* SplitNode.swift in Sources */,
 				B3AC4A0DB754CDD14A23C074 /* SplitTree.swift in Sources */,
@@ -1153,6 +1160,7 @@
 				6A83AB65B756268FD550201B /* SessionManagerTests.swift in Sources */,
 				41E7E6EF21724868D5F93170 /* SessionRestoreConfigTests.swift in Sources */,
 				5C50AAB2978969B584527B3C /* SessionTitleLookupTests.swift in Sources */,
+				74C4207A3F04363339D8D079 /* ShellEscapeTests.swift in Sources */,
 				E90720F1B287FCBE0801B69A /* SplitContainerLayoutTests.swift in Sources */,
 				39BAA2F9DBFD5B80448D72FC /* SplitNodeTests.swift in Sources */,
 				168318DF3743587B07F2849D /* StackedCardContainerDoubleClickTests.swift in Sources */,
