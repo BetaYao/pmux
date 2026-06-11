@@ -75,6 +75,17 @@ enum AgentType: String, Codable, CaseIterable {
         }
     }
 
+    /// Full agent invocation including the task as the agent's initial prompt
+    /// (a positional argument, e.g. `claude 'fix the bug'`). Returns nil for
+    /// non-AI / shell types (those are not auto-launched). The task is
+    /// shell-escaped because the result is interpreted by a POSIX shell.
+    func launchCommand(withTask task: String) -> String? {
+        guard let base = launchCommand else { return nil }
+        let trimmed = task.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return base }
+        return "\(base) \(ShellEscape.singleQuote(trimmed))"
+    }
+
     /// Short label for compact UI (the picker chip).
     var shortName: String {
         switch self {

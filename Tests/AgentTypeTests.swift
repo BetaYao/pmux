@@ -141,4 +141,34 @@ final class AgentTypeTests: XCTestCase {
         XCTAssertEqual(AgentType.btop.displayName, "btop")
         XCTAssertEqual(AgentType.shellCommand.displayName, "Shell")
     }
+
+    // MARK: - launchCommand(withTask:)
+
+    func testLaunchCommandWithTaskComposesPositionalPrompt() {
+        XCTAssertEqual(
+            AgentType.claudeCode.launchCommand(withTask: "fix the login bug"),
+            "claude 'fix the login bug'"
+        )
+        XCTAssertEqual(
+            AgentType.codex.launchCommand(withTask: "add tests"),
+            "codex 'add tests'"
+        )
+    }
+
+    func testLaunchCommandWithEmptyTaskReturnsBareCommand() {
+        XCTAssertEqual(AgentType.claudeCode.launchCommand(withTask: ""), "claude")
+        XCTAssertEqual(AgentType.claudeCode.launchCommand(withTask: "   "), "claude")
+    }
+
+    func testLaunchCommandWithTaskEscapesQuotes() {
+        XCTAssertEqual(
+            AgentType.claudeCode.launchCommand(withTask: "can't stop"),
+            "claude 'can'\\''t stop'"
+        )
+    }
+
+    func testLaunchCommandWithTaskNilForNonAIAgent() {
+        XCTAssertNil(AgentType.npm.launchCommand(withTask: "anything"))
+        XCTAssertNil(AgentType.shellCommand.launchCommand(withTask: "anything"))
+    }
 }
