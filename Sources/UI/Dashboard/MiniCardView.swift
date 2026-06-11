@@ -18,7 +18,7 @@ final class MiniCardView: NSView {
     private let statusTextLabel = NSTextField(labelWithString: "")
     private var statusDots: [NSView] = []
     private var durationLeadingConstraint: NSLayoutConstraint?
-    // Line 4: agent badge + repo · worktree
+    // Line 4: repo badge + worktree branch
     private let agentBadge = AgentBadgeView()
     private let repoWorktreeLabel = NSTextField(labelWithString: "")
     private var repoLeadingDefault: NSLayoutConstraint!
@@ -45,19 +45,19 @@ final class MiniCardView: NSView {
         let title = lastUserPrompt.isEmpty ? project : lastUserPrompt
         titleLabel.stringValue = title
 
-        // Line 4: repo · worktree
-        repoWorktreeLabel.stringValue = "\(project)  \u{00B7}  \(thread)"
-
-        // Agent badge (AI agents only) sits before the repo name.
-        if let style = Self.badgeStyle(for: agentType) {
-            agentBadge.configure(text: style.label, color: style.color, symbol: style.symbol)
-            agentBadge.isHidden = false
-            repoLeadingDefault.isActive = false
-            repoLeadingAfterBadge.isActive = true
-        } else {
+        // Line 4: repo badge + worktree branch. The repo name reuses the old
+        // agent-badge pill style; each repo gets a stable pseudo-random color so
+        // different projects are easy to tell apart at a glance.
+        repoWorktreeLabel.stringValue = thread
+        if project.isEmpty {
             agentBadge.isHidden = true
             repoLeadingAfterBadge.isActive = false
             repoLeadingDefault.isActive = true
+        } else {
+            agentBadge.configure(text: project, color: Self.repoColor(for: project), symbol: "folder")
+            agentBadge.isHidden = false
+            repoLeadingDefault.isActive = false
+            repoLeadingAfterBadge.isActive = true
         }
 
         // Status dots before the duration line
@@ -249,28 +249,26 @@ final class MiniCardView: NSView {
         repoWorktreeLabel.textColor = SemanticColors.muted
     }
 
-    /// Label + brand color + SF Symbol for an agent badge, or nil for non-AI types.
-    static func badgeStyle(for type: AgentType) -> (label: String, color: NSColor, symbol: String)? {
-        switch type {
-        case .claudeCode: return ("Claude", NSColor(hex: 0xd97757), "sparkle")
-        case .codex:      return ("Codex", NSColor(hex: 0x10a37f), "diamond")
-        case .openCode:   return ("opencode", NSColor(hex: 0x8b7fd9), "diamond")
-        case .gemini:     return ("Gemini", NSColor(hex: 0x4285f4), "sparkles")
-        case .cline:      return ("Cline", NSColor(hex: 0x6aa84f), "terminal")
-        case .goose:      return ("Goose", NSColor(hex: 0xb07ad9), "bird")
-        case .amp:        return ("Amp", NSColor(hex: 0xe0a030), "bolt")
-        case .aider:      return ("Aider", NSColor(hex: 0x4aa3a3), "wand.and.stars")
-        case .cursor:     return ("Cursor", NSColor(hex: 0x9aa0a6), "cursorarrow")
-        case .kiro:       return ("Kiro", NSColor(hex: 0x7a9bd9), "diamond")
-        default:          return nil
-        }
+    /// Stable pseudo-random brand color for a repo, picked from a fixed palette by a
+    /// deterministic hash so the same project always gets the same color across launches.
+    static func repoColor(for project: String) -> NSColor {
+        let palette = [0xd97757, 0x10a37f, 0x8b7fd9, 0x4285f4, 0x6aa84f,
+                       0xb07ad9, 0xe0a030, 0x4aa3a3, 0xd96f9a, 0x7a9bd9]
+        var hash: UInt64 = 5381
+        for byte in project.utf8 { hash = (hash &* 33) &+ UInt64(byte) }
+        return NSColor(hex: palette[Int(hash % UInt64(palette.count))])
     }
+
+    // Test hook
+    var repoBadgeTextForTesting: String { agentBadge.isHidden ? "" : agentBadge.labelText }
 }
 
-/// Small rounded pill showing an agent's icon + name in its brand color.
+/// Small rounded pill showing an icon + name in a brand color. Used for the repo chip.
 final class AgentBadgeView: NSView {
     private let icon = NSImageView()
     private let label = NSTextField(labelWithString: "")
+
+    var labelText: String { label.stringValue }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)

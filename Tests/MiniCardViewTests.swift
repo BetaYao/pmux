@@ -12,8 +12,16 @@ final class MiniCardViewTests: XCTestCase {
         )
         XCTAssertEqual(card.agentId, "t1")
         XCTAssertEqual(card.titleTextForTesting, "Why are classics unread?")
-        XCTAssertTrue(card.repoWorktreeTextForTesting.contains("teamclaw-next"))
+        // Repo name lives in the colored badge; the worktree branch in the line label.
+        XCTAssertEqual(card.repoBadgeTextForTesting, "teamclaw-next")
         XCTAssertTrue(card.repoWorktreeTextForTesting.contains("test-trsyt"))
+        XCTAssertFalse(card.repoWorktreeTextForTesting.contains("teamclaw-next"))
+    }
+
+    func testRepoColorIsStableAndVariesByRepo() {
+        XCTAssertEqual(MiniCardView.repoColor(for: "repo-a"), MiniCardView.repoColor(for: "repo-a"))
+        // Two repos that hash into different palette slots get different colors.
+        XCTAssertNotEqual(MiniCardView.repoColor(for: "amux"), MiniCardView.repoColor(for: "teamclaw-next"))
     }
 
     func testTitleFallsBackToProject() {
