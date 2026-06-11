@@ -418,11 +418,22 @@ class MainWindowController: NSWindowController {
                     let branchName = WorktreeCreator.branchName(fromTaskDescription: taskDescription, existingBranches: branches)
                     let info = try WorktreeCreator.createWorktree(repoPath: repoPath, branchName: branchName, baseBranch: base)
                     WorktreeAgentTypeStore.shared.set(agentType, forWorktree: info.path)
+                    WorktreeTaskStore.shared.set(taskDescription, forWorktree: info.path)
                     if reuseEnv, let currentPath { WorktreeCreator.copyEnvironmentFiles(from: currentPath, to: info.path) }
+                    // Pre-create the persistent session with the agent already
+                    // running, server-side, before the GUI attaches. Runs on
+                    // this background queue (synchronous process spawns).
+                    if let agentCommandLine = agentType.launchCommand(withTask: taskDescription) {
+                        SessionManager.createDetachedSession(
+                            name: SessionManager.persistentSessionName(for: info.path),
+                            backend: self.runtimeBackend,
+                            cwd: info.path,
+                            agentCommandLine: agentCommandLine
+                        )
+                    }
                     DispatchQueue.main.async {
                         self.tabCoordinator.handleNewBranch(info: info, repoPath: repoPath)
                         self.dashboardVC?.inlineCreateReportSuccess()
-                        self.launchAgent(agentType, inWorktree: info.path, taskDescription: taskDescription)
                     }
                 } catch {
                     DispatchQueue.main.async {
@@ -570,20 +581,6 @@ class MainWindowController: NSWindowController {
         }
     }
 
-    /// Best-effort: type the selected agent's launch command into the new
-    /// worktree's terminal once its session has had a moment to attach.
-    private func launchAgent(_ agentType: AgentType, inWorktree path: String, taskDescription: String? = nil) {
-        guard let command = agentType.launchCommand else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            guard let surface = AgentHead.shared.agent(forWorktree: path)?.surface else { return }
-            surface.sendText(command + "\r")
-            if let taskDescription, !taskDescription.isEmpty {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                    surface.sendText(taskDescription + "\r")
-                }
-            }
-        }
-    }
 
 
     // MARK: - Forwarding to TabCoordinator
