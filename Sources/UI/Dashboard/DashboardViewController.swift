@@ -899,7 +899,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
 
     private var activeSplitWorktreePath: String?
 
-    func embedSplitContainerForSelectedAgent() {
+    /// Embed the selected agent's split container into the focus panel.
+    /// `focusTerminal: false` is used for live nav preview — it keeps the dashboard
+    /// VC as first responder so arrow keys keep driving the nav ring.
+    func embedSplitContainerForSelectedAgent(focusTerminal: Bool = true) {
         guard currentLayout != .grid else { return }
         guard let refs = focusLayoutRefs(for: currentLayout) else { return }
         let container = refs.focusPanel.terminalContainer
@@ -962,7 +965,17 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         previousSplitView?.removeFromSuperview()
         previousSplitView?.alphaValue = 1
 
-        // Focus the active leaf — defer to let the view hierarchy settle
+        // Focus the active leaf — defer to let the view hierarchy settle.
+        // Skipped during nav preview so the dashboard VC keeps first responder.
+        guard focusTerminal else { return }
+
+        // A terminal is becoming the active surface outside the nav ring (e.g. initial
+        // launch embed): the controller must be in .insert so Cmd+Esc can switch back
+        // to NORMAL. In-nav commits leave this to exitDashboardNavigation().
+        if !isInDState {
+            windowKeyboardMode?.enterInsert()
+        }
+
         let leafToFocus = tree.allLeaves.first(where: { $0.id == tree.focusedId }) ?? tree.allLeaves.first
         if let leaf = leafToFocus,
            let surface = SurfaceRegistry.shared.surface(forId: leaf.surfaceId),
@@ -1033,6 +1046,15 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
 
         let snapshot = focusController.snapshot
         tearDownNavVisuals()
+
+        // A cancelling exit (Esc) undoes any live preview by restoring the pre-nav
+        // selection. A committing exit (Return) keeps whatever is currently previewed.
+        if restoreSnapshot, currentLayout != .grid,
+           let path = snapshot?.focusedWorktreePath,
+           let original = agents.first(where: { $0.worktreePath == path }),
+           original.id != selectedAgentId {
+            selectAgent(byWorktreePath: path)
+        }
 
         if restoreSnapshot, let snap = snapshot, let responder = snap.firstResponder,
            (responder as? NSView)?.window != nil {
@@ -1170,9 +1192,11 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         case .moveFocus(let dir):
             focusController.move(dir, columns: currentGridColumns)
             applyKeyboardFocusVisuals(); scrollFocusedIntoView()
+            previewFocusedCard()
         case .jumpToCard(let idx):
             focusController.jump(toIndex: idx)
             applyKeyboardFocusVisuals(); scrollFocusedIntoView()
+            previewFocusedCard()
         case .enterTerminal:
             onEnterTerminal?()
             handleReturnInDState()
@@ -1242,6 +1266,24 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
                 card.scrollToVisible(card.bounds)
             }
         }
+    }
+
+    /// In focus layouts, live-preview the focused mini card in the main panel as the
+    /// nav ring moves — the left panel "follows" the selection. The terminal is NOT
+    /// focused (the dashboard VC keeps first responder) so arrows keep navigating;
+    /// Return then commits via `handleReturnInDState`. No-op in grid or on the big panel.
+    private func previewFocusedCard() {
+        guard currentLayout != .grid else { return }
+        guard case .card(let agentId) = focusController.focusedTarget else { return }
+        guard let agent = agents.first(where: { $0.id == agentId }), agent.id != selectedAgentId else { return }
+
+        selectedAgentId = agent.id
+        detachTerminals()
+        embedSplitContainerForSelectedAgent(focusTerminal: false)
+        updateMiniCardSelection()
+        // Re-assert nav visuals: embedding mutated the panel's subviews.
+        applyKeyboardFocusVisuals()
+        applyDimOverlayIfNeeded()
     }
 
     // MARK: - Resize
