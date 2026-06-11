@@ -570,8 +570,6 @@ class TabCoordinator {
     // MARK: - Modals
 
     func showCloseProjectModal(_ projectName: String, window: NSWindow?) {
-        panelCoordinator?.closeBothPanels()
-
         let alert = NSAlert()
         alert.messageText = "Close \"\(projectName)\"?"
         alert.informativeText = "This will close all terminals and kill persisted sessions for this repository."
@@ -591,7 +589,6 @@ class TabCoordinator {
     }
 
     func showNewThreadModal(window: NSWindow?) {
-        panelCoordinator?.closeBothPanels()
         delegate?.tabCoordinatorRequestShowNewBranchDialog(self)
     }
 

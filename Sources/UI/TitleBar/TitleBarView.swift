@@ -138,10 +138,6 @@ final class TitleBarView: NSView {
         startTipRotationIfNeeded()
     }
 
-    func aiAnchorView() -> NSView {
-        themeButton
-    }
-
     // MARK: - Setup
 
     private func setup() {

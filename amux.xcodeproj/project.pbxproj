@@ -106,7 +106,6 @@
 		67AA9A730C3EB48C03AEE1E0 /* WorktreeAgentTypeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D2BF38D5A191A1A64A780DE /* WorktreeAgentTypeStore.swift */; };
 		67D28AAC8088E0CAFA4CAF61 /* CodexSessionPromptLookup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91692BA3DA00B2A74251D935 /* CodexSessionPromptLookup.swift */; };
 		68450E7786073CCF31F3A3BD /* StackedCardContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A7A0330F333A0B2C6446D3E /* StackedCardContainerView.swift */; };
-		69C15496E8B2B3F786E6130E /* PanelBackdropView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B60D750E445BAD16A19C4EA /* PanelBackdropView.swift */; };
 		69F53C95363DFBD282918709 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5CE7477048E954AB50ACAAFA /* Assets.xcassets */; };
 		6A83AB65B756268FD550201B /* SessionManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8717084986CFAE8E228120B /* SessionManagerTests.swift */; };
 		6A9EAE95E80524EA1D9EB4D7 /* ActivityFeedRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CFD5E68972BBDDF4E6503B8 /* ActivityFeedRendererTests.swift */; };
@@ -124,7 +123,6 @@
 		76F3D2F38EEEC53187965726 /* WorkspaceManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4050BBCF87128788FEA4DBD7 /* WorkspaceManagerTests.swift */; };
 		76F4404111DB70F4C0C4CF29 /* MiniCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6801CC6BC092B600544DE3F /* MiniCardView.swift */; };
 		7F7C728569955A4EE8D977DB /* LayoutPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61F39A5F13BF128471AC523A /* LayoutPopoverView.swift */; };
-		7F863B588CC2C1F8EB9F61CC /* AIPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0B05206F0246A3997CE1652 /* AIPanelView.swift */; };
 		802F43F4DD424A259BA671D9 /* WebhookTaskParsingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C03829944569F8C151AAB9E4 /* WebhookTaskParsingTests.swift */; };
 		80333D84534CADA8B2C2969B /* TodoStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34E4F93820AF92C19BDFCEE4 /* TodoStore.swift */; };
 		831002A74BCB4954E577464C /* WorktreeTitleResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 910EC5EAC3FBF33C22FAEC7E /* WorktreeTitleResolverTests.swift */; };
@@ -267,7 +265,6 @@
 		377C75E3CFF0B2C35DE644FE /* UpdateCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCoordinator.swift; sourceTree = "<group>"; };
 		386E9B610BF513960A1DBBD8 /* AgentDisplayHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDisplayHelpers.swift; sourceTree = "<group>"; };
 		39247E0AFC479057F44EA052 /* QuickSwitcherViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickSwitcherViewController.swift; sourceTree = "<group>"; };
-		3B60D750E445BAD16A19C4EA /* PanelBackdropView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelBackdropView.swift; sourceTree = "<group>"; };
 		3C5104151E0925770B36E4A0 /* StatusDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusDetector.swift; sourceTree = "<group>"; };
 		3CFD5E68972BBDDF4E6503B8 /* ActivityFeedRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityFeedRendererTests.swift; sourceTree = "<group>"; };
 		3F03B8ADAABD9E98BB306A06 /* NotificationManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManagerTests.swift; sourceTree = "<group>"; };
@@ -361,7 +358,6 @@
 		9FC9B4D4CE66F445A566937A /* CodexHooksSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexHooksSetup.swift; sourceTree = "<group>"; };
 		9FDD3D9BE5C09FC189546B84 /* ActivityFeedIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityFeedIntegrationTests.swift; sourceTree = "<group>"; };
 		A08C8207099E6B3E406F9A47 /* amux-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "amux-Bridging-Header.h"; sourceTree = "<group>"; };
-		A0B05206F0246A3997CE1652 /* AIPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPanelView.swift; sourceTree = "<group>"; };
 		A1467CD91910EC4C3FF3FD41 /* WorktreeTitleResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeTitleResolver.swift; sourceTree = "<group>"; };
 		A20D2B334967F1BF44BF73E5 /* IdeaStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdeaStore.swift; sourceTree = "<group>"; };
 		A216C6E480EEA731BD8903E5 /* UpdateBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateBanner.swift; sourceTree = "<group>"; };
@@ -710,9 +706,7 @@
 		B4A1EB018C11D94FCADE7078 /* Panel */ = {
 			isa = PBXGroup;
 			children = (
-				A0B05206F0246A3997CE1652 /* AIPanelView.swift */,
 				9AE42CA3B274590C4167492A /* NotificationPanelView.swift */,
-				3B60D750E445BAD16A19C4EA /* PanelBackdropView.swift */,
 			);
 			path = Panel;
 			sourceTree = "<group>";
@@ -979,7 +973,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				7F863B588CC2C1F8EB9F61CC /* AIPanelView.swift in Sources */,
 				B0353B00FE3B01DC533A34DD /* ActivityEvent.swift in Sources */,
 				E8112BE011274975AD966F4C /* ActivityEventExtractor.swift in Sources */,
 				137E41A313134AAC8952AE60 /* ActivityFeedRenderer.swift in Sources */,
@@ -1032,7 +1025,6 @@
 				508EA3F0EFD6AF155D8DA047 /* NotificationPanelView.swift in Sources */,
 				184A8411A5B0F648D37F0FDB /* OSC133Parser.swift in Sources */,
 				1F3536F4A06FA0552ADD78D5 /* PaneStatus.swift in Sources */,
-				69C15496E8B2B3F786E6130E /* PanelBackdropView.swift in Sources */,
 				6E8A5721690ECFEB5D938F0B /* PanelCoordinator.swift in Sources */,
 				B96DE9970486556FAFDCB938 /* PendingWorktreeTransfer.swift in Sources */,
 				3FF31958E4EBF540D34919EA /* ProcessRunner.swift in Sources */,

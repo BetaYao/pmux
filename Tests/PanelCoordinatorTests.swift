@@ -20,19 +20,6 @@ final class PanelCoordinatorTests: XCTestCase {
         NotificationHistory.shared.clear()
     }
 
-    func testCloseBothPanelsSetsOpenFalse() {
-        let coordinator = PanelCoordinator()
-        coordinator.closeBothPanels()
-        XCTAssertFalse(coordinator.aiPopover.isShown)
-    }
-
-    func testToggleAIPanelWithoutTitleBarIsNoop() {
-        let coordinator = PanelCoordinator()
-        coordinator.titleBar = nil
-        // Should not crash when titleBar is nil
-        coordinator.toggleAIPanel()
-    }
-
     func testSelectNotificationNavigatesWithPaneIndex() {
         let coordinator = PanelCoordinator()
         let delegate = MockPanelCoordinatorDelegate()

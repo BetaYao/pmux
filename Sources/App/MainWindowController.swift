@@ -385,8 +385,6 @@ class MainWindowController: NSWindowController {
         // Window hover tracking for arc block styling
         setupWindowHoverTracking(contentView: contentView)
 
-        panelCoordinator.setupPopovers()
-
         // Create dashboard — single permanent LeftRight layout
         let dashboard = DashboardViewController()
         dashboard.dashboardDelegate = self
@@ -726,7 +724,7 @@ class AmuxWindow: NSWindow {
             if event.keyCode == 53, WindowStyling.shouldHandleEscShortcut() {
                 return
             }
-            // Cmd+Esc (instant) or double-Esc in insert mode → normal.
+            // Cmd+Esc in insert mode → normal.
             // macOS does not route Cmd+Esc through performKeyEquivalent the way it
             // does Cmd+<letter>, so it lands here. Read the real Command flag instead
             // of assuming a plain Esc — otherwise Cmd+Esc gets mis-handled as a single
@@ -1158,7 +1156,6 @@ extension MainWindowController: TabCoordinatorDelegate {
         embedViewController(vc)
     }
     func tabCoordinatorDidSwitchTab(_ coordinator: TabCoordinator) {
-        panelCoordinator.closeBothPanels()
     }
     func tabCoordinatorRequestUpdateTitleBar(_ coordinator: TabCoordinator) {
         updateTitleBar()
@@ -1196,30 +1193,5 @@ extension MainWindowController: KeyboardModeDelegate {
     }
     func keyboardHintDidChange(_ hint: String) {
         statusBar.updateMode(keyboardMode.mode, hint: hint)
-    }
-}
-
-final class ViewHostController: NSViewController {
-    private let hostedView: NSView
-
-    init(hostedView: NSView) {
-        self.hostedView = hostedView
-        super.init(nibName: nil, bundle: nil)
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) not supported")
-    }
-
-    override func loadView() {
-        hostedView.translatesAutoresizingMaskIntoConstraints = false
-        view = NSView(frame: NSRect(origin: .zero, size: hostedView.frame.size))
-        view.addSubview(hostedView)
-        NSLayoutConstraint.activate([
-            hostedView.topAnchor.constraint(equalTo: view.topAnchor),
-            hostedView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            hostedView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            hostedView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-        ])
     }
 }

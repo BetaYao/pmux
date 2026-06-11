@@ -401,11 +401,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         inlineCreateView.onCreate = onCreate
     }
 
-    /// Refresh the inline creator's repo list (e.g. after a repo was added).
-    func refreshInlineCreateRepos(_ repoPaths: [String]) {
-        inlineCreateView.configure(repoPaths: repoPaths)
-    }
-
     func focusInlineCreate() { inlineCreateView.focusNameField() }
 
     /// Called when the inline create form ends (submit or cancel) so the owner
@@ -1344,26 +1339,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         rebuildGrid()
 
         dashboardDelegate?.dashboardDidReorderCards(order: agents.map { $0.worktreePath })
-    }
-}
-
-// MARK: - NSView helper
-
-private extension NSView {
-    /// Remove all constraints that reference this view from its superview
-    func removeAllConstraintsFromSuperviews() {
-        for constraint in constraints {
-            if constraint.firstItem === self && constraint.secondItem == nil {
-                removeConstraint(constraint)
-            }
-        }
-        if let superview = superview {
-            for constraint in superview.constraints {
-                if constraint.firstItem === self || constraint.secondItem === self {
-                    superview.removeConstraint(constraint)
-                }
-            }
-        }
     }
 }
 
