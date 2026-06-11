@@ -177,8 +177,8 @@ final class AIPanelView: NSView, NSTextViewDelegate {
         return sv
     }()
 
-    private let inputTextView: NSTextView = {
-        let tv = NSTextView()
+    private let inputTextView: IdeaInputTextView = {
+        let tv = IdeaInputTextView()
         tv.identifier = NSUserInterfaceItemIdentifier("panel.ai.input")
         tv.font = NSFont.systemFont(ofSize: 13)
         tv.textColor = SemanticColors.text
@@ -297,6 +297,9 @@ final class AIPanelView: NSView, NSTextViewDelegate {
         ideasTabButton.action = #selector(ideasTabClicked)
 
         inputTextView.delegate = self
+        // Reliable Return-to-send handled in the text view's own keyDown (the
+        // doCommandBy path below is unreliable inside the NSPopover host).
+        inputTextView.onSend = { [weak self] in self?.sendCurrentInput() }
 
         // Add subviews
         addSubview(leftBorder)
@@ -816,4 +819,23 @@ final class AIPanelView: NSView, NSTextViewDelegate {
         inputHeightConstraint.constant = clamped
     }
 
+}
+
+/// Text view for the idea composer. Return (or Cmd+Return) sends; Shift+Return
+/// inserts a newline. Handled in keyDown so it works reliably inside the NSPopover
+/// host, where the NSTextViewDelegate.doCommandBy path does not fire dependably.
+final class IdeaInputTextView: NSTextView {
+    var onSend: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        // Return (36) and numeric-keypad Enter (76).
+        if event.keyCode == 36 || event.keyCode == 76 {
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if !flags.contains(.shift) {
+                onSend?()
+                return
+            }
+        }
+        super.keyDown(with: event)
+    }
 }
