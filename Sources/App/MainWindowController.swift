@@ -726,19 +726,26 @@ class AmuxWindow: NSWindow {
             if event.keyCode == 53, WindowStyling.shouldHandleEscShortcut() {
                 return
             }
-            // Double-Esc in insert mode → normal (first Esc passes to terminal).
+            // Cmd+Esc (instant) or double-Esc in insert mode → normal.
+            // macOS does not route Cmd+Esc through performKeyEquivalent the way it
+            // does Cmd+<letter>, so it lands here. Read the real Command flag instead
+            // of assuming a plain Esc — otherwise Cmd+Esc gets mis-handled as a single
+            // Esc and passes through to the terminal (interrupting the agent).
             if event.keyCode == 53,
                let mwc = windowController as? MainWindowController,
                mwc.keyboardMode.mode == .insert {
+                let hasCommand = event.modifierFlags
+                    .intersection(.deviceIndependentFlagsMask)
+                    .contains(.command)
                 let consumed = mwc.keyboardMode.handleEsc(
-                    hasCommand: false,
+                    hasCommand: hasCommand,
                     now: ProcessInfo.processInfo.systemUptime
                 )
                 if consumed {
                     mwc.tabCoordinator.dashboardVC?.enterDashboardNavigation()
                     return
                 }
-                // first Esc: fall through to terminal
+                // first plain Esc: fall through to terminal
             }
         }
         super.sendEvent(event)
