@@ -111,6 +111,7 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
             self?.setExpanded(focused, animated: true)
         }
         promptTextView.onCancel = { [weak self] in self?.cancelForm() }
+        promptTextView.onSubmit = { [weak self] in self?.submit() }
         addSubview(promptTextView)
 
         errorLabel.maximumNumberOfLines = 2
@@ -262,13 +263,8 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
     }
 
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-        if commandSelector == #selector(NSResponder.insertNewline(_:)) {
-            if NSEvent.modifierFlags.contains(.command) {
-                submit()
-                return true
-            }
-            return false
-        }
+        // Return-to-submit is handled in PromptTextView.keyDown; here we only let
+        // Shift+Return fall through as a newline.
         if commandSelector == #selector(NSResponder.insertTab(_:)) {
             window?.makeFirstResponder(repoChip)
             return true
@@ -502,6 +498,22 @@ private final class PromptTextView: NSTextView {
     var onFocusChange: ((Bool) -> Void)?
     /// Invoked when the user presses Esc in the name field (cancel the form).
     var onCancel: (() -> Void)?
+    /// Invoked when the user presses Return (without Shift) to submit the form.
+    var onSubmit: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        // Return (36) / numeric-keypad Enter (76): submit. Shift+Return: newline.
+        // Read the event's own modifiers — reliable, unlike NSEvent.modifierFlags
+        // in a doCommandBy callback.
+        if event.keyCode == 36 || event.keyCode == 76 {
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if !flags.contains(.shift) {
+                onSubmit?()
+                return
+            }
+        }
+        super.keyDown(with: event)
+    }
 
     convenience init() {
         let storage = NSTextStorage()

@@ -48,32 +48,13 @@ extension KeyboardModeControllerTests {
         XCTAssertEqual(c.mode, .insert)
     }
 
-    func testDoubleEscWithinWindowExits() {
+    func testRepeatedPlainEscNeverExits() {
         let c = KeyboardModeController()
         c.enterInsert()
-        _ = c.handleEsc(hasCommand: false, now: 0.0)
-        let handled = c.handleEsc(hasCommand: false, now: 0.30)   // within 0.4s
-        XCTAssertTrue(handled)
-        XCTAssertEqual(c.mode, .normal)
-    }
-
-    func testDoubleEscTooSlowDoesNotExit() {
-        let c = KeyboardModeController()
-        c.enterInsert()
-        _ = c.handleEsc(hasCommand: false, now: 0.0)
-        let handled = c.handleEsc(hasCommand: false, now: 0.80)   // outside 0.4s
-        XCTAssertFalse(handled)
-        XCTAssertEqual(c.mode, .insert)
-    }
-
-    func testEscTimerResetsOnInsertReentry() {
-        let c = KeyboardModeController()
-        c.enterInsert()
-        _ = c.handleEsc(hasCommand: false, now: 0.0)   // first esc, recorded
-        c.enterNormal()
-        c.enterInsert()                                 // re-enter insert
-        let handled = c.handleEsc(hasCommand: false, now: 0.10)  // should be treated as a FIRST esc
-        XCTAssertFalse(handled)
+        // Double-Esc is gone: any number of plain escs always pass through.
+        XCTAssertFalse(c.handleEsc(hasCommand: false, now: 0.0))
+        XCTAssertFalse(c.handleEsc(hasCommand: false, now: 0.10))
+        XCTAssertFalse(c.handleEsc(hasCommand: false, now: 0.20))
         XCTAssertEqual(c.mode, .insert)
     }
 }

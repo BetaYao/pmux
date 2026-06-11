@@ -12,7 +12,6 @@ final class KeyboardModeController {
     private(set) var substate: KeyboardSubstate = .none
 
     func enterInsert() {
-        lastEscTime = -1
         setMode(.insert, substate: .none)
     }
 
@@ -20,27 +19,17 @@ final class KeyboardModeController {
         setMode(.normal, substate: .none)
     }
 
-    private var lastEscTime: TimeInterval = -1
-    static let doubleEscWindow: TimeInterval = 0.4
-
     /// Returns true if the controller consumed the Esc (caller must NOT pass it on).
-    /// `now` is a monotonic timestamp in seconds (injected for tests; production uses
-    /// ProcessInfo.processInfo.systemUptime).
+    /// Only Cmd+Esc exits insert mode; a plain Esc always passes through to the terminal.
+    /// `now` is accepted for call-site compatibility but no longer used.
     @discardableResult
     func handleEsc(hasCommand: Bool, now: TimeInterval) -> Bool {
         guard mode == .insert else { return false }
         if hasCommand {
             enterNormal()
-            lastEscTime = -1
             return true
         }
-        if lastEscTime >= 0 && (now - lastEscTime) <= Self.doubleEscWindow {
-            enterNormal()
-            lastEscTime = -1
-            return true
-        }
-        lastEscTime = now
-        return false   // first Esc passes through to the terminal
+        return false   // plain Esc passes through to the terminal
     }
 
     func beginDelete(agentId: String) {
@@ -89,13 +78,13 @@ final class KeyboardModeController {
         case .deletePending:
             return "DELETE?  ·  d / y confirm  ·  esc cancel"
         case .createForm:
-            return "CREATE  ·  tab field  ·  \u{2190}\u{2192} change  ·  \u{2318}\u{23CE} create  ·  esc cancel"
+            return "CREATE  ·  tab field  ·  \u{2190}\u{2192} change  ·  \u{23CE} create  ·  esc cancel"
         case .none:
             switch mode {
             case .insert:
-                return "INSERT  ·  \u{2318}esc / esc\u{00B7}esc \u{2192} normal"
+                return "INSERT  ·  \u{2318}esc \u{2192} normal"
             case .normal:
-                return "NORMAL  ·  hjkl move  ·  \u{23CE} enter  ·  d del  ·  c diff  ·  f files  ·  n new"
+                return "NORMAL  ·  hjkl move  ·  \u{23CE} enter term  ·  \u{2318}esc back  ·  d del  ·  c diff  ·  f files  ·  n new"
             }
         }
     }
