@@ -116,4 +116,74 @@ enum SessionManager {
         ProcessRunner.runSync(["tmux", "resize-window", "-t", sessionName, "-A"])
         ProcessRunner.runSync(["tmux", "refresh-client", "-t", sessionName, "-S"])
     }
+
+    // MARK: - Detached agent launch
+
+    /// Build the backend CLI invocation(s) that create a persistent session
+    /// detached, with `agentCommandLine` running in `cwd` and a shell kept alive
+    /// afterward. Returns an empty array for backends without persistent
+    /// sessions. Pure (no process spawning) — unit-tested.
+    static func detachedLaunchCommands(
+        backend: String,
+        name: String,
+        cwd: String,
+        agentCommandLine: String,
+        shell: String
+    ) -> [[String]] {
+        switch backend {
+        case "tmux":
+            // Create the detached interactive shell in cwd, then type the agent
+            // command into it. The shell persists after the agent exits.
+            return [
+                ["tmux", "new-session", "-d", "-s", name, "-c", cwd],
+                ["tmux", "send-keys", "-t", name, agentCommandLine, "Enter"],
+            ]
+        case "zmx":
+            // `zmx run` execs argv directly (no shell) and inherits cwd, so wrap
+            // in a login shell that cd's, runs the agent, then execs an
+            // interactive login shell ($0 = the trailing shell arg) to persist.
+            let inner = "cd \(ShellEscape.singleQuote(cwd)) && \(agentCommandLine); exec \"$0\" -li"
+            return [["zmx", "run", name, shell, "-lic", inner, shell]]
+        default:
+            return []
+        }
+    }
+
+    /// Whether a persistent session with `name` already exists for `backend`.
+    static func sessionExists(name: String, backend: String) -> Bool {
+        switch backend {
+        case "tmux":
+            // has-session exits 0 (no stdout) when present → output() non-nil.
+            return ProcessRunner.output(["tmux", "has-session", "-t", name]) != nil
+        case "zmx":
+            let list = ProcessRunner.output(["zmx", "list"]) ?? ""
+            return parseZmxSessionNames(listOutput: list).contains(name)
+        default:
+            return false
+        }
+    }
+
+    /// Create a detached session running the agent, unless one already exists.
+    /// Spawns processes synchronously — call off the main thread.
+    /// Returns whether a new session was launched.
+    @discardableResult
+    static func createDetachedSession(
+        name: String,
+        backend: String,
+        cwd: String,
+        agentCommandLine: String
+    ) -> Bool {
+        guard backend == "tmux" || backend == "zmx" else { return false }
+        if sessionExists(name: name, backend: backend) { return false }
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let commands = detachedLaunchCommands(
+            backend: backend, name: name, cwd: cwd,
+            agentCommandLine: agentCommandLine, shell: shell
+        )
+        guard !commands.isEmpty else { return false }
+        for argv in commands {
+            ProcessRunner.runSync(argv)
+        }
+        return true
+    }
 }
