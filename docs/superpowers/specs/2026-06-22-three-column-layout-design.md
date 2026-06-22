@@ -36,7 +36,7 @@ architecture and the "No external SPM dependencies" constraint.
 | Scope source | Both col-3 views are **worktree-scoped** — follow the focused worktree |
 | File tree click | Runs `$EDITOR <path>` in the **center column's active terminal pane** (fallback `vi`) |
 | Git changes | Read-only **list** of changed files with status badges (M/A/D/?/R); no inline diff in v1 |
-| File tree lib | Native `NSOutlineView`; no third-party component |
+| Col 3 implementation | **Reuse existing inspector components** (`DiffReviewView` + yazi terminal surface) docked as a column, instead of building new views — see "Column 3 — reuse decision" below |
 
 ## Architecture
 
@@ -52,49 +52,65 @@ architecture and the "No external SPM dependencies" constraint.
 for `grid` / `topSmall` / `topLarge`; remove the layout-switcher UI from the title bar. Two
 collapse toggles remain.
 
-### New components (`Sources/UI/SidePanel/`)
+### Column 3 — reuse decision
 
-- **`WorktreeSidePanelViewController`** — col 3 container. Top segmented toggle (Files / Git);
-  swaps between the two child VCs below. Holds the current focused-worktree path. Toggle state
-  persists per session.
-- **`FileTreeViewController`** — `NSOutlineView` + custom data source. Rooted at the focused
-  worktree directory. Lazy-loads children on expand via `FileManager`. Hides dotfiles by default
-  (no `.gitignore` filtering in v1). Clicking a file → delegate callback up to the dashboard.
-- **`GitChangesViewController`** — read-only `NSTableView` / stack listing `git status --porcelain`
-  output for the worktree: status badge (M/A/D/?/R, including renamed `->` form) + relative path.
-  Empty → "No changes"; non-git → "Not a Git repository" placeholder.
+The codebase **already has** the file-browse + git-changes UI, today presented as a modal sheet
+(`WorktreeInspectorViewController`):
+
+- **Files** = a `yazi` TUI file browser in an ephemeral `TerminalSurface`
+  (`TerminalSurface.createEphemeral(in:workingDirectory:command:)`; command from
+  `WorktreeInspectorViewController.yaziCommand(yaziPath:configDirectory:)`). Yazi handles browsing
+  and opening files itself; if yazi is not installed, a "Yazi is not installed" placeholder shows.
+- **Changes** = `DiffReviewView(worktreePath:)` — changed-files list with status badges **plus an
+  inline diff**. Git status parsing already done by `GitDiff.changedFileEntries(worktreePath:)`.
+
+We dock this content as column 3 instead of building NSOutlineView + a custom list/parser. This
+supersedes the earlier NSOutlineView / `$EDITOR`-on-click / `git status` parser plan. (Inline diff
+in the Changes tab is now in scope — it comes free with `DiffReviewView`. The `$EDITOR`-on-click
+interaction is dropped; yazi owns file opening.)
+
+### New component
+
+- **`WorktreeSidePanelViewController`** (`Sources/UI/SidePanel/`) — col 3 container. Top
+  `NSSegmentedControl` ("Files" / "Changes") + a content view. `setWorktree(_ path: String?)`
+  rebuilds the active tab's content for the given worktree (nil → empty placeholder). Tab switch
+  rebuilds content. Owns/destroys its ephemeral yazi `TerminalSurface` (mirrors the inspector's
+  `showSelectedTab()` / `deinit` lifecycle). Reuses `DiffReviewView` and the static
+  `WorktreeInspectorViewController.yaziCommand(...)` directly — no duplication of git logic.
 
 ### Wiring / data flow
 
-- Focused-worktree change (from `TabCoordinator` / `AgentHead`) →
-  `DashboardViewController.sidePanel.setWorktree(path)` → both child VCs re-root / reload.
-- File click: `FileTreeViewController` → delegate → `DashboardViewController` → existing
-  `splitContainerDelegate` / surface-input API → sends `$EDITOR <path>\n` to the center column's
-  active pane.
-- Collapse buttons: title bar exposes two toggles (col 1 / col 3); reuse existing collapse logic.
-- **Git execution reuse:** reuse the existing process/`git` execution path used by
-  `WorktreeDiscovery` (which already runs `git worktree list --porcelain`) rather than introducing
-  a second git-runner.
+- Focused-worktree change (selection in col 1, or `updateAgents`) →
+  `DashboardViewController` calls `sidePanel.setWorktree(selectedWorktreePath)` → the panel rebuilds
+  the active tab. Both center terminal and right panel stay in sync on the focused worktree.
+- Collapse buttons: title bar exposes two toggles (col 1 / col 3); reuse the existing
+  constraint-swap + animation pattern from `toggleSidebarCollapse()`.
 
 ### Refresh
 
-- **File tree:** refreshes on worktree focus change + a manual refresh action.
-- **Git changes:** reloads on (a) worktree focus change, (b) manual refresh, and (c) a lightweight
-  poll (its own timer or piggybacking the existing `StatusPublisher` 2s tick). Only the focused
-  worktree is polled; `git status --porcelain` only.
+- The panel rebuilds on worktree focus change and on tab switch. `DiffReviewView` loads a fresh
+  git snapshot when constructed; yazi reflects the live filesystem. No extra polling timer in v1
+  (rebuild-on-focus-change is sufficient; a manual refresh can be added later).
 
 ## Testing
 
-- **`git status --porcelain` parser** — pure function; unit-tested across status codes
-  (M / A / D / `??` / R with `old -> new` rename form).
-- **File-tree data source** — directory read + dotfile filtering logic (pure parts) unit-tested.
-- **`$EDITOR` command construction** — including `vi` fallback when `$EDITOR` unset — unit-tested.
-- NSOutlineView / NSTableView rendering itself is not unit-tested (consistent with current project
-  practice).
+Reusing existing components removes most new testable logic (git parsing lives in `GitDiff`, file
+browsing in yazi). New tests:
+
+- **`WorktreeSidePanelViewController`** — `setWorktree` updates the held path and rebuilds; `nil`
+  shows the empty placeholder; tab switch swaps content; switching away from Files destroys the
+  yazi surface (no leak). Follows the style of the existing `WorktreeInspector` tests (inject
+  `makeDiffReviewView` / yazi-surface closures to avoid real processes).
+- **Collapse state** — col 1 and col 3 collapse flags toggle independently and activate the right
+  constraints (logic-level assertions, mirroring existing dashboard tests).
+- **Regression** — update `ConfigTests.testDefaultDashboardLayout` and
+  `DashboardViewControllerClickTests` for the removed layout modes.
+- View rendering itself is not unit-tested (consistent with current project practice).
 
 ## Out of scope (v1 / YAGNI)
 
-- Inline git diff view.
-- `.gitignore`-aware file-tree filtering.
-- File-tree context menus, rename/delete, drag-drop.
+- A custom NSOutlineView file tree (superseded — yazi is reused).
+- `$EDITOR`-on-click file opening (superseded — yazi owns file opening).
+- A dedicated git-status polling timer (rebuild-on-focus-change is enough).
 - Pinning col 3 to an arbitrary (non-worktree) directory.
+- Persisting which tab (Files/Changes) was last selected across launches.
