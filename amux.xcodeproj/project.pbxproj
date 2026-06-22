@@ -76,6 +76,7 @@
 		41B9258ABA2694BB59FEFD59 /* AgentChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 146F6CFE95F8BF76037B1527 /* AgentChannel.swift */; };
 		41E7E6EF21724868D5F93170 /* SessionRestoreConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 749DF586568A05962185F5E5 /* SessionRestoreConfigTests.swift */; };
 		42F15738CDD467055210F0BF /* SessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0935D46D032322E0AAD958B9 /* SessionManager.swift */; };
+		437E4087EF0568C61970CCF5 /* FileContentViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 703C63C3D479E4AA31A57278 /* FileContentViewTests.swift */; };
 		4435E3865D9E61DDFF8AA050 /* WebhookServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F8CD528BB84100CE6A1C2BC /* WebhookServer.swift */; };
 		4457220CF1D043B972484F7F /* MenuBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A9CA5A8238F664ACD3EB68 /* MenuBuilder.swift */; };
 		459DC560D846BC498DB1A6D5 /* DashboardFocusController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0900293E11EEB98055F543F1 /* DashboardFocusController.swift */; };
@@ -165,6 +166,7 @@
 		AC12EFA38D938519EE095E73 /* DraggableGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BADA07A3BC0F02C284B4A731 /* DraggableGridView.swift */; };
 		AC3C005E9B943E2C5022B6B8 /* WeComFrameParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FD74DC269CC1047CDF533BE /* WeComFrameParser.swift */; };
 		AC9EC42BD91EDA2CDEC27051 /* TitleBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 361A0F8BDCB80ABFEE51ABEF /* TitleBarView.swift */; };
+		ACD952C8F28844610C933F5E /* FileContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D70D4E61FF7463F259F003E /* FileContentView.swift */; };
 		ADADFDC868327D94A0CA7D6C /* KeymapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B01560D2FEF8B2588A08D57 /* KeymapTests.swift */; };
 		ADB81EEAFF7EA9C2FA9D0F21 /* CodexHooksSetupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 771E165C5872C71BDCC8EAD9 /* CodexHooksSetupTests.swift */; };
 		AE9B93B0BBC931C5924D6BF5 /* AgentInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = F42BCDD26B5C7A3C19FA2BA2 /* AgentInfo.swift */; };
@@ -299,6 +301,7 @@
 		4B01560D2FEF8B2588A08D57 /* KeymapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeymapTests.swift; sourceTree = "<group>"; };
 		4C8C1C62BF62C18F2B901A35 /* DashboardViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardViewController.swift; sourceTree = "<group>"; };
 		4D524A46AAB1A6EBBE431255 /* DiffSyntaxHighlighter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffSyntaxHighlighter.swift; sourceTree = "<group>"; };
+		4D70D4E61FF7463F259F003E /* FileContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileContentView.swift; sourceTree = "<group>"; };
 		4D718460AD9491F743280FE5 /* ConfigTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigTests.swift; sourceTree = "<group>"; };
 		504631ADF92DAF1564B3C166 /* SettingsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewController.swift; sourceTree = "<group>"; };
 		5178802A6CFC60D26D8095F7 /* ExternalChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalChannel.swift; sourceTree = "<group>"; };
@@ -328,6 +331,7 @@
 		6C5FC39612AA92BA43B1B90C /* WeComFrameParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeComFrameParserTests.swift; sourceTree = "<group>"; };
 		6CE9ED6C829B9D6591149665 /* SplitNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitNode.swift; sourceTree = "<group>"; };
 		7002541D56DA218F09334A6A /* SmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmokeTests.swift; sourceTree = "<group>"; };
+		703C63C3D479E4AA31A57278 /* FileContentViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileContentViewTests.swift; sourceTree = "<group>"; };
 		71246792B8CA4D8013FF1143 /* IdeaStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdeaStoreTests.swift; sourceTree = "<group>"; };
 		71E75F067D7D657FBE44564A /* NotificationHistoryViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationHistoryViewController.swift; sourceTree = "<group>"; };
 		7263CB7DD688A712750E40A2 /* WeChatConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeChatConfig.swift; sourceTree = "<group>"; };
@@ -547,6 +551,7 @@
 				5A734AE469187A302F64B605 /* DashboardFocusControllerTests.swift */,
 				956A5CED2CE82A7DECB94A23 /* DashboardViewControllerClickTests.swift */,
 				298964B2A8466D6994AC4EDB /* DiffReviewViewTests.swift */,
+				703C63C3D479E4AA31A57278 /* FileContentViewTests.swift */,
 				9504C70D80C10EE3E1AF0E1F /* FileTreeOutlineControllerTests.swift */,
 				534D30F22E8DA59B1A4A9A76 /* FuzzyMatchTests.swift */,
 				E1FFDB5E28F5B9C02E702E07 /* GatewayStateTests.swift */,
@@ -720,6 +725,7 @@
 			isa = PBXGroup;
 			children = (
 				3889081D8CC908CB10FD9718 /* CenterOverlayView.swift */,
+				4D70D4E61FF7463F259F003E /* FileContentView.swift */,
 				2EAB70CB89C72C5761F98ACE /* FileTreeOutlineController.swift */,
 				D7A7F775D6B8BEE5C48C38E6 /* WorktreeSidePanelViewController.swift */,
 			);
@@ -1047,6 +1053,7 @@
 				86C74FCAAFCA088693D90F1B /* DividerView.swift in Sources */,
 				AC12EFA38D938519EE095E73 /* DraggableGridView.swift in Sources */,
 				17FC80E4FED802D4DD5DAC72 /* ExternalChannel.swift in Sources */,
+				ACD952C8F28844610C933F5E /* FileContentView.swift in Sources */,
 				2E9BBA662D446A0D7B45B998 /* FileTreeOutlineController.swift in Sources */,
 				4F4FCF48A5C14AF1282286C1 /* FocusPanelView.swift in Sources */,
 				60EAB450B28BE33A6B10AB2D /* FuzzyMatch.swift in Sources */,
@@ -1183,6 +1190,7 @@
 				C79624766A5642D89E0E3961 /* DashboardFocusControllerTests.swift in Sources */,
 				2D0892AAED3E61654B881E5C /* DashboardViewControllerClickTests.swift in Sources */,
 				F98DD0E19EC37F425B3CA35A /* DiffReviewViewTests.swift in Sources */,
+				437E4087EF0568C61970CCF5 /* FileContentViewTests.swift in Sources */,
 				8EC25E85F41D14B1D51B42CB /* FileTreeOutlineControllerTests.swift in Sources */,
 				53DCDAAD9533697D3C7A2188 /* FuzzyMatchTests.swift in Sources */,
 				B0B9CD0816B4D7B559DCAFEC /* GatewayStateTests.swift in Sources */,
