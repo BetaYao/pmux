@@ -248,6 +248,12 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         } else {
             updateCurrentLayoutInPlace()
         }
+        syncSidePanelToSelection()
+    }
+
+    private func syncSidePanelToSelection() {
+        let path = agents.first(where: { $0.id == selectedAgentId })?.worktreePath
+        sidePanelVC.setWorktree(path)
     }
 
     /// Update existing views in-place without rebuilding the view hierarchy
@@ -366,6 +372,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
                 container.isSelected = (container.agentId == selectedAgentId)
             }
         }
+        syncSidePanelToSelection()
     }
 
     func toggleLeftColumnCollapse() {
@@ -995,6 +1002,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
 
         previousSplitView?.removeFromSuperview()
         previousSplitView?.alphaValue = 1
+        syncSidePanelToSelection()
 
         // Focus the active leaf — defer to let the view hierarchy settle.
         // Skipped during nav preview so the dashboard VC keeps first responder.
@@ -1353,6 +1361,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
             selectedAgentId = agentId
             embedSplitContainerForSelectedAgent()
             updateMiniCardSelection()
+            syncSidePanelToSelection()
         }
         dashboardDelegate?.dashboardDidChangeSelection(self)
     }
