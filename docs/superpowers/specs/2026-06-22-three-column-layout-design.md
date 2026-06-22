@@ -107,6 +107,50 @@ browsing in yazi). New tests:
   `DashboardViewControllerClickTests` for the removed layout modes.
 - View rendering itself is not unit-tested (consistent with current project practice).
 
+## Revision 2 (2026-06-22) — otty-style header + native panel + center overlay
+
+After Tasks 1–6 shipped, the design was revised. These changes SUPERSEDE the yazi/in-panel-diff
+approach from Revision 1 for the right panel, and flatten the header.
+
+### Decisions (Revision 2)
+
+| Topic | Decision |
+|---|---|
+| Header | **Remove the capsule entirely** (leftArcBlock + all capsule labels + usage progress bars). Flatten to otty-style: a plain **centered title** (focused worktree/session title) + the existing **right-side flat icon buttons** (theme, collapse-left, collapse-right, clean-worktrees). No token/usage readout in the header. |
+| Right panel "Files" | **Native `NSOutlineView` file tree** rooted at the focused worktree. **Drop yazi entirely.** Lazy-load dirs via `FileManager`, hide dotfiles. |
+| Right panel "Changes" | **Plain list** of changed files (status badge + path) from `GitDiff.changedFileEntries(worktreePath:)`. **No inline diff in the panel.** |
+| Detail location | **Center overlay.** Clicking a file in the tree → its content opens as a **full-cover overlay over the center terminal**. Clicking a changed file → `DiffReviewView` (reused) opens as a full-cover overlay. The terminal keeps running underneath; dismiss with **Esc or a close button**. |
+
+### Components (Revision 2)
+
+- **Header flatten** — `TitleBarView`: delete the capsule subtree and its state (timer, frames, usage bars,
+  `usesFocusedWorktreeMode`, capsule tracking area). Keep a single centered `NSTextField` title driven by the
+  existing `updateFocusedWorktree(title:tokenText:)` (token text ignored). Keep the right icon buttons and
+  `setWindowHovered`/`updateChromeState` (button-only). Remove `updatePrimaryCapsuleFrames` and its call site;
+  neutralize `updateNotificationSummary` (no capsule border to color).
+- **Center overlay host** — `DashboardViewController.showCenterOverlay(_ content: NSView, title: String)` /
+  `dismissCenterOverlay()`. A container pinned over `leftRightFocusPanel` (full cover) with a small header
+  (title + close button) and Esc handling; terminal `SplitContainerView` stays embedded underneath.
+- **File tree** — `FileTreeOutlineController` (`Sources/UI/SidePanel/`): `NSOutlineView` + `FileManager` lazy
+  data source, dotfiles hidden. Selecting a file → delegate callback with the file path.
+- **File content viewer** — `FileContentView` (`Sources/UI/SidePanel/`): read-only mono `NSTextView`. Reads
+  text via `String(contentsOf:encoding:)`; shows a placeholder for binary/unreadable/oversized (>1 MB) files.
+- **Changes list** — a plain list (NSTableView or stacked rows) of `GitChangedFile` (fields: `path`, `oldPath`,
+  `status`, `stage`). Selecting a row → delegate callback with the path.
+- **Side panel rewrite** — `WorktreeSidePanelViewController`: Files tab hosts the file tree; Changes tab hosts
+  the list. Remove `makeYaziSurface` and the in-panel `DiffReviewView`. Add a delegate
+  (`WorktreeSidePanelDelegate`) with `didSelectFile(path:)` and `didSelectChange(path:)`, routed by the
+  dashboard to `showCenterOverlay`. `DiffReviewView` is now used ONLY inside the center overlay (for changes).
+
+### Testing (Revision 2)
+
+- `FileTreeOutlineController` data source: directory listing + dotfile filtering (pure logic) — unit-tested
+  against a temp directory.
+- `FileContentView` read helper: returns text for a UTF-8 file, nil/placeholder for missing/oversized — unit-tested.
+- `WorktreeSidePanelViewController`: tab switch, `setWorktree`, and that selecting a file/change fires the
+  delegate (injected spy) — update existing tests (yazi cases removed).
+- Header + overlay are view wiring — build + manual run.
+
 ## Out of scope (v1 / YAGNI)
 
 - A custom NSOutlineView file tree (superseded — yazi is reused).
