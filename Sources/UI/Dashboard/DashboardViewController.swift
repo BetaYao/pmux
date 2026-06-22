@@ -152,7 +152,11 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
 
     // Right column (3-column layout)
     private let rightColumnContainer = NSView()
-    private(set) lazy var sidePanelVC = WorktreeSidePanelViewController(worktreePath: nil)
+    private(set) lazy var sidePanelVC: WorktreeSidePanelViewController = {
+        let vc = WorktreeSidePanelViewController(worktreePath: nil)
+        vc.delegate = self
+        return vc
+    }()
     private var leftColumnWidthExpanded: NSLayoutConstraint?
     private var leftColumnWidthCollapsed: NSLayoutConstraint?
     private var rightColumnWidthExpanded: NSLayoutConstraint?
@@ -1584,6 +1588,21 @@ extension DashboardViewController: TerminalSurfaceDelegate {
                 self.view.window?.makeFirstResponder(termView)
             }
         }
+    }
+}
+
+// MARK: - WorktreeSidePanelDelegate
+
+extension DashboardViewController: WorktreeSidePanelDelegate {
+    func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectFile path: String) {
+        let title = URL(fileURLWithPath: path).lastPathComponent
+        showCenterOverlay(FileContentView(path: path), title: title)
+    }
+
+    func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectChange path: String) {
+        let worktreePath = agents.first(where: { $0.id == selectedAgentId })?.worktreePath ?? ""
+        let title = "Changes: \(URL(fileURLWithPath: path).lastPathComponent)"
+        showCenterOverlay(DiffReviewView(worktreePath: worktreePath), title: title)
     }
 }
 

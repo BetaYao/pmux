@@ -5,19 +5,14 @@ import AppKit
 
 final class WorktreeSidePanelViewControllerTests: XCTestCase {
     private func makeVC(worktreePath: String?) -> WorktreeSidePanelViewController {
-        WorktreeSidePanelViewController(
-            worktreePath: worktreePath,
-            initialTab: .changes,
-            makeDiffReviewView: { _ in DiffReviewView(worktreePath: "/tmp") { GitDiffSnapshot(changedFiles: [], files: []) } },
-            makeYaziSurface: { _, _ in TerminalSurface() }
-        )
+        WorktreeSidePanelViewController(worktreePath: worktreePath)
     }
 
     func testInitHoldsWorktreePath() {
         let vc = makeVC(worktreePath: "/tmp/wt-a")
         vc.loadViewIfNeeded()
         XCTAssertEqual(vc.worktreePathForTesting, "/tmp/wt-a")
-        XCTAssertEqual(vc.selectedTabForTesting, .changes)
+        XCTAssertEqual(vc.selectedTabForTesting, .files)
     }
 
     func testSetWorktreeUpdatesHeldPath() {
@@ -36,42 +31,40 @@ final class WorktreeSidePanelViewControllerTests: XCTestCase {
         XCTAssertTrue(hasPlaceholder)
     }
 
-    func testFilesTabUsesInjectedYaziLauncher() {
-        var launched = 0
-        let vc = WorktreeSidePanelViewController(
-            worktreePath: "/tmp/wt-a",
-            initialTab: .files,
-            makeDiffReviewView: { _ in DiffReviewView(worktreePath: "/tmp") { GitDiffSnapshot(changedFiles: [], files: []) } },
-            makeYaziSurface: { _, _ in launched += 1; return TerminalSurface() }
-        )
-        vc.loadViewIfNeeded()
-        XCTAssertEqual(launched, 1)
-    }
+    // MARK: - Delegate spy tests
 
-    func testSwitchingAwayFromFilesDoesNotLaunchYaziAgain() {
-        var launched = 0
-        let vc = WorktreeSidePanelViewController(
-            worktreePath: "/tmp/wt-a",
-            initialTab: .files,
-            makeDiffReviewView: { _ in DiffReviewView(worktreePath: "/tmp") { GitDiffSnapshot(changedFiles: [], files: []) } },
-            makeYaziSurface: { _, _ in launched += 1; return TerminalSurface() }
-        )
-        vc.loadViewIfNeeded()
-        vc.setWorktree("/tmp/wt-b") // still Files tab -> relaunch
-        XCTAssertEqual(launched, 2)
-    }
+    private class SpyDelegate: WorktreeSidePanelDelegate {
+        var selectedFilePath: String?
+        var selectedChangePath: String?
 
-    func testFailedYaziShowsMissingMessage() {
-        let vc = WorktreeSidePanelViewController(
-            worktreePath: "/tmp/wt-a",
-            initialTab: .files,
-            makeDiffReviewView: { _ in DiffReviewView(worktreePath: "/tmp") { GitDiffSnapshot(changedFiles: [], files: []) } },
-            makeYaziSurface: { _, _ in nil }
-        )
-        vc.loadViewIfNeeded()
-        let hasMsg = vc.view.descendantViews().contains {
-            $0.accessibilityIdentifier() == "sidePanel.filesMissingYazi"
+        func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectFile path: String) {
+            selectedFilePath = path
         }
-        XCTAssertTrue(hasMsg)
+
+        func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectChange path: String) {
+            selectedChangePath = path
+        }
+    }
+
+    func testHandleFileSelectionForwardsToDelegate() {
+        let vc = makeVC(worktreePath: "/tmp/wt-a")
+        let spy = SpyDelegate()
+        vc.delegate = spy
+        vc.loadViewIfNeeded()
+
+        vc.handleFileSelection("/x/y.txt")
+
+        XCTAssertEqual(spy.selectedFilePath, "/x/y.txt")
+    }
+
+    func testHandleChangeSelectionForwardsToDelegate() {
+        let vc = makeVC(worktreePath: "/tmp/wt-a")
+        let spy = SpyDelegate()
+        vc.delegate = spy
+        vc.loadViewIfNeeded()
+
+        vc.handleChangeSelection("/x/z.txt")
+
+        XCTAssertEqual(spy.selectedChangePath, "/x/z.txt")
     }
 }
