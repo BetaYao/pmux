@@ -160,6 +160,9 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
     private var isLeftColumnCollapsed = false
     private var isRightColumnCollapsed = false
 
+    // Center overlay
+    private var centerOverlay: CenterOverlayView?
+
     // Top-Small layout
     private let topSmallContainer = NSView()
     private let topSmallFocusPanel = FocusPanelView()
@@ -1540,6 +1543,46 @@ extension DashboardViewController: TerminalSurfaceDelegate {
         if agent.id == selectedAgentId {
             invalidateSplitContainer(forPath: agent.worktreePath)
             embedSplitContainerForSelectedAgent()
+        }
+    }
+
+    // MARK: - Center Overlay
+
+    /// Shows a full-cover overlay over the center terminal panel.
+    /// Any existing overlay is removed first.
+    func showCenterOverlay(_ content: NSView, title: String) {
+        dismissCenterOverlay()
+
+        let overlay = CenterOverlayView(title: title, content: content) { [weak self] in
+            self?.dismissCenterOverlay()
+        }
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        leftRightFocusPanel.addSubview(overlay)
+
+        NSLayoutConstraint.activate([
+            overlay.topAnchor.constraint(equalTo: leftRightFocusPanel.topAnchor),
+            overlay.leadingAnchor.constraint(equalTo: leftRightFocusPanel.leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: leftRightFocusPanel.trailingAnchor),
+            overlay.bottomAnchor.constraint(equalTo: leftRightFocusPanel.bottomAnchor),
+        ])
+
+        centerOverlay = overlay
+        overlay.window?.makeFirstResponder(overlay)
+    }
+
+    /// Removes the center overlay and restores first responder to the active terminal pane.
+    func dismissCenterOverlay() {
+        guard let overlay = centerOverlay else { return }
+        overlay.removeFromSuperview()
+        centerOverlay = nil
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let container = self.activeSplitContainer, let tree = container.tree else { return }
+            let focusedId = tree.focusedId
+            if let leaf = tree.allLeaves.first(where: { $0.id == focusedId }),
+               let termView = container.surfaceViews[leaf.surfaceId] {
+                self.view.window?.makeFirstResponder(termView)
+            }
         }
     }
 }

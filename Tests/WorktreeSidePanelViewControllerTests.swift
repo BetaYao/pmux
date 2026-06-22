@@ -75,9 +75,3 @@ final class WorktreeSidePanelViewControllerTests: XCTestCase {
         XCTAssertTrue(hasMsg)
     }
 }
-
-extension NSView {
-    func descendantViews() -> [NSView] {
-        subviews + subviews.flatMap { $0.descendantViews() }
-    }
-}

@@ -341,8 +341,7 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertEqual(TitleBarView.Layout.barHeight, 45)
         XCTAssertEqual(TitleBarView.Layout.capsuleHeight, 37)
         XCTAssertEqual(TitleBarView.Layout.arcVerticalOffset, 2)
-        XCTAssertEqual(TitleBarView.Layout.dashboardLeadingInset, 16)
-        XCTAssertEqual(TitleBarView.Layout.dashboardHorizontalPadding, 10)
+        // dashboardLeadingInset and dashboardHorizontalPadding removed from Layout
     }
 
     // Note: the single-layout redesign removed the dedicated "Dashboard" tab
