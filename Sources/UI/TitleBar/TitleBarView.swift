@@ -105,18 +105,33 @@ final class TitleBarView: NSView {
         startTipRotationIfNeeded()
     }
 
+    /// Collapse whitespace/newlines and cap a resolved worktree title to a
+    /// label-length string (with an ellipsis) so it fits the title-bar capsule.
+    static func clampTitle(_ title: String, limit: Int = 64) -> String {
+        let collapsed = title
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        guard collapsed.count > limit else { return collapsed }
+        return collapsed.prefix(limit).trimmingCharacters(in: .whitespaces) + "\u{2026}"
+    }
+
     /// Show the focused worktree's title on the left and a token placeholder on the right.
     func updateFocusedWorktree(title: String, tokenText: String = "\u{2014}") {
         tipRotationTimer?.invalidate()
         tipRotationTimer = nil
         usesFocusedWorktreeMode = true
         capsuleIconView.isHidden = true
-        capsuleLeadingLabel.stringValue = title
-        capsuleLeadingLabel.lineBreakMode = .byWordWrapping
-        capsuleLeadingLabel.maximumNumberOfLines = 2
-        capsuleLeadingLabel.cell?.wraps = true
-        capsuleLeadingLabel.cell?.usesSingleLineMode = false
-        capsuleLeadingLabel.cell?.lineBreakMode = .byWordWrapping
+        // A resolved title can be a whole task-description paragraph; clamp it to
+        // a label-length string so the full-width capsule reads as a title and
+        // doesn't run text across the entire (possibly ultrawide) title bar.
+        capsuleLeadingLabel.stringValue = Self.clampTitle(title)
+        capsuleLeadingLabel.toolTip = title
+        capsuleLeadingLabel.lineBreakMode = .byTruncatingTail
+        capsuleLeadingLabel.maximumNumberOfLines = 1
+        capsuleLeadingLabel.cell?.wraps = false
+        capsuleLeadingLabel.cell?.usesSingleLineMode = true
+        capsuleLeadingLabel.cell?.lineBreakMode = .byTruncatingTail
         capsuleBodyLabel.isHidden = true
         capsuleTrailingLabel.stringValue = tokenText
         capsuleTrailingLabel.isHidden = false

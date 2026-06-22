@@ -27,6 +27,24 @@ class QuickSwitcherViewController: NSViewController, NSSearchFieldDelegate {
         fatalError("init(coder:) not supported")
     }
 
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        primeTitles()
+    }
+
+    /// Resolve semantic titles off the main thread, then refresh the rows so the
+    /// list shows task descriptions / session summaries instead of pinyin branch
+    /// names. Worktrees with a fresh cache entry resolve without disk access.
+    private func primeTitles() {
+        for info in allWorktrees {
+            WorktreeTitleCache.shared.title(
+                worktreePath: info.path, lastUserPrompt: "", branch: info.branch
+            ) { [weak self] _ in
+                self?.resultsTableView.reloadData()
+            }
+        }
+    }
+
     override func loadView() {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 480, height: 340))
         container.wantsLayer = true
@@ -247,8 +265,11 @@ extension QuickSwitcherViewController: NSTableViewDelegate {
         dot.translatesAutoresizingMaskIntoConstraints = false
         cell.addSubview(dot)
 
-        // Branch name
-        let branchLabel = NSTextField(labelWithString: info.displayName)
+        // Worktree title — resolved semantic title (Claude session summary →
+        // stored task description → prompt), falling back to the branch/dir name
+        // until the cache is primed.
+        let title = WorktreeTitleCache.shared.cachedTitle(worktreePath: info.path) ?? info.displayName
+        let branchLabel = NSTextField(labelWithString: title)
         branchLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
         branchLabel.textColor = SemanticColors.text
         branchLabel.lineBreakMode = .byTruncatingTail

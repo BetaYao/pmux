@@ -136,14 +136,16 @@ enum SessionManager {
             // command into it. The shell persists after the agent exits.
             return [
                 ["tmux", "new-session", "-d", "-s", name, "-c", cwd],
-                ["tmux", "send-keys", "-t", name, agentCommandLine, "Enter"],
+                ["tmux", "send-keys", "-t", name, "clear && \(agentCommandLine)", "Enter"],
             ]
         case "zmx":
-            // `zmx run` execs argv directly (no shell) and inherits cwd, so wrap
-            // in a login shell that cd's, runs the agent, then execs an
-            // interactive login shell ($0 = the trailing shell arg) to persist.
-            let inner = "cd \(ShellEscape.singleQuote(cwd)) && \(agentCommandLine); exec \"$0\" -li"
-            return [["zmx", "run", name, shell, "-lic", inner, shell]]
+            // `zmx run` types the command into its own persistent interactive
+            // shell (and appends a ZMX_TASK_COMPLETED marker), so the session
+            // survives the agent exiting on its own — no `exec "$0"` trick
+            // needed. Wrap only in a login shell that cd's and `clear`s the
+            // echoed command line before the agent renders inline.
+            let inner = "cd \(ShellEscape.singleQuote(cwd)) && clear && \(agentCommandLine)"
+            return [["zmx", "run", name, shell, "-lic", inner]]
         default:
             return []
         }

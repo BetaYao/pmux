@@ -76,12 +76,22 @@ final class WorktreeInspectorViewController: NSViewController {
         root.layer?.backgroundColor = Theme.background.cgColor
         root.setAccessibilityIdentifier("worktreeInspector")
 
-        let title = NSTextField(labelWithString: URL(fileURLWithPath: worktreePath).lastPathComponent)
+        // Prefer the resolved semantic title (Claude session summary → stored
+        // task description → prompt); fall back to the worktree directory name
+        // while the title resolves off the main thread.
+        let dirName = URL(fileURLWithPath: worktreePath).lastPathComponent
+        let title = NSTextField(labelWithString:
+            WorktreeTitleCache.shared.cachedTitle(worktreePath: worktreePath) ?? dirName)
         title.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
         title.textColor = Theme.textPrimary
         title.lineBreakMode = .byTruncatingMiddle
         title.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(title)
+        WorktreeTitleCache.shared.title(
+            worktreePath: worktreePath, lastUserPrompt: "", branch: dirName
+        ) { [weak title] resolved in
+            title?.stringValue = resolved
+        }
 
         closeButton.title = "Close"
         closeButton.bezelStyle = .rounded

@@ -17,7 +17,7 @@ final class SessionLaunchCommandTests: XCTestCase {
         )
         XCTAssertEqual(
             cmds[1],
-            ["tmux", "send-keys", "-t", "amux-repo-feat", "claude 'fix bug'", "Enter"]
+            ["tmux", "send-keys", "-t", "amux-repo-feat", "clear && claude 'fix bug'", "Enter"]
         )
     }
 
@@ -35,8 +35,7 @@ final class SessionLaunchCommandTests: XCTestCase {
             [
                 "zmx", "run", "amux-repo-feat",
                 "/bin/zsh", "-lic",
-                "cd '/work/repo/feat' && claude 'fix bug'; exec \"$0\" -li",
-                "/bin/zsh",
+                "cd '/work/repo/feat' && clear && claude 'fix bug'",
             ]
         )
     }
