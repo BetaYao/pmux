@@ -107,8 +107,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
     /// Seeded to .leftRight so first-launch behavior is predictable.
     private(set) var lastFocusLayout: DashboardLayout = .leftRight
     var selectedAgentId: String = ""
-    private var isSidebarCollapsed = false
-
     let focusController = DashboardFocusController()
     private var isInDState: Bool { focusController.mode != .idle }
 
@@ -326,7 +324,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         guard layout != currentLayout else { return }
         detachTerminals()
         resetSidebarConstraints()
-        isSidebarCollapsed = false
+        isLeftColumnCollapsed = false; isRightColumnCollapsed = false
         // Remember the focus layout we are LEAVING, so grid Return can restore it.
         if currentLayout != .grid {
             lastFocusLayout = currentLayout
@@ -370,33 +368,30 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         }
     }
 
-    func toggleSidebarCollapse() {
-        guard currentLayout != .grid else { return }
-        isSidebarCollapsed.toggle()
-
-        guard let refs = focusLayoutRefs(for: currentLayout) else { return }
-
-        // Swap constraints based on layout type
-        switch currentLayout {
-        case .leftRight:
-            break // Task 4 rewrites collapse for 3-column layout
-        case .topSmall:
-            topSmallScrollHeight?.isActive = !isSidebarCollapsed
-            topSmallScrollHeightCollapsed?.isActive = isSidebarCollapsed
-        case .topLarge:
-            topLargeScrollHeight?.isActive = !isSidebarCollapsed
-            topLargeScrollHeightCollapsed?.isActive = isSidebarCollapsed
-        case .grid:
-            break
+    func toggleLeftColumnCollapse() {
+        isLeftColumnCollapsed.toggle()
+        leftColumnWidthExpanded?.isActive = !isLeftColumnCollapsed
+        leftColumnWidthCollapsed?.isActive = isLeftColumnCollapsed
+        animateColumnLayout {
+            self.leftRightSidebarScroll.animator().alphaValue = self.isLeftColumnCollapsed ? 0 : 1
+            self.inlineCreateView.animator().alphaValue = self.isLeftColumnCollapsed ? 0 : 1
         }
+    }
 
+    func toggleRightColumnCollapse() {
+        isRightColumnCollapsed.toggle()
+        rightColumnWidthExpanded?.isActive = !isRightColumnCollapsed
+        rightColumnWidthCollapsed?.isActive = isRightColumnCollapsed
+        animateColumnLayout {
+            self.rightColumnContainer.animator().alphaValue = self.isRightColumnCollapsed ? 0 : 1
+        }
+    }
+
+    private func animateColumnLayout(_ extra: @escaping () -> Void) {
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.2
             context.allowsImplicitAnimation = true
-
-            refs.scrollView.animator().isHidden = isSidebarCollapsed
-            refs.scrollView.animator().alphaValue = isSidebarCollapsed ? 0 : 1
-
+            extra()
             self.view.layoutSubtreeIfNeeded()
         }
     }
@@ -425,7 +420,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
     func inlineCreateReportFailure(_ message: String) { inlineCreateView.reportCreateFailure(message) }
 
     private func resetSidebarConstraints() {
-        // leftRight collapse constraints handled by Task 4
+        leftColumnWidthExpanded?.isActive = true
+        leftColumnWidthCollapsed?.isActive = false
+        rightColumnWidthExpanded?.isActive = true
+        rightColumnWidthCollapsed?.isActive = false
         topSmallScrollHeight?.isActive = true
         topSmallScrollHeightCollapsed?.isActive = false
         topLargeScrollHeight?.isActive = true

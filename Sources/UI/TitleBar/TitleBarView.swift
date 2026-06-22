@@ -2,7 +2,8 @@ import AppKit
 
 protocol TitleBarDelegate: AnyObject {
     func titleBarDidToggleTheme()
-    func titleBarDidRequestCollapseSidebar()
+    func titleBarDidRequestCollapseLeftColumn()
+    func titleBarDidRequestCollapseRightColumn()
     func titleBarDidRequestCleanMergedWorktrees()
 }
 
@@ -47,7 +48,8 @@ final class TitleBarView: NSView {
     // Right controls — action group
     private let cleanWorktreeButton = NSButton()
     private let themeButton = NSButton()
-    private let collapseSidebarButton = NSButton()
+    private let collapseLeftButton = NSButton()
+    private let collapseRightButton = NSButton()
     private var rightArcWidthConstraint: NSLayoutConstraint?
 
     // State
@@ -93,9 +95,6 @@ final class TitleBarView: NSView {
         rightArcWidthConstraint?.constant = canCleanWorktrees
             ? Layout.rightCapsuleCleanWidth
             : Layout.rightCapsuleCompactWidth
-        collapseSidebarButton.isHidden = !hasWorkspaces
-        collapseSidebarButton.isEnabled = !isGridLayout
-        collapseSidebarButton.alphaValue = isGridLayout ? 0.3 : 1.0
         layoutSubtreeIfNeeded()
     }
 
@@ -328,10 +327,15 @@ final class TitleBarView: NSView {
                                action: #selector(themeClicked))
         actionStack.addArrangedSubview(themeButton)
 
-        configureArcIconButton(collapseSidebarButton, symbol: "sidebar.right",
-                               identifier: "titlebar.collapseSidebar", label: "Toggle Sidebar",
-                               action: #selector(collapseSidebarClicked))
-        actionStack.addArrangedSubview(collapseSidebarButton)
+        configureArcIconButton(collapseLeftButton, symbol: "sidebar.left",
+                               identifier: "titlebar.collapseLeft", label: "Toggle Worktrees",
+                               action: #selector(collapseLeftClicked))
+        actionStack.addArrangedSubview(collapseLeftButton)
+
+        configureArcIconButton(collapseRightButton, symbol: "sidebar.right",
+                               identifier: "titlebar.collapseRight", label: "Toggle Side Panel",
+                               action: #selector(collapseRightClicked))
+        actionStack.addArrangedSubview(collapseRightButton)
 
         configureCleanWorktreeButton()
 
@@ -458,9 +462,8 @@ final class TitleBarView: NSView {
         delegate?.titleBarDidToggleTheme()
     }
 
-    @objc private func collapseSidebarClicked() {
-        delegate?.titleBarDidRequestCollapseSidebar()
-    }
+    @objc private func collapseLeftClicked() { delegate?.titleBarDidRequestCollapseLeftColumn() }
+    @objc private func collapseRightClicked() { delegate?.titleBarDidRequestCollapseRightColumn() }
 
     @objc private func cleanWorktreeClicked() {
         delegate?.titleBarDidRequestCleanMergedWorktrees()

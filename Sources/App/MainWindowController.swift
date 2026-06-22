@@ -692,9 +692,9 @@ class AmuxWindow: NSWindow {
             }
         }
 
-        // Cmd+B: toggle sidebar collapse
+        // Cmd+B: toggle left column collapse
         if flags == .command && event.charactersIgnoringModifiers == "b" {
-            mwc.tabCoordinator.dashboardVC?.toggleSidebarCollapse()
+            mwc.tabCoordinator.dashboardVC?.toggleLeftColumnCollapse()
             return true
         }
 
@@ -811,8 +811,12 @@ extension MainWindowController: TitleBarDelegate {
         applyWindowBackgroundStyle()
     }
 
-    func titleBarDidRequestCollapseSidebar() {
-        tabCoordinator.dashboardVC?.toggleSidebarCollapse()
+    func titleBarDidRequestCollapseLeftColumn() {
+        tabCoordinator.dashboardVC?.toggleLeftColumnCollapse()
+    }
+
+    func titleBarDidRequestCollapseRightColumn() {
+        tabCoordinator.dashboardVC?.toggleRightColumnCollapse()
     }
 
     func titleBarDidRequestCleanMergedWorktrees() {
