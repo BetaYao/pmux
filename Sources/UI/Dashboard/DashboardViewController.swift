@@ -66,6 +66,9 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         static let topLargeMiniRowHorizontalInset: CGFloat = 8
         static let topLargeMiniRowBottomInset: CGFloat = 8
         static let leftRightSidebarTrailingInset: CGFloat = 8
+        static let leftColumnWidth: CGFloat = 260
+        static let rightColumnWidth: CGFloat = 320
+        static let columnSpacing: CGFloat = 8
 
         static let topSmallFocusMaskedCorners: CACornerMask = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
         static let topLargeFocusMaskedCorners: CACornerMask = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
@@ -148,6 +151,16 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
     private var leftRightMiniCards: [StackedMiniCardContainerView] = []
     private let inlineCreateView = InlineWorktreeCreateView()
     private var inlineCreateHeightConstraint: NSLayoutConstraint?
+
+    // Right column (3-column layout)
+    private let rightColumnContainer = NSView()
+    private(set) lazy var sidePanelVC = WorktreeSidePanelViewController(worktreePath: nil)
+    private var leftColumnWidthExpanded: NSLayoutConstraint?
+    private var leftColumnWidthCollapsed: NSLayoutConstraint?
+    private var rightColumnWidthExpanded: NSLayoutConstraint?
+    private var rightColumnWidthCollapsed: NSLayoutConstraint?
+    private var isLeftColumnCollapsed = false
+    private var isRightColumnCollapsed = false
 
     // Top-Small layout
     private let topSmallContainer = NSView()
@@ -366,8 +379,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         // Swap constraints based on layout type
         switch currentLayout {
         case .leftRight:
-            leftRightFocusWidthExpanded?.isActive = !isSidebarCollapsed
-            leftRightFocusWidthCollapsed?.isActive = isSidebarCollapsed
+            break // Task 4 rewrites collapse for 3-column layout
         case .topSmall:
             topSmallScrollHeight?.isActive = !isSidebarCollapsed
             topSmallScrollHeightCollapsed?.isActive = isSidebarCollapsed
@@ -413,8 +425,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
     func inlineCreateReportFailure(_ message: String) { inlineCreateView.reportCreateFailure(message) }
 
     private func resetSidebarConstraints() {
-        leftRightFocusWidthExpanded?.isActive = true
-        leftRightFocusWidthCollapsed?.isActive = false
+        // leftRight collapse constraints handled by Task 4
         topSmallScrollHeight?.isActive = true
         topSmallScrollHeightCollapsed?.isActive = false
         topLargeScrollHeight?.isActive = true
@@ -635,15 +646,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         leftRightContainer.setAccessibilityElement(true)
         view.addSubview(leftRightContainer)
 
-        // Focus panel (left, 78%)
-        leftRightFocusPanel.translatesAutoresizingMaskIntoConstraints = false
-        leftRightFocusPanel.setCornerMask(
-            LayoutMetrics.leftRightFocusMaskedCorners,
-            radius: LayoutMetrics.focusPanelCornerRadius
-        )
-        leftRightContainer.addSubview(leftRightFocusPanel)
-
-        // Sidebar scroll (right, 22%)
+        // --- Left column: worktree sidebar scroll + inline create ---
         leftRightSidebarScroll.translatesAutoresizingMaskIntoConstraints = false
         leftRightSidebarScroll.hasVerticalScroller = true
         leftRightSidebarScroll.scrollerStyle = .overlay
@@ -655,21 +658,44 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         leftRightSidebarStack.alignment = .leading
         leftRightSidebarStack.translatesAutoresizingMaskIntoConstraints = false
         leftRightSidebarScroll.documentView = leftRightSidebarStack
-
         leftRightContainer.addSubview(leftRightSidebarScroll)
 
-        // Sticky inline worktree creator, pinned to the bottom of the sidebar.
-        // Added to the stable container (not the cleared mini-card stack) so it
-        // survives sidebar relayout.
         inlineCreateView.translatesAutoresizingMaskIntoConstraints = false
         leftRightContainer.addSubview(inlineCreateView)
         inlineCreateView.onPreferredHeightChange = { [weak self] height, animated in
             self?.setInlineCreateHeight(height, animated: animated)
         }
-
-        let spacing: CGFloat = 8
         let inlineHeight = inlineCreateView.heightAnchor.constraint(equalToConstant: inlineCreateView.preferredHeight)
         inlineCreateHeightConstraint = inlineHeight
+
+        // --- Center column: focus panel ---
+        leftRightFocusPanel.translatesAutoresizingMaskIntoConstraints = false
+        leftRightFocusPanel.setCornerMask(
+            [.layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMinXMaxYCorner, .layerMaxXMaxYCorner],
+            radius: LayoutMetrics.focusPanelCornerRadius
+        )
+        leftRightContainer.addSubview(leftRightFocusPanel)
+
+        // --- Right column: side panel host ---
+        rightColumnContainer.translatesAutoresizingMaskIntoConstraints = false
+        rightColumnContainer.wantsLayer = true
+        rightColumnContainer.setAccessibilityIdentifier("dashboard.rightColumn")
+        leftRightContainer.addSubview(rightColumnContainer)
+
+        addChild(sidePanelVC)
+        sidePanelVC.view.translatesAutoresizingMaskIntoConstraints = false
+        rightColumnContainer.addSubview(sidePanelVC.view)
+
+        let spacing = LayoutMetrics.columnSpacing
+        let edge: CGFloat = 8
+
+        // Fixed widths for side columns; centre fills the gap.
+        leftColumnWidthExpanded = leftRightSidebarScroll.widthAnchor.constraint(equalToConstant: LayoutMetrics.leftColumnWidth)
+        leftColumnWidthCollapsed = leftRightSidebarScroll.widthAnchor.constraint(equalToConstant: 0)
+        rightColumnWidthExpanded = rightColumnContainer.widthAnchor.constraint(equalToConstant: LayoutMetrics.rightColumnWidth)
+        rightColumnWidthCollapsed = rightColumnContainer.widthAnchor.constraint(equalToConstant: 0)
+        leftColumnWidthExpanded?.isActive = true
+        rightColumnWidthExpanded?.isActive = true
 
         NSLayoutConstraint.activate([
             leftRightContainer.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: layoutTopInset),
@@ -677,25 +703,32 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
             leftRightContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -LayoutMetrics.containerHorizontalInset),
             leftRightContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -LayoutMetrics.containerBottomInset),
 
-            leftRightFocusPanel.topAnchor.constraint(equalTo: leftRightContainer.topAnchor),
-            leftRightFocusPanel.leadingAnchor.constraint(equalTo: leftRightContainer.leadingAnchor),
-            leftRightFocusPanel.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor),
-
+            // Left column
             leftRightSidebarScroll.topAnchor.constraint(equalTo: leftRightContainer.topAnchor),
-            leftRightSidebarScroll.trailingAnchor.constraint(equalTo: leftRightContainer.trailingAnchor, constant: -LayoutMetrics.leftRightSidebarTrailingInset),
-            leftRightSidebarScroll.leadingAnchor.constraint(equalTo: leftRightFocusPanel.trailingAnchor, constant: spacing),
+            leftRightSidebarScroll.leadingAnchor.constraint(equalTo: leftRightContainer.leadingAnchor, constant: edge),
             leftRightSidebarScroll.bottomAnchor.constraint(equalTo: inlineCreateView.topAnchor, constant: -10),
 
             inlineCreateView.leadingAnchor.constraint(equalTo: leftRightSidebarScroll.leadingAnchor),
             inlineCreateView.trailingAnchor.constraint(equalTo: leftRightSidebarScroll.trailingAnchor),
             inlineCreateView.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor, constant: -8),
             inlineHeight,
-        ])
 
-        // Sidebar collapse constraints for left-right
-        leftRightFocusWidthExpanded = leftRightFocusPanel.widthAnchor.constraint(equalTo: leftRightContainer.widthAnchor, multiplier: 0.78, constant: -spacing / 2)
-        leftRightFocusWidthCollapsed = leftRightFocusPanel.trailingAnchor.constraint(equalTo: leftRightContainer.trailingAnchor)
-        leftRightFocusWidthExpanded?.isActive = true
+            // Centre column
+            leftRightFocusPanel.topAnchor.constraint(equalTo: leftRightContainer.topAnchor),
+            leftRightFocusPanel.leadingAnchor.constraint(equalTo: leftRightSidebarScroll.trailingAnchor, constant: spacing),
+            leftRightFocusPanel.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor),
+            leftRightFocusPanel.trailingAnchor.constraint(equalTo: rightColumnContainer.leadingAnchor, constant: -spacing),
+
+            // Right column
+            rightColumnContainer.topAnchor.constraint(equalTo: leftRightContainer.topAnchor),
+            rightColumnContainer.trailingAnchor.constraint(equalTo: leftRightContainer.trailingAnchor, constant: -edge),
+            rightColumnContainer.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor),
+
+            sidePanelVC.view.topAnchor.constraint(equalTo: rightColumnContainer.topAnchor),
+            sidePanelVC.view.leadingAnchor.constraint(equalTo: rightColumnContainer.leadingAnchor),
+            sidePanelVC.view.trailingAnchor.constraint(equalTo: rightColumnContainer.trailingAnchor),
+            sidePanelVC.view.bottomAnchor.constraint(equalTo: rightColumnContainer.bottomAnchor),
+        ])
     }
 
     private func setInlineCreateHeight(_ height: CGFloat, animated: Bool) {
