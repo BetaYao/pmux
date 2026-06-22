@@ -232,6 +232,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
             leftRightContainer.isHidden = true
             topSmallContainer.isHidden = true
             topLargeContainer.isHidden = true
+            sidePanelVC.setWorktree(nil)
             return
         } else {
             emptyStateView.isHidden = true

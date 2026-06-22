@@ -103,6 +103,7 @@
 		60EAB450B28BE33A6B10AB2D /* FuzzyMatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = E52052467AC47FB35B914991 /* FuzzyMatch.swift */; };
 		65302E44A50551B00DB56FF8 /* UpdateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40B73C9CDD58BD5046BEDBF9 /* UpdateManager.swift */; };
 		657A8C63949C0D25073D8794 /* PasteRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 625358E2BF5C78EEC9AD1849 /* PasteRegressionTests.swift */; };
+		6613665134B5E36E6D8E8A1C /* WorktreeSidePanelViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A7F775D6B8BEE5C48C38E6 /* WorktreeSidePanelViewController.swift */; };
 		66136CB9AB0E73AD5271EF8A /* DiffSyntaxHighlighter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D524A46AAB1A6EBBE431255 /* DiffSyntaxHighlighter.swift */; };
 		67AA9A730C3EB48C03AEE1E0 /* WorktreeAgentTypeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D2BF38D5A191A1A64A780DE /* WorktreeAgentTypeStore.swift */; };
 		67D28AAC8088E0CAFA4CAF61 /* CodexSessionPromptLookup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91692BA3DA00B2A74251D935 /* CodexSessionPromptLookup.swift */; };
@@ -146,6 +147,7 @@
 		949DE6883F7AEE1D91999921 /* GatewayState.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF00151674278A8ADACEE0DB /* GatewayState.swift */; };
 		991264858C4BCF4B7B9E5A38 /* OSC133ParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94C3780E9A9F385A62BA4B4E /* OSC133ParserTests.swift */; };
 		99EE68EC3759D59E45E31589 /* CodexUsageSummaryProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCA264E4F788D2C1360BC2E8 /* CodexUsageSummaryProvider.swift */; };
+		9A995D003879B1811D5D404D /* WorktreeSidePanelViewControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2EFD583955F594EFE0C7489 /* WorktreeSidePanelViewControllerTests.swift */; };
 		9CA067A8D23D3601FE9420A0 /* GridLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10B78299658083446AFC1C2D /* GridLayout.swift */; };
 		9E0810ED4AE2BFA09DD9C560 /* TaskProgressParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3F368385F2FABFF32DD80B8 /* TaskProgressParser.swift */; };
 		9E25B2192D8FB5482E57B4BA /* CommandParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 764A4EFA7F1260ED02735D23 /* CommandParser.swift */; };
@@ -409,6 +411,7 @@
 		D51869426BD46FF5046164C6 /* WebhookStatusProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookStatusProviderTests.swift; sourceTree = "<group>"; };
 		D71889CE21B57B848EE76371 /* TerminalSurfaceReparentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSurfaceReparentTests.swift; sourceTree = "<group>"; };
 		D79E6E1F1311E35910E4035A /* ProcessRunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessRunnerTests.swift; sourceTree = "<group>"; };
+		D7A7F775D6B8BEE5C48C38E6 /* WorktreeSidePanelViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeSidePanelViewController.swift; sourceTree = "<group>"; };
 		D8717084986CFAE8E228120B /* SessionManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManagerTests.swift; sourceTree = "<group>"; };
 		D889DDFAC3CC9C0EACC3044D /* GridLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridLayoutTests.swift; sourceTree = "<group>"; };
 		D8991D3023558A01A66BCD88 /* WorktreeInspectorViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeInspectorViewController.swift; sourceTree = "<group>"; };
@@ -417,6 +420,7 @@
 		DFE4293578DDF8459D6E4961 /* ActivityEventTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityEventTests.swift; sourceTree = "<group>"; };
 		E18FF3C293F2E181CE16A945 /* LayoutPopoverPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutPopoverPage.swift; sourceTree = "<group>"; };
 		E1FFDB5E28F5B9C02E702E07 /* GatewayStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayStateTests.swift; sourceTree = "<group>"; };
+		E2EFD583955F594EFE0C7489 /* WorktreeSidePanelViewControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeSidePanelViewControllerTests.swift; sourceTree = "<group>"; };
 		E35FDB8159EDBE52A45E877F /* SemanticColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SemanticColors.swift; sourceTree = "<group>"; };
 		E3A2E0A7AFE5800BDC7ABC95 /* AgentType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentType.swift; sourceTree = "<group>"; };
 		E3F368385F2FABFF32DD80B8 /* TaskProgressParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskProgressParser.swift; sourceTree = "<group>"; };
@@ -464,6 +468,7 @@
 				B4A1EB018C11D94FCADE7078 /* Panel */,
 				B1C171C2B7C91E49813CD11F /* Settings */,
 				E30133183960B62D458884CF /* Shared */,
+				A5E492C511B6EA5081CF8C51 /* SidePanel */,
 				4E9CFCF44CCF6EAB3638C18D /* Split */,
 				CB404BA795523251145131E0 /* StatusBar */,
 				B6C3C3B62B47BD17A1B09890 /* TitleBar */,
@@ -584,6 +589,7 @@
 				BAEBD5230AD9BFA1D7573FDB /* WorktreeDeleterTests.swift */,
 				B0B8FCBC2DD71C43FD120B2D /* WorktreeDiscoveryTests.swift */,
 				EC5AA3C4E1BFDC350B483FD9 /* WorktreeInspectorViewControllerTests.swift */,
+				E2EFD583955F594EFE0C7489 /* WorktreeSidePanelViewControllerTests.swift */,
 				F06B8F0AF6A21D4BD5B202AF /* WorktreeStatusAggregatorTests.swift */,
 				6C4BBF5F77F720B1D5C48C5E /* WorktreeTaskStoreTests.swift */,
 				910EC5EAC3FBF33C22FAEC7E /* WorktreeTitleResolverTests.swift */,
@@ -695,6 +701,14 @@
 				DA59BE484C3F1572CC25B507 /* WorktreeDiscovery.swift */,
 			);
 			path = Git;
+			sourceTree = "<group>";
+		};
+		A5E492C511B6EA5081CF8C51 /* SidePanel */ = {
+			isa = PBXGroup;
+			children = (
+				D7A7F775D6B8BEE5C48C38E6 /* WorktreeSidePanelViewController.swift */,
+			);
+			path = SidePanel;
 			sourceTree = "<group>";
 		};
 		AAFCFEEC3AEC69863A61C67C /* Usage */ = {
@@ -1091,6 +1105,7 @@
 				BA59BEB549227A0278D6A980 /* WorktreeDeleter.swift in Sources */,
 				F26FB72BE7F5AF59EC2A2D38 /* WorktreeDiscovery.swift in Sources */,
 				C9160CA5C0AC6FEF659EA5C8 /* WorktreeInspectorViewController.swift in Sources */,
+				6613665134B5E36E6D8E8A1C /* WorktreeSidePanelViewController.swift in Sources */,
 				A9500AA10FD1B8D5EC15A95C /* WorktreeStatusAggregator.swift in Sources */,
 				E0031CB590181D631045DB2E /* WorktreeTaskStore.swift in Sources */,
 				53A02041656EA631E7563517 /* WorktreeTitleCache.swift in Sources */,
@@ -1203,6 +1218,7 @@
 				18580C2B189A7C4DF84EACB6 /* WorktreeDeleterTests.swift in Sources */,
 				4F4963D3402AC5AB787C4F5E /* WorktreeDiscoveryTests.swift in Sources */,
 				3F18663AE9538393D84112CD /* WorktreeInspectorViewControllerTests.swift in Sources */,
+				9A995D003879B1811D5D404D /* WorktreeSidePanelViewControllerTests.swift in Sources */,
 				F88078FD74B9E988ABF0ECD6 /* WorktreeStatusAggregatorTests.swift in Sources */,
 				3DF985298C6F5ECBF3D915EE /* WorktreeTaskStoreTests.swift in Sources */,
 				831002A74BCB4954E577464C /* WorktreeTitleResolverTests.swift in Sources */,
