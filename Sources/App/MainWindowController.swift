@@ -163,7 +163,6 @@ class MainWindowController: NSWindowController {
         )
         handleNotificationHistoryDidChange(nil)
         usageSummaryStore.onUpdate = { [weak self] frames in
-            self?.titleBar.updatePrimaryCapsuleFrames(frames)
             let usageText = frames
                 .filter { $0.kind == .usage }
                 .map { frame in
