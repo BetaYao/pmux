@@ -243,7 +243,7 @@ final class WorktreeInspectorViewController: NSViewController {
         return started
     }
 
-    private static func defaultYaziConfigDirectory() -> URL {
+    static func defaultYaziConfigDirectory() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("amux-yazi", isDirectory: true)
     }

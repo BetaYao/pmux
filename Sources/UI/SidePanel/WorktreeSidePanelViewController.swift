@@ -9,7 +9,7 @@ final class WorktreeSidePanelViewController: NSViewController {
     private var worktreePath: String?
     private var selectedTab: SidePanelTab
     private let makeDiffReviewView: (String) -> DiffReviewView
-    private let makeYaziSurface: (NSView, String) -> Bool
+    private let makeYaziSurface: (NSView, String) -> TerminalSurface?
 
     private let segmentedControl = NSSegmentedControl(
         labels: ["Files", "Changes"],
@@ -27,7 +27,7 @@ final class WorktreeSidePanelViewController: NSViewController {
         worktreePath: String?,
         initialTab: SidePanelTab = .changes,
         makeDiffReviewView: @escaping (String) -> DiffReviewView = { DiffReviewView(worktreePath: $0) },
-        makeYaziSurface: @escaping (NSView, String) -> Bool = WorktreeSidePanelViewController.defaultYaziLauncher
+        makeYaziSurface: @escaping (NSView, String) -> TerminalSurface? = WorktreeSidePanelViewController.defaultYaziLauncher
     ) {
         self.worktreePath = worktreePath
         self.selectedTab = initialTab
@@ -112,7 +112,28 @@ final class WorktreeSidePanelViewController: NSViewController {
     }
 
     private func showFilesTab(_ path: String) {
-        showPlaceholder("Files", identifier: "sidePanel.filesPlaceholder")
+        let terminalContainer = NSView()
+        terminalContainer.wantsLayer = true
+        terminalContainer.layer?.backgroundColor = Theme.background.cgColor
+        terminalContainer.setAccessibilityIdentifier("sidePanel.yaziContainer")
+        terminalContainer.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(terminalContainer)
+        NSLayoutConstraint.activate([
+            terminalContainer.topAnchor.constraint(equalTo: contentView.topAnchor),
+            terminalContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            terminalContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            terminalContainer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+        ])
+
+        if let surface = makeYaziSurface(terminalContainer, path) {
+            yaziSurface = surface
+        } else {
+            terminalContainer.removeFromSuperview()
+            showPlaceholder(
+                "Yazi is not installed. Install yazi to browse files in this tab.",
+                identifier: "sidePanel.filesMissingYazi"
+            )
+        }
     }
 
     private func showPlaceholder(_ message: String, identifier: String) {
@@ -133,7 +154,14 @@ final class WorktreeSidePanelViewController: NSViewController {
         ])
     }
 
-    static func defaultYaziLauncher(in container: NSView, worktreePath: String) -> Bool {
-        false
+    static func defaultYaziLauncher(in container: NSView, worktreePath: String) -> TerminalSurface? {
+        guard let yaziPath = ProcessRunner.commandPath("yazi") else { return nil }
+        guard let command = WorktreeInspectorViewController.yaziCommand(
+            yaziPath: yaziPath,
+            configDirectory: WorktreeInspectorViewController.defaultYaziConfigDirectory()
+        ) else { return nil }
+        let surface = TerminalSurface()
+        guard surface.createEphemeral(in: container, workingDirectory: worktreePath, command: command) else { return nil }
+        return surface
     }
 }
