@@ -89,8 +89,12 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
     private var leftColumnWidthExpanded: NSLayoutConstraint?
     private var leftColumnWidthCollapsed: NSLayoutConstraint?
     private var isLeftColumnCollapsed = false
-    /// Which of the four panes the left column currently shows.
+    /// Which of the panes the left column currently shows.
     private var currentLeftPane: LeftPane = .bridge
+
+    /// Worktree paths idle > 8h — collapsed under the expander in the popover list.
+    var idleWorktreePaths: Set<String> = []
+    private var worktreeIdleExpanded = false
 
     var selectedAgentIndex: Int {
         agents.firstIndex(where: { $0.id == selectedAgentId }) ?? 0
@@ -277,17 +281,13 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
     func selectLeftPane(_ pane: LeftPane) {
         currentLeftPane = pane
 
-        let showWorktree = (pane == .worktree)
         let isBridge = (pane == .bridge)
-        leftRightSidebarScroll.isHidden = !showWorktree
-        sidePanelVC.view.isHidden = showWorktree
         // The status + input bar belongs to the bridge pane only.
         leftBottomBar.isHidden = !isBridge
         sidePanelBottomToBar?.isActive = isBridge
         sidePanelBottomToContainer?.isActive = !isBridge
 
         switch pane {
-        case .worktree: break
         case .bridge:   sidePanelVC.selectTab(.firstMate)
         case .file:     sidePanelVC.selectTab(.files)
         case .change:   sidePanelVC.selectTab(.changes)
@@ -300,6 +300,41 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
         animateColumnLayout {
             self.leftColumnContainer.animator().alphaValue = 1
         }
+    }
+
+    // MARK: - Worktree popover
+
+    private lazy var worktreePopover: NSPopover = {
+        let pop = NSPopover()
+        pop.behavior = .transient
+        let vc = NSViewController()
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 520))
+        host.addSubview(leftRightSidebarScroll)
+        NSLayoutConstraint.activate([
+            host.widthAnchor.constraint(equalToConstant: 320),
+            host.heightAnchor.constraint(equalToConstant: 520),
+            leftRightSidebarScroll.topAnchor.constraint(equalTo: host.topAnchor, constant: 8),
+            leftRightSidebarScroll.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: 8),
+            leftRightSidebarScroll.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: -8),
+            leftRightSidebarScroll.bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: -8),
+        ])
+        vc.view = host
+        pop.contentViewController = vc
+        return pop
+    }()
+
+    /// Toggle the worktree list popover anchored to the title-bar worktree icon.
+    func toggleWorktreePopover(from sourceView: NSView) {
+        if worktreePopover.isShown {
+            worktreePopover.close()
+        } else {
+            populateWorktreeCards()
+            worktreePopover.show(relativeTo: sourceView.bounds, of: sourceView, preferredEdge: .maxY)
+        }
+    }
+
+    func closeWorktreePopover() {
+        if worktreePopover.isShown { worktreePopover.close() }
     }
 
     /// Update the First Mate fleet status line (repos · worktrees · hidden).
@@ -367,14 +402,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
     }
 
     private func rebuildFocusLayout() {
-        var refs = focusLayoutRefs
-
-        refs.miniCards.forEach { $0.removeFromSuperview() }
-        refs.miniCards.removeAll()
-        refs.stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-
-        guard !agents.isEmpty else { return }
-
         if let selected = agents.first(where: { $0.id == selectedAgentId }) ?? agents.first {
             selectedAgentId = selected.id
             // Only embed when the dashboard is visible to avoid stealing
@@ -383,38 +410,85 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
                 embedSplitContainerForSelectedAgent()
             }
         }
+        populateWorktreeCards()
+    }
 
-        let fixedWidth = refs.scrollView.bounds.width > 0 ? refs.scrollView.bounds.width : 240
-        for agent in agents {
-            let container = StackedMiniCardContainerView()
-            container.delegate = self
-            container.reorderDelegate = self
-            container.configure(paneCount: agent.paneCount)
-            WorktreeTitleCache.shared.title(worktreePath: agent.worktreePath, lastUserPrompt: agent.lastUserPrompt, branch: agent.thread) { _ in }
-            container.miniCardView.configure(
-                id: agent.id, project: agent.project, thread: agent.thread,
-                status: agent.status, lastMessage: agent.lastMessage,
-                lastUserPrompt: WorktreeTitleCache.shared.cachedTitle(worktreePath: agent.worktreePath) ?? agent.lastUserPrompt,
-                totalDuration: agent.totalDuration, roundDuration: agent.roundDuration,
-                paneStatuses: agent.paneStatuses,
-                isMainWorktree: agent.isMainWorktree,
-                tasks: agent.tasks,
-                activityEvents: agent.activityEvents,
-                agentType: WorktreeAgentTypeStore.shared.agentType(forWorktree: agent.worktreePath)
-                    ?? AgentHead.shared.agent(forWorktree: agent.worktreePath)?.agentType ?? .unknown
-            )
-            container.isSelected = (agent.id == selectedAgentId)
-            container.translatesAutoresizingMaskIntoConstraints = false
-            refs.miniCards.append(container)
-            refs.stack.addArrangedSubview(container)
+    /// Build the worktree mini-card list (popover content). Idle worktrees
+    /// (in `idleWorktreePaths`) collapse below a "N hidden" expander row.
+    private func populateWorktreeCards() {
+        let refs = focusLayoutRefs
+        refs.miniCards.forEach { $0.removeFromSuperview() }
+        refs.stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
-            NSLayoutConstraint.activate([
-                container.widthAnchor.constraint(equalToConstant: fixedWidth),
-                container.heightAnchor.constraint(equalToConstant: 84),
-            ])
+        guard !agents.isEmpty else { leftRightMiniCards = []; return }
+
+        let fixedWidth = refs.scrollView.bounds.width > 0 ? refs.scrollView.bounds.width : 304
+
+        // One card per agent, kept parallel to `agents` for in-place updates.
+        let cards = agents.map { makeMiniCard(for: $0, width: fixedWidth) }
+        leftRightMiniCards = cards
+
+        let activeCards = zip(agents, cards).filter { !idleWorktreePaths.contains($0.0.worktreePath) }.map(\.1)
+        let idleCards = zip(agents, cards).filter { idleWorktreePaths.contains($0.0.worktreePath) }.map(\.1)
+
+        activeCards.forEach { refs.stack.addArrangedSubview($0) }
+        if !idleCards.isEmpty {
+            refs.stack.addArrangedSubview(makeIdleExpanderRow(hiddenCount: idleCards.count, width: fixedWidth))
+            if worktreeIdleExpanded {
+                idleCards.forEach { refs.stack.addArrangedSubview($0) }
+            }
         }
+    }
 
-        leftRightMiniCards = refs.miniCards
+    private func makeMiniCard(for agent: AgentDisplayInfo, width: CGFloat) -> StackedMiniCardContainerView {
+        let container = StackedMiniCardContainerView()
+        container.delegate = self
+        container.reorderDelegate = self
+        container.configure(paneCount: agent.paneCount)
+        WorktreeTitleCache.shared.title(worktreePath: agent.worktreePath, lastUserPrompt: agent.lastUserPrompt, branch: agent.thread) { _ in }
+        container.miniCardView.configure(
+            id: agent.id, project: agent.project, thread: agent.thread,
+            status: agent.status, lastMessage: agent.lastMessage,
+            lastUserPrompt: WorktreeTitleCache.shared.cachedTitle(worktreePath: agent.worktreePath) ?? agent.lastUserPrompt,
+            totalDuration: agent.totalDuration, roundDuration: agent.roundDuration,
+            paneStatuses: agent.paneStatuses,
+            isMainWorktree: agent.isMainWorktree,
+            tasks: agent.tasks,
+            activityEvents: agent.activityEvents,
+            agentType: WorktreeAgentTypeStore.shared.agentType(forWorktree: agent.worktreePath)
+                ?? AgentHead.shared.agent(forWorktree: agent.worktreePath)?.agentType ?? .unknown
+        )
+        container.isSelected = (agent.id == selectedAgentId)
+        container.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            container.widthAnchor.constraint(equalToConstant: width),
+            container.heightAnchor.constraint(equalToConstant: 84),
+        ])
+        return container
+    }
+
+    private func makeIdleExpanderRow(hiddenCount: Int, width: CGFloat) -> NSView {
+        let title = worktreeIdleExpanded
+            ? "▾ Hide \(hiddenCount) idle"
+            : "▸ \(hiddenCount) idle worktree\(hiddenCount == 1 ? "" : "s")"
+        let btn = NSButton(title: title, target: self, action: #selector(toggleWorktreeIdleExpanded))
+        btn.isBordered = false
+        btn.bezelStyle = .recessed
+        btn.contentTintColor = Theme.textSecondary
+        btn.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        btn.alignment = .left
+        btn.translatesAutoresizingMaskIntoConstraints = false
+        btn.setAccessibilityIdentifier("worktree.idleExpander")
+        NSLayoutConstraint.activate([
+            btn.widthAnchor.constraint(equalToConstant: width),
+            btn.heightAnchor.constraint(equalToConstant: 26),
+        ])
+        return btn
+    }
+
+    @objc private func toggleWorktreeIdleExpanded() {
+        worktreeIdleExpanded.toggle()
+        populateWorktreeCards()
     }
 
     // MARK: - Setup: Empty State
@@ -485,7 +559,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
         leftColumnContainer.setAccessibilityIdentifier("dashboard.leftColumn")
         leftRightContainer.addSubview(leftColumnContainer)
 
-        // Worktree list (worktree pane).
+        // Worktree list (now hosted in a title-bar popover, not the left column).
         leftRightSidebarScroll.translatesAutoresizingMaskIntoConstraints = false
         leftRightSidebarScroll.hasVerticalScroller = true
         leftRightSidebarScroll.scrollerStyle = .overlay
@@ -497,7 +571,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
         leftRightSidebarStack.alignment = .leading
         leftRightSidebarStack.translatesAutoresizingMaskIntoConstraints = false
         leftRightSidebarScroll.documentView = leftRightSidebarStack
-        leftColumnContainer.addSubview(leftRightSidebarScroll)
 
         // First Mate bottom bar: fleet status line + task input.
         leftBottomBar.translatesAutoresizingMaskIntoConstraints = false
@@ -523,7 +596,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
         // Bridge/file/change side panel — fills the column, hidden until selected.
         addChild(sidePanelVC)
         sidePanelVC.view.translatesAutoresizingMaskIntoConstraints = false
-        sidePanelVC.view.isHidden = true
         leftColumnContainer.addSubview(sidePanelVC.view)
 
         // --- Center column: focus panel ---
@@ -552,12 +624,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
             leftColumnContainer.topAnchor.constraint(equalTo: leftRightContainer.topAnchor),
             leftColumnContainer.leadingAnchor.constraint(equalTo: leftRightContainer.leadingAnchor, constant: edge),
             leftColumnContainer.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor, constant: -8),
-
-            // Worktree list fills the column (worktree pane has no input bar).
-            leftRightSidebarScroll.topAnchor.constraint(equalTo: leftColumnContainer.topAnchor),
-            leftRightSidebarScroll.leadingAnchor.constraint(equalTo: leftColumnContainer.leadingAnchor),
-            leftRightSidebarScroll.trailingAnchor.constraint(equalTo: leftColumnContainer.trailingAnchor),
-            leftRightSidebarScroll.bottomAnchor.constraint(equalTo: leftColumnContainer.bottomAnchor),
 
             // Bottom bar pinned to the container bottom (shown only on bridge).
             leftBottomBar.leadingAnchor.constraint(equalTo: leftColumnContainer.leadingAnchor),
@@ -977,6 +1043,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
         updateMiniCardSelection()
         syncSidePanelToSelection()
         dashboardDelegate?.dashboardDidChangeSelection(self)
+        // Selecting from the worktree popover dismisses it.
+        closeWorktreePopover()
     }
 
     func agentCardDoubleClicked(agentId: String) {

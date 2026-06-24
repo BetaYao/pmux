@@ -1,17 +1,18 @@
 import AppKit
 
-/// The four left-side panes, switched via the top-left icon cluster.
+/// The left-side panes, switched via the top-left icon cluster.
+/// (Worktrees are no longer a pane — they live in a title-bar popover.)
 enum LeftPane: Int, CaseIterable {
-    case worktree = 0
-    case bridge = 1
-    case file = 2
-    case change = 3
+    case bridge = 0
+    case file = 1
+    case change = 2
 }
 
 protocol TitleBarDelegate: AnyObject {
     func titleBarDidToggleTheme()
     func titleBarDidRequestCollapseLeftColumn()
     func titleBarDidSelectLeftPane(_ pane: LeftPane)
+    func titleBarDidToggleWorktreeList(from sourceView: NSView)
     func titleBarDidSelectWorktree(_ path: String)
 }
 
@@ -26,6 +27,10 @@ final class TitleBarView: NSView {
         /// With a unified toolbar, the title-bar accessory's content origin is
         /// inset past the traffic-light region. Subtract it so window-x math lines up.
         static let toolbarLeadingInset: CGFloat = 76
+        /// Window-x of the centre content area's left edge:
+        /// edge(8) + leftColumnWidth(300) + columnSpacing(8). The worktree icon +
+        /// tab strip align here so tabs sit above the centre terminal.
+        static let centerContentLeftEdge: CGFloat = 316
     }
 
     weak var delegate: TitleBarDelegate?
@@ -47,6 +52,9 @@ final class TitleBarView: NSView {
     private let themeButton = NSButton()
     private var paneButtons: [LeftPane: NSButton] = [:]
     private var selectedLeftPane: LeftPane = .bridge
+
+    // Fixed worktree-list icon at the front of the tab strip; opens a popover.
+    private let tabWorktreeButton = NSButton()
 
     // Worktree tab strip (horizontally scrollable) + overflow menu for idle tabs.
     private let tabStripScroll = NSScrollView()
@@ -141,10 +149,9 @@ final class TitleBarView: NSView {
                                action: #selector(themeClicked))
         leftClusterStack.addArrangedSubview(themeButton)
 
-        // Pane switchers: bridge / worktree / file / change.
+        // Pane switchers: bridge / file / change.
         let panes: [(LeftPane, String, String)] = [
             (.bridge, "sailboat", "First Mate"),
-            (.worktree, "rectangle.stack", "Worktrees"),
             (.file, "folder", "Files"),
             (.change, "plusminus", "Changes"),
         ]
@@ -190,6 +197,18 @@ final class TitleBarView: NSView {
         tabStripScroll.documentView = tabStripStack
         addSubview(tabStripScroll)
 
+        // Fixed worktree-list icon at the front of the tab strip — aligned to the
+        // centre content's left edge — opening the worktree popover on click.
+        configureArcIconButton(tabWorktreeButton, symbol: "rectangle.stack",
+                               identifier: "titlebar.worktreeList", label: "Worktrees",
+                               action: #selector(worktreeListClicked))
+        addSubview(tabWorktreeButton)
+        NSLayoutConstraint.activate([
+            tabWorktreeButton.leadingAnchor.constraint(
+                equalTo: leadingAnchor, constant: Layout.centerContentLeftEdge - Layout.toolbarLeadingInset),
+            tabWorktreeButton.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Layout.arcVerticalOffset),
+        ])
+
         // Top-right overflow badge — collapsed (idle) worktrees live in its
         // pull-down menu; the title shows how many. Hidden when none.
         tabOverflowButton.bezelStyle = .recessed
@@ -211,7 +230,7 @@ final class TitleBarView: NSView {
         scrollTrailingToEdge?.isActive = true
 
         NSLayoutConstraint.activate([
-            tabStripScroll.leadingAnchor.constraint(equalTo: leftClusterStack.trailingAnchor, constant: 8),
+            tabStripScroll.leadingAnchor.constraint(equalTo: tabWorktreeButton.trailingAnchor, constant: 6),
             tabStripScroll.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Layout.arcVerticalOffset),
             tabStripScroll.heightAnchor.constraint(equalToConstant: 22),
 
@@ -446,6 +465,10 @@ final class TitleBarView: NSView {
         guard let pane = LeftPane(rawValue: sender.tag) else { return }
         setSelectedLeftPane(pane)
         delegate?.titleBarDidSelectLeftPane(pane)
+    }
+
+    @objc private func worktreeListClicked() {
+        delegate?.titleBarDidToggleWorktreeList(from: tabWorktreeButton)
     }
 
     // MARK: - Theme

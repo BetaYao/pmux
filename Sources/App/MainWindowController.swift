@@ -611,6 +611,7 @@ dashboard.surfaceManager = terminalCoordinator.surfaceManager
             worktrees: tabs.count,
             hidden: tabs.filter(\.collapsed).count
         )
+        tabCoordinator.dashboardVC?.idleWorktreePaths = Set(tabs.filter(\.collapsed).map(\.path))
     }
 
     private func refreshFocusedWorktreeCapsule() {
@@ -868,6 +869,10 @@ extension MainWindowController: TitleBarDelegate {
 
     func titleBarDidSelectLeftPane(_ pane: LeftPane) {
         tabCoordinator.dashboardVC?.selectLeftPane(pane)
+    }
+
+    func titleBarDidToggleWorktreeList(from sourceView: NSView) {
+        tabCoordinator.dashboardVC?.toggleWorktreePopover(from: sourceView)
     }
 
     func titleBarDidSelectWorktree(_ path: String) {
