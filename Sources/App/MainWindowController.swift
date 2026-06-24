@@ -376,6 +376,10 @@ dashboard.surfaceManager = terminalCoordinator.surfaceManager
         dashboardVC = dashboard
         tabCoordinator.dashboardVC = dashboard
 
+        dashboard.sidePanelVC.onBridgeNavigate = { [weak self] path in
+            self?.tabCoordinator.selectTab(forWorktree: path)
+        }
+
         dashboard.onEnterTerminal = { [weak self] in self?.keyboardMode.enterInsert() }
         dashboard.onRequestNewWorktree = { [weak self] in
             self?.keyboardMode.beginCreateForm()

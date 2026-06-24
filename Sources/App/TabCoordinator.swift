@@ -792,6 +792,19 @@ class TabCoordinator {
         return leaves[zeroBasedIndex].id == tree.focusedId
     }
 
+    // MARK: - Tab Selection
+
+    static func tabIndex(forWorktree path: String, in paths: [String]) -> Int? {
+        paths.firstIndex(of: path)
+    }
+
+    func selectTab(forWorktree path: String) {
+        let paths = allWorktrees.map { $0.info.path }
+        if let idx = Self.tabIndex(forWorktree: path, in: paths) {
+            switchToTab(idx)
+        }
+    }
+
     // MARK: - Navigation
 
     func handleNavigateToWorktree(worktreePath: String, paneIndex: Int?) {
