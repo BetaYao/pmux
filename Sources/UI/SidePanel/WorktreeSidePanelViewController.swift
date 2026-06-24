@@ -16,16 +16,15 @@ final class WorktreeSidePanelViewController: NSViewController {
 
     weak var delegate: WorktreeSidePanelDelegate?
 
-    private let segmentedControl = NSSegmentedControl(
-        labels: ["Files", "Changes"],
-        trackingMode: .selectOne,
-        target: nil,
-        action: nil
-    )
     private let contentView = NSView()
 
     // Files tab
     private var fileTreeController: FileTreeOutlineController?
+    private var fileSearchField: NSSearchField?
+    private var hiddenToggleButton: NSButton?
+    private var showHiddenFiles = false
+    /// Folder expansion state remembered per worktree, restored on return.
+    private var expandedByWorktree: [String: Set<String>] = [:]
 
     // Changes tab
     private var changesTableView: NSTableView?
@@ -49,21 +48,11 @@ final class WorktreeSidePanelViewController: NSViewController {
         root.layer?.backgroundColor = Theme.background.cgColor
         root.setAccessibilityIdentifier("sidePanel.view")
 
-        segmentedControl.target = self
-        segmentedControl.action = #selector(tabChanged)
-        segmentedControl.selectedSegment = selectedTab.rawValue
-        segmentedControl.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(segmentedControl)
-
         contentView.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(contentView)
 
         NSLayoutConstraint.activate([
-            segmentedControl.topAnchor.constraint(equalTo: root.topAnchor, constant: 8),
-            segmentedControl.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 8),
-            segmentedControl.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -8),
-
-            contentView.topAnchor.constraint(equalTo: segmentedControl.bottomAnchor, constant: 8),
+            contentView.topAnchor.constraint(equalTo: root.topAnchor),
             contentView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             contentView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             contentView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
@@ -75,8 +64,15 @@ final class WorktreeSidePanelViewController: NSViewController {
 
     func setWorktree(_ path: String?) {
         guard path != worktreePath else { return }
+        captureExpansion()
         worktreePath = path
         if isViewLoaded { rebuildContent() }
+    }
+
+    /// Remember the current worktree's folder expansion before tearing the tree down.
+    private func captureExpansion() {
+        guard let path = worktreePath, let controller = fileTreeController else { return }
+        expandedByWorktree[path] = controller.currentExpandedPaths()
     }
 
     // MARK: - Internal selection handlers (called by tree/table, forwarded to delegate)
@@ -89,14 +85,19 @@ final class WorktreeSidePanelViewController: NSViewController {
         delegate?.sidePanel(self, didSelectChange: path)
     }
 
-    @objc private func tabChanged() {
-        selectedTab = SidePanelTab(rawValue: segmentedControl.selectedSegment) ?? .files
-        rebuildContent()
+    /// Switch the visible tab. Driven by the title-bar file/changes icons.
+    func selectTab(_ tab: SidePanelTab) {
+        guard tab != selectedTab else { return }
+        captureExpansion()
+        selectedTab = tab
+        if isViewLoaded { rebuildContent() }
     }
 
     private func rebuildContent() {
         contentView.subviews.forEach { $0.removeFromSuperview() }
         fileTreeController = nil
+        fileSearchField = nil
+        hiddenToggleButton = nil
         changesTableView = nil
         changesScrollView = nil
 
@@ -115,24 +116,75 @@ final class WorktreeSidePanelViewController: NSViewController {
 
     private func showFilesTab(_ path: String) {
         let controller = FileTreeOutlineController(rootPath: path)
+        controller.showHidden = showHiddenFiles
         controller.onSelectFile = { [weak self] filePath in
             self?.handleFileSelection(filePath)
         }
         fileTreeController = controller
+
+        // Search + hidden-files toggle row.
+        let searchField = NSSearchField()
+        searchField.placeholderString = "Search files"
+        searchField.translatesAutoresizingMaskIntoConstraints = false
+        searchField.target = self
+        searchField.action = #selector(searchChanged(_:))
+        searchField.sendsSearchStringImmediately = false
+        searchField.sendsWholeSearchString = false
+        searchField.setAccessibilityIdentifier("sidePanel.fileSearch")
+        self.fileSearchField = searchField
+
+        let hiddenToggle = NSButton()
+        hiddenToggle.bezelStyle = .recessed
+        hiddenToggle.isBordered = false
+        hiddenToggle.imagePosition = .imageOnly
+        hiddenToggle.image = NSImage(systemSymbolName: showHiddenFiles ? "eye" : "eye.slash",
+                                     accessibilityDescription: "Toggle hidden files")
+        hiddenToggle.contentTintColor = Theme.textSecondary
+        hiddenToggle.target = self
+        hiddenToggle.action = #selector(toggleHiddenFiles(_:))
+        hiddenToggle.translatesAutoresizingMaskIntoConstraints = false
+        hiddenToggle.toolTip = "Show/Hide hidden files"
+        hiddenToggle.setAccessibilityIdentifier("sidePanel.toggleHidden")
+        self.hiddenToggleButton = hiddenToggle
 
         let scrollView = NSScrollView()
         scrollView.documentView = controller.outlineView
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.translatesAutoresizingMaskIntoConstraints = false
+
+        contentView.addSubview(searchField)
+        contentView.addSubview(hiddenToggle)
         contentView.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            searchField.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 4),
+            searchField.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 6),
+
+            hiddenToggle.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
+            hiddenToggle.leadingAnchor.constraint(equalTo: searchField.trailingAnchor, constant: 4),
+            hiddenToggle.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -6),
+            hiddenToggle.widthAnchor.constraint(equalToConstant: 22),
+
+            scrollView.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 4),
             scrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
         ])
+
+        // Restore the folder expansion remembered for this worktree.
+        controller.restoreExpansion(expandedByWorktree[path] ?? [])
+    }
+
+    @objc private func searchChanged(_ sender: NSSearchField) {
+        fileTreeController?.filterText = sender.stringValue
+    }
+
+    @objc private func toggleHiddenFiles(_ sender: NSButton) {
+        showHiddenFiles.toggle()
+        fileTreeController?.showHidden = showHiddenFiles
+        sender.image = NSImage(systemSymbolName: showHiddenFiles ? "eye" : "eye.slash",
+                               accessibilityDescription: "Toggle hidden files")
     }
 
     private func showChangesTab(_ path: String) {

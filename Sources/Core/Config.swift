@@ -10,7 +10,6 @@ struct Config: Codable {
     var autoUpdate: UpdateConfig
     var cardOrder: [String]
     var zoomIndex: Int
-    var dashboardLayout: String
     var themeMode: String
     var worktreeStartedAt: [String: String]
     var splitLayouts: [String: CodableSplitNode]
@@ -31,7 +30,6 @@ struct Config: Codable {
         case autoUpdate = "auto_update"
         case cardOrder = "card_order"
         case zoomIndex = "zoom_index"
-        case dashboardLayout = "dashboard_layout"
         case themeMode = "theme_mode"
         case worktreeStartedAt = "worktree_started_at"
         case splitLayouts = "split_layouts"
@@ -53,7 +51,6 @@ struct Config: Codable {
         autoUpdate = UpdateConfig()
         cardOrder = []
         zoomIndex = 3
-        dashboardLayout = "left-right"
         themeMode = "system"
         worktreeStartedAt = [:]
         splitLayouts = [:]
@@ -81,7 +78,6 @@ struct Config: Codable {
         autoUpdate = try container.decodeIfPresent(UpdateConfig.self, forKey: .autoUpdate) ?? UpdateConfig()
         cardOrder = try container.decodeIfPresent([String].self, forKey: .cardOrder) ?? []
         zoomIndex = try container.decodeIfPresent(Int.self, forKey: .zoomIndex) ?? 3
-        dashboardLayout = try container.decodeIfPresent(String.self, forKey: .dashboardLayout) ?? "left-right"
         themeMode = try container.decodeIfPresent(String.self, forKey: .themeMode) ?? "system"
         worktreeStartedAt = try container.decodeIfPresent([String: String].self, forKey: .worktreeStartedAt) ?? [:]
         splitLayouts = try container.decodeIfPresent([String: CodableSplitNode].self, forKey: .splitLayouts) ?? [:]

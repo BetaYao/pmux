@@ -3,31 +3,21 @@ import XCTest
 
 final class DashboardViewControllerClickTests: XCTestCase {
 
-    // MARK: - Grid single-click
+    // MARK: - Single-click
 
-    func testGridSingleClickUpdatesSelectedAgentId() {
+    func testSingleClickUpdatesSelectedAgentId() {
         let vc = DashboardViewController()
-        vc.currentLayout = .grid
         vc.agentCardClicked(agentId: "agent-1")
         XCTAssertEqual(vc.selectedAgentId, "agent-1")
     }
 
-    func testGridSingleClickDoesNotChangeLayout() {
-        let vc = DashboardViewController()
-        vc.currentLayout = .grid
-        vc.agentCardClicked(agentId: "agent-1")
-        XCTAssertEqual(vc.currentLayout, .grid,
-                       "Single click in grid must not switch to another layout")
-    }
-
-    func testGridSingleClickDoesNotCallDelegate() {
+    func testSingleClickDoesNotCallDelegate() {
         let vc = DashboardViewController()
         let spy = DashboardDelegateSpy()
         vc.dashboardDelegate = spy
-        vc.currentLayout = .grid
         vc.agentCardClicked(agentId: "agent-1")
         XCTAssertFalse(spy.didSelectProjectCalled,
-                       "Single click in grid must not call dashboardDidSelectProject")
+                       "Single click must not call dashboardDidSelectProject")
     }
 
     // MARK: - Double-click on unknown agentId (guard path)

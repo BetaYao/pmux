@@ -276,11 +276,6 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(items.map { $0.path }, ["/b", "/a", "/unknown"])
     }
 
-    func testDefaultDashboardLayout() {
-        let config = Config()
-        XCTAssertEqual(config.dashboardLayout, "left-right")
-    }
-
     func testDefaultThemeMode() {
         let config = Config()
         XCTAssertEqual(config.themeMode, "system")
@@ -296,7 +291,6 @@ final class ConfigTests: XCTestCase {
 
         let config = try JSONDecoder().decode(Config.self, from: json)
         XCTAssertEqual(config.backend, "zmx")
-        XCTAssertEqual(config.dashboardLayout, "left-right")
         XCTAssertEqual(config.themeMode, "system")
     }
 

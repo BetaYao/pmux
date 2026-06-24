@@ -35,6 +35,7 @@ fi
 echo "==> Building amux..."
 xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug \
   -derivedDataPath "$BUILD_DIR" \
+  -skipPackagePluginValidation \
   build
 
 APP="$BUILD_DIR/Build/Products/Debug/amux.app"

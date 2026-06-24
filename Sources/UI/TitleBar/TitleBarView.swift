@@ -5,15 +5,21 @@ protocol TitleBarDelegate: AnyObject {
     func titleBarDidRequestCollapseLeftColumn()
     func titleBarDidRequestCollapseRightColumn()
     func titleBarDidRequestCleanMergedWorktrees()
+    func titleBarDidRequestShowFiles()
+    func titleBarDidRequestShowChanges()
 }
 
 final class TitleBarView: NSView {
     enum Layout {
-        static let barHeight: CGFloat = 45
-        static let capsuleHeight: CGFloat = 37
-        static let rightCapsuleCompactWidth: CGFloat = 76
-        static let rightCapsuleCleanWidth: CGFloat = 112
-        static let arcVerticalOffset: CGFloat = 2
+        static let barHeight: CGFloat = 38
+        static let capsuleHeight: CGFloat = 24
+        static let arcVerticalOffset: CGFloat = 1
+        /// Right edge of the dashboard's first (worktree) column — keeps the
+        /// collapse-left icon aligned with that column. = edge(8) + leftColumnWidth(260).
+        static let firstColumnRightEdge: CGFloat = 268
+        /// With a unified toolbar, the title-bar accessory's content origin is
+        /// inset past the traffic-light region. Subtract it so window-x math lines up.
+        static let toolbarLeadingInset: CGFloat = 76
     }
 
     weak var delegate: TitleBarDelegate?
@@ -22,13 +28,21 @@ final class TitleBarView: NSView {
 
     private let rightArcBlock = NSView()
     private let titleLabel = NSTextField(labelWithString: "")
+    private let pathLabel = NSTextField(labelWithString: "")
+    private let titleStack = NSStackView()
 
-    // Right controls — action group
+    // Left control — collapse the worktrees sidebar. Aligned to the first
+    // column's right edge when expanded; tucked next to the traffic lights when collapsed.
+    private let collapseLeftButton = NSButton()
+    private var collapseLeftExpandedConstraint: NSLayoutConstraint?
+    private var collapseLeftCollapsedConstraint: NSLayoutConstraint?
+
+    // Right controls — action group: file, changes, clean, theme, collapse-right.
+    private let filesButton = NSButton()
+    private let changesButton = NSButton()
     private let cleanWorktreeButton = NSButton()
     private let themeButton = NSButton()
-    private let collapseLeftButton = NSButton()
     private let collapseRightButton = NSButton()
-    private var rightArcWidthConstraint: NSLayoutConstraint?
 
     // State
     private var isWindowHovered = false
@@ -56,9 +70,6 @@ final class TitleBarView: NSView {
     func updateChromeState(isGridLayout: Bool, hasWorkspaces: Bool = true, canCleanWorktrees: Bool = false) {
         cleanWorktreeButton.isHidden = !canCleanWorktrees
         cleanWorktreeButton.isEnabled = canCleanWorktrees
-        rightArcWidthConstraint?.constant = canCleanWorktrees
-            ? Layout.rightCapsuleCleanWidth
-            : Layout.rightCapsuleCompactWidth
         layoutSubtreeIfNeeded()
     }
 
@@ -75,9 +86,14 @@ final class TitleBarView: NSView {
         return collapsed.prefix(limit).trimmingCharacters(in: .whitespaces) + "\u{2026}"
     }
 
-    func updateFocusedWorktree(title: String, tokenText: String = "\u{2014}") {
+    func updateFocusedWorktree(title: String, path: String = "", tokenText: String = "\u{2014}") {
         titleLabel.stringValue = Self.clampTitle(title)
         titleLabel.toolTip = title
+        // Abbreviate the home directory so the second line stays readable.
+        let display = path.isEmpty ? "" : (path as NSString).abbreviatingWithTildeInPath
+        pathLabel.stringValue = display
+        pathLabel.toolTip = path
+        pathLabel.isHidden = display.isEmpty
     }
 
     // MARK: - Setup
@@ -88,20 +104,45 @@ final class TitleBarView: NSView {
         translatesAutoresizingMaskIntoConstraints = false
         setAccessibilityIdentifier("titlebar")
 
-        setupTitleLabel()
+        // rightArcBlock must be added to the view hierarchy before
+        // setupTitleLabel(), which activates a constraint between titleLabel
+        // and rightArcBlock — they need a common ancestor to be active.
+        setupLeftButton()
         setupRightArcBlock()
-
-        let rightWidth = rightArcBlock.widthAnchor.constraint(equalToConstant: Layout.rightCapsuleCompactWidth)
-        rightArcWidthConstraint = rightWidth
+        setupTitleLabel()
 
         NSLayoutConstraint.activate([
             rightArcBlock.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             rightArcBlock.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Layout.arcVerticalOffset),
             rightArcBlock.heightAnchor.constraint(equalToConstant: Layout.capsuleHeight),
-            rightWidth,
         ])
 
         updateArcBlockColors()
+    }
+
+    private func setupLeftButton() {
+        configureArcIconButton(collapseLeftButton, symbol: "sidebar.left",
+                               identifier: "titlebar.collapseLeft", label: "Toggle Worktrees",
+                               action: #selector(collapseLeftClicked))
+        addSubview(collapseLeftButton)
+        // Expanded: trailing aligns to the first column's right edge.
+        // Collapsed: leading tucks next to the traffic lights (titleBar x≈0).
+        collapseLeftExpandedConstraint = collapseLeftButton.trailingAnchor.constraint(
+            equalTo: leadingAnchor, constant: Layout.firstColumnRightEdge - Layout.toolbarLeadingInset)
+        collapseLeftCollapsedConstraint = collapseLeftButton.leadingAnchor.constraint(
+            equalTo: leadingAnchor, constant: 4)
+        collapseLeftExpandedConstraint?.isActive = true
+        NSLayoutConstraint.activate([
+            collapseLeftButton.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Layout.arcVerticalOffset),
+        ])
+    }
+
+    /// Reposition the collapse-left icon: tucked by the traffic lights when the
+    /// worktree column is collapsed, aligned to that column's right edge otherwise.
+    func setLeftColumnCollapsed(_ collapsed: Bool) {
+        collapseLeftExpandedConstraint?.isActive = !collapsed
+        collapseLeftCollapsedConstraint?.isActive = collapsed
+        layoutSubtreeIfNeeded()
     }
 
     private func setupTitleLabel() {
@@ -112,14 +153,29 @@ final class TitleBarView: NSView {
         titleLabel.cell?.usesSingleLineMode = true
         titleLabel.cell?.lineBreakMode = .byTruncatingTail
         titleLabel.alignment = .center
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(titleLabel)
+
+        // Second line: full path of the current worktree, dimmer and smaller.
+        pathLabel.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+        pathLabel.textColor = SemanticColors.muted
+        pathLabel.lineBreakMode = .byTruncatingMiddle
+        pathLabel.maximumNumberOfLines = 1
+        pathLabel.cell?.usesSingleLineMode = true
+        pathLabel.cell?.lineBreakMode = .byTruncatingMiddle
+        pathLabel.alignment = .center
+
+        titleStack.orientation = .vertical
+        titleStack.alignment = .centerX
+        titleStack.spacing = 1
+        titleStack.translatesAutoresizingMaskIntoConstraints = false
+        titleStack.addArrangedSubview(titleLabel)
+        titleStack.addArrangedSubview(pathLabel)
+        addSubview(titleStack)
 
         NSLayoutConstraint.activate([
-            titleLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
-            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            titleLabel.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 80),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: rightArcBlock.leadingAnchor, constant: -8),
+            titleStack.centerXAnchor.constraint(equalTo: centerXAnchor),
+            titleStack.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Layout.arcVerticalOffset),
+            titleStack.leadingAnchor.constraint(greaterThanOrEqualTo: collapseLeftButton.trailingAnchor, constant: 8),
+            titleStack.trailingAnchor.constraint(lessThanOrEqualTo: rightArcBlock.leadingAnchor, constant: -8),
         ])
     }
 
@@ -130,35 +186,35 @@ final class TitleBarView: NSView {
         rightArcBlock.translatesAutoresizingMaskIntoConstraints = false
         addSubview(rightArcBlock)
 
-        let actionStack = NSStackView()
-        actionStack.orientation = .horizontal
-        actionStack.spacing = 2
-        actionStack.alignment = .centerY
+        // Order: file, changes, clean, theme, collapse-right.
+        configureArcIconButton(filesButton, symbol: "doc.text",
+                               identifier: "titlebar.files", label: "Browse Files",
+                               action: #selector(filesClicked))
+
+        configureArcIconButton(changesButton, symbol: "plusminus",
+                               identifier: "titlebar.changes", label: "Show Changes",
+                               action: #selector(changesClicked))
+
+        configureCleanWorktreeButton()
 
         configureArcIconButton(themeButton, symbol: "circle.lefthalf.filled",
                                identifier: "titlebar.themeToggle", label: "Toggle Theme",
                                action: #selector(themeClicked))
-        actionStack.addArrangedSubview(themeButton)
-
-        configureArcIconButton(collapseLeftButton, symbol: "sidebar.left",
-                               identifier: "titlebar.collapseLeft", label: "Toggle Worktrees",
-                               action: #selector(collapseLeftClicked))
-        actionStack.addArrangedSubview(collapseLeftButton)
 
         configureArcIconButton(collapseRightButton, symbol: "sidebar.right",
                                identifier: "titlebar.collapseRight", label: "Toggle Side Panel",
                                action: #selector(collapseRightClicked))
-        actionStack.addArrangedSubview(collapseRightButton)
-
-        configureCleanWorktreeButton()
 
         let rightStack = NSStackView()
         rightStack.orientation = .horizontal
-        rightStack.spacing = 6
+        rightStack.spacing = 2
         rightStack.alignment = .centerY
         rightStack.translatesAutoresizingMaskIntoConstraints = false
+        rightStack.addArrangedSubview(filesButton)
+        rightStack.addArrangedSubview(changesButton)
         rightStack.addArrangedSubview(cleanWorktreeButton)
-        rightStack.addArrangedSubview(actionStack)
+        rightStack.addArrangedSubview(themeButton)
+        rightStack.addArrangedSubview(collapseRightButton)
         rightArcBlock.addSubview(rightStack)
 
         NSLayoutConstraint.activate([
@@ -173,7 +229,7 @@ final class TitleBarView: NSView {
     private func configureArcIconButton(_ button: NSButton, symbol: String,
                                         identifier: String, label: String? = nil, action: Selector) {
         let desc = label ?? identifier
-        let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+        let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
         if let image = NSImage(systemSymbolName: symbol, accessibilityDescription: desc) {
             button.image = image.withSymbolConfiguration(config)
         }
@@ -189,8 +245,8 @@ final class TitleBarView: NSView {
         button.wantsLayer = true
         button.layer?.cornerRadius = 7
         NSLayoutConstraint.activate([
-            button.widthAnchor.constraint(equalToConstant: 30),
-            button.heightAnchor.constraint(equalToConstant: 30),
+            button.widthAnchor.constraint(equalToConstant: 24),
+            button.heightAnchor.constraint(equalToConstant: 24),
         ])
         setupHoverTracking(for: button)
     }
@@ -200,7 +256,7 @@ final class TitleBarView: NSView {
         cleanWorktreeButton.bezelStyle = .recessed
         cleanWorktreeButton.isBordered = false
         cleanWorktreeButton.image = NSImage(systemSymbolName: "trash", accessibilityDescription: "Clean worktrees")?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 13, weight: .medium))
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12, weight: .medium))
         cleanWorktreeButton.imagePosition = .imageOnly
         cleanWorktreeButton.contentTintColor = SemanticColors.muted
         cleanWorktreeButton.isHidden = true
@@ -214,8 +270,8 @@ final class TitleBarView: NSView {
         cleanWorktreeButton.layer?.cornerRadius = 7
         cleanWorktreeButton.layer?.backgroundColor = NSColor.clear.cgColor
         NSLayoutConstraint.activate([
-            cleanWorktreeButton.widthAnchor.constraint(equalToConstant: 30),
-            cleanWorktreeButton.heightAnchor.constraint(equalToConstant: 30),
+            cleanWorktreeButton.widthAnchor.constraint(equalToConstant: 24),
+            cleanWorktreeButton.heightAnchor.constraint(equalToConstant: 24),
         ])
         setupHoverTracking(for: cleanWorktreeButton)
     }
@@ -277,6 +333,8 @@ final class TitleBarView: NSView {
 
     @objc private func collapseLeftClicked() { delegate?.titleBarDidRequestCollapseLeftColumn() }
     @objc private func collapseRightClicked() { delegate?.titleBarDidRequestCollapseRightColumn() }
+    @objc private func filesClicked() { delegate?.titleBarDidRequestShowFiles() }
+    @objc private func changesClicked() { delegate?.titleBarDidRequestShowChanges() }
 
     @objc private func cleanWorktreeClicked() {
         delegate?.titleBarDidRequestCleanMergedWorktrees()
@@ -299,6 +357,7 @@ final class TitleBarView: NSView {
         let saved = NSAppearance.current
         NSAppearance.current = window?.effectiveAppearance ?? NSApp.effectiveAppearance
         titleLabel.textColor = SemanticColors.text
+        pathLabel.textColor = SemanticColors.muted
         NSAppearance.current = saved
     }
 

@@ -3,41 +3,6 @@ import XCTest
 
 final class DashboardFocusControllerTests: XCTestCase {
 
-    // MARK: - Grid ring
-
-    func testGridRingNextWrapsAround() {
-        let ctrl = DashboardFocusController()
-        ctrl.enterGrid(cardIds: ["a", "b", "c"], initialId: "a")
-        XCTAssertEqual(ctrl.focusedTarget, .card("a"))
-        ctrl.next()
-        XCTAssertEqual(ctrl.focusedTarget, .card("b"))
-        ctrl.next()
-        XCTAssertEqual(ctrl.focusedTarget, .card("c"))
-        ctrl.next()
-        XCTAssertEqual(ctrl.focusedTarget, .card("a"))
-    }
-
-    func testGridRingPrevWrapsAround() {
-        let ctrl = DashboardFocusController()
-        ctrl.enterGrid(cardIds: ["a", "b", "c"], initialId: "a")
-        ctrl.prev()
-        XCTAssertEqual(ctrl.focusedTarget, .card("c"))
-        ctrl.prev()
-        XCTAssertEqual(ctrl.focusedTarget, .card("b"))
-    }
-
-    func testGridInitialFallsBackToFirstWhenInitialNotFound() {
-        let ctrl = DashboardFocusController()
-        ctrl.enterGrid(cardIds: ["a", "b", "c"], initialId: "zzz")
-        XCTAssertEqual(ctrl.focusedTarget, .card("a"))
-    }
-
-    func testGridInitialHandlesEmptyRing() {
-        let ctrl = DashboardFocusController()
-        ctrl.enterGrid(cardIds: [], initialId: nil)
-        XCTAssertEqual(ctrl.focusedTarget, .none)
-    }
-
     // MARK: - Focus-layout ring
 
     func testFocusLayoutRingStartsAtBigPanel() {
@@ -78,26 +43,19 @@ final class DashboardFocusControllerTests: XCTestCase {
 
     // MARK: - Delete shifts focus
 
-    func testDeleteShiftsFocusToNextCardInGrid() {
+    func testDeleteShiftsFocusToNextCard() {
         let ctrl = DashboardFocusController()
-        ctrl.enterGrid(cardIds: ["a", "b", "c"], initialId: "b")
+        ctrl.enterFocusLayout(cardIds: ["a", "b", "c"], initialId: "b")
         ctrl.removeCurrentCard()
         // After removing "b", ring is ["a", "c"] and focus advances to "c"
         XCTAssertEqual(ctrl.focusedTarget, .card("c"))
     }
 
-    func testDeleteLastCardWrapsToFirstInGrid() {
+    func testDeleteLastCardWrapsToFirst() {
         let ctrl = DashboardFocusController()
-        ctrl.enterGrid(cardIds: ["a", "b", "c"], initialId: "c")
+        ctrl.enterFocusLayout(cardIds: ["a", "b", "c"], initialId: "c")
         ctrl.removeCurrentCard()
         XCTAssertEqual(ctrl.focusedTarget, .card("a"))
-    }
-
-    func testDeleteOnlyCardBecomesNone() {
-        let ctrl = DashboardFocusController()
-        ctrl.enterGrid(cardIds: ["a"], initialId: "a")
-        ctrl.removeCurrentCard()
-        XCTAssertEqual(ctrl.focusedTarget, .none)
     }
 
     func testDeleteInFocusLayoutFallsBackToBigPanelIfNoCardsLeft() {

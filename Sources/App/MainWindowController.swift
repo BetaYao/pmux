@@ -301,23 +301,7 @@ class MainWindowController: NSWindowController {
         }
     }
 
-    @objc func dashboardZoomIn() {
-        dashboardVC?.zoomIn()
-        let zoom = dashboardVC?.zoomIndex ?? GridLayout.defaultZoomIndex
-        config.zoomIndex = zoom
-        tabCoordinator.config.zoomIndex = zoom
-        saveConfig()
-    }
-
-    @objc func dashboardZoomOut() {
-        dashboardVC?.zoomOut()
-        let zoom = dashboardVC?.zoomIndex ?? GridLayout.defaultZoomIndex
-        config.zoomIndex = zoom
-        tabCoordinator.config.zoomIndex = zoom
-        saveConfig()
-    }
-
-    @objc func showDiffOverlay() {
+@objc func showDiffOverlay() {
         // Use the currently selected agent's worktree path from the dashboard.
         guard let path = tabCoordinator.selectedAgent?.worktreePath else { return }
         presentDiffOverlay(for: path)
@@ -387,8 +371,7 @@ class MainWindowController: NSWindowController {
         // Create dashboard — single permanent LeftRight layout
         let dashboard = DashboardViewController()
         dashboard.dashboardDelegate = self
-        dashboard.setZoomIndex(config.zoomIndex)
-        dashboard.surfaceManager = terminalCoordinator.surfaceManager
+dashboard.surfaceManager = terminalCoordinator.surfaceManager
         dashboard.splitContainerDelegate = self
         dashboardVC = dashboard
         tabCoordinator.dashboardVC = dashboard
@@ -471,7 +454,7 @@ class MainWindowController: NSWindowController {
         toolbar.displayMode = .iconOnly
         toolbar.showsBaselineSeparator = false
         window.toolbar = toolbar
-        window.toolbarStyle = .unified
+        window.toolbarStyle = .unifiedCompact
 
         titleBar.delegate = self
         titleBar.translatesAutoresizingMaskIntoConstraints = false
@@ -564,7 +547,7 @@ class MainWindowController: NSWindowController {
 
     private func refreshFocusedWorktreeCapsule() {
         guard let agent = tabCoordinator.selectedAgent else {
-            titleBar.updateFocusedWorktree(title: "")
+            titleBar.updateFocusedWorktree(title: "", path: "")
             return
         }
         let path = agent.worktreePath
@@ -576,7 +559,7 @@ class MainWindowController: NSWindowController {
         let token = capsuleToken
         WorktreeTitleCache.shared.title(worktreePath: path, lastUserPrompt: prompt, branch: branch) { [weak self] title in
             guard let self, token == self.capsuleToken else { return }
-            self.titleBar.updateFocusedWorktree(title: title)
+            self.titleBar.updateFocusedWorktree(title: title, path: path)
         }
     }
 
@@ -811,7 +794,8 @@ extension MainWindowController: TitleBarDelegate {
     }
 
     func titleBarDidRequestCollapseLeftColumn() {
-        tabCoordinator.dashboardVC?.toggleLeftColumnCollapse()
+        guard let collapsed = tabCoordinator.dashboardVC?.toggleLeftColumnCollapse() else { return }
+        titleBar.setLeftColumnCollapsed(collapsed)
     }
 
     func titleBarDidRequestCollapseRightColumn() {
@@ -820,6 +804,14 @@ extension MainWindowController: TitleBarDelegate {
 
     func titleBarDidRequestCleanMergedWorktrees() {
         cleanMergedWorktrees()
+    }
+
+    func titleBarDidRequestShowFiles() {
+        tabCoordinator.dashboardVC?.showSidePanelTab(.files)
+    }
+
+    func titleBarDidRequestShowChanges() {
+        tabCoordinator.dashboardVC?.showSidePanelTab(.changes)
     }
 }
 

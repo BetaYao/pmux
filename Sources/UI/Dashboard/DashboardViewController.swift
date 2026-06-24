@@ -47,31 +47,18 @@ struct AgentDisplayInfo {
     }
 }
 
-// MARK: - Pasteboard type (used by DraggableGridView)
-
-extension NSPasteboard.PasteboardType {
-    static let terminalCard = NSPasteboard.PasteboardType("com.amux.terminalCard")
-}
-
 // MARK: - DashboardViewController
 
-class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGridDelegate {
+class DashboardViewController: NSViewController, AgentCardDelegate {
     enum LayoutMetrics {
         static let focusPanelCornerRadius: CGFloat = 10
         static let containerHorizontalInset: CGFloat = 0
         static let containerBottomInset: CGFloat = 0
-        static let topSmallFocusJoinSpacing: CGFloat = 8
-        static let topLargeFocusJoinSpacing: CGFloat = 0
-        static let topSmallMiniRowHorizontalInset: CGFloat = 8
-        static let topLargeMiniRowHorizontalInset: CGFloat = 8
-        static let topLargeMiniRowBottomInset: CGFloat = 8
         static let leftRightSidebarTrailingInset: CGFloat = 8
         static let leftColumnWidth: CGFloat = 260
         static let rightColumnWidth: CGFloat = 320
         static let columnSpacing: CGFloat = 8
 
-        static let topSmallFocusMaskedCorners: CACornerMask = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
-        static let topLargeFocusMaskedCorners: CACornerMask = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
         static let leftRightFocusMaskedCorners: CACornerMask = [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
     }
 
@@ -80,12 +67,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         let scrollView: NSScrollView
         let stack: NSStackView
         var miniCards: [StackedMiniCardContainerView]
-
-        enum WidthStyle {
-            case fixed          // Uses scroll view's bounds width (leftRight sidebar)
-            case flexible       // Uses 220pt nominal with 180-260 range (topSmall, topLarge)
-        }
-        let widthStyle: WidthStyle
     }
 
     weak var dashboardDelegate: DashboardDelegate?
@@ -102,26 +83,20 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
     /// Set by MainWindowController — forwards split events to TerminalCoordinator
     weak var splitContainerDelegate: SplitContainerDelegate?
 
-    var currentLayout: DashboardLayout = .leftRight
-    /// The most recently used non-grid focus layout. Grid's Return drill-in uses this as the target.
-    /// Seeded to .leftRight so first-launch behavior is predictable.
-    private(set) var lastFocusLayout: DashboardLayout = .leftRight
     var selectedAgentId: String = ""
     let focusController = DashboardFocusController()
     private var isInDState: Bool { focusController.mode != .idle }
 
-    // Constraints swapped when sidebar collapses/expands
-    private var leftRightFocusWidthExpanded: NSLayoutConstraint?   // 0.78 multiplier
-    private var leftRightFocusWidthCollapsed: NSLayoutConstraint?  // trailing = container trailing
-    private var topSmallScrollHeight: NSLayoutConstraint?          // 128pt
-    private var topSmallScrollHeightCollapsed: NSLayoutConstraint? // 0pt
-    private var topLargeScrollHeight: NSLayoutConstraint?          // 128pt
-    private var topLargeScrollHeightCollapsed: NSLayoutConstraint? // 0pt
+    private var leftColumnWidthExpanded: NSLayoutConstraint?
+    private var leftColumnWidthCollapsed: NSLayoutConstraint?
+    private var rightColumnWidthExpanded: NSLayoutConstraint?
+    private var rightColumnWidthCollapsed: NSLayoutConstraint?
+    private var isLeftColumnCollapsed = false
+    private var isRightColumnCollapsed = false
 
     var selectedAgentIndex: Int {
         agents.firstIndex(where: { $0.id == selectedAgentId }) ?? 0
     }
-    private(set) var zoomIndex: Int = GridLayout.defaultZoomIndex
 
     /// Cached SplitContainerView per worktree path
     private var splitContainers: [String: SplitContainerView] = [:]
@@ -132,13 +107,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
     // Data
     private(set) var agents: [AgentDisplayInfo] = []
 
-    // Grid layout
-    private let gridScrollView = NonFirstResponderScrollView()
-    private let gridContainer = DraggableGridView()
-    private var gridCards: [StackedCardContainerView] = []
-
-    private let gridSpacing: CGFloat = 3
-    private let aspectRatio: CGFloat = 0.5625
     private let layoutTopInset: CGFloat = 8
 
     // Left-Right layout
@@ -157,36 +125,12 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         vc.delegate = self
         return vc
     }()
-    private var leftColumnWidthExpanded: NSLayoutConstraint?
-    private var leftColumnWidthCollapsed: NSLayoutConstraint?
-    private var rightColumnWidthExpanded: NSLayoutConstraint?
-    private var rightColumnWidthCollapsed: NSLayoutConstraint?
-    private var isLeftColumnCollapsed = false
-    private var isRightColumnCollapsed = false
 
     // Center overlay
     private var centerOverlay: CenterOverlayView?
 
-    // Top-Small layout
-    private let topSmallContainer = NSView()
-    private let topSmallFocusPanel = FocusPanelView()
-    private let topSmallTopScroll = NonFirstResponderScrollView()
-    private let topSmallTopStack = NonFirstResponderStackView()
-    private var topSmallMiniCards: [StackedMiniCardContainerView] = []
-
-    // Top-Large layout
-    private let topLargeContainer = NSView()
-    private let topLargeFocusPanel = FocusPanelView()
-    private let topLargeBottomScroll = NonFirstResponderScrollView()
-    private let topLargeBottomStack = NonFirstResponderStackView()
-    private var topLargeMiniCards: [StackedMiniCardContainerView] = []
-
     // Empty state
     private let emptyStateView = NSView()
-
-    private var currentMinCardWidth: CGFloat {
-        GridLayout.zoomLevels[zoomIndex]
-    }
 
     // MARK: - First responder
 
@@ -201,12 +145,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         self.view = root
 
         setupEmptyState()
-        setupGridLayout()
         setupLeftRightLayout()
-        setupTopSmallLayout()
-        setupTopLargeLayout()
 
-        showLayout(currentLayout)
+        // Show the 3-column layout immediately; hide empty state
+        leftRightContainer.isHidden = false
     }
 
     // MARK: - Public API
@@ -234,16 +176,12 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         // Show empty state when no agents
         if agents.isEmpty {
             emptyStateView.isHidden = false
-            showLayout(currentLayout) // hides all layout containers
-            gridScrollView.isHidden = true
             leftRightContainer.isHidden = true
-            topSmallContainer.isHidden = true
-            topLargeContainer.isHidden = true
             sidePanelVC.setWorktree(nil)
             return
         } else {
             emptyStateView.isHidden = true
-            showLayout(currentLayout)
+            leftRightContainer.isHidden = false
         }
 
         // Validate selectedAgentId
@@ -252,9 +190,9 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         }
 
         if structureChanged {
-            rebuildCurrentLayout()
+            rebuildFocusLayout()
         } else {
-            updateCurrentLayoutInPlace()
+            updateFocusLayoutInPlace(agents, miniCards: focusLayoutRefs.miniCards, focusPanel: focusLayoutRefs.focusPanel)
         }
         syncSidePanelToSelection()
     }
@@ -262,40 +200,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
     private func syncSidePanelToSelection() {
         let path = agents.first(where: { $0.id == selectedAgentId })?.worktreePath
         sidePanelVC.setWorktree(path)
-    }
-
-    /// Update existing views in-place without rebuilding the view hierarchy
-    private func updateCurrentLayoutInPlace() {
-        if currentLayout == .grid {
-            updateGridInPlace(sortedAgents())
-        } else if let refs = focusLayoutRefs(for: currentLayout) {
-            updateFocusLayoutInPlace(agents, miniCards: refs.miniCards, focusPanel: refs.focusPanel)
-        }
-    }
-
-    private func updateGridInPlace(_ sorted: [AgentDisplayInfo]) {
-        guard sorted.count == gridCards.count else {
-            rebuildGrid()
-            return
-        }
-        for (index, agent) in sorted.enumerated() {
-            gridCards[index].configure(paneCount: agent.paneCount)
-            gridCards[index].layoutChildren()
-            gridCards[index].cardView.configure(
-                id: agent.id,
-                project: agent.project,
-                thread: agent.thread,
-                status: agent.status,
-                lastMessage: agent.lastMessage,
-                totalDuration: agent.totalDuration,
-                roundDuration: agent.roundDuration,
-                paneCount: agent.paneCount,
-                paneStatuses: agent.paneStatuses,
-                tasks: agent.tasks,
-                activityEvents: agent.activityEvents
-            )
-            gridCards[index].isSelected = (agent.id == selectedAgentId)
-        }
     }
 
     private func updateFocusLayoutInPlace(_ sorted: [AgentDisplayInfo], miniCards: [StackedMiniCardContainerView], focusPanel: FocusPanelView) {
@@ -334,34 +238,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         }
     }
 
-    func setLayout(_ layout: DashboardLayout) {
-        guard layout != currentLayout else { return }
-        detachTerminals()
-        resetSidebarConstraints()
-        isLeftColumnCollapsed = false; isRightColumnCollapsed = false
-        // Remember the focus layout we are LEAVING, so grid Return can restore it.
-        if currentLayout != .grid {
-            lastFocusLayout = currentLayout
-        }
-        currentLayout = layout
-        showLayout(layout)
-        rebuildCurrentLayout()
-
-        if layout == .grid {
-            DispatchQueue.main.async { [weak self] in
-                self?.enterDashboardNavigation()
-            }
-        }
-    }
-
-    func zoomIn() {
-        setZoomIndex(zoomIndex - 1)
-    }
-
-    func zoomOut() {
-        setZoomIndex(zoomIndex + 1)
-    }
-
     func detachTerminals() {
         activeSplitContainer?.removeFromSuperview()
         activeSplitContainer = nil
@@ -371,19 +247,16 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
     func selectAgent(byWorktreePath path: String) {
         guard let agent = agents.first(where: { $0.worktreePath == path }) else { return }
         selectedAgentId = agent.id
-        if currentLayout != .grid {
-            detachTerminals()
-            embedSplitContainerForSelectedAgent()
-            updateMiniCardSelection()
-        } else {
-            for container in gridCards {
-                container.isSelected = (container.agentId == selectedAgentId)
-            }
-        }
+        detachTerminals()
+        embedSplitContainerForSelectedAgent()
+        updateMiniCardSelection()
         syncSidePanelToSelection()
     }
 
-    func toggleLeftColumnCollapse() {
+    var isLeftColumnCollapsedState: Bool { isLeftColumnCollapsed }
+
+    @discardableResult
+    func toggleLeftColumnCollapse() -> Bool {
         isLeftColumnCollapsed.toggle()
         leftColumnWidthExpanded?.isActive = !isLeftColumnCollapsed
         leftColumnWidthCollapsed?.isActive = isLeftColumnCollapsed
@@ -391,6 +264,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
             self.leftRightSidebarScroll.animator().alphaValue = self.isLeftColumnCollapsed ? 0 : 1
             self.inlineCreateView.animator().alphaValue = self.isLeftColumnCollapsed ? 0 : 1
         }
+        return isLeftColumnCollapsed
     }
 
     func toggleRightColumnCollapse() {
@@ -399,6 +273,19 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         rightColumnWidthCollapsed?.isActive = isRightColumnCollapsed
         animateColumnLayout {
             self.rightColumnContainer.animator().alphaValue = self.isRightColumnCollapsed ? 0 : 1
+        }
+    }
+
+    /// Expand the right column (if collapsed) and switch the side panel to the
+    /// requested tab. Driven by the title-bar file/changes icons.
+    func showSidePanelTab(_ tab: SidePanelTab) {
+        sidePanelVC.selectTab(tab)
+        guard isRightColumnCollapsed else { return }
+        isRightColumnCollapsed = false
+        rightColumnWidthExpanded?.isActive = true
+        rightColumnWidthCollapsed?.isActive = false
+        animateColumnLayout {
+            self.rightColumnContainer.animator().alphaValue = 1
         }
     }
 
@@ -434,17 +321,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
     func inlineCreateReportSuccess() { inlineCreateView.reportCreateSuccess() }
     func inlineCreateReportFailure(_ message: String) { inlineCreateView.reportCreateFailure(message) }
 
-    private func resetSidebarConstraints() {
-        leftColumnWidthExpanded?.isActive = true
-        leftColumnWidthCollapsed?.isActive = false
-        rightColumnWidthExpanded?.isActive = true
-        rightColumnWidthCollapsed?.isActive = false
-        topSmallScrollHeight?.isActive = true
-        topSmallScrollHeightCollapsed?.isActive = false
-        topLargeScrollHeight?.isActive = true
-        topLargeScrollHeightCollapsed?.isActive = false
-    }
-
     // MARK: - Sorting
 
     private func sortedAgents() -> [AgentDisplayInfo] {
@@ -461,41 +337,14 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         }
     }
 
-    // MARK: - Layout visibility
+    // MARK: - Layout
 
-    private func showLayout(_ layout: DashboardLayout) {
-        // Only hide containers that are NOT the target layout.
-        // Hiding and immediately un-hiding the active container causes AppKit
-        // to resign the first responder (terminal loses keyboard focus).
-        gridScrollView.isHidden = layout != .grid
-        leftRightContainer.isHidden = layout != .leftRight
-        topSmallContainer.isHidden = layout != .topSmall
-        topLargeContainer.isHidden = layout != .topLarge
+    private var focusLayoutRefs: FocusLayoutRefs {
+        FocusLayoutRefs(focusPanel: leftRightFocusPanel, scrollView: leftRightSidebarScroll, stack: leftRightSidebarStack, miniCards: leftRightMiniCards)
     }
 
-    private func rebuildCurrentLayout() {
-        switch currentLayout {
-        case .grid:
-            rebuildGrid()
-        case .leftRight, .topSmall, .topLarge:
-            rebuildFocusLayout(currentLayout)
-        }
-    }
-
-    private func focusLayoutRefs(for layout: DashboardLayout) -> FocusLayoutRefs? {
-        switch layout {
-        case .grid: return nil
-        case .leftRight:
-            return FocusLayoutRefs(focusPanel: leftRightFocusPanel, scrollView: leftRightSidebarScroll, stack: leftRightSidebarStack, miniCards: leftRightMiniCards, widthStyle: .fixed)
-        case .topSmall:
-            return FocusLayoutRefs(focusPanel: topSmallFocusPanel, scrollView: topSmallTopScroll, stack: topSmallTopStack, miniCards: topSmallMiniCards, widthStyle: .flexible)
-        case .topLarge:
-            return FocusLayoutRefs(focusPanel: topLargeFocusPanel, scrollView: topLargeBottomScroll, stack: topLargeBottomStack, miniCards: topLargeMiniCards, widthStyle: .flexible)
-        }
-    }
-
-    private func rebuildFocusLayout(_ layout: DashboardLayout) {
-        guard var refs = focusLayoutRefs(for: layout) else { return }
+    private func rebuildFocusLayout() {
+        var refs = focusLayoutRefs
 
         refs.miniCards.forEach { $0.removeFromSuperview() }
         refs.miniCards.removeAll()
@@ -536,41 +385,13 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
             refs.miniCards.append(container)
             refs.stack.addArrangedSubview(container)
 
-            switch refs.widthStyle {
-            case .fixed:
-                NSLayoutConstraint.activate([
-                    container.widthAnchor.constraint(equalToConstant: fixedWidth),
-                    // Compact card: hug the 3–4 lines of content instead of a 16:9 box.
-                    container.heightAnchor.constraint(equalToConstant: 84),
-                ])
-            case .flexible:
-                let w = container.widthAnchor.constraint(equalToConstant: 220)
-                w.priority = .defaultHigh
-                NSLayoutConstraint.activate([
-                    w,
-                    container.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
-                    container.widthAnchor.constraint(lessThanOrEqualToConstant: 260),
-                    container.heightAnchor.constraint(equalTo: container.widthAnchor, multiplier: 9.0 / 16.0),
-                ])
-            }
+            NSLayoutConstraint.activate([
+                container.widthAnchor.constraint(equalToConstant: fixedWidth),
+                container.heightAnchor.constraint(equalToConstant: 84),
+            ])
         }
 
-        // Write back the updated miniCards array to the correct property
-        switch layout {
-        case .leftRight: leftRightMiniCards = refs.miniCards
-        case .topSmall: topSmallMiniCards = refs.miniCards
-        case .topLarge: topLargeMiniCards = refs.miniCards
-        case .grid: break
-        }
-    }
-
-    // MARK: - Zoom
-
-    func setZoomIndex(_ index: Int) {
-        zoomIndex = GridLayout.clampZoomIndex(index)
-        if case .grid = currentLayout {
-            rebuildGrid()
-        }
+        leftRightMiniCards = refs.miniCards
     }
 
     // MARK: - Setup: Empty State
@@ -623,32 +444,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         dashboardDelegate?.dashboardDidRequestAddProject()
     }
 
-    // MARK: - Setup: Grid
-
-    private func setupGridLayout() {
-        gridScrollView.translatesAutoresizingMaskIntoConstraints = false
-        gridScrollView.hasVerticalScroller = true
-        gridScrollView.hasHorizontalScroller = false
-        gridScrollView.drawsBackground = false
-        gridScrollView.borderType = .noBorder
-
-        gridContainer.wantsLayer = true
-        gridContainer.translatesAutoresizingMaskIntoConstraints = false
-        gridContainer.setAccessibilityIdentifier("dashboard.layout.grid")
-        gridContainer.setAccessibilityElement(true)
-        gridContainer.dragDelegate = self
-        gridScrollView.documentView = gridContainer
-
-        view.addSubview(gridScrollView)
-
-        NSLayoutConstraint.activate([
-            gridScrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: layoutTopInset),
-            gridScrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: gridSpacing),
-            gridScrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -gridSpacing),
-            gridScrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -gridSpacing),
-        ])
-    }
-
     // MARK: - Setup: Left-Right
 
     private func setupLeftRightLayout() {
@@ -692,6 +487,8 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         // --- Right column: side panel host ---
         rightColumnContainer.translatesAutoresizingMaskIntoConstraints = false
         rightColumnContainer.wantsLayer = true
+        rightColumnContainer.layer?.cornerRadius = LayoutMetrics.focusPanelCornerRadius
+        rightColumnContainer.layer?.masksToBounds = true
         rightColumnContainer.setAccessibilityIdentifier("dashboard.rightColumn")
         leftRightContainer.addSubview(rightColumnContainer)
 
@@ -729,13 +526,13 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
             // Centre column
             leftRightFocusPanel.topAnchor.constraint(equalTo: leftRightContainer.topAnchor),
             leftRightFocusPanel.leadingAnchor.constraint(equalTo: leftRightSidebarScroll.trailingAnchor, constant: spacing),
-            leftRightFocusPanel.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor),
+            leftRightFocusPanel.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor, constant: -8),
             leftRightFocusPanel.trailingAnchor.constraint(equalTo: rightColumnContainer.leadingAnchor, constant: -spacing),
 
             // Right column
             rightColumnContainer.topAnchor.constraint(equalTo: leftRightContainer.topAnchor),
             rightColumnContainer.trailingAnchor.constraint(equalTo: leftRightContainer.trailingAnchor, constant: -edge),
-            rightColumnContainer.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor),
+            rightColumnContainer.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor, constant: -8),
 
             sidePanelVC.view.topAnchor.constraint(equalTo: rightColumnContainer.topAnchor),
             sidePanelVC.view.leadingAnchor.constraint(equalTo: rightColumnContainer.leadingAnchor),
@@ -766,181 +563,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         }
     }
 
-    // MARK: - Setup: Top-Small
-
-    private func setupTopSmallLayout() {
-        topSmallContainer.translatesAutoresizingMaskIntoConstraints = false
-        topSmallContainer.wantsLayer = true
-        topSmallContainer.isHidden = true
-        topSmallContainer.setAccessibilityIdentifier("dashboard.layout.top-small")
-        topSmallContainer.setAccessibilityElement(true)
-        view.addSubview(topSmallContainer)
-
-        // Top: horizontal scrolling row of mini cards
-        topSmallTopScroll.translatesAutoresizingMaskIntoConstraints = false
-        topSmallTopScroll.hasVerticalScroller = false
-        topSmallTopScroll.hasHorizontalScroller = true
-        topSmallTopScroll.scrollerStyle = .overlay
-        topSmallTopScroll.drawsBackground = false
-        topSmallTopScroll.borderType = .noBorder
-
-        topSmallTopStack.orientation = .horizontal
-        topSmallTopStack.spacing = 8
-        topSmallTopStack.alignment = .top
-        topSmallTopStack.translatesAutoresizingMaskIntoConstraints = false
-        topSmallTopScroll.documentView = topSmallTopStack
-
-        topSmallContainer.addSubview(topSmallTopScroll)
-
-        // Bottom: focus panel
-        topSmallFocusPanel.translatesAutoresizingMaskIntoConstraints = false
-        topSmallFocusPanel.setCornerMask(
-            LayoutMetrics.topSmallFocusMaskedCorners,
-            radius: LayoutMetrics.focusPanelCornerRadius
-        )
-        topSmallContainer.addSubview(topSmallFocusPanel)
-
-        // Mini card height in top-small: derive from clamped width range 180-260 at 16:9
-        let miniCardHeight: CGFloat = 128
-
-        NSLayoutConstraint.activate([
-            topSmallContainer.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: layoutTopInset),
-            topSmallContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: LayoutMetrics.containerHorizontalInset),
-            topSmallContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -LayoutMetrics.containerHorizontalInset),
-            topSmallContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -LayoutMetrics.containerBottomInset),
-
-            topSmallTopScroll.topAnchor.constraint(equalTo: topSmallContainer.topAnchor),
-            topSmallTopScroll.leadingAnchor.constraint(equalTo: topSmallContainer.leadingAnchor, constant: LayoutMetrics.topSmallMiniRowHorizontalInset),
-            topSmallTopScroll.trailingAnchor.constraint(equalTo: topSmallContainer.trailingAnchor, constant: -LayoutMetrics.topSmallMiniRowHorizontalInset),
-
-            topSmallFocusPanel.topAnchor.constraint(equalTo: topSmallTopScroll.bottomAnchor, constant: LayoutMetrics.topSmallFocusJoinSpacing),
-            topSmallFocusPanel.leadingAnchor.constraint(equalTo: topSmallContainer.leadingAnchor),
-            topSmallFocusPanel.trailingAnchor.constraint(equalTo: topSmallContainer.trailingAnchor),
-            topSmallFocusPanel.bottomAnchor.constraint(equalTo: topSmallContainer.bottomAnchor),
-        ])
-
-        topSmallScrollHeight = topSmallTopScroll.heightAnchor.constraint(equalToConstant: miniCardHeight)
-        topSmallScrollHeightCollapsed = topSmallTopScroll.heightAnchor.constraint(equalToConstant: 0)
-        topSmallScrollHeight?.isActive = true
-    }
-
-    // MARK: - Setup: Top-Large
-
-    private func setupTopLargeLayout() {
-        topLargeContainer.translatesAutoresizingMaskIntoConstraints = false
-        topLargeContainer.wantsLayer = true
-        topLargeContainer.isHidden = true
-        topLargeContainer.setAccessibilityIdentifier("dashboard.layout.top-large")
-        topLargeContainer.setAccessibilityElement(true)
-        view.addSubview(topLargeContainer)
-
-        // Top: focus panel
-        topLargeFocusPanel.translatesAutoresizingMaskIntoConstraints = false
-        topLargeFocusPanel.setCornerMask(
-            LayoutMetrics.topLargeFocusMaskedCorners,
-            radius: LayoutMetrics.focusPanelCornerRadius
-        )
-        topLargeContainer.addSubview(topLargeFocusPanel)
-
-        // Bottom: horizontal scrolling row of mini cards
-        topLargeBottomScroll.translatesAutoresizingMaskIntoConstraints = false
-        topLargeBottomScroll.hasVerticalScroller = false
-        topLargeBottomScroll.hasHorizontalScroller = true
-        topLargeBottomScroll.scrollerStyle = .overlay
-        topLargeBottomScroll.drawsBackground = false
-        topLargeBottomScroll.borderType = .noBorder
-
-        topLargeBottomStack.orientation = .horizontal
-        topLargeBottomStack.spacing = 8
-        topLargeBottomStack.alignment = .top
-        topLargeBottomStack.translatesAutoresizingMaskIntoConstraints = false
-        topLargeBottomScroll.documentView = topLargeBottomStack
-
-        topLargeContainer.addSubview(topLargeBottomScroll)
-
-        let miniCardHeight: CGFloat = 128
-
-        NSLayoutConstraint.activate([
-            topLargeContainer.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: layoutTopInset),
-            topLargeContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: LayoutMetrics.containerHorizontalInset),
-            topLargeContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -LayoutMetrics.containerHorizontalInset),
-            topLargeContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -LayoutMetrics.containerBottomInset),
-
-            topLargeFocusPanel.topAnchor.constraint(equalTo: topLargeContainer.topAnchor),
-            topLargeFocusPanel.leadingAnchor.constraint(equalTo: topLargeContainer.leadingAnchor),
-            topLargeFocusPanel.trailingAnchor.constraint(equalTo: topLargeContainer.trailingAnchor),
-            topLargeFocusPanel.bottomAnchor.constraint(equalTo: topLargeBottomScroll.topAnchor, constant: -LayoutMetrics.topLargeFocusJoinSpacing),
-
-            topLargeBottomScroll.leadingAnchor.constraint(equalTo: topLargeContainer.leadingAnchor, constant: LayoutMetrics.topLargeMiniRowHorizontalInset),
-            topLargeBottomScroll.trailingAnchor.constraint(equalTo: topLargeContainer.trailingAnchor, constant: -LayoutMetrics.topLargeMiniRowHorizontalInset),
-            topLargeBottomScroll.bottomAnchor.constraint(equalTo: topLargeContainer.bottomAnchor, constant: -LayoutMetrics.topLargeMiniRowBottomInset),
-        ])
-
-        topLargeScrollHeight = topLargeBottomScroll.heightAnchor.constraint(equalToConstant: miniCardHeight)
-        topLargeScrollHeightCollapsed = topLargeBottomScroll.heightAnchor.constraint(equalToConstant: 0)
-        topLargeScrollHeight?.isActive = true
-    }
-
-    // MARK: - Rebuild: Grid
-
-    private func rebuildGrid() {
-        gridCards.forEach { $0.removeFromSuperview() }
-        gridCards.removeAll()
-
-        let sorted = sortedAgents()
-        guard !sorted.isEmpty else { return }
-
-        for agent in sorted {
-            let container = StackedCardContainerView()
-            container.delegate = self
-            container.reorderDelegate = self
-            container.configure(paneCount: agent.paneCount)
-            container.cardView.configure(
-                id: agent.id,
-                project: agent.project,
-                thread: agent.thread,
-                status: agent.status,
-                lastMessage: agent.lastMessage,
-                totalDuration: agent.totalDuration,
-                roundDuration: agent.roundDuration,
-                paneCount: agent.paneCount,
-                tasks: agent.tasks,
-                activityEvents: agent.activityEvents
-            )
-            container.isSelected = (agent.id == selectedAgentId)
-            container.translatesAutoresizingMaskIntoConstraints = true
-            gridCards.append(container)
-            gridContainer.addSubview(container)
-        }
-
-        layoutGridFrames()
-    }
-
-    private var currentGridLayout: GridLayout {
-        let availableWidth = gridScrollView.contentView.bounds.width
-        let availableHeight = gridScrollView.contentView.bounds.height
-        return GridLayout(
-            availableWidth: availableWidth,
-            availableHeight: availableHeight,
-            cardCount: gridCards.count,
-            minCardWidth: currentMinCardWidth,
-            spacing: gridSpacing,
-            aspectRatio: aspectRatio
-        )
-    }
-
-    private func layoutGridFrames() {
-        guard !gridCards.isEmpty else { return }
-        let layout = currentGridLayout
-        let availableWidth = gridScrollView.contentView.bounds.width
-        gridContainer.frame = NSRect(x: 0, y: 0, width: availableWidth, height: layout.scrollContentHeight)
-
-        for (index, container) in gridCards.enumerated() {
-            container.frame = layout.cardFrame(at: index)
-            container.layoutChildren()
-        }
-    }
-
     // MARK: - Split container embedding
 
     private var activeSplitWorktreePath: String?
@@ -949,9 +571,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
     /// `focusTerminal: false` is used for live nav preview — it keeps the dashboard
     /// VC as first responder so arrow keys keep driving the nav ring.
     func embedSplitContainerForSelectedAgent(focusTerminal: Bool = true) {
-        guard currentLayout != .grid else { return }
-        guard let refs = focusLayoutRefs(for: currentLayout) else { return }
-        let container = refs.focusPanel.terminalContainer
+        let container = focusLayoutRefs.focusPanel.terminalContainer
 
         guard let agent = agents.first(where: { $0.id == selectedAgentId }) ?? agents.first else { return }
         let worktreePath = agent.worktreePath
@@ -1058,8 +678,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
 
         let snapshot = DashboardFocusController.Snapshot(
             firstResponder: view.window?.firstResponder,
-            focusedWorktreePath: agents.first(where: { $0.id == selectedAgentId })?.worktreePath,
-            layout: currentLayout
+            focusedWorktreePath: agents.first(where: { $0.id == selectedAgentId })?.worktreePath
         )
         focusController.captureSnapshot(snapshot)
 
@@ -1067,16 +686,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         let initial = snapshot.focusedWorktreePath
             .flatMap { path in agents.first(where: { $0.worktreePath == path })?.id }
             ?? (selectedAgentId.isEmpty ? nil : selectedAgentId)
-        if currentLayout == .grid {
-            focusController.enterGrid(cardIds: cardIds, initialId: initial)
-        } else {
-            focusController.enterFocusLayout(cardIds: cardIds, initialId: initial)
-        }
-
-        // Clear mouse-selection visuals so only the keyboard focus ring is visible.
-        if currentLayout == .grid {
-            gridCards.forEach { $0.isSelected = false }
-        }
+        focusController.enterFocusLayout(cardIds: cardIds, initialId: initial)
 
         view.window?.makeFirstResponder(self)
         applyKeyboardFocusVisuals()
@@ -1096,7 +706,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
 
         // A cancelling exit (Esc) undoes any live preview by restoring the pre-nav
         // selection. A committing exit (Return) keeps whatever is currently previewed.
-        if restoreSnapshot, currentLayout != .grid,
+        if restoreSnapshot,
            let path = snapshot?.focusedWorktreePath,
            let original = agents.first(where: { $0.worktreePath == path }),
            original.id != selectedAgentId {
@@ -1128,62 +738,44 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
     }
 
     /// Visual/state teardown shared by `exitDashboardNavigation` and `exitNavForCreateForm`.
-    /// Drops the focus ring, dim overlays, restores grid mouse-selection visuals, and exits
-    /// the focus controller. Deliberately does NOT touch `windowKeyboardMode` or restore the
-    /// first responder — callers own those decisions.
+    /// Drops the focus ring, dim overlays, and exits the focus controller. Deliberately does
+    /// NOT touch `windowKeyboardMode` or restore the first responder — callers own those decisions.
     private func tearDownNavVisuals() {
         focusController.exit()
-
         clearKeyboardFocusVisuals()
         clearDimOverlay()
-
-        // Restore mouse-selection visual on the selected card.
-        if currentLayout == .grid {
-            for container in gridCards {
-                container.isSelected = (container.agentId == selectedAgentId)
-            }
-        }
     }
 
     // MARK: - D-state visual helpers
 
     private func applyKeyboardFocusVisuals() {
         clearKeyboardFocusVisuals()
+        let refs = focusLayoutRefs
         switch focusController.focusedTarget {
         case .none: return
         case .bigPanel:
-            if let refs = focusLayoutRefs(for: currentLayout) {
-                refs.focusPanel.isKeyboardFocused = true
-            }
+            refs.focusPanel.isKeyboardFocused = true
         case .card(let agentId):
-            if currentLayout == .grid {
-                gridCards.first(where: { $0.agentId == agentId })?.isKeyboardFocused = true
-            } else if let refs = focusLayoutRefs(for: currentLayout) {
-                refs.miniCards.first(where: { $0.agentId == agentId })?.miniCardView.isKeyboardFocused = true
-            }
+            refs.miniCards.first(where: { $0.agentId == agentId })?.miniCardView.isKeyboardFocused = true
         }
     }
 
     private func clearKeyboardFocusVisuals() {
-        gridCards.forEach { $0.isKeyboardFocused = false }
-        if let refs = focusLayoutRefs(for: currentLayout) {
-            refs.focusPanel.isKeyboardFocused = false
-            refs.miniCards.forEach { $0.miniCardView.isKeyboardFocused = false }
-        }
+        let refs = focusLayoutRefs
+        refs.focusPanel.isKeyboardFocused = false
+        refs.miniCards.forEach { $0.miniCardView.isKeyboardFocused = false }
     }
 
     private func applyDimOverlayIfNeeded() {
-        guard currentLayout != .grid else { return }
-        guard let refs = focusLayoutRefs(for: currentLayout) else { return }
+        let refs = focusLayoutRefs
         refs.focusPanel.showDimOverlay(opacity: 0.05)
         refs.miniCards.forEach { $0.miniCardView.showDimOverlay(opacity: 0.05) }
     }
 
     private func clearDimOverlay() {
-        if let refs = focusLayoutRefs(for: currentLayout) {
-            refs.focusPanel.hideDimOverlay()
-            refs.miniCards.forEach { $0.miniCardView.hideDimOverlay() }
-        }
+        let refs = focusLayoutRefs
+        refs.focusPanel.hideDimOverlay()
+        refs.miniCards.forEach { $0.miniCardView.hideDimOverlay() }
     }
 
     // MARK: - D-state key handling
@@ -1237,7 +829,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
     private func dispatch(_ action: KeyboardAction) {
         switch action {
         case .moveFocus(let dir):
-            focusController.move(dir, columns: currentGridColumns)
+            focusController.move(dir, columns: 1)
             applyKeyboardFocusVisuals(); scrollFocusedIntoView()
             previewFocusedCard()
         case .jumpToCard(let idx):
@@ -1275,12 +867,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         applyKeyboardFocusVisuals()
     }
 
-    /// Columns per row for the current grid layout. Focus layouts return 1 (vertical list).
-    private var currentGridColumns: Int {
-        guard currentLayout == .grid else { return 1 }
-        return max(1, currentGridLayout.columns)
-    }
-
     private func handleReturnInDState() {
         switch focusController.focusedTarget {
         case .none:
@@ -1291,36 +877,24 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
             guard let agent = agents.first(where: { $0.id == agentId }) else {
                 exitDashboardNavigation(restoreSnapshot: true); return
             }
-            if currentLayout == .grid {
-                setLayout(lastFocusLayout)
-                selectAgent(byWorktreePath: agent.worktreePath)
-                exitDashboardNavigation(restoreSnapshot: false)
-            } else {
-                selectAgent(byWorktreePath: agent.worktreePath)
-                exitDashboardNavigation(restoreSnapshot: false)
-            }
+            selectAgent(byWorktreePath: agent.worktreePath)
+            exitDashboardNavigation(restoreSnapshot: false)
         }
     }
 
     private func scrollFocusedIntoView() {
         guard case .card(let agentId) = focusController.focusedTarget else { return }
-        if currentLayout == .grid {
-            if let card = gridCards.first(where: { $0.agentId == agentId }) {
-                card.scrollToVisible(card.bounds)
-            }
-        } else if let refs = focusLayoutRefs(for: currentLayout) {
-            if let card = refs.miniCards.first(where: { $0.agentId == agentId }) {
-                card.scrollToVisible(card.bounds)
-            }
+        let refs = focusLayoutRefs
+        if let card = refs.miniCards.first(where: { $0.agentId == agentId }) {
+            card.scrollToVisible(card.bounds)
         }
     }
 
     /// In focus layouts, live-preview the focused mini card in the main panel as the
     /// nav ring moves — the left panel "follows" the selection. The terminal is NOT
     /// focused (the dashboard VC keeps first responder) so arrows keep navigating;
-    /// Return then commits via `handleReturnInDState`. No-op in grid or on the big panel.
+    /// Return then commits via `handleReturnInDState`.
     private func previewFocusedCard() {
-        guard currentLayout != .grid else { return }
         guard case .card(let agentId) = focusController.focusedTarget else { return }
         guard let agent = agents.first(where: { $0.id == agentId }), agent.id != selectedAgentId else { return }
 
@@ -1333,22 +907,6 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         applyDimOverlayIfNeeded()
     }
 
-    // MARK: - Resize
-
-    override func viewDidAppear() {
-        super.viewDidAppear()
-        if currentLayout == .grid && !isInDState {
-            enterDashboardNavigation()
-        }
-    }
-
-    override func viewDidLayout() {
-        super.viewDidLayout()
-        if case .grid = currentLayout {
-            layoutGridFrames()
-        }
-    }
-
     // MARK: - AgentCardDelegate
 
     func agentCardClicked(agentId: String) {
@@ -1356,21 +914,14 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
         if isInDState {
             exitDashboardNavigation(restoreSnapshot: false)
         }
-        switch currentLayout {
-        case .grid:
-            // Single click → select in place (no layout switch)
-            selectedAgentId = agentId
-            for container in gridCards {
-                container.isSelected = (container.agentId == agentId)
-            }
-        default:
-            // Click selects agent and embeds its split container
-            detachTerminals()
-            selectedAgentId = agentId
-            embedSplitContainerForSelectedAgent()
-            updateMiniCardSelection()
-            syncSidePanelToSelection()
-        }
+        // Close any open file/diff overlay so the terminal is shown.
+        dismissCenterOverlay()
+        // Click selects agent and embeds its split container
+        detachTerminals()
+        selectedAgentId = agentId
+        embedSplitContainerForSelectedAgent()
+        updateMiniCardSelection()
+        syncSidePanelToSelection()
         dashboardDelegate?.dashboardDidChangeSelection(self)
     }
 
@@ -1399,36 +950,10 @@ class DashboardViewController: NSViewController, AgentCardDelegate, DraggableGri
     }
 
     private func updateMiniCardSelection() {
-        guard let refs = focusLayoutRefs(for: currentLayout) else { return }
+        let refs = focusLayoutRefs
         for card in refs.miniCards {
             card.isSelected = (card.agentId == selectedAgentId)
         }
-    }
-
-    // MARK: - DraggableGridDelegate
-
-    func draggableGrid(_ grid: DraggableGridView, dropIndexFor point: NSPoint) -> Int {
-        currentGridLayout.gridIndex(for: point)
-    }
-
-    func draggableGrid(_ grid: DraggableGridView, dropIndicatorFrameAt index: Int) -> NSRect {
-        guard !gridCards.isEmpty else { return .zero }
-        return currentGridLayout.dropIndicatorFrame(at: index)
-    }
-
-    func draggableGrid(_ grid: DraggableGridView, didDropItemWithID id: String, atIndex toIndex: Int) {
-        guard let fromIndex = agents.firstIndex(where: { $0.id == id }) else { return }
-        guard fromIndex != toIndex, toIndex >= 0, toIndex <= agents.count else { return }
-
-        var mutableAgents = agents
-        let item = mutableAgents.remove(at: fromIndex)
-        let adjustedIndex = toIndex > fromIndex ? toIndex - 1 : toIndex
-        mutableAgents.insert(item, at: min(adjustedIndex, mutableAgents.count))
-        agents = mutableAgents
-
-        rebuildGrid()
-
-        dashboardDelegate?.dashboardDidReorderCards(order: agents.map { $0.worktreePath })
     }
 }
 
@@ -1451,7 +976,7 @@ extension DashboardViewController: MiniCardReorderDelegate {
     }
 
     func miniCardReorderEnded(_ card: StackedMiniCardContainerView) {
-        guard let refs = focusLayoutRefs(for: currentLayout) else { return }
+        let refs = focusLayoutRefs
         // Read the new order from the stack's arrangedSubviews
         let newOrder = refs.stack.arrangedSubviews.compactMap { ($0 as? StackedMiniCardContainerView)?.agentId }
         guard newOrder.count == agents.count else { return }
@@ -1466,63 +991,9 @@ extension DashboardViewController: MiniCardReorderDelegate {
         agents = reordered
 
         // Sync the stored miniCards array to match the new stack order
-        let updatedCards = refs.stack.arrangedSubviews.compactMap { $0 as? StackedMiniCardContainerView }
-        switch currentLayout {
-        case .leftRight: leftRightMiniCards = updatedCards
-        case .topSmall: topSmallMiniCards = updatedCards
-        case .topLarge: topLargeMiniCards = updatedCards
-        case .grid: break
-        }
+        leftRightMiniCards = refs.stack.arrangedSubviews.compactMap { $0 as? StackedMiniCardContainerView }
 
         // Persist — pass worktree paths directly to avoid ID→AgentHead lookup failures
-        dashboardDelegate?.dashboardDidReorderCards(order: agents.map { $0.worktreePath })
-    }
-}
-
-extension DashboardViewController: GridCardReorderDelegate {
-    /// Index of the card being dragged in `gridCards`, before dragging started.
-    private static var gridDragOriginIndex: Int = 0
-
-    func gridCardReorderBegan(_ card: StackedCardContainerView) {
-        guard let idx = gridCards.firstIndex(of: card) else { return }
-        Self.gridDragOriginIndex = idx
-    }
-
-    func gridCardReorderMoved(_ card: StackedCardContainerView, locationInContainer point: NSPoint) {
-        let layout = currentGridLayout
-        let targetIndex = layout.gridIndex(for: point)
-        guard let currentIndex = gridCards.firstIndex(of: card),
-              targetIndex != currentIndex,
-              targetIndex >= 0, targetIndex < gridCards.count else { return }
-
-        // Move the card in the array
-        let moved = gridCards.remove(at: currentIndex)
-        gridCards.insert(moved, at: targetIndex)
-
-        // Animate other cards to their new positions (skip the dragged card)
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.2
-            ctx.allowsImplicitAnimation = true
-            for (i, c) in gridCards.enumerated() where c !== card {
-                c.animator().frame = layout.cardFrame(at: i)
-            }
-        }
-    }
-
-    func gridCardReorderEnded(_ card: StackedCardContainerView) {
-        // Rebuild agents array to match gridCards order
-        var reordered: [AgentDisplayInfo] = []
-        for c in gridCards {
-            if let agent = agents.first(where: { $0.id == c.agentId }) {
-                reordered.append(agent)
-            }
-        }
-        agents = reordered
-
-        // Snap the dragged card to its final grid position and re-layout
-        layoutGridFrames()
-
-        // Persist
         dashboardDelegate?.dashboardDidReorderCards(order: agents.map { $0.worktreePath })
     }
 }
@@ -1533,16 +1004,6 @@ extension DashboardViewController: TerminalSurfaceDelegate {
         guard view.window != nil else { return }
         // Find the agent whose surface recovered
         guard let agent = agents.first(where: { $0.surface === surface }) else { return }
-        // Re-embed into grid card if visible
-        if let container = gridCards.first(where: { $0.agentId == agent.id }),
-           let surface = surfaceManager?.primarySurface(forPath: agent.worktreePath) {
-            surface.delegate = self
-            if surface.surface == nil {
-                _ = surface.create(in: container.cardView.terminalContainer, workingDirectory: agent.worktreePath, sessionName: surface.sessionName)
-            } else {
-                surface.reparent(to: container.cardView.terminalContainer)
-            }
-        }
         // Re-embed the split container for the active agent
         if agent.id == selectedAgentId {
             invalidateSplitContainer(forPath: agent.worktreePath)
@@ -1554,10 +1015,18 @@ extension DashboardViewController: TerminalSurfaceDelegate {
 
     /// Shows a full-cover overlay over the center terminal panel.
     /// Any existing overlay is removed first.
-    func showCenterOverlay(_ content: NSView, title: String) {
+    @discardableResult
+    func showCenterOverlay(
+        _ content: NSView,
+        title: String,
+        onSave: (() -> Void)? = nil,
+        onPreview: (() -> Void)? = nil
+    ) -> CenterOverlayView {
         dismissCenterOverlay()
 
-        let overlay = CenterOverlayView(title: title, content: content) { [weak self] in
+        let overlay = CenterOverlayView(
+            title: title, content: content, onSave: onSave, onPreview: onPreview
+        ) { [weak self] in
             self?.dismissCenterOverlay()
         }
         overlay.translatesAutoresizingMaskIntoConstraints = false
@@ -1572,6 +1041,7 @@ extension DashboardViewController: TerminalSurfaceDelegate {
 
         centerOverlay = overlay
         overlay.window?.makeFirstResponder(overlay)
+        return overlay
     }
 
     /// Removes the center overlay and restores first responder to the active terminal pane.
@@ -1596,7 +1066,28 @@ extension DashboardViewController: TerminalSurfaceDelegate {
 extension DashboardViewController: WorktreeSidePanelDelegate {
     func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectFile path: String) {
         let title = URL(fileURLWithPath: path).lastPathComponent
-        showCenterOverlay(FileContentView(path: path), title: title)
+
+        // Editable, syntax-highlighted editor for UTF-8 text; fall back to the
+        // read-only placeholder for binary / oversized files.
+        guard let editor = CodeEditorView(path: path) else {
+            showCenterOverlay(FileContentView(path: path), title: title)
+            return
+        }
+
+        weak var overlayRef: CenterOverlayView?
+        let overlay = showCenterOverlay(
+            editor,
+            title: title,
+            onSave: { [weak editor] in editor?.save() },
+            onPreview: editor.isPreviewable ? { [weak editor] in
+                guard let editor else { return }
+                overlayRef?.setPreviewing(editor.togglePreview())
+            } : nil
+        )
+        overlayRef = overlay
+        editor.onDirtyChange = { [weak overlay] dirty in
+            overlay?.setDirty(dirty)
+        }
     }
 
     func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectChange path: String) {

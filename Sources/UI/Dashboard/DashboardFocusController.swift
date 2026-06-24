@@ -14,8 +14,7 @@ final class DashboardFocusController {
 
     enum Mode {
         case idle              // not in D state
-        case grid              // grid layout: ring = cards only
-        case focusLayout       // leftRight/topSmall/topLarge: ring = [bigPanel, cards...]
+        case focusLayout       // ring = [bigPanel, cards...]
     }
 
     private(set) var mode: Mode = .idle
@@ -26,23 +25,10 @@ final class DashboardFocusController {
     struct Snapshot {
         let firstResponder: NSResponder?
         let focusedWorktreePath: String?
-        let layout: DashboardLayout
     }
     private(set) var snapshot: Snapshot?
 
     // MARK: - Entry
-
-    func enterGrid(cardIds: [String], initialId: String?) {
-        mode = .grid
-        self.cardIds = cardIds
-        if let initial = initialId, cardIds.contains(initial) {
-            focusedTarget = .card(initial)
-        } else if let first = cardIds.first {
-            focusedTarget = .card(first)
-        } else {
-            focusedTarget = .none
-        }
-    }
 
     func enterFocusLayout(cardIds: [String], initialId: String? = nil) {
         mode = .focusLayout
@@ -74,13 +60,6 @@ final class DashboardFocusController {
         switch mode {
         case .idle:
             return
-        case .grid:
-            guard !cardIds.isEmpty else { focusedTarget = .none; return }
-            if case .card(let id) = focusedTarget, let idx = cardIds.firstIndex(of: id) {
-                focusedTarget = .card(cardIds[(idx + 1) % cardIds.count])
-            } else {
-                focusedTarget = .card(cardIds[0])
-            }
         case .focusLayout:
             // ring: [bigPanel, card0, card1, ...]
             switch focusedTarget {
@@ -106,14 +85,6 @@ final class DashboardFocusController {
         switch mode {
         case .idle:
             return
-        case .grid:
-            guard !cardIds.isEmpty else { focusedTarget = .none; return }
-            if case .card(let id) = focusedTarget, let idx = cardIds.firstIndex(of: id) {
-                let prevIdx = (idx - 1 + cardIds.count) % cardIds.count
-                focusedTarget = .card(cardIds[prevIdx])
-            } else {
-                focusedTarget = .card(cardIds[cardIds.count - 1])
-            }
         case .focusLayout:
             switch focusedTarget {
             case .bigPanel:
@@ -170,7 +141,7 @@ final class DashboardFocusController {
               let idx = cardIds.firstIndex(of: id) else { return }
         cardIds.remove(at: idx)
         if cardIds.isEmpty {
-            focusedTarget = (mode == .focusLayout) ? .bigPanel : .none
+            focusedTarget = .bigPanel
             return
         }
         let nextIdx = idx % cardIds.count
@@ -182,7 +153,7 @@ final class DashboardFocusController {
     func refreshCards(_ ids: [String]) {
         cardIds = ids
         if case .card(let id) = focusedTarget, !ids.contains(id) {
-            focusedTarget = (mode == .focusLayout) ? .bigPanel : (ids.first.map { .card($0) } ?? .none)
+            focusedTarget = .bigPanel
         }
     }
 }

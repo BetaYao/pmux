@@ -11,21 +11,64 @@ final class CenterOverlayView: NSView {
 
     private let titleLabel = NSTextField(labelWithString: "")
     private let closeButton = NSButton()
+    private let saveButton = NSButton()
+    private let previewButton = NSButton()
     private let headerBar = NSView()
     private let contentContainer = NSView()
     private let onClose: () -> Void
+    private let onSave: (() -> Void)?
+    private let onPreview: (() -> Void)?
 
     // MARK: Init
 
-    init(title: String, content: NSView, onClose: @escaping () -> Void) {
+    init(
+        title: String,
+        content: NSView,
+        onSave: (() -> Void)? = nil,
+        onPreview: (() -> Void)? = nil,
+        onClose: @escaping () -> Void
+    ) {
         self.onClose = onClose
+        self.onSave = onSave
+        self.onPreview = onPreview
         super.init(frame: .zero)
 
         wantsLayer = true
-        layer?.backgroundColor = SemanticColors.bg.cgColor
 
         setupHeader(title: title)
         setupContent(content)
+        // Header must sit above the content (e.g. the editor gutter) in z-order.
+        addSubview(headerBar, positioned: .above, relativeTo: contentContainer)
+        applyOpaqueBackground()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyOpaqueBackground()
+    }
+
+    /// The center terminal renders via a Metal layer that bleeds through any
+    /// translucent background, so the overlay (and its header) must be fully
+    /// opaque. Re-resolve the color whenever the appearance changes.
+    private func applyOpaqueBackground() {
+        var resolved = NSColor.windowBackgroundColor
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            resolved = SemanticColors.panel.usingColorSpace(.sRGB)?.withAlphaComponent(1.0)
+                ?? NSColor.windowBackgroundColor
+        }
+        layer?.backgroundColor = resolved.cgColor
+        headerBar.layer?.backgroundColor = resolved.cgColor
+    }
+
+    /// Reflect the editor's dirty state on the Save button.
+    func setDirty(_ dirty: Bool) {
+        saveButton.title = dirty ? "Save•" : "Saved"
+        saveButton.isEnabled = dirty
+    }
+
+    /// Reflect the editor/preview mode on the Preview button.
+    func setPreviewing(_ previewing: Bool) {
+        previewButton.title = previewing ? "Edit" : "Preview"
     }
 
     @available(*, unavailable)
@@ -35,6 +78,9 @@ final class CenterOverlayView: NSView {
 
     private func setupHeader(title: String) {
         headerBar.translatesAutoresizingMaskIntoConstraints = false
+        // Opaque background applied in applyOpaqueBackground() — the center
+        // terminal's Metal layer bleeds through any translucent fill.
+        headerBar.wantsLayer = true
         addSubview(headerBar)
 
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -60,13 +106,43 @@ final class CenterOverlayView: NSView {
 
             titleLabel.leadingAnchor.constraint(equalTo: headerBar.leadingAnchor, constant: 12),
             titleLabel.centerYAnchor.constraint(equalTo: headerBar.centerYAnchor),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -8),
 
             closeButton.trailingAnchor.constraint(equalTo: headerBar.trailingAnchor, constant: -8),
             closeButton.centerYAnchor.constraint(equalTo: headerBar.centerYAnchor),
             closeButton.widthAnchor.constraint(equalToConstant: 20),
             closeButton.heightAnchor.constraint(equalToConstant: 20),
         ])
+
+        // Right cluster, laid out right→left: Close, Save, Preview.
+        var leftmost: NSView = closeButton
+
+        func configureTextButton(_ button: NSButton, id: String, action: Selector) {
+            button.translatesAutoresizingMaskIntoConstraints = false
+            button.bezelStyle = .recessed
+            button.isBordered = false
+            button.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+            button.contentTintColor = SemanticColors.text
+            button.target = self
+            button.action = action
+            button.setAccessibilityIdentifier(id)
+            headerBar.addSubview(button)
+            NSLayoutConstraint.activate([
+                button.trailingAnchor.constraint(equalTo: leftmost.leadingAnchor, constant: -12),
+                button.centerYAnchor.constraint(equalTo: headerBar.centerYAnchor),
+            ])
+            leftmost = button
+        }
+
+        if onSave != nil {
+            configureTextButton(saveButton, id: "centerOverlay.saveButton", action: #selector(saveButtonTapped))
+            setDirty(false)
+        }
+        if onPreview != nil {
+            configureTextButton(previewButton, id: "centerOverlay.previewButton", action: #selector(previewButtonTapped))
+            setPreviewing(false)
+        }
+
+        titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: leftmost.leadingAnchor, constant: -8).isActive = true
     }
 
     private func setupContent(_ content: NSView) {
@@ -95,6 +171,14 @@ final class CenterOverlayView: NSView {
         onClose()
     }
 
+    @objc private func saveButtonTapped() {
+        onSave?()
+    }
+
+    @objc private func previewButtonTapped() {
+        onPreview?()
+    }
+
     // MARK: Key handling
 
     override var acceptsFirstResponder: Bool { true }
@@ -110,6 +194,13 @@ final class CenterOverlayView: NSView {
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.keyCode == 53 {
             onClose()
+            return true
+        }
+        // Cmd+S → save (when editable).
+        if onSave != nil,
+           event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+           event.charactersIgnoringModifiers == "s" {
+            onSave?()
             return true
         }
         return super.performKeyEquivalent(with: event)

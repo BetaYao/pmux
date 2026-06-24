@@ -13,7 +13,10 @@ amux (AMUX — Agent Multiplexer) is a native macOS terminal multiplexer built w
 xcodegen generate
 
 # Build
-xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build
+# NOTE: CodeEditSourceEditor pulls in the SwiftLint build-tool plugin, which
+# requires trust validation. Headless/CLI builds must pass -skipPackagePluginValidation
+# (in Xcode.app, click "Trust & Enable" once instead).
+xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug -skipPackagePluginValidation -skipMacroValidation build
 
 # Run tests
 xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test
@@ -88,7 +91,7 @@ The project uses XcodeGen (`project.yml`) to generate the Xcode project file. Af
 - **Swift 5.10**, macOS 14.0+ (Sonoma), AppKit (not SwiftUI)
 - **Ghostty C interop** via `amux-Bridging-Header.h` → `ghostty.h`; `GhosttyKit.xcframework` provides `libghostty`
 - Links against: Metal, QuartzCore, IOSurface, Carbon, UniformTypeIdentifiers, libghostty, libc++
-- No external SPM dependencies — pure system frameworks + Ghostty
+- SPM dependencies: `CodeEditSourceEditor` (+ `CodeEditLanguages`) for the embedded code editor; otherwise system frameworks + Ghostty
 - Delegate pattern used throughout (not Combine/async-await for UI updates)
 - `GhosttyBridge.shared` is the singleton entry point for all terminal operations
 - `SurfaceRegistry.shared` is the global surface lookup table (surface ID → TerminalSurface)

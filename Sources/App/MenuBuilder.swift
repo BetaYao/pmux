@@ -71,19 +71,7 @@ enum MenuBuilder {
         diffItem.target = target
         viewMenu.addItem(diffItem)
 
-        viewMenu.addItem(NSMenuItem.separator())
-
-        let zoomInItem = NSMenuItem(title: "Zoom In (Smaller Cards)", action: #selector(MainWindowController.dashboardZoomIn), keyEquivalent: "-")
-        zoomInItem.keyEquivalentModifierMask = .command
-        zoomInItem.target = target
-        viewMenu.addItem(zoomInItem)
-
-        let zoomOutItem = NSMenuItem(title: "Zoom Out (Larger Cards)", action: #selector(MainWindowController.dashboardZoomOut), keyEquivalent: "=")
-        zoomOutItem.keyEquivalentModifierMask = .command
-        zoomOutItem.target = target
-        viewMenu.addItem(zoomOutItem)
-
-        viewMenuItem.submenu = viewMenu
+viewMenuItem.submenu = viewMenu
         mainMenu.addItem(viewMenuItem)
 
         // Window menu (standard macOS window management)
