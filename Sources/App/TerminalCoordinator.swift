@@ -202,9 +202,15 @@ class TerminalCoordinator {
     /// (e.g. First Mate return-to-port approval). Does full surface teardown.
     func deleteWorktreeForReturnToPort(path: String, branch: String) {
         let info = WorktreeInfo(path: path, branch: branch, commitHash: "", isMainWorktree: false)
-        let hasChanges = WorktreeDeleter.hasUncommittedChanges(worktreePath: path)
-        let repoPath = WorktreeDiscovery.findRepoRoot(from: path) ?? path
-        performDeleteWorktree(info, repoPath: repoPath, deleteBranch: false, force: hasChanges)
+        // Compute dirty-state / repo-root off the main thread — both shell out to
+        // git synchronously and would otherwise stall the UI on large repos.
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let hasChanges = WorktreeDeleter.hasUncommittedChanges(worktreePath: path)
+            let repoPath = WorktreeDiscovery.findRepoRoot(from: path) ?? path
+            DispatchQueue.main.async {
+                self?.performDeleteWorktree(info, repoPath: repoPath, deleteBranch: false, force: hasChanges)
+            }
+        }
     }
 
     private func performDeleteWorktree(_ info: WorktreeInfo, repoPath: String, deleteBranch: Bool, force: Bool) {
