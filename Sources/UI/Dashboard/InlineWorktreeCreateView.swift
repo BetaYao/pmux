@@ -19,6 +19,9 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
     /// so the keyboard-mode controller can exit `.createForm` and return the
     /// dashboard nav ring to `.normal`.
     var onFormEnd: (() -> Void)?
+    /// Fired when the user presses Return and the text starts with `/`.
+    /// The full trimmed text (including the `/` prefix) is passed to the handler.
+    var onSubmitCommand: ((String) -> Void)?
 
     static let agentChoices = AgentType.allCases.filter { $0.isAIAgent }
     var selectedAgentType: AgentType = .claudeCode
@@ -250,14 +253,137 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
     }
 
     @objc private func submit() {
-        let taskDescription = promptTextView.plainText.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-        guard !taskDescription.isEmpty, let repo = selectedRepoPath else { return }
-        onCreate?(taskDescription, repo, selectedAgentType, reuseEnvCheckbox.state == .on)
-        onFormEnd?()
+        let text = promptTextView.plainText.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        if text.hasPrefix("/") {
+            onSubmitCommand?(text)
+            clearAfterSubmit()
+            onFormEnd?()
+        } else {
+            guard let repo = selectedRepoPath else { return }
+            onCreate?(text, repo, selectedAgentType, reuseEnvCheckbox.state == .on)
+            onFormEnd?()
+        }
+    }
+
+    private func clearAfterSubmit() {
+        promptTextView.setPlainText("")
+        errorLabel.isHidden = true
+        errorLabel.stringValue = ""
+        errorHeight.constant = 0
+        onPreferredHeightChange?(preferredHeight, true)
+    }
+
+    // MARK: - Command completion
+
+    private static let commandCompletions = ["new", "order", "commit", "return", "broadcast"]
+
+    func textDidChange(_ notification: Notification) {
+        let text = promptTextView.plainText
+        // Show completions when text is exactly "/" or "/\w*"
+        let isCommandPrefix = text.hasPrefix("/") && text.dropFirst().allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
+        if isCommandPrefix {
+            showCommandCompletions(prefix: String(text.dropFirst()))
+        } else {
+            hideCommandCompletions()
+        }
+    }
+
+    private var completionPanel: NSPanel?
+
+    private func showCommandCompletions(prefix: String) {
+        let filtered = Self.commandCompletions.filter { prefix.isEmpty || $0.hasPrefix(prefix.lowercased()) }
+        guard !filtered.isEmpty else { hideCommandCompletions(); return }
+
+        // Build or reuse a borderless panel positioned above the input field
+        let panel: NSPanel
+        if let existing = completionPanel {
+            panel = existing
+        } else {
+            panel = NSPanel(contentRect: .zero,
+                            styleMask: [.borderless, .nonactivatingPanel],
+                            backing: .buffered,
+                            defer: false)
+            panel.isOpaque = false
+            panel.backgroundColor = .clear
+            panel.hasShadow = true
+            completionPanel = panel
+        }
+
+        // Build a stack of item views
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.spacing = 0
+        stack.edgeInsets = NSEdgeInsets(top: 6, left: 0, bottom: 6, right: 0)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        for name in filtered {
+            let label = NSTextField(labelWithString: "/\(name)")
+            label.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+            label.textColor = SemanticColors.text
+            label.translatesAutoresizingMaskIntoConstraints = false
+            label.cell?.backgroundStyle = .normal
+
+            let row = CompletionRowView(label: label) { [weak self] in
+                self?.applyCompletion(name)
+            }
+            stack.addArrangedSubview(row)
+        }
+
+        let container = NSVisualEffectView()
+        container.material = .menu
+        container.blendingMode = .behindWindow
+        container.state = .active
+        container.wantsLayer = true
+        container.layer?.cornerRadius = 8
+        container.layer?.masksToBounds = true
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: container.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+
+        let rowHeight: CGFloat = 28
+        let panelWidth: CGFloat = 180
+        let panelHeight = CGFloat(filtered.count) * rowHeight + 12
+
+        panel.contentView = container
+
+        // Position above the input view
+        guard let window else { hideCommandCompletions(); return }
+        let viewOriginInScreen = window.convertToScreen(convert(bounds, to: nil))
+        let panelFrame = NSRect(
+            x: viewOriginInScreen.minX + 12,
+            y: viewOriginInScreen.maxY + 4,
+            width: panelWidth,
+            height: panelHeight
+        )
+        panel.setFrame(panelFrame, display: true)
+        window.addChildWindow(panel, ordered: .above)
+        panel.orderFront(nil)
+    }
+
+    private func hideCommandCompletions() {
+        if let panel = completionPanel {
+            panel.parent?.removeChildWindow(panel)
+            panel.orderOut(nil)
+        }
+    }
+
+    private func applyCompletion(_ name: String) {
+        promptTextView.setPlainText("/\(name) ")
+        // Move cursor to end
+        let len = promptTextView.string.count
+        promptTextView.setSelectedRange(NSRange(location: len, length: 0))
+        hideCommandCompletions()
     }
 
     /// Cancels/collapses the form and notifies the keyboard-mode controller.
     private func cancelForm() {
+        hideCommandCompletions()
         window?.makeFirstResponder(nil)
         onFormEnd?()
     }
@@ -435,6 +561,50 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         applyColors()
+    }
+}
+
+/// A clickable row in the command completion popover.
+private final class CompletionRowView: NSView {
+    private let label: NSTextField
+    private let action: () -> Void
+    private var isHovered = false {
+        didSet { updateBackground() }
+    }
+
+    init(label: NSTextField, action: @escaping () -> Void) {
+        self.label = label
+        self.action = action
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 4
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            heightAnchor.constraint(equalToConstant: 28),
+        ])
+        let click = NSClickGestureRecognizer(target: self, action: #selector(clicked))
+        addGestureRecognizer(click)
+        let area = NSTrackingArea(rect: .zero,
+                                  options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
+
+    @objc private func clicked() { action() }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false }
+
+    private func updateBackground() {
+        layer?.backgroundColor = isHovered
+            ? NSColor.controlAccentColor.withAlphaComponent(0.2).cgColor
+            : .clear
     }
 }
 

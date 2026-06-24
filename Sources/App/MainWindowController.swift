@@ -421,7 +421,8 @@ dashboard.surfaceManager = terminalCoordinator.surfaceManager
         dashboard.setupInlineCreate(
             repoPaths: config.workspacePaths,
             repoPathsProvider: { [weak self] in self?.tabCoordinator.config.workspacePaths ?? [] },
-            onAddRepo: { [weak self] in self?.tabCoordinator.addRepoViaOpenPanel(window: self?.window) }
+            onAddRepo: { [weak self] in self?.tabCoordinator.addRepoViaOpenPanel(window: self?.window) },
+            onSubmitCommand: { [weak self] text in self?.submitBridgeCommand(text) }
         ) { [weak self] taskDescription, repoPath, agentType, reuseEnv in
             self?.performWorktreeCreate(task: taskDescription, repoPath: repoPath, agentType: agentType, reuseEnv: reuseEnv)
         }

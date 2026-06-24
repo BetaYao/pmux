@@ -361,10 +361,12 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
     func setupInlineCreate(repoPaths: [String],
                            repoPathsProvider: @escaping () -> [String],
                            onAddRepo: @escaping () -> Void,
+                           onSubmitCommand: @escaping (String) -> Void,
                            onCreate: @escaping (String, String, AgentType, Bool) -> Void) {
         inlineCreateView.configure(repoPaths: repoPaths)
         inlineCreateView.repoPathsProvider = repoPathsProvider
         inlineCreateView.onAddRepo = onAddRepo
+        inlineCreateView.onSubmitCommand = onSubmitCommand
         inlineCreateView.onCreate = onCreate
     }
 
