@@ -8,6 +8,7 @@ enum FirstMateActionKind: Equatable {
     case inspect
     case autoCommit
     case suggestNextOrder
+    case returnToPort
 }
 
 struct FirstMateAction: Equatable {

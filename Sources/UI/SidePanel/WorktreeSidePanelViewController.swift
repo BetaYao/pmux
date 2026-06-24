@@ -1,8 +1,9 @@
 import AppKit
 
 enum SidePanelTab: Int {
-    case files = 0
-    case changes = 1
+    case firstMate = 0
+    case files = 1
+    case changes = 2
 }
 
 protocol WorktreeSidePanelDelegate: AnyObject {
@@ -16,7 +17,16 @@ final class WorktreeSidePanelViewController: NSViewController {
 
     weak var delegate: WorktreeSidePanelDelegate?
 
+    private let tabBar = NSStackView()
     private let contentView = NSView()
+
+    // First Mate tab
+    private var bridgeVC: BridgePanelViewController?
+    var pendingOrdersQueue: PendingOrdersQueue? {
+        didSet { bridgeVC?.queue = pendingOrdersQueue }
+    }
+    var onBridgeNavigate: ((String) -> Void)?
+    var onBridgeApprove: ((PendingOrder) -> Void)?
 
     // Files tab
     private var fileTreeController: FileTreeOutlineController?
@@ -34,7 +44,7 @@ final class WorktreeSidePanelViewController: NSViewController {
     var selectedTabForTesting: SidePanelTab { selectedTab }
     var worktreePathForTesting: String? { worktreePath }
 
-    init(worktreePath: String?, initialTab: SidePanelTab = .files) {
+    init(worktreePath: String?, initialTab: SidePanelTab = .firstMate) {
         self.worktreePath = worktreePath
         self.selectedTab = initialTab
         super.init(nibName: nil, bundle: nil)
@@ -48,11 +58,42 @@ final class WorktreeSidePanelViewController: NSViewController {
         root.layer?.backgroundColor = Theme.background.cgColor
         root.setAccessibilityIdentifier("sidePanel.view")
 
+        tabBar.orientation = .horizontal
+        tabBar.spacing = 2
+        tabBar.distribution = .fillEqually
+        tabBar.translatesAutoresizingMaskIntoConstraints = false
+
+        let tabs: [(SidePanelTab, String, String)] = [
+            (.firstMate, "helm", "First Mate"),
+            (.files, "folder", "Files"),
+            (.changes, "list.bullet.rectangle", "Changes"),
+        ]
+        for (tab, icon, tooltip) in tabs {
+            let btn = NSButton()
+            btn.bezelStyle = .recessed
+            btn.isBordered = false
+            btn.imagePosition = .imageOnly
+            btn.image = NSImage(systemSymbolName: icon, accessibilityDescription: tooltip)
+            btn.contentTintColor = tab == selectedTab ? Theme.accent : Theme.textSecondary
+            btn.target = self
+            btn.action = #selector(tabButtonClicked(_:))
+            btn.tag = tab.rawValue
+            btn.toolTip = tooltip
+            btn.translatesAutoresizingMaskIntoConstraints = false
+            btn.heightAnchor.constraint(equalToConstant: 24).isActive = true
+            tabBar.addArrangedSubview(btn)
+        }
+
         contentView.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(tabBar)
         root.addSubview(contentView)
 
         NSLayoutConstraint.activate([
-            contentView.topAnchor.constraint(equalTo: root.topAnchor),
+            tabBar.topAnchor.constraint(equalTo: root.topAnchor, constant: 4),
+            tabBar.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 6),
+            tabBar.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -6),
+
+            contentView.topAnchor.constraint(equalTo: tabBar.bottomAnchor, constant: 4),
             contentView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             contentView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             contentView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
@@ -60,6 +101,18 @@ final class WorktreeSidePanelViewController: NSViewController {
 
         view = root
         rebuildContent()
+    }
+
+    @objc private func tabButtonClicked(_ sender: NSButton) {
+        guard let tab = SidePanelTab(rawValue: sender.tag) else { return }
+        selectTab(tab)
+    }
+
+    private func updateTabBarHighlight() {
+        for view in tabBar.arrangedSubviews {
+            guard let btn = view as? NSButton, let tab = SidePanelTab(rawValue: btn.tag) else { continue }
+            btn.contentTintColor = tab == selectedTab ? Theme.accent : Theme.textSecondary
+        }
     }
 
     func setWorktree(_ path: String?) {
@@ -90,10 +143,18 @@ final class WorktreeSidePanelViewController: NSViewController {
         guard tab != selectedTab else { return }
         captureExpansion()
         selectedTab = tab
-        if isViewLoaded { rebuildContent() }
+        if isViewLoaded {
+            updateTabBarHighlight()
+            rebuildContent()
+        }
     }
 
     private func rebuildContent() {
+        // Remove any existing child VC
+        bridgeVC?.view.removeFromSuperview()
+        bridgeVC?.removeFromParent()
+        bridgeVC = nil
+
         contentView.subviews.forEach { $0.removeFromSuperview() }
         fileTreeController = nil
         fileSearchField = nil
@@ -101,17 +162,39 @@ final class WorktreeSidePanelViewController: NSViewController {
         changesTableView = nil
         changesScrollView = nil
 
-        guard let path = worktreePath else {
-            showPlaceholder("No worktree selected", identifier: "sidePanel.emptyPlaceholder")
-            return
-        }
-
         switch selectedTab {
+        case .firstMate:
+            showFirstMateTab()
         case .files:
+            guard let path = worktreePath else {
+                showPlaceholder("No worktree selected", identifier: "sidePanel.emptyPlaceholder")
+                return
+            }
             showFilesTab(path)
         case .changes:
+            guard let path = worktreePath else {
+                showPlaceholder("No worktree selected", identifier: "sidePanel.emptyPlaceholder")
+                return
+            }
             showChangesTab(path)
         }
+    }
+
+    private func showFirstMateTab() {
+        let vc = BridgePanelViewController()
+        vc.queue = pendingOrdersQueue
+        vc.onNavigateToWorktree = { [weak self] path in self?.onBridgeNavigate?(path) }
+        vc.onApprove = { [weak self] order in self?.onBridgeApprove?(order) }
+        addChild(vc)
+        vc.view.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(vc.view)
+        NSLayoutConstraint.activate([
+            vc.view.topAnchor.constraint(equalTo: contentView.topAnchor),
+            vc.view.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            vc.view.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            vc.view.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+        ])
+        bridgeVC = vc
     }
 
     private func showFilesTab(_ path: String) {
