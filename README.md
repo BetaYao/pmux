@@ -1,12 +1,12 @@
-# amux
+# Seamux
 
 **A macOS workspace for coding agents, git worktrees, and parallel development.**
 
 **一个为 coding agent、git worktree 和并行开发准备的 macOS 工作台。**
 
-amux brings the moving parts of modern AI-assisted development into one place: repos, worktrees, panes, runs, prompts, and notifications.
+Seamux brings the moving parts of modern AI-assisted development into one place: repos, worktrees, panes, runs, prompts, and notifications.
 
-当开发日常变成多个仓库、多个分支、多个 worktree、多个 agent 同时推进时，amux 用一个 macOS 界面把这些上下文整理到一起。
+当开发日常变成多个仓库、多个分支、多个 worktree、多个 agent 同时推进时，Seamux 用一个 macOS 界面把这些上下文整理到一起。
 
 Download:
 [`Apple Silicon`](https://github.com/BetaYao/pmux/releases/latest) · [`Intel`](https://github.com/BetaYao/pmux/releases/latest)
@@ -52,7 +52,7 @@ Notifications stay tied to the actual work: result, target, and recent prompt.
 
 ### 产品定位
 
-amux 面向的是一种已经很常见的开发方式：
+Seamux 面向的是一种已经很常见的开发方式：
 
 - 一个个终端窗口来回切
 - 一堆 worktree 散落在 Finder 和 shell 里
@@ -63,7 +63,7 @@ amux 面向的是一种已经很常见的开发方式：
 
 ### 它是怎么工作的
 
-amux 不打算替代终端。
+Seamux 不打算替代终端。
 
 它更像是给这套工作流补上一层产品化的操作界面：
 
@@ -100,14 +100,14 @@ amux 不打算替代终端。
 - 通知是碎片化的，不是可导航的
 - pane 在跑什么、哪个分支需要你、哪个任务刚结束，需要你自己拼上下文
 
-amux 不是替代终端，而是让这套终端工作流更像一个完整产品，而不是一组零散工具。
+Seamux 不是替代终端，而是让这套终端工作流更像一个完整产品，而不是一组零散工具。
 
 ### 下载
 
 如果你只是想直接试用：
 
 - 打开 GitHub Releases
-- 下载对应架构的 `amux-macos-arm64.zip` 或 `amux-macos-x86_64.zip`
+- 下载对应架构的 `seamux-macos-arm64.zip` 或 `seamux-macos-x86_64.zip`
 - 解压并启动应用
 
 ### 本地开发
@@ -115,7 +115,7 @@ amux 不是替代终端，而是让这套终端工作流更像一个完整产品
 本地构建：
 
 ```bash
-xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build
+xcodebuild -project seamux.xcodeproj -scheme seamux -configuration Debug build
 ```
 
 运行 UI 测试：
@@ -138,7 +138,7 @@ xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build
 
 - 推送 `v2.0.0` 这类 tag 会触发 release workflow
 - workflow 会分别构建 `arm64` 和 `x86_64` 的 macOS 包
-- 最终上传 `amux-macos-arm64.zip` 和 `amux-macos-x86_64.zip`
+- 最终上传 `seamux-macos-arm64.zip` 和 `seamux-macos-x86_64.zip`
 
 如果配置了下面这些 secrets，workflow 还会自动签名、notarize、staple：
 
@@ -170,7 +170,7 @@ amux is built for a workflow that is becoming normal:
 
 What used to be a few terminal tabs is now multiple repos, multiple worktrees, multiple agent runs, and constant context switching.
 
-amux turns that into a workspace you can actually operate from.
+Seamux turns that into a workspace you can actually operate from.
 
 ### How It Works
 
@@ -198,7 +198,7 @@ But once agent runs become parallel and notifications become constant, the crack
 - notifications are noisy instead of navigable
 - context lives in your head instead of the interface
 
-amux does not replace the terminal. It gives that workflow a cleaner surface to live in.
+Seamux does not replace the terminal. It gives that workflow a cleaner surface to live in.
 
 ### Core Experience
 
@@ -214,7 +214,7 @@ It moves the experience from:
 If you just want to try it:
 
 - Open GitHub Releases
-- Download `amux-macos-arm64.zip` or `amux-macos-x86_64.zip`
+- Download `seamux-macos-arm64.zip` or `seamux-macos-x86_64.zip`
 - Unzip it and launch the app
 
 ### Local Development
@@ -222,7 +222,7 @@ If you just want to try it:
 Build locally:
 
 ```bash
-xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug build
+xcodebuild -project seamux.xcodeproj -scheme seamux -configuration Debug build
 ```
 
 Run UI tests:
@@ -245,7 +245,7 @@ This repository includes [`.github/workflows/release.yml`](.github/workflows/rel
 
 - Pushing a tag like `v2.0.0` triggers the release workflow
 - The workflow builds both `arm64` and `x86_64` macOS artifacts
-- It publishes `amux-macos-arm64.zip` and `amux-macos-x86_64.zip` to the GitHub Release
+- It publishes `seamux-macos-arm64.zip` and `seamux-macos-x86_64.zip` to the GitHub Release
 
 If the following repository secrets are configured, the workflow will also sign, notarize, and staple the app:
 

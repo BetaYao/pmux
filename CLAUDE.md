@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-amux (AMUX — Agent Multiplexer) is a native macOS terminal multiplexer built with Swift + AppKit. It integrates the Ghostty terminal engine (via C bindings through GhosttyKit.xcframework) to render terminals, uses tmux for session persistence, and provides a dashboard UI for browsing git worktrees with agent status detection.
+Seamux (sea + multiplexer; AMUX — Agent Multiplexer) is a native macOS terminal multiplexer built with Swift + AppKit. It integrates the Ghostty terminal engine (via C bindings through GhosttyKit.xcframework) to render terminals, uses tmux for session persistence, and provides a dashboard UI for browsing git worktrees with agent status detection.
 
 ## Build Commands
 
@@ -16,22 +16,22 @@ xcodegen generate
 # NOTE: CodeEditSourceEditor pulls in the SwiftLint build-tool plugin, which
 # requires trust validation. Headless/CLI builds must pass -skipPackagePluginValidation
 # (in Xcode.app, click "Trust & Enable" once instead).
-xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug -skipPackagePluginValidation -skipMacroValidation build
+xcodebuild -project seamux.xcodeproj -scheme seamux -configuration Debug -skipPackagePluginValidation -skipMacroValidation build
 
 # Run tests
-xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test
+xcodebuild -project seamux.xcodeproj -scheme seamuxTests -configuration Debug test
 
 # Run a single test class
-xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/ConfigTests
+xcodebuild -project seamux.xcodeproj -scheme seamuxTests -configuration Debug test -only-testing:amuxTests/ConfigTests
 
 # Run a single test method
-xcodebuild -project amux.xcodeproj -scheme amuxTests -configuration Debug test -only-testing:amuxTests/ConfigTests/testDefaultConfig
+xcodebuild -project seamux.xcodeproj -scheme seamuxTests -configuration Debug test -only-testing:amuxTests/ConfigTests/testDefaultConfig
 
 # Run UI tests
-xcodebuild -project amux.xcodeproj -scheme amuxUITests -configuration Debug test
+xcodebuild -project seamux.xcodeproj -scheme seamuxUITests -configuration Debug test
 
 # Clean build
-xcodebuild -project amux.xcodeproj -scheme amux clean
+xcodebuild -project seamux.xcodeproj -scheme seamux clean
 ```
 
 The project uses XcodeGen (`project.yml`) to generate the Xcode project file. After modifying `project.yml`, regenerate with `xcodegen generate`.

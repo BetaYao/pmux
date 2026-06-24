@@ -32,17 +32,17 @@ if [[ "$CLEAN_RESTART" -eq 1 ]]; then
   rm -rf "$BUILD_DIR"
 fi
 
-echo "==> Building amux..."
-xcodebuild -project amux.xcodeproj -scheme amux -configuration Debug \
+echo "==> Building Seamux..."
+xcodebuild -project seamux.xcodeproj -scheme seamux -configuration Debug \
   -derivedDataPath "$BUILD_DIR" \
   -skipPackagePluginValidation \
   build
 
-APP="$BUILD_DIR/Build/Products/Debug/amux.app"
+APP="$BUILD_DIR/Build/Products/Debug/seamux.app"
 
-echo "==> Killing existing amux..."
-killall amux 2>/dev/null || true
+echo "==> Killing existing Seamux..."
+killall seamux 2>/dev/null || true
 sleep 1
 
-echo "==> Launching amux (Ctrl+C to quit)..."
-"$APP/Contents/MacOS/amux"
+echo "==> Launching Seamux (Ctrl+C to quit)..."
+"$APP/Contents/MacOS/seamux"
