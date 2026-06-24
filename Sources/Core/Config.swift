@@ -19,6 +19,7 @@ struct Config: Codable {
     var focusedPaneIds: [String: String]
     var wecomBot: WeComBotConfig?
     var wechat: WeChatConfig?
+    var firstMate: FirstMateConfig
 
     enum CodingKeys: String, CodingKey {
         case workspacePaths = "workspace_paths"
@@ -39,6 +40,7 @@ struct Config: Codable {
         case focusedPaneIds = "focused_pane_ids"
         case wecomBot = "wecom_bot"
         case wechat
+        case firstMate
     }
 
     init() {
@@ -60,6 +62,7 @@ struct Config: Codable {
         focusedPaneIds = [:]
         wecomBot = nil
         wechat = nil
+        firstMate = .default
     }
 
     init(from decoder: Decoder) throws {
@@ -87,6 +90,7 @@ struct Config: Codable {
         focusedPaneIds = try container.decodeIfPresent([String: String].self, forKey: .focusedPaneIds) ?? [:]
         wecomBot = try container.decodeIfPresent(WeComBotConfig.self, forKey: .wecomBot)
         wechat = try container.decodeIfPresent(WeChatConfig.self, forKey: .wechat)
+        firstMate = try container.decodeIfPresent(FirstMateConfig.self, forKey: .firstMate) ?? .default
     }
 
     static let configDir = FileManager.default.homeDirectoryForCurrentUser
