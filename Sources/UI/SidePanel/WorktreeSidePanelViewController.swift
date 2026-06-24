@@ -56,9 +56,8 @@ final class WorktreeSidePanelViewController: NSViewController {
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
     override func loadView() {
-        let root = NSView()
-        root.wantsLayer = true
-        root.layer?.backgroundColor = Theme.background.cgColor
+        let root = ThemedBackgroundView()
+        root.backgroundToken = Theme.background
         root.setAccessibilityIdentifier("sidePanel.view")
 
         tabBar.orientation = .horizontal
@@ -294,9 +293,11 @@ final class WorktreeSidePanelViewController: NSViewController {
         tableView.target = self
         tableView.action = #selector(changeRowClicked)
         tableView.setAccessibilityIdentifier("sidePanel.changesTable")
+        tableView.backgroundColor = .clear
 
         let scrollView = NSScrollView()
         scrollView.documentView = tableView
+        scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.translatesAutoresizingMaskIntoConstraints = false

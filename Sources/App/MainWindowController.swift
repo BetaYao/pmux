@@ -634,9 +634,11 @@ dashboard.surfaceManager = terminalCoordinator.surfaceManager
             // Idle = the most recent pane status/message change (a signal that
             // only advances on real activity, not background polling) is older
             // than the collapse interval. The selected worktree stays visible.
+            // The main worktree (base repo / main branch) is never collapsed —
+            // it always stays pinned at the top of the list.
             let lastActivity = statusAggregator.lastActivity(for: path) ?? agent?.startedAt
             let isIdle = lastActivity.map { now.timeIntervalSince($0) > Self.tabIdleCollapseInterval } ?? false
-            let collapsed = isIdle && !isSelected
+            let collapsed = isIdle && !isSelected && !entry.info.isMainWorktree
 
             return (path: path, title: title, statusColor: statusColor, isSelected: isSelected, collapsed: collapsed)
         }

@@ -31,12 +31,22 @@ final class BridgePanelViewController: NSViewController {
     private let watchTableView = NSTableView()
     private let watchScrollView = NSScrollView()
 
+    /// Layer-backed views whose CGColors must be re-resolved when the
+    /// effective appearance changes (light/dark switch). `.cgColor` snapshots
+    /// the color at resolve time, so we re-apply via `resolvedCGColor`.
+    private var dividers: [NSView] = []
+
     // MARK: - Lifecycle
 
     override func loadView() {
-        let root = NSView()
-        root.wantsLayer = true
-        root.layer?.backgroundColor = Theme.background.cgColor
+        let root = ThemedBackgroundView()
+        root.backgroundToken = Theme.background
+        root.onAppearanceChange = { [weak self] in
+            guard let self else { return }
+            for line in self.dividers {
+                line.layer?.backgroundColor = line.resolvedCGColor(SemanticColors.line)
+            }
+        }
 
         stackView.orientation = .vertical
         stackView.alignment = .leading
@@ -80,8 +90,10 @@ final class BridgePanelViewController: NSViewController {
         ordersTableView.tag = 1
         ordersTableView.setAccessibilityIdentifier("bridge.ordersTable")
         ordersTableView.allowsEmptySelection = true
+        ordersTableView.backgroundColor = .clear
 
         ordersScrollView.documentView = ordersTableView
+        ordersScrollView.drawsBackground = false
         ordersScrollView.hasVerticalScroller = true
         ordersScrollView.autohidesScrollers = true
         ordersScrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -116,8 +128,10 @@ final class BridgePanelViewController: NSViewController {
         watchTableView.tag = 2
         watchTableView.setAccessibilityIdentifier("bridge.watchTable")
         watchTableView.allowsEmptySelection = true
+        watchTableView.backgroundColor = .clear
 
         watchScrollView.documentView = watchTableView
+        watchScrollView.drawsBackground = false
         watchScrollView.hasVerticalScroller = true
         watchScrollView.autohidesScrollers = true
         watchScrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -153,9 +167,10 @@ final class BridgePanelViewController: NSViewController {
     private func makeDivider() -> NSView {
         let line = NSView()
         line.wantsLayer = true
-        line.layer?.backgroundColor = NSColor.separatorColor.cgColor
+        line.layer?.backgroundColor = line.resolvedCGColor(SemanticColors.line)
         line.translatesAutoresizingMaskIntoConstraints = false
         line.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        dividers.append(line)
         return line
     }
 
@@ -388,7 +403,7 @@ private final class OrderCellView: NSTableCellView {
         self.onDismiss = onDismiss
         let prefix = expanded ? "⚠ " : ""
         messageLabel.stringValue = prefix + order.action.message
-        messageLabel.textColor = expanded ? .systemOrange : NSColor(named: "textPrimary") ?? .labelColor
+        messageLabel.textColor = expanded ? .systemOrange : Theme.textPrimary
         approveButton.title = expanded ? "!!" : "✓"
     }
 
