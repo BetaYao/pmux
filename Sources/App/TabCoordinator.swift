@@ -863,11 +863,14 @@ extension TabCoordinator {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self else { return }
             var results: [String] = []
+            var firstFailedCmd: String? = nil
             for cmd in commands {
-                let output = ProcessRunner.output(["bash", "-lc", "cd \(worktreePath.shellQuoted) && \(cmd)"]) ?? "(no output)"
-                results.append("[\(cmd)]\n\(output)")
+                let rawOutput = ProcessRunner.output(["bash", "-lc", "cd \(worktreePath.shellQuoted) && \(cmd)"])
+                if rawOutput == nil && firstFailedCmd == nil { firstFailedCmd = cmd }
+                results.append("[\(cmd)]\n\(rawOutput ?? "(failed)")")
             }
             let combined = results.joined(separator: "\n---\n")
+            let passed = firstFailedCmd == nil
             DispatchQueue.main.async {
                 NotificationManager.shared.notify(
                     worktreePath: worktreePath,
@@ -877,10 +880,25 @@ extension TabCoordinator {
                     newStatus: .idle,
                     lastMessage: combined
                 )
-                // autoReview stub: wiring requires backend/session context in MainWindowController
-                if self.config.firstMate.autoReview {
-                    NSLog("[FirstMate] autoReview: review water 待接入 (\(action.branch))")
+                // Record inspection result in watch feed
+                var watchMsg: String
+                if passed {
+                    watchMsg = self.config.firstMate.autoReview
+                        ? "验船通过 · review 就绪(手动拉起)"
+                        : "验船通过"
+                } else {
+                    watchMsg = "验船失败: \(firstFailedCmd!)"
                 }
+                let watchAction = FirstMateAction(
+                    kind: .inspect,
+                    zone: passed ? .green : .red,
+                    worktreePath: action.worktreePath,
+                    branch: action.branch,
+                    project: action.project,
+                    terminalID: action.terminalID,
+                    message: watchMsg
+                )
+                self.watchFeed.record(watchAction)
             }
         }
     }
