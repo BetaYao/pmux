@@ -423,39 +423,7 @@ dashboard.surfaceManager = terminalCoordinator.surfaceManager
             repoPathsProvider: { [weak self] in self?.tabCoordinator.config.workspacePaths ?? [] },
             onAddRepo: { [weak self] in self?.tabCoordinator.addRepoViaOpenPanel(window: self?.window) }
         ) { [weak self] taskDescription, repoPath, agentType, reuseEnv in
-            guard let self else { return }
-            let currentPath = self.tabCoordinator.selectedAgent?.worktreePath
-            DispatchQueue.global(qos: .userInitiated).async {
-                let branches = WorktreeCreator.listBranches(repoPath: repoPath)
-                let base = branches.contains("main") ? "main" : (branches.contains("master") ? "master" : (branches.first ?? "main"))
-                do {
-                    let branchName = WorktreeCreator.branchName(fromTaskDescription: taskDescription, existingBranches: branches)
-                    let info = try WorktreeCreator.createWorktree(repoPath: repoPath, branchName: branchName, baseBranch: base)
-                    WorktreeAgentTypeStore.shared.set(agentType, forWorktree: info.path)
-                    WorktreeTaskStore.shared.set(taskDescription, forWorktree: info.path)
-                    if reuseEnv, let currentPath { WorktreeCreator.copyEnvironmentFiles(from: currentPath, to: info.path) }
-                    // Pre-create the persistent session with the agent already
-                    // running, server-side, before the GUI attaches. Runs on
-                    // this background queue (synchronous process spawns).
-                    if let agentCommandLine = agentType.launchCommand(withTask: taskDescription) {
-                        SessionManager.createDetachedSession(
-                            name: SessionManager.persistentSessionName(for: info.path),
-                            backend: self.runtimeBackend,
-                            cwd: info.path,
-                            agentCommandLine: agentCommandLine
-                        )
-                    }
-                    DispatchQueue.main.async {
-                        self.tabCoordinator.handleNewBranch(info: info, repoPath: repoPath)
-                        self.dashboardVC?.inlineCreateReportSuccess()
-                    }
-                } catch {
-                    DispatchQueue.main.async {
-                        NSSound.beep()
-                        self.dashboardVC?.inlineCreateReportFailure(error.localizedDescription)
-                    }
-                }
-            }
+            self?.performWorktreeCreate(task: taskDescription, repoPath: repoPath, agentType: agentType, reuseEnv: reuseEnv)
         }
 
         embedViewController(dashboard)
@@ -465,6 +433,73 @@ dashboard.surfaceManager = terminalCoordinator.surfaceManager
         positionStandardWindowButtons()
     }
 
+    private func performWorktreeCreate(task: String, repoPath: String, agentType: AgentType, reuseEnv: Bool) {
+        let currentPath = tabCoordinator.selectedAgent?.worktreePath
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let branches = WorktreeCreator.listBranches(repoPath: repoPath)
+            let base = branches.contains("main") ? "main" : (branches.contains("master") ? "master" : (branches.first ?? "main"))
+            do {
+                let branchName = WorktreeCreator.branchName(fromTaskDescription: task, existingBranches: branches)
+                let info = try WorktreeCreator.createWorktree(repoPath: repoPath, branchName: branchName, baseBranch: base)
+                WorktreeAgentTypeStore.shared.set(agentType, forWorktree: info.path)
+                WorktreeTaskStore.shared.set(task, forWorktree: info.path)
+                if reuseEnv, let currentPath { WorktreeCreator.copyEnvironmentFiles(from: currentPath, to: info.path) }
+                if let agentCommandLine = agentType.launchCommand(withTask: task) {
+                    SessionManager.createDetachedSession(
+                        name: SessionManager.persistentSessionName(for: info.path),
+                        backend: self.runtimeBackend,
+                        cwd: info.path,
+                        agentCommandLine: agentCommandLine
+                    )
+                }
+                DispatchQueue.main.async {
+                    self.tabCoordinator.handleNewBranch(info: info, repoPath: repoPath)
+                    self.dashboardVC?.inlineCreateReportSuccess()
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    NSSound.beep()
+                    self.dashboardVC?.inlineCreateReportFailure(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func currentWorktreeRefs() -> [WorktreeRef] {
+        AgentHead.shared.allAgents().map { WorktreeRef(branch: $0.branch, path: $0.worktreePath) }
+    }
+
+    private func makeBridgeRouter() -> BridgeCommandRouter {
+        BridgeCommandRouter(
+            queue: tabCoordinator.pendingOrders,
+            createWorktree: { [weak self] task in
+                guard let self else { return }
+                let repoPath = self.tabCoordinator.config.workspacePaths.first ?? ""
+                self.performWorktreeCreate(task: task, repoPath: repoPath, agentType: .claudeCode, reuseEnv: false)
+            },
+            orderExisting: { path, task in
+                guard let tid = AgentHead.shared.agent(forWorktree: path)?.id else { return }
+                AgentHead.shared.sendCommand(to: tid, command: task)
+            },
+            commit: { path in
+                guard let tid = AgentHead.shared.agent(forWorktree: path)?.id else { return }
+                AgentHead.shared.sendCommand(to: tid, command: "git add -A && git commit -m 'wip'")
+            },
+            activeAgentCount: { AgentHead.shared.allAgents().count },
+            branchForPath: { path in AgentHead.shared.agent(forWorktree: path)?.branch ?? "" },
+            projectForPath: { path in AgentHead.shared.agent(forWorktree: path)?.project ?? "" }
+        )
+    }
+
+    func submitBridgeCommand(_ text: String) {
+        switch BridgeCommandParser.parse(text, worktrees: currentWorktreeRefs()) {
+        case .success(let command):
+            makeBridgeRouter().route(command)
+        case .failure:
+            NSSound.beep()
+        }
+    }
 
     private func applyWindowBackgroundStyle() {
         guard let window else { return }
@@ -1264,8 +1299,20 @@ extension MainWindowController {
                   let terminalID = AgentHead.shared.agent(forWorktree: worktreePath)?.id else { return }
             AgentHead.shared.sendCommand(to: terminalID, command: task)
         case .returnToPort:
-            // Deferred return-to-port (E) feature — not yet emitted by the engine.
-            break
+            let path = order.action.worktreePath
+            guard let agent = AgentHead.shared.agent(forWorktree: path) else { return }
+            DispatchQueue.global(qos: .userInitiated).async {
+                try? WorktreeDeleter.deleteWorktree(
+                    worktreePath: path,
+                    repoPath: agent.project,
+                    branchName: agent.branch
+                )
+            }
+        case .broadcastOrder:
+            guard let task = order.action.payload else { return }
+            for agent in AgentHead.shared.allAgents() {
+                AgentHead.shared.sendCommand(to: agent.id, command: task)
+            }
         default:
             break
         }
