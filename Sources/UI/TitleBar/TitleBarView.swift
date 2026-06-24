@@ -147,6 +147,7 @@ final class TitleBarView: NSView {
             tabStripClipView.heightAnchor.constraint(equalToConstant: 22),
             tabStripStack.leadingAnchor.constraint(equalTo: tabStripClipView.leadingAnchor),
             tabStripStack.centerYAnchor.constraint(equalTo: tabStripClipView.centerYAnchor),
+            tabStripStack.trailingAnchor.constraint(lessThanOrEqualTo: tabStripClipView.trailingAnchor),
         ])
     }
 

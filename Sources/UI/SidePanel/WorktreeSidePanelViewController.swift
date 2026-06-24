@@ -67,7 +67,7 @@ final class WorktreeSidePanelViewController: NSViewController {
         tabBar.translatesAutoresizingMaskIntoConstraints = false
 
         let tabs: [(SidePanelTab, String, String)] = [
-            (.firstMate, "helm", "First Mate"),
+            (.firstMate, "sailboat", "First Mate"),
             (.files, "folder", "Files"),
             (.changes, "list.bullet.rectangle", "Changes"),
         ]

@@ -381,6 +381,9 @@ dashboard.surfaceManager = terminalCoordinator.surfaceManager
         dashboard.sidePanelVC.onBridgeNavigate = { [weak self] path in
             self?.tabCoordinator.selectTab(forWorktree: path)
         }
+        dashboard.sidePanelVC.onBridgeApprove = { [weak self] order in
+            self?.handleBridgeApprove(order)
+        }
 
         dashboard.onEnterTerminal = { [weak self] in self?.keyboardMode.enterInsert() }
         dashboard.onRequestNewWorktree = { [weak self] in
@@ -1208,5 +1211,24 @@ extension MainWindowController: KeyboardModeDelegate {
     }
     func keyboardHintDidChange(_ hint: String) {
         statusBar.updateMode(keyboardMode.mode, hint: hint)
+    }
+}
+
+// MARK: - Bridge Approve
+
+extension MainWindowController {
+    func handleBridgeApprove(_ order: PendingOrder) {
+        switch order.action.kind {
+        case .suggestNextOrder:
+            let worktreePath = order.action.worktreePath
+            guard let task = WorktreeTaskStore.shared.task(forWorktree: worktreePath),
+                  let terminalID = AgentHead.shared.agent(forWorktree: worktreePath)?.id else { return }
+            AgentHead.shared.sendCommand(to: terminalID, command: task)
+        case .returnToPort:
+            // Deferred return-to-port (E) feature — not yet emitted by the engine.
+            break
+        default:
+            break
+        }
     }
 }

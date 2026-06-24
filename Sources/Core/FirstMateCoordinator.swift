@@ -23,6 +23,7 @@ final class FirstMateCoordinator {
     }
 
     func handle(_ t: StatusTransition) {
+        dispatchPrecondition(condition: .onQueue(.main))
         for action in FirstMate.evaluate(t, config: config) {
             switch action.zone {
             case .green:

@@ -7,6 +7,7 @@ enum ConfirmDecision: Equatable { case expand, execute }
 enum BridgeConfirmFlow {
     static func onEnter(kind: FirstMateActionKind, expanded: Bool) -> ConfirmDecision {
         switch kind {
+        // Deferred return-to-port (E) feature — not yet emitted by the engine.
         case .returnToPort:
             return expanded ? .execute : .expand
         default:

@@ -107,6 +107,8 @@ class TabCoordinator {
         }
     }
 
+    deinit { AgentHead.shared.onStatusTransition = nil }
+
     // MARK: - Tab Switching
 
     func switchToTab(_ index: Int) {
@@ -858,7 +860,8 @@ extension TabCoordinator {
     func runFirstMateInspection(_ action: FirstMateAction) {
         let commands = config.firstMate.inspectionCommands
         let worktreePath = action.worktreePath
-        guard !commands.isEmpty else { return }
+        let isAutoCommit = action.kind == .autoCommit
+        guard !commands.isEmpty || isAutoCommit else { return }
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self else { return }
             var results: [String] = []
@@ -870,18 +873,30 @@ extension TabCoordinator {
             }
             let combined = results.joined(separator: "\n---\n")
             let passed = firstFailedCmd == nil
+
+            var commitResult: String? = nil
+            if isAutoCommit {
+                _ = ProcessRunner.output(["git", "-C", worktreePath, "add", "-A"])
+                let commitOut = ProcessRunner.output(["git", "-C", worktreePath, "commit", "-m", "amux: auto-commit after agent completion"])
+                commitResult = commitOut != nil ? "auto-commit succeeded" : "auto-commit: nothing to commit or failed"
+            }
+
             DispatchQueue.main.async {
-                NotificationManager.shared.notify(
-                    worktreePath: worktreePath,
-                    workspaceName: action.project,
-                    branch: action.branch,
-                    oldStatus: .running,
-                    newStatus: .idle,
-                    lastMessage: combined
-                )
+                if !combined.isEmpty {
+                    NotificationManager.shared.notify(
+                        worktreePath: worktreePath,
+                        workspaceName: action.project,
+                        branch: action.branch,
+                        oldStatus: .running,
+                        newStatus: .idle,
+                        lastMessage: combined
+                    )
+                }
                 // Record inspection result in watch feed
                 var watchMsg: String
-                if passed {
+                if let cr = commitResult {
+                    watchMsg = cr
+                } else if passed {
                     watchMsg = self.config.firstMate.autoReview
                         ? "验船通过 · review 就绪(手动拉起)"
                         : "验船通过"
@@ -889,7 +904,7 @@ extension TabCoordinator {
                     watchMsg = "验船失败: \(firstFailedCmd!)"
                 }
                 let watchAction = FirstMateAction(
-                    kind: .inspect,
+                    kind: isAutoCommit ? .autoCommit : .inspect,
                     zone: passed ? .green : .red,
                     worktreePath: action.worktreePath,
                     branch: action.branch,
