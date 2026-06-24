@@ -17,6 +17,24 @@ class WorktreeStatusAggregator {
     private var terminalToWorktree: [String: String] = [:]
     private var worktreeTerminals: [String: [String]] = [:]
 
+    /// Per-worktree "last real activity" time. Seeded from persisted config so
+    /// it does NOT reset to launch time, and only advanced on genuine status/
+    /// message changes (not on the initial post-launch detection of a pane).
+    private var lastActivityAt: [String: Date] = [:]
+    /// Fired when a worktree's last-activity time advances, so the owner can persist it.
+    var onActivity: ((String, Date) -> Void)?
+
+    /// Seed persisted last-activity times. Only fills entries we don't already have.
+    func seedLastActivity(_ map: [String: Date]) {
+        for (path, date) in map where lastActivityAt[path] == nil {
+            lastActivityAt[path] = date
+        }
+    }
+
+    func lastActivity(for worktreePath: String) -> Date? {
+        lastActivityAt[worktreePath]
+    }
+
     func registerTerminal(_ terminalID: String, worktreePath: String, leafIndex: Int) {
         terminalToWorktree[terminalID] = worktreePath
         var ids = worktreeTerminals[worktreePath] ?? []
@@ -55,6 +73,14 @@ class WorktreeStatusAggregator {
         let promptChanged = oldPaneState?.lastUserPrompt != lastUserPrompt
 
         guard statusChanged || messageChanged || promptChanged else { return }
+
+        // Advance the worktree's last-activity time. A first-ever detection of a
+        // pane (oldPaneState == nil) is launch/restore noise — keep any seeded/
+        // persisted value, only stamping now when there is no history at all.
+        if oldPaneState != nil || lastActivityAt[worktreePath] == nil {
+            lastActivityAt[worktreePath] = now
+            onActivity?(worktreePath, now)
+        }
 
         let paneIndex = paneIndexForTerminal(terminalID, worktreePath: worktreePath)
         // Preserve existing prompt if new one is empty

@@ -111,8 +111,31 @@ class MainWindowController: NSWindowController {
         let pub = StatusPublisher(agentConfig: config.agentDetect)
         pub.aggregator = statusAggregator
         statusAggregator.delegate = self
+        statusAggregator.seedLastActivity(persistedActivityMap())
+        statusAggregator.onActivity = { [weak self] path, date in
+            self?.recordWorktreeActivity(path, date)
+        }
         return pub
     }()
+
+    private static let activityISO8601 = ISO8601DateFormatter()
+
+    /// Persisted per-worktree last-activity times, parsed from config.
+    private func persistedActivityMap() -> [String: Date] {
+        var map: [String: Date] = [:]
+        for (path, iso) in config.worktreeLastActivityAt {
+            if let date = Self.activityISO8601.date(from: iso) { map[path] = date }
+        }
+        return map
+    }
+
+    /// Persist a worktree's advanced last-activity time (debounced via Config.save()).
+    private func recordWorktreeActivity(_ path: String, _ date: Date) {
+        let iso = Self.activityISO8601.string(from: date)
+        config.worktreeLastActivityAt[path] = iso
+        tabCoordinator.config.worktreeLastActivityAt[path] = iso
+        config.save()
+    }
 
     convenience init() {
         let window = AmuxWindow(
@@ -575,7 +598,7 @@ dashboard.surfaceManager = terminalCoordinator.surfaceManager
             // Idle = the most recent pane status/message change (a signal that
             // only advances on real activity, not background polling) is older
             // than the collapse interval. The selected worktree stays visible.
-            let lastActivity = statusAggregator.status(for: path)?.panes.map(\.lastUpdated).max() ?? agent?.startedAt
+            let lastActivity = statusAggregator.lastActivity(for: path) ?? agent?.startedAt
             let isIdle = lastActivity.map { now.timeIntervalSince($0) > Self.tabIdleCollapseInterval } ?? false
             let collapsed = isIdle && !isSelected
 

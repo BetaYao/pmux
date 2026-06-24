@@ -12,6 +12,9 @@ struct Config: Codable {
     var zoomIndex: Int
     var themeMode: String
     var worktreeStartedAt: [String: String]
+    /// Per-worktree last real-activity timestamp (ISO8601). Persisted so the
+    /// >8h idle-collapse survives app restarts instead of resetting to launch.
+    var worktreeLastActivityAt: [String: String]
     var splitLayouts: [String: CodableSplitNode]
     var activeTabRepoPath: String?
     var selectedWorktreePath: String?
@@ -33,6 +36,7 @@ struct Config: Codable {
         case zoomIndex = "zoom_index"
         case themeMode = "theme_mode"
         case worktreeStartedAt = "worktree_started_at"
+        case worktreeLastActivityAt = "worktree_last_activity_at"
         case splitLayouts = "split_layouts"
         case activeTabRepoPath = "active_tab_repo_path"
         case selectedWorktreePath = "selected_worktree_path"
@@ -55,6 +59,7 @@ struct Config: Codable {
         zoomIndex = 3
         themeMode = "system"
         worktreeStartedAt = [:]
+        worktreeLastActivityAt = [:]
         splitLayouts = [:]
         activeTabRepoPath = nil
         selectedWorktreePath = nil
@@ -83,6 +88,7 @@ struct Config: Codable {
         zoomIndex = try container.decodeIfPresent(Int.self, forKey: .zoomIndex) ?? 3
         themeMode = try container.decodeIfPresent(String.self, forKey: .themeMode) ?? "system"
         worktreeStartedAt = try container.decodeIfPresent([String: String].self, forKey: .worktreeStartedAt) ?? [:]
+        worktreeLastActivityAt = try container.decodeIfPresent([String: String].self, forKey: .worktreeLastActivityAt) ?? [:]
         splitLayouts = try container.decodeIfPresent([String: CodableSplitNode].self, forKey: .splitLayouts) ?? [:]
         activeTabRepoPath = try container.decodeIfPresent(String.self, forKey: .activeTabRepoPath)
         selectedWorktreePath = try container.decodeIfPresent(String.self, forKey: .selectedWorktreePath)
