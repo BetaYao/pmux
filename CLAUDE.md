@@ -22,10 +22,10 @@ xcodebuild -project seahelm.xcodeproj -scheme seahelm -configuration Debug -skip
 xcodebuild -project seahelm.xcodeproj -scheme seahelmTests -configuration Debug test
 
 # Run a single test class
-xcodebuild -project seahelm.xcodeproj -scheme seahelmTests -configuration Debug test -only-testing:amuxTests/ConfigTests
+xcodebuild -project seahelm.xcodeproj -scheme seahelmTests -configuration Debug test -only-testing:seahelmTests/ConfigTests
 
 # Run a single test method
-xcodebuild -project seahelm.xcodeproj -scheme seahelmTests -configuration Debug test -only-testing:amuxTests/ConfigTests/testDefaultConfig
+xcodebuild -project seahelm.xcodeproj -scheme seahelmTests -configuration Debug test -only-testing:seahelmTests/ConfigTests/testDefaultConfig
 
 # Run UI tests
 xcodebuild -project seahelm.xcodeproj -scheme seahelmUITests -configuration Debug test
@@ -89,13 +89,13 @@ The project uses XcodeGen (`project.yml`) to generate the Xcode project file. Af
 ## Key Technical Details
 
 - **Swift 5.10**, macOS 14.0+ (Sonoma), AppKit (not SwiftUI)
-- **Ghostty C interop** via `amux-Bridging-Header.h` → `ghostty.h`; `GhosttyKit.xcframework` provides `libghostty`
+- **Ghostty C interop** via `seahelm-Bridging-Header.h` → `ghostty.h`; `GhosttyKit.xcframework` provides `libghostty`
 - Links against: Metal, QuartzCore, IOSurface, Carbon, UniformTypeIdentifiers, libghostty, libc++
 - SPM dependencies: `CodeEditSourceEditor` (+ `CodeEditLanguages`) for the embedded code editor; otherwise system frameworks + Ghostty
 - Delegate pattern used throughout (not Combine/async-await for UI updates)
 - `GhosttyBridge.shared` is the singleton entry point for all terminal operations
 - `SurfaceRegistry.shared` is the global surface lookup table (surface ID → TerminalSurface)
 - `AgentHead.shared` is the single source of truth for agent state (status, messages, activity events)
-- Tests use XCTest with `@testable import amux`; test files in `Tests/` directory; no external test dependencies
+- Tests use XCTest with `@testable import seahelm`; test files in `Tests/` directory; no external test dependencies
 - Config uses `decodeIfPresent()` throughout for backward compatibility with older config files
 - `ghostty/` directory contains the vendored Ghostty source (read-only reference, not built from here)
