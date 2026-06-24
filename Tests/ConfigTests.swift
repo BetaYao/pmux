@@ -1,5 +1,5 @@
 import XCTest
-@testable import amux
+@testable import seamux
 
 final class ConfigTests: XCTestCase {
 
@@ -304,6 +304,38 @@ final class ConfigTests: XCTestCase {
 
         let config = try JSONDecoder().decode(Config.self, from: json)
         XCTAssertEqual(config.backend, "zmx")
+    }
+
+    // MARK: - Config Dir Migration
+
+    func testMigratesLegacyConfigDirWhenNewMissing() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("seamux-migrate-\(UUID().uuidString)")
+        let legacy = tmp.appendingPathComponent(".config/amux")
+        try fm.createDirectory(at: legacy, withIntermediateDirectories: true)
+        try "{\"foo\":1}".write(to: legacy.appendingPathComponent("config.json"), atomically: true, encoding: .utf8)
+
+        Config.migrateLegacyConfigDirIfNeeded(home: tmp, fileManager: fm)
+
+        let migrated = tmp.appendingPathComponent(".config/seamux/config.json")
+        XCTAssertTrue(fm.fileExists(atPath: migrated.path), "new config.json should exist after migration")
+        XCTAssertTrue(fm.fileExists(atPath: legacy.appendingPathComponent("config.json").path), "legacy must be kept for rollback")
+    }
+
+    func testMigrationNoopWhenNewExists() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("seamux-migrate-\(UUID().uuidString)")
+        let legacy = tmp.appendingPathComponent(".config/amux")
+        let new = tmp.appendingPathComponent(".config/seamux")
+        try fm.createDirectory(at: legacy, withIntermediateDirectories: true)
+        try fm.createDirectory(at: new, withIntermediateDirectories: true)
+        try "OLD".write(to: legacy.appendingPathComponent("config.json"), atomically: true, encoding: .utf8)
+        try "NEW".write(to: new.appendingPathComponent("config.json"), atomically: true, encoding: .utf8)
+
+        Config.migrateLegacyConfigDirIfNeeded(home: tmp, fileManager: fm)
+
+        let content = try String(contentsOf: new.appendingPathComponent("config.json"), encoding: .utf8)
+        XCTAssertEqual(content, "NEW", "existing new config must not be overwritten")
     }
 
     func testAgentDetectConfig_Decode() throws {

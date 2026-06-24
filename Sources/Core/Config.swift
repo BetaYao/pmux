@@ -90,10 +90,23 @@ struct Config: Codable {
     }
 
     static let configDir = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".config/amux")
+        .appendingPathComponent(".config/seamux")
     static let configPath = configDir.appendingPathComponent("config.json")
 
+    /// Copies ~/.config/amux to ~/.config/seamux on first launch (keeps old dir for rollback).
+    static func migrateLegacyConfigDirIfNeeded(
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        fileManager fm: FileManager = .default
+    ) {
+        let new = home.appendingPathComponent(".config/seamux")
+        let legacy = home.appendingPathComponent(".config/amux")
+        guard !fm.fileExists(atPath: new.path),
+              fm.fileExists(atPath: legacy.path) else { return }
+        try? fm.copyItem(at: legacy, to: new)
+    }
+
     static func load() -> Config {
+        migrateLegacyConfigDirIfNeeded()
         // Support UI test config override via launch argument
         if let idx = CommandLine.arguments.firstIndex(of: "-UITestConfig"),
            idx + 1 < CommandLine.arguments.count {

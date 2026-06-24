@@ -29,9 +29,9 @@ class GhosttyBridge {
         }
         ghostty_config_load_default_files(config)
 
-        // Load amux-specific overrides (e.g. copy-on-select = false)
+        // Load seamux-specific overrides (e.g. copy-on-select = false)
         let amuxConfigPath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".config/amux/ghostty.conf").path
+            .appendingPathComponent(".config/seamux/ghostty.conf").path
         if FileManager.default.fileExists(atPath: amuxConfigPath) {
             ghostty_config_load_file(config, amuxConfigPath)
         }

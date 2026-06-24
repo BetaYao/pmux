@@ -343,7 +343,7 @@ class TabCoordinator {
                 self.delegate?.tabCoordinatorRequestUpdateTitleBar(self)
 
                 if allWorktreeInfos.isEmpty {
-                    NSLog("No workspaces configured. Add paths to ~/.config/amux/config.json")
+                    NSLog("No workspaces configured. Add paths to ~/.config/seamux/config.json")
                 }
 
                 // Start polling for agent status
