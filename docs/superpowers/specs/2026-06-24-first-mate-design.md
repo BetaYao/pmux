@@ -122,6 +122,16 @@ StatusPublisher → StatusDetector → WorktreeStatusAggregator → AgentHead(�
 
 **卡片增强(借线框 B 的细节):** sailor 卡片用左色边即时表达状态 —— 黄=等待(带计时)、绿=完工/验船通过、红=异常或待批、灰=working。
 
+### 主内容区:每 worktree 一个 tab
+
+主区从单一 Dashboard 改为**多 tab,一个 worktree(sailor)一个 tab**:
+
+- 左栏舰桥 = 舰队总览 + 待批航令(全局视角);主区 tab = 钻进某条船干活(单船视角)。职责清晰分离。
+- 每个 tab 标题 = sailor 名 / 分支名,带状态色点(复用卡片色边的同一套:黄/绿/红/灰),不切过去也能在 tab 条上看到哪条船要注意。
+- 点左栏舰桥里的某个值更 / 待批项 → 跳到对应 worktree 的 tab。
+- tab 的生命周期跟 worktree:E 返港入坞删除 worktree 时,对应 tab 关闭。
+- 复用现有 `TabCoordinator`(已缓存 `repoVCs[repoPath]`、管 tab 切换与 surface 生命周期);本改动是把"项目 tab"粒度细化到"worktree tab",并与左栏舰桥的导航联动。
+
 ## 边界情况(易翻车,需在实现中处理)
 
 1. **"完成"怎么算?** 看屏会把中途停顿误判成完工。→ 优先用 hook 的明确完工信号;无 hook 时要求 `completed` 状态稳定持续去抖窗口(复用 `DebouncedStatusTracker`)才触发验船。
@@ -134,6 +144,21 @@ StatusPublisher → StatusDetector → WorktreeStatusAggregator → AgentHead(�
 - `PendingOrdersQueue` 幂等性单测(同 worktree 重复入队只保留一条;批准/否决后可再入队)。
 - 边沿去重单测(同状态持续不重复产出动作)。
 - 配置向后兼容单测(缺 `firstMate` 节时用默认值)。
+
+## 改名:amux → Seamux
+
+项目从 `amux`(Agent Multiplexer)改名为 **Seamux**(sea + multiplexer):融入公司 "sea" 元素,保留 multiplexer 血脉,从 amux 平滑过渡。隐喻链不变(Bridge / First Mate / Sailor 全套照旧叠加在 Seamux 之上)。
+
+横切改动范围(机械,建议作为独立计划线先行或并行):
+
+- `project.yml` — target / scheme / product name(`amux` → `seamux`),regenerate Xcode project
+- bundle identifier、app 显示名、Info.plist
+- bridging header 文件名 `amux-Bridging-Header.h` 与引用
+- 测试 target(`amuxTests` / `amuxUITests`)、`@testable import amux` → `import seamux`
+- `run.sh`、`CLAUDE.md`、配置目录 `~/.config/amux/` → `~/.config/seamux/`(需读旧路径做一次迁移以兼容老用户)
+- README / 文档 / logo 文案
+
+> 配置目录迁移是唯一有数据风险的点:首次启动若新路径不存在而旧路径存在,复制旧 config 过来。
 
 ## 不做(YAGNI)
 
