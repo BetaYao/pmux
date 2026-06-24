@@ -1,5 +1,5 @@
 import XCTest
-@testable import seamux
+@testable import seahelm
 
 /// Tests that terminal surfaces fill their container after reparent.
 class TerminalSurfaceReparentTests: XCTestCase {

@@ -1,5 +1,5 @@
 import XCTest
-@testable import seamux
+@testable import seahelm
 
 /// Tests for AgentHead singleton.
 /// Note: We avoid creating TerminalSurface instances in tests because they

@@ -1,5 +1,5 @@
 import XCTest
-@testable import seamux
+@testable import seahelm
 
 class SessionManagerTests: XCTestCase {
     func testPersistentSessionNameSanitizesDots() {

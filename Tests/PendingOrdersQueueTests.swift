@@ -1,5 +1,5 @@
 import XCTest
-@testable import seamux
+@testable import seahelm
 
 final class PendingOrdersQueueTests: XCTestCase {
     private func action(_ kind: FirstMateActionKind, wt: String = "/wt/x") -> FirstMateAction {

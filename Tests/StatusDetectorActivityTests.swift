@@ -1,6 +1,6 @@
 // Tests/StatusDetectorActivityTests.swift
 import XCTest
-@testable import seamux
+@testable import seahelm
 
 final class StatusDetectorActivityTests: XCTestCase {
     let detector = StatusDetector()

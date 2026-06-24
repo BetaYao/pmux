@@ -1,6 +1,6 @@
 import XCTest
 import AppKit
-@testable import seamux
+@testable import seahelm
 
 final class CenterOverlayTests: XCTestCase {
     func testShowThenDismiss() {

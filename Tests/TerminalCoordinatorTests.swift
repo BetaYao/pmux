@@ -1,5 +1,5 @@
 import XCTest
-@testable import seamux
+@testable import seahelm
 
 private class MockTerminalCoordinatorDelegate: TerminalCoordinatorDelegate {
     var surfacesUpdated = false

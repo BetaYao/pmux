@@ -1,7 +1,7 @@
 // Tests/WorktreeSidePanelViewControllerTests.swift
 import XCTest
 import AppKit
-@testable import seamux
+@testable import seahelm
 
 final class WorktreeSidePanelViewControllerTests: XCTestCase {
     private func makeVC(worktreePath: String?) -> WorktreeSidePanelViewController {

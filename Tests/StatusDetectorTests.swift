@@ -1,5 +1,5 @@
 import XCTest
-@testable import seamux
+@testable import seahelm
 
 final class StatusDetectorTests: XCTestCase {
     let detector = StatusDetector()

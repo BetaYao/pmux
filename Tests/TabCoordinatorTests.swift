@@ -1,5 +1,5 @@
 import XCTest
-@testable import seamux
+@testable import seahelm
 
 private class MockTabCoordinatorDelegate: TabCoordinatorDelegate {
     var embeddedVC: NSViewController?

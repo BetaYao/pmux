@@ -1,5 +1,5 @@
 import XCTest
-@testable import seamux
+@testable import seahelm
 
 final class FirstMateCoordinatorTests: XCTestCase {
     private func tx(_ new: AgentStatus, hold: Double = 0, completion: Bool = false) -> StatusTransition {

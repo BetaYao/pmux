@@ -1,6 +1,6 @@
 // Tests/FileContentViewTests.swift
 import XCTest
-@testable import seamux
+@testable import seahelm
 
 final class FileContentViewTests: XCTestCase {
     func testReadsUTF8AndRejectsOversizeAndMissing() throws {

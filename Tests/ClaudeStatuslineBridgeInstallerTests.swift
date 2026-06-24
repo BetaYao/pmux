@@ -1,5 +1,5 @@
 import XCTest
-@testable import seamux
+@testable import seahelm
 
 final class ClaudeStatuslineBridgeInstallerTests: XCTestCase {
     func testInstallsWrapperAndPreservesExistingCommand() throws {

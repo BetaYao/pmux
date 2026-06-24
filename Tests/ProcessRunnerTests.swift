@@ -1,5 +1,5 @@
 import XCTest
-@testable import seamux
+@testable import seahelm
 
 class ProcessRunnerTests: XCTestCase {
     func testCommandExistsForKnownCommand() {

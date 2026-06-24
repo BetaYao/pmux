@@ -1,6 +1,6 @@
 // Tests/ActivityFeedRendererTests.swift
 import XCTest
-@testable import seamux
+@testable import seahelm
 
 final class ActivityFeedRendererTests: XCTestCase {
     func testEmptyEventsReturnsEmpty() {

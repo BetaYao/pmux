@@ -1,5 +1,5 @@
 import XCTest
-@testable import seamux
+@testable import seahelm
 
 final class TodoStoreTests: XCTestCase {
     private var store: TodoStore!
