@@ -317,7 +317,7 @@ final class ConfigTests: XCTestCase {
 
         Config.migrateLegacyConfigDirIfNeeded(home: tmp, fileManager: fm)
 
-        let migrated = tmp.appendingPathComponent(".config/seamux/config.json")
+        let migrated = tmp.appendingPathComponent(".config/seahelm/config.json")
         XCTAssertTrue(fm.fileExists(atPath: migrated.path), "new config.json should exist after migration")
         XCTAssertTrue(fm.fileExists(atPath: legacy.appendingPathComponent("config.json").path), "legacy must be kept for rollback")
     }
@@ -326,7 +326,7 @@ final class ConfigTests: XCTestCase {
         let fm = FileManager.default
         let tmp = fm.temporaryDirectory.appendingPathComponent("seamux-migrate-\(UUID().uuidString)")
         let legacy = tmp.appendingPathComponent(".config/amux")
-        let new = tmp.appendingPathComponent(".config/seamux")
+        let new = tmp.appendingPathComponent(".config/seahelm")
         try fm.createDirectory(at: legacy, withIntermediateDirectories: true)
         try fm.createDirectory(at: new, withIntermediateDirectories: true)
         try "OLD".write(to: legacy.appendingPathComponent("config.json"), atomically: true, encoding: .utf8)
@@ -336,6 +336,52 @@ final class ConfigTests: XCTestCase {
 
         let content = try String(contentsOf: new.appendingPathComponent("config.json"), encoding: .utf8)
         XCTAssertEqual(content, "NEW", "existing new config must not be overwritten")
+    }
+
+    // MARK: - Seahelm Migration
+
+    func testMigratesSeamuxIntoSeahelm() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let seamux = tmp.appendingPathComponent(".config/seamux")
+        try fm.createDirectory(at: seamux, withIntermediateDirectories: true)
+        try "{}".write(to: seamux.appendingPathComponent("config.json"), atomically: true, encoding: .utf8)
+
+        Config.migrateLegacyConfigDirIfNeeded(home: tmp, fileManager: fm)
+
+        let seahelm = tmp.appendingPathComponent(".config/seahelm/config.json")
+        XCTAssertTrue(fm.fileExists(atPath: seahelm.path))
+        // Source dir preserved for rollback
+        XCTAssertTrue(fm.fileExists(atPath: seamux.appendingPathComponent("config.json").path))
+    }
+
+    func testMigratesAmuxWhenNoSeamux() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let amux = tmp.appendingPathComponent(".config/amux")
+        try fm.createDirectory(at: amux, withIntermediateDirectories: true)
+        try "{}".write(to: amux.appendingPathComponent("config.json"), atomically: true, encoding: .utf8)
+
+        Config.migrateLegacyConfigDirIfNeeded(home: tmp, fileManager: fm)
+
+        let seahelm = tmp.appendingPathComponent(".config/seahelm/config.json")
+        XCTAssertTrue(fm.fileExists(atPath: seahelm.path))
+    }
+
+    func testNoMigrationWhenSeahelmExists() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let seahelm = tmp.appendingPathComponent(".config/seahelm")
+        let seamux = tmp.appendingPathComponent(".config/seamux")
+        try fm.createDirectory(at: seahelm, withIntermediateDirectories: true)
+        try fm.createDirectory(at: seamux, withIntermediateDirectories: true)
+        try "new".write(to: seahelm.appendingPathComponent("config.json"), atomically: true, encoding: .utf8)
+        try "old".write(to: seamux.appendingPathComponent("config.json"), atomically: true, encoding: .utf8)
+
+        Config.migrateLegacyConfigDirIfNeeded(home: tmp, fileManager: fm)
+
+        let contents = try String(contentsOf: seahelm.appendingPathComponent("config.json"), encoding: .utf8)
+        XCTAssertEqual(contents, "new")  // not overwritten
     }
 
     func testAgentDetectConfig_Decode() throws {

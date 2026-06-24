@@ -100,19 +100,26 @@ struct Config: Codable {
     }
 
     static let configDir = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".config/seamux")
+        .appendingPathComponent(".config/seahelm")
     static let configPath = configDir.appendingPathComponent("config.json")
 
-    /// Copies ~/.config/amux to ~/.config/seamux on first launch (keeps old dir for rollback).
+    /// Copies the newest pre-existing config dir (~/.config/seamux, else
+    /// ~/.config/amux) into ~/.config/seahelm on first launch. Source dirs are
+    /// kept for rollback. No-op once ~/.config/seahelm exists.
     static func migrateLegacyConfigDirIfNeeded(
         home: URL = FileManager.default.homeDirectoryForCurrentUser,
         fileManager fm: FileManager = .default
     ) {
-        let new = home.appendingPathComponent(".config/seamux")
-        let legacy = home.appendingPathComponent(".config/amux")
-        guard !fm.fileExists(atPath: new.path),
-              fm.fileExists(atPath: legacy.path) else { return }
-        try? fm.copyItem(at: legacy, to: new)
+        let new = home.appendingPathComponent(".config/seahelm")
+        guard !fm.fileExists(atPath: new.path) else { return }
+        let candidates = [".config/seamux", ".config/amux"]
+        for rel in candidates {
+            let legacy = home.appendingPathComponent(rel)
+            if fm.fileExists(atPath: legacy.path) {
+                try? fm.copyItem(at: legacy, to: new)
+                return
+            }
+        }
     }
 
     static func load() -> Config {
