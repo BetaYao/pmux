@@ -605,6 +605,12 @@ dashboard.surfaceManager = terminalCoordinator.surfaceManager
             return (path: path, title: title, statusColor: statusColor, isSelected: isSelected, collapsed: collapsed)
         }
         titleBar.setWorktreeTabs(tabs)
+
+        tabCoordinator.dashboardVC?.updateFleetSummary(
+            repos: tabCoordinator.workspaceManager.tabs.count,
+            worktrees: tabs.count,
+            hidden: tabs.filter(\.collapsed).count
+        )
     }
 
     private func refreshFocusedWorktreeCapsule() {

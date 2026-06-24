@@ -116,6 +116,13 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
     private let inlineCreateView = InlineWorktreeCreateView()
     private var inlineCreateHeightConstraint: NSLayoutConstraint?
 
+    // First Mate bottom bar: fleet status line + the task input. Shown only on
+    // the bridge pane (the input lives here now, not in the worktree pane).
+    private let leftBottomBar = NSView()
+    private let fleetStatusLabel = NSTextField(labelWithString: "")
+    private var sidePanelBottomToBar: NSLayoutConstraint?
+    private var sidePanelBottomToContainer: NSLayoutConstraint?
+
     // Left column container — hosts the worktree list, inline create, and the
     // bridge/file/change side panel (one pane visible at a time).
     private let leftColumnContainer = NSView()
@@ -271,9 +278,13 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
         currentLeftPane = pane
 
         let showWorktree = (pane == .worktree)
+        let isBridge = (pane == .bridge)
         leftRightSidebarScroll.isHidden = !showWorktree
-        inlineCreateView.isHidden = !showWorktree
         sidePanelVC.view.isHidden = showWorktree
+        // The status + input bar belongs to the bridge pane only.
+        leftBottomBar.isHidden = !isBridge
+        sidePanelBottomToBar?.isActive = isBridge
+        sidePanelBottomToContainer?.isActive = !isBridge
 
         switch pane {
         case .worktree: break
@@ -289,6 +300,16 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
         animateColumnLayout {
             self.leftColumnContainer.animator().alphaValue = 1
         }
+    }
+
+    /// Update the First Mate fleet status line (repos · worktrees · hidden).
+    func updateFleetSummary(repos: Int, worktrees: Int, hidden: Int) {
+        var parts = [
+            "\(repos) repo\(repos == 1 ? "" : "s")",
+            "\(worktrees) worktree\(worktrees == 1 ? "" : "s")",
+        ]
+        if hidden > 0 { parts.append("\(hidden) hidden") }
+        fleetStatusLabel.stringValue = parts.joined(separator: " · ")
     }
 
     private func animateColumnLayout(_ extra: @escaping () -> Void) {
@@ -478,8 +499,21 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
         leftRightSidebarScroll.documentView = leftRightSidebarStack
         leftColumnContainer.addSubview(leftRightSidebarScroll)
 
+        // First Mate bottom bar: fleet status line + task input.
+        leftBottomBar.translatesAutoresizingMaskIntoConstraints = false
+        leftColumnContainer.addSubview(leftBottomBar)
+
+        fleetStatusLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        fleetStatusLabel.textColor = Theme.textSecondary
+        fleetStatusLabel.lineBreakMode = .byTruncatingTail
+        fleetStatusLabel.maximumNumberOfLines = 1
+        fleetStatusLabel.cell?.usesSingleLineMode = true
+        fleetStatusLabel.translatesAutoresizingMaskIntoConstraints = false
+        fleetStatusLabel.setAccessibilityIdentifier("bridge.fleetStatus")
+        leftBottomBar.addSubview(fleetStatusLabel)
+
         inlineCreateView.translatesAutoresizingMaskIntoConstraints = false
-        leftColumnContainer.addSubview(inlineCreateView)
+        leftBottomBar.addSubview(inlineCreateView)
         inlineCreateView.onPreferredHeightChange = { [weak self] height, animated in
             self?.setInlineCreateHeight(height, animated: animated)
         }
@@ -519,22 +553,31 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
             leftColumnContainer.leadingAnchor.constraint(equalTo: leftRightContainer.leadingAnchor, constant: edge),
             leftColumnContainer.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor, constant: -8),
 
-            // Worktree list + inline create inside the container
+            // Worktree list fills the column (worktree pane has no input bar).
             leftRightSidebarScroll.topAnchor.constraint(equalTo: leftColumnContainer.topAnchor),
             leftRightSidebarScroll.leadingAnchor.constraint(equalTo: leftColumnContainer.leadingAnchor),
             leftRightSidebarScroll.trailingAnchor.constraint(equalTo: leftColumnContainer.trailingAnchor),
-            leftRightSidebarScroll.bottomAnchor.constraint(equalTo: inlineCreateView.topAnchor, constant: -10),
+            leftRightSidebarScroll.bottomAnchor.constraint(equalTo: leftColumnContainer.bottomAnchor),
 
-            inlineCreateView.leadingAnchor.constraint(equalTo: leftColumnContainer.leadingAnchor),
-            inlineCreateView.trailingAnchor.constraint(equalTo: leftColumnContainer.trailingAnchor),
-            inlineCreateView.bottomAnchor.constraint(equalTo: leftColumnContainer.bottomAnchor),
+            // Bottom bar pinned to the container bottom (shown only on bridge).
+            leftBottomBar.leadingAnchor.constraint(equalTo: leftColumnContainer.leadingAnchor),
+            leftBottomBar.trailingAnchor.constraint(equalTo: leftColumnContainer.trailingAnchor),
+            leftBottomBar.bottomAnchor.constraint(equalTo: leftColumnContainer.bottomAnchor),
+
+            fleetStatusLabel.topAnchor.constraint(equalTo: leftBottomBar.topAnchor, constant: 4),
+            fleetStatusLabel.leadingAnchor.constraint(equalTo: leftBottomBar.leadingAnchor, constant: 10),
+            fleetStatusLabel.trailingAnchor.constraint(equalTo: leftBottomBar.trailingAnchor, constant: -10),
+
+            inlineCreateView.topAnchor.constraint(equalTo: fleetStatusLabel.bottomAnchor, constant: 6),
+            inlineCreateView.leadingAnchor.constraint(equalTo: leftBottomBar.leadingAnchor),
+            inlineCreateView.trailingAnchor.constraint(equalTo: leftBottomBar.trailingAnchor),
+            inlineCreateView.bottomAnchor.constraint(equalTo: leftBottomBar.bottomAnchor),
             inlineHeight,
 
-            // Side panel fills the container
+            // Side panel fills the column; bottom toggled vs the bar in selectLeftPane.
             sidePanelVC.view.topAnchor.constraint(equalTo: leftColumnContainer.topAnchor),
             sidePanelVC.view.leadingAnchor.constraint(equalTo: leftColumnContainer.leadingAnchor),
             sidePanelVC.view.trailingAnchor.constraint(equalTo: leftColumnContainer.trailingAnchor),
-            sidePanelVC.view.bottomAnchor.constraint(equalTo: leftColumnContainer.bottomAnchor),
 
             // Centre column fills from the left container to the right edge
             leftRightFocusPanel.topAnchor.constraint(equalTo: leftRightContainer.topAnchor),
@@ -542,6 +585,11 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
             leftRightFocusPanel.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor, constant: -8),
             leftRightFocusPanel.trailingAnchor.constraint(equalTo: leftRightContainer.trailingAnchor, constant: -edge),
         ])
+
+        // Side-panel bottom toggles between sitting above the bridge bar and
+        // filling to the container bottom (file/change panes).
+        sidePanelBottomToBar = sidePanelVC.view.bottomAnchor.constraint(equalTo: leftBottomBar.topAnchor, constant: -6)
+        sidePanelBottomToContainer = sidePanelVC.view.bottomAnchor.constraint(equalTo: leftColumnContainer.bottomAnchor)
 
         // Default to the bridge (First Mate) pane.
         selectLeftPane(.bridge)
