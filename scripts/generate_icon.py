@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-"""Generate amux app icon: stacked terminal cards, cyan + deep blue."""
+"""Generate Seahelm app icon: sea-wave disc framed by a ship's-wheel (helm) ring."""
 
 from PIL import Image, ImageDraw, ImageFont
 import os
 import json
+import math
 
 SIZE = 1024
-# Colors
-BG = (15, 23, 42)        # #0f172a deep blue
-STROKE = (34, 211, 238)  # #22d3ee cyan
-PANE_FILL = (22, 78, 99) # #164e63 dark teal
-PANE_STROKE = (34, 211, 238)
+# Seahelm palette (parent "sea" brand family)
+BADGE_BG = (255, 255, 255, 255)  # light squircle field
+NAVY = (10, 10, 100)             # #0A0A64 ring / base / outline
+RED  = (255, 77, 46)             # #FF4D2E top sun band
+CYAN = (25, 209, 224)            # #19D1E0 mid band
+BLUE = (43, 111, 255)            # #2B6FFF lower wave
+
 
 def rounded_rect(draw, xy, radius, fill=None, outline=None, width=1):
     """Draw a rounded rectangle."""
@@ -36,66 +39,75 @@ def rounded_rect(draw, xy, radius, fill=None, outline=None, width=1):
         draw.line([x1, y0 + r, x1, y1 - r], fill=outline, width=width)
 
 
-def draw_icon(size=1024):
+def _wave_fill(draw, cx, top, diameter, r, frac, amp, color):
+    """Fill the disc region BELOW a sine crest whose baseline sits at
+    `top + frac*diameter`. Painting bands top-colour first then each lower
+    band as a below-fill yields clean stacked wave bands."""
+    base_y = top + frac * diameter
+    pts = []
+    steps = 96
+    for i in range(steps + 1):
+        x = cx - r + (2 * r) * (i / steps)
+        y = base_y - amp * math.sin(math.pi * (i / steps))
+        pts.append((x, y))
+    pts.append((cx + r, top + diameter * 2))
+    pts.append((cx - r, top + diameter * 2))
+    draw.polygon(pts, fill=color)
+
+
+def _draw_at(size):
     img = Image.new('RGBA', (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
+    cx, cy = size / 2.0, size / 2.0
+    s = size / 1024.0
 
-    s = size / 140  # scale factor from our 140x140 design
+    # Light rounded-square badge
+    pad = int(72 * s)
+    rounded_rect(draw, [pad, pad, size - pad, size - pad], int(180 * s), fill=BADGE_BG)
 
-    # Outer squircle
-    pad = int(10 * s)
-    outer_r = int(26 * s)
-    outer_w = max(int(2.5 * s), 3)
-    rounded_rect(draw, [pad, pad, size - pad, size - pad], outer_r, fill=BG, outline=STROKE, width=outer_w)
+    ring_r = 330 * s          # outer radius of the navy ring band
+    ring_w = max(int(34 * s), 4)
+    disc_r = ring_r - ring_w - 18 * s
 
-    # Pane dimensions
-    pane_gap = int(8 * s)
-    pane_pad = int(24 * s)
-    pane_r = int(6 * s)
-    pane_w = max(int(1.5 * s), 2)
+    # Helm spokes/handles, drawn under the ring so the ring caps them
+    handle_len = 46 * s
+    handle_w = max(int(22 * s), 4)
+    knob = 17 * s
+    for i in range(8):
+        ang = math.pi / 8 + i * (math.pi / 4)
+        x0 = cx + (ring_r - ring_w / 2) * math.cos(ang)
+        y0 = cy + (ring_r - ring_w / 2) * math.sin(ang)
+        x1 = cx + (ring_r + handle_len) * math.cos(ang)
+        y1 = cy + (ring_r + handle_len) * math.sin(ang)
+        draw.line([x0, y0, x1, y1], fill=NAVY, width=handle_w)
+        draw.ellipse([x1 - knob, y1 - knob, x1 + knob, y1 + knob], fill=NAVY)
 
-    total_inner = size - 2 * pane_pad - pane_gap
-    pane_size = total_inner // 2
+    # Navy ring band
+    draw.ellipse([cx - ring_r, cy - ring_r, cx + ring_r, cy + ring_r],
+                 outline=NAVY, width=ring_w)
 
-    positions = [
-        (pane_pad, pane_pad),
-        (pane_pad + pane_size + pane_gap, pane_pad),
-        (pane_pad, pane_pad + pane_size + pane_gap),
-        (pane_pad + pane_size + pane_gap, pane_pad + pane_size + pane_gap),
-    ]
+    # Sea disc rendered on its own layer, then circular-masked
+    disc = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    dd = ImageDraw.Draw(disc)
+    top = cy - disc_r
+    diameter = 2 * disc_r
+    # Paint top band colour first, then each lower band as a below-fill.
+    dd.ellipse([cx - disc_r, cy - disc_r, cx + disc_r, cy + disc_r], fill=RED)   # top sun band
+    _wave_fill(dd, cx, top, diameter, disc_r, 0.34, 0.07 * diameter, CYAN)        # mid band
+    _wave_fill(dd, cx, top, diameter, disc_r, 0.55, 0.07 * diameter, BLUE)        # lower wave
+    _wave_fill(dd, cx, top, diameter, disc_r, 0.74, 0.06 * diameter, NAVY)        # deep base
 
-    # Try to find a monospace font
-    font = None
-    font_size = int(13 * s)
-    font_paths = [
-        "/System/Library/Fonts/SFMono-Regular.otf",
-        "/System/Library/Fonts/Menlo.ttc",
-        "/System/Library/Fonts/Monaco.dfont",
-        "/Library/Fonts/SF-Mono-Regular.otf",
-    ]
-    for fp in font_paths:
-        if os.path.exists(fp):
-            try:
-                font = ImageFont.truetype(fp, font_size)
-                break
-            except Exception:
-                continue
-    if font is None:
-        font = ImageFont.load_default()
-
-    prompt = "\u276f_"  # ❯_
-
-    for (px, py) in positions:
-        x0, y0 = px, py
-        x1, y1 = px + pane_size, py + pane_size
-        rounded_rect(draw, [x0, y0, x1, y1], pane_r, fill=PANE_FILL, outline=PANE_STROKE, width=pane_w)
-
-        # Draw prompt text centered vertically, left-padded
-        text_x = x0 + int(8 * s)
-        text_y = y0 + pane_size // 2 - font_size // 2
-        draw.text((text_x, text_y), prompt, fill=STROKE, font=font)
-
+    mask = Image.new('L', (size, size), 0)
+    ImageDraw.Draw(mask).ellipse([cx - disc_r, cy - disc_r, cx + disc_r, cy + disc_r], fill=255)
+    img.paste(disc, (0, 0), mask)
     return img
+
+
+def draw_icon(size=1024):
+    # Supersample for smooth circle/wave edges, then downscale.
+    ss = 3
+    big = _draw_at(size * ss)
+    return big.resize((size, size), Image.LANCZOS)
 
 
 def main():
