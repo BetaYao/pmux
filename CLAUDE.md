@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Seamux (sea + multiplexer; AMUX — Agent Multiplexer) is a native macOS terminal multiplexer built with Swift + AppKit. It integrates the Ghostty terminal engine (via C bindings through GhosttyKit.xcframework) to render terminals, uses tmux for session persistence, and provides a dashboard UI for browsing git worktrees with agent status detection.
+Seahelm (sea + helm; AMUX — Agent Multiplexer) is a native macOS terminal multiplexer built with Swift + AppKit. It integrates the Ghostty terminal engine (via C bindings through GhosttyKit.xcframework) to render terminals, uses tmux for session persistence, and provides a dashboard UI for browsing git worktrees with agent status detection.
 
 ## Build Commands
 
@@ -16,22 +16,22 @@ xcodegen generate
 # NOTE: CodeEditSourceEditor pulls in the SwiftLint build-tool plugin, which
 # requires trust validation. Headless/CLI builds must pass -skipPackagePluginValidation
 # (in Xcode.app, click "Trust & Enable" once instead).
-xcodebuild -project seamux.xcodeproj -scheme seamux -configuration Debug -skipPackagePluginValidation -skipMacroValidation build
+xcodebuild -project seahelm.xcodeproj -scheme seahelm -configuration Debug -skipPackagePluginValidation -skipMacroValidation build
 
 # Run tests
-xcodebuild -project seamux.xcodeproj -scheme seamuxTests -configuration Debug test
+xcodebuild -project seahelm.xcodeproj -scheme seahelmTests -configuration Debug test
 
 # Run a single test class
-xcodebuild -project seamux.xcodeproj -scheme seamuxTests -configuration Debug test -only-testing:amuxTests/ConfigTests
+xcodebuild -project seahelm.xcodeproj -scheme seahelmTests -configuration Debug test -only-testing:amuxTests/ConfigTests
 
 # Run a single test method
-xcodebuild -project seamux.xcodeproj -scheme seamuxTests -configuration Debug test -only-testing:amuxTests/ConfigTests/testDefaultConfig
+xcodebuild -project seahelm.xcodeproj -scheme seahelmTests -configuration Debug test -only-testing:amuxTests/ConfigTests/testDefaultConfig
 
 # Run UI tests
-xcodebuild -project seamux.xcodeproj -scheme seamuxUITests -configuration Debug test
+xcodebuild -project seahelm.xcodeproj -scheme seahelmUITests -configuration Debug test
 
 # Clean build
-xcodebuild -project seamux.xcodeproj -scheme seamux clean
+xcodebuild -project seahelm.xcodeproj -scheme seahelm clean
 ```
 
 The project uses XcodeGen (`project.yml`) to generate the Xcode project file. After modifying `project.yml`, regenerate with `xcodegen generate`.
@@ -58,7 +58,7 @@ The project uses XcodeGen (`project.yml`) to generate the Xcode project file. Af
    - `StatusPublisher` — Timer-based polling (2s) on background queue, reads viewport text via `ghosttyLock`-protected C API calls
    - `StatusDetector` — Priority: process exit > OSC 133 shell phase > text pattern matching > Unknown
    - `WorktreeStatusAggregator` — Aggregates per-pane statuses into per-worktree status, fires `WorktreeStatusDelegate`
-   - `Config` — JSON config at `~/.config/seamux/config.json`; uses `decodeIfPresent()` for backward compat (migrated from legacy ~/.config/amux on first launch)
+   - `Config` — JSON config at `~/.config/seahelm/config.json`; uses `decodeIfPresent()` for backward compat (migrated from legacy ~/.config/amux on first launch)
    - `SurfaceRegistry` — Global registry mapping surface IDs to `TerminalSurface` instances
    - `ExternalChannel` — Protocol for WeChat/WeCom bot integrations
 
