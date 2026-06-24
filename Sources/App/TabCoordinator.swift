@@ -802,10 +802,9 @@ class TabCoordinator {
     }
 
     func selectTab(forWorktree path: String) {
-        let paths = allWorktrees.map { $0.info.path }
-        if let idx = Self.tabIndex(forWorktree: path, in: paths) {
-            switchToTab(idx)
-        }
+        dashboardVC?.selectAgent(byWorktreePath: path)
+        saveSelectedWorktree()
+        delegate?.tabCoordinatorRequestUpdateTitleBar(self)
     }
 
     // MARK: - Navigation

@@ -547,8 +547,21 @@ dashboard.surfaceManager = terminalCoordinator.surfaceManager
             hasWorkspaces: !tabCoordinator.workspaceManager.tabs.isEmpty,
             canCleanWorktrees: tabCoordinator.allWorktrees.contains { !$0.info.isMainWorktree }
         )
+        refreshWorktreeTabs()
         updatePrimaryCapsuleNotification()
         refreshFocusedWorktreeCapsule()
+    }
+
+    private func refreshWorktreeTabs() {
+        let selectedPath = tabCoordinator.selectedAgent?.worktreePath
+        let tabs = tabCoordinator.allWorktrees.map { entry -> (path: String, title: String, statusColor: NSColor, isSelected: Bool) in
+            let path = entry.info.path
+            let title = entry.info.branch.isEmpty ? URL(fileURLWithPath: path).lastPathComponent : entry.info.branch
+            let statusColor = AgentHead.shared.agent(forWorktree: path)?.status.color ?? NSColor(hex: 0x555555)
+            let isSelected = path == selectedPath
+            return (path: path, title: title, statusColor: statusColor, isSelected: isSelected)
+        }
+        titleBar.setWorktreeTabs(tabs)
     }
 
     private func refreshFocusedWorktreeCapsule() {
@@ -818,6 +831,10 @@ extension MainWindowController: TitleBarDelegate {
 
     func titleBarDidRequestShowChanges() {
         tabCoordinator.dashboardVC?.showSidePanelTab(.changes)
+    }
+
+    func titleBarDidSelectWorktree(_ path: String) {
+        tabCoordinator.selectTab(forWorktree: path)
     }
 }
 

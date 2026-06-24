@@ -7,6 +7,7 @@ protocol TitleBarDelegate: AnyObject {
     func titleBarDidRequestCleanMergedWorktrees()
     func titleBarDidRequestShowFiles()
     func titleBarDidRequestShowChanges()
+    func titleBarDidSelectWorktree(_ path: String)
 }
 
 final class TitleBarView: NSView {
@@ -43,6 +44,11 @@ final class TitleBarView: NSView {
     private let cleanWorktreeButton = NSButton()
     private let themeButton = NSButton()
     private let collapseRightButton = NSButton()
+
+    // Worktree tab strip
+    private let tabStripClipView = NSView()
+    private let tabStripStack = NSStackView()
+    private var worktreeTabPaths: [String] = []
 
     // State
     private var isWindowHovered = false
@@ -117,7 +123,48 @@ final class TitleBarView: NSView {
             rightArcBlock.heightAnchor.constraint(equalToConstant: Layout.capsuleHeight),
         ])
 
+        setupTabStrip()
         updateArcBlockColors()
+    }
+
+    private func setupTabStrip() {
+        tabStripStack.orientation = .horizontal
+        tabStripStack.spacing = 2
+        tabStripStack.alignment = .centerY
+        tabStripStack.translatesAutoresizingMaskIntoConstraints = false
+
+        tabStripClipView.wantsLayer = true
+        tabStripClipView.layer?.masksToBounds = true
+        tabStripClipView.translatesAutoresizingMaskIntoConstraints = false
+        tabStripClipView.isHidden = true
+        addSubview(tabStripClipView)
+        tabStripClipView.addSubview(tabStripStack)
+
+        NSLayoutConstraint.activate([
+            tabStripClipView.leadingAnchor.constraint(equalTo: collapseLeftButton.trailingAnchor, constant: 8),
+            tabStripClipView.trailingAnchor.constraint(lessThanOrEqualTo: rightArcBlock.leadingAnchor, constant: -8),
+            tabStripClipView.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Layout.arcVerticalOffset),
+            tabStripClipView.heightAnchor.constraint(equalToConstant: 22),
+            tabStripStack.leadingAnchor.constraint(equalTo: tabStripClipView.leadingAnchor),
+            tabStripStack.centerYAnchor.constraint(equalTo: tabStripClipView.centerYAnchor),
+        ])
+    }
+
+    func setWorktreeTabs(_ tabs: [(path: String, title: String, statusColor: NSColor, isSelected: Bool)]) {
+        worktreeTabPaths = tabs.map(\.path)
+        tabStripStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+
+        for tab in tabs {
+            let btn = WorktreeTabButton(path: tab.path, title: tab.title, statusColor: tab.statusColor, isSelected: tab.isSelected)
+            btn.onTap = { [weak self] path in
+                self?.delegate?.titleBarDidSelectWorktree(path)
+            }
+            tabStripStack.addArrangedSubview(btn)
+        }
+
+        let hasTabs = !tabs.isEmpty
+        tabStripClipView.isHidden = !hasTabs
+        titleStack.isHidden = hasTabs
     }
 
     private func setupLeftButton() {
@@ -384,6 +431,90 @@ final class TitleBarView: NSView {
     override func mouseExited(with event: NSEvent) {
         setWindowHovered(false)
         super.mouseExited(with: event)
+    }
+}
+
+// MARK: - WorktreeTabButton
+
+private final class WorktreeTabButton: NSView {
+    var onTap: ((String) -> Void)?
+    private let path: String
+    private let dotView = NSView()
+    private let label = NSTextField(labelWithString: "")
+    private var hovered = false
+
+    init(path: String, title: String, statusColor: NSColor, isSelected: Bool) {
+        self.path = path
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.cornerRadius = 5
+
+        dotView.wantsLayer = true
+        dotView.layer?.cornerRadius = 3
+        dotView.layer?.backgroundColor = statusColor.cgColor
+        dotView.translatesAutoresizingMaskIntoConstraints = false
+
+        label.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        label.textColor = isSelected ? SemanticColors.text : SemanticColors.muted
+        label.lineBreakMode = .byTruncatingTail
+        label.maximumNumberOfLines = 1
+        label.cell?.usesSingleLineMode = true
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.stringValue = title
+
+        addSubview(dotView)
+        addSubview(label)
+
+        NSLayoutConstraint.activate([
+            dotView.widthAnchor.constraint(equalToConstant: 6),
+            dotView.heightAnchor.constraint(equalToConstant: 6),
+            dotView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            dotView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            label.leadingAnchor.constraint(equalTo: dotView.trailingAnchor, constant: 4),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            heightAnchor.constraint(equalToConstant: 22),
+        ])
+
+        applySelectedStyle(isSelected)
+
+        let click = NSClickGestureRecognizer(target: self, action: #selector(handleClick))
+        addGestureRecognizer(click)
+
+        updateTrackingAreas()
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func applySelectedStyle(_ selected: Bool) {
+        layer?.backgroundColor = selected
+            ? NSColor.white.withAlphaComponent(0.12).cgColor
+            : NSColor.clear.cgColor
+    }
+
+    @objc private func handleClick() {
+        onTap?(path)
+    }
+
+    private var trackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = trackingArea { removeTrackingArea(existing) }
+        let area = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInActiveApp], owner: self, userInfo: nil)
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hovered = true
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovered = false
+        applySelectedStyle(label.textColor == SemanticColors.text)
     }
 }
 
