@@ -555,14 +555,30 @@ dashboard.surfaceManager = terminalCoordinator.surfaceManager
         refreshFocusedWorktreeCapsule()
     }
 
+    /// Worktrees with no agent interaction for longer than this collapse into
+    /// the title-bar overflow menu instead of occupying a tab slot.
+    private static let tabIdleCollapseInterval: TimeInterval = 8 * 3600
+
     private func refreshWorktreeTabs() {
         let selectedPath = tabCoordinator.selectedAgent?.worktreePath
-        let tabs = tabCoordinator.allWorktrees.map { entry -> (path: String, title: String, statusColor: NSColor, isSelected: Bool) in
+        let now = Date()
+        let tabs = tabCoordinator.allWorktrees.map { entry -> (path: String, title: String, statusColor: NSColor, isSelected: Bool, collapsed: Bool) in
             let path = entry.info.path
-            let title = entry.info.branch.isEmpty ? URL(fileURLWithPath: path).lastPathComponent : entry.info.branch
-            let statusColor = AgentHead.shared.agent(forWorktree: path)?.status.color ?? NSColor(hex: 0x555555)
+            let repo = tabCoordinator.repoName(forWorktree: path)
+            let name = entry.info.branch.isEmpty ? URL(fileURLWithPath: path).lastPathComponent : entry.info.branch
+            let title = TitleBarView.clampTitle("\(repo) · \(name)", limit: 32)
+
+            let agent = AgentHead.shared.agent(forWorktree: path)
+            let statusColor = agent?.status.color ?? NSColor(hex: 0x555555)
             let isSelected = path == selectedPath
-            return (path: path, title: title, statusColor: statusColor, isSelected: isSelected)
+
+            // Idle = no activity event / start older than the collapse interval.
+            // The selected worktree is always kept visible.
+            let lastActivity = agent?.activityEvents.first?.timestamp ?? agent?.startedAt
+            let isIdle = lastActivity.map { now.timeIntervalSince($0) > Self.tabIdleCollapseInterval } ?? false
+            let collapsed = isIdle && !isSelected
+
+            return (path: path, title: title, statusColor: statusColor, isSelected: isSelected, collapsed: collapsed)
         }
         titleBar.setWorktreeTabs(tabs)
     }

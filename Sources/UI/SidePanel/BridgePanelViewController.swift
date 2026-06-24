@@ -39,7 +39,7 @@ final class BridgePanelViewController: NSViewController {
         root.layer?.backgroundColor = Theme.background.cgColor
 
         stackView.orientation = .vertical
-        stackView.alignment = .width
+        stackView.alignment = .leading
         stackView.spacing = 0
         stackView.distribution = .fill
         stackView.translatesAutoresizingMaskIntoConstraints = false
@@ -86,9 +86,19 @@ final class BridgePanelViewController: NSViewController {
         ordersScrollView.autohidesScrollers = true
         ordersScrollView.translatesAutoresizingMaskIntoConstraints = false
 
+        ordersTableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+
         let section = makeSectionContainer(header: ordersHeader, scroll: ordersScrollView, minHeight: 100)
-        stackView.addArrangedSubview(section)
-        stackView.addArrangedSubview(makeDivider())
+        addFullWidthArranged(section)
+        addFullWidthArranged(makeDivider())
+    }
+
+    /// Add an arranged subview and pin its width to the stack so it fills the
+    /// full panel width (vertical NSStackView won't stretch the cross-axis on
+    /// its own without an explicit constraint).
+    private func addFullWidthArranged(_ subview: NSView) {
+        stackView.addArrangedSubview(subview)
+        subview.widthAnchor.constraint(equalTo: stackView.widthAnchor).isActive = true
     }
 
     private func setupWatchSection() {
@@ -111,9 +121,10 @@ final class BridgePanelViewController: NSViewController {
         watchScrollView.hasVerticalScroller = true
         watchScrollView.autohidesScrollers = true
         watchScrollView.translatesAutoresizingMaskIntoConstraints = false
+        watchTableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
 
         let section = makeSectionContainer(header: watchHeader, scroll: watchScrollView, minHeight: 60)
-        stackView.addArrangedSubview(section)
+        addFullWidthArranged(section)
     }
 
     private func makeSectionContainer(header: NSTextField, scroll: NSScrollView, minHeight: CGFloat) -> NSView {

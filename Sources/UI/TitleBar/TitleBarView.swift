@@ -48,10 +48,12 @@ final class TitleBarView: NSView {
     private var paneButtons: [LeftPane: NSButton] = [:]
     private var selectedLeftPane: LeftPane = .worktree
 
-    // Worktree tab strip
-    private let tabStripClipView = NSView()
+    // Worktree tab strip (horizontally scrollable) + overflow menu for idle tabs.
+    private let tabStripScroll = NSScrollView()
     private let tabStripStack = NSStackView()
+    private let tabOverflowButton = NSButton()
     private var worktreeTabPaths: [String] = []
+    private var collapsedTabs: [(path: String, title: String, statusColor: NSColor)] = []
 
     // State
     private var isWindowHovered = false
@@ -173,39 +175,110 @@ final class TitleBarView: NSView {
         tabStripStack.alignment = .centerY
         tabStripStack.translatesAutoresizingMaskIntoConstraints = false
 
-        tabStripClipView.wantsLayer = true
-        tabStripClipView.layer?.masksToBounds = true
-        tabStripClipView.translatesAutoresizingMaskIntoConstraints = false
-        tabStripClipView.isHidden = true
-        addSubview(tabStripClipView)
-        tabStripClipView.addSubview(tabStripStack)
+        // A horizontal scroll view so a long row of tabs scrolls rather than
+        // forcing the title-bar accessory — and the window — wider.
+        tabStripScroll.translatesAutoresizingMaskIntoConstraints = false
+        tabStripScroll.drawsBackground = false
+        tabStripScroll.borderType = .noBorder
+        tabStripScroll.hasHorizontalScroller = false
+        tabStripScroll.hasVerticalScroller = false
+        tabStripScroll.horizontalScrollElasticity = .allowed
+        tabStripScroll.verticalScrollElasticity = .none
+        tabStripScroll.isHidden = true
+        tabStripScroll.documentView = tabStripStack
+        addSubview(tabStripScroll)
+
+        // Overflow button — idle (collapsed) worktrees live in its pull-down menu.
+        tabOverflowButton.bezelStyle = .recessed
+        tabOverflowButton.isBordered = false
+        tabOverflowButton.imagePosition = .imageOnly
+        tabOverflowButton.image = NSImage(systemSymbolName: "chevron.left.chevron.right",
+                                          accessibilityDescription: "Idle worktrees")?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 11, weight: .medium))
+        tabOverflowButton.contentTintColor = NSColor(hex: 0x888888)
+        tabOverflowButton.target = self
+        tabOverflowButton.action = #selector(overflowClicked)
+        tabOverflowButton.translatesAutoresizingMaskIntoConstraints = false
+        tabOverflowButton.isHidden = true
+        tabOverflowButton.setAccessibilityIdentifier("titlebar.tabOverflow")
+        addSubview(tabOverflowButton)
 
         NSLayoutConstraint.activate([
-            tabStripClipView.leadingAnchor.constraint(equalTo: leftClusterStack.trailingAnchor, constant: 8),
-            tabStripClipView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
-            tabStripClipView.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Layout.arcVerticalOffset),
-            tabStripClipView.heightAnchor.constraint(equalToConstant: 22),
-            tabStripStack.leadingAnchor.constraint(equalTo: tabStripClipView.leadingAnchor),
-            tabStripStack.centerYAnchor.constraint(equalTo: tabStripClipView.centerYAnchor),
-            tabStripStack.trailingAnchor.constraint(lessThanOrEqualTo: tabStripClipView.trailingAnchor),
+            tabStripScroll.leadingAnchor.constraint(equalTo: leftClusterStack.trailingAnchor, constant: 8),
+            tabStripScroll.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Layout.arcVerticalOffset),
+            tabStripScroll.heightAnchor.constraint(equalToConstant: 22),
+            tabStripScroll.trailingAnchor.constraint(equalTo: tabOverflowButton.leadingAnchor, constant: -4),
+
+            tabOverflowButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            tabOverflowButton.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Layout.arcVerticalOffset),
+            tabOverflowButton.widthAnchor.constraint(equalToConstant: 22),
+            tabOverflowButton.heightAnchor.constraint(equalToConstant: 22),
+
+            tabStripStack.topAnchor.constraint(equalTo: tabStripScroll.contentView.topAnchor),
+            tabStripStack.bottomAnchor.constraint(equalTo: tabStripScroll.contentView.bottomAnchor),
+            tabStripStack.leadingAnchor.constraint(equalTo: tabStripScroll.contentView.leadingAnchor),
+            tabStripStack.heightAnchor.constraint(equalToConstant: 22),
         ])
     }
 
-    func setWorktreeTabs(_ tabs: [(path: String, title: String, statusColor: NSColor, isSelected: Bool)]) {
+    func setWorktreeTabs(_ tabs: [(path: String, title: String, statusColor: NSColor, isSelected: Bool, collapsed: Bool)]) {
         worktreeTabPaths = tabs.map(\.path)
         tabStripStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
-        for tab in tabs {
+        let active = tabs.filter { !$0.collapsed }
+        collapsedTabs = tabs.filter(\.collapsed).map { ($0.path, $0.title, $0.statusColor) }
+
+        var selectedButton: WorktreeTabButton?
+        for tab in active {
             let btn = WorktreeTabButton(path: tab.path, title: tab.title, statusColor: tab.statusColor, isSelected: tab.isSelected)
             btn.onTap = { [weak self] path in
                 self?.delegate?.titleBarDidSelectWorktree(path)
             }
             tabStripStack.addArrangedSubview(btn)
+            if tab.isSelected { selectedButton = btn }
         }
 
         let hasTabs = !tabs.isEmpty
-        tabStripClipView.isHidden = !hasTabs
+        tabStripScroll.isHidden = !hasTabs
+        tabOverflowButton.isHidden = collapsedTabs.isEmpty
         titleStack.isHidden = hasTabs
+
+        // Keep the selected tab in view after layout settles.
+        if let selectedButton {
+            DispatchQueue.main.async {
+                selectedButton.scrollToVisible(selectedButton.bounds)
+            }
+        }
+    }
+
+    @objc private func overflowClicked() {
+        guard !collapsedTabs.isEmpty else { return }
+        let menu = NSMenu()
+        for tab in collapsedTabs {
+            let item = NSMenuItem(title: tab.title, action: #selector(overflowItemClicked(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = tab.path
+            item.image = Self.statusDotImage(color: tab.statusColor)
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil,
+                   at: NSPoint(x: 0, y: tabOverflowButton.bounds.height + 4),
+                   in: tabOverflowButton)
+    }
+
+    @objc private func overflowItemClicked(_ sender: NSMenuItem) {
+        guard let path = sender.representedObject as? String else { return }
+        delegate?.titleBarDidSelectWorktree(path)
+    }
+
+    private static func statusDotImage(color: NSColor) -> NSImage {
+        let size = NSSize(width: 8, height: 8)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        color.setFill()
+        NSBezierPath(ovalIn: NSRect(origin: .zero, size: size)).fill()
+        image.unlockFocus()
+        return image
     }
 
     private func setupLeftButton() {
@@ -440,7 +513,11 @@ private final class WorktreeTabButton: NSView {
             label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
             heightAnchor.constraint(equalToConstant: 22),
+            // Cap very long titles so a single tab can't dominate the strip.
+            widthAnchor.constraint(lessThanOrEqualToConstant: 200),
         ])
+        // Let the label truncate (tail) instead of stretching the tab.
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         applySelectedStyle(isSelected)
 

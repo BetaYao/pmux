@@ -17,6 +17,13 @@ class TabCoordinator {
     var activeTabIndex: Int = 0
     var allWorktrees: [(info: WorktreeInfo, tree: SplitTree)] = []
     var worktreeRepoCache: [String: String] = [:]
+
+    /// Display name of the repo owning a given worktree path.
+    func repoName(forWorktree path: String) -> String {
+        let repoPath = worktreeRepoCache[path] ?? path
+        return workspaceManager.tabs.first(where: { $0.repoPath == repoPath })?.displayName
+            ?? URL(fileURLWithPath: repoPath).lastPathComponent
+    }
     var branchRefreshTimer: Timer?
     weak var dashboardVC: DashboardViewController?
 
