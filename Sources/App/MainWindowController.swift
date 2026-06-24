@@ -820,20 +820,8 @@ extension MainWindowController: TitleBarDelegate {
         titleBar.setLeftColumnCollapsed(collapsed)
     }
 
-    func titleBarDidRequestCollapseRightColumn() {
-        tabCoordinator.dashboardVC?.toggleRightColumnCollapse()
-    }
-
-    func titleBarDidRequestCleanMergedWorktrees() {
-        cleanMergedWorktrees()
-    }
-
-    func titleBarDidRequestShowFiles() {
-        tabCoordinator.dashboardVC?.showSidePanelTab(.files)
-    }
-
-    func titleBarDidRequestShowChanges() {
-        tabCoordinator.dashboardVC?.showSidePanelTab(.changes)
+    func titleBarDidSelectLeftPane(_ pane: LeftPane) {
+        tabCoordinator.dashboardVC?.selectLeftPane(pane)
     }
 
     func titleBarDidSelectWorktree(_ path: String) {

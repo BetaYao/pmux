@@ -87,16 +87,16 @@ final class WorktreeSidePanelViewController: NSViewController {
             tabBar.addArrangedSubview(btn)
         }
 
+        // The internal tab bar is hidden — pane switching is driven by the
+        // title-bar pane-switch icons now. tabBar is left unused but in place
+        // so the highlight bookkeeping in updateTabBarHighlight() stays valid.
+        tabBar.isHidden = true
+
         contentView.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(tabBar)
         root.addSubview(contentView)
 
         NSLayoutConstraint.activate([
-            tabBar.topAnchor.constraint(equalTo: root.topAnchor, constant: 4),
-            tabBar.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 6),
-            tabBar.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -6),
-
-            contentView.topAnchor.constraint(equalTo: tabBar.bottomAnchor, constant: 4),
+            contentView.topAnchor.constraint(equalTo: root.topAnchor, constant: 4),
             contentView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             contentView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             contentView.bottomAnchor.constraint(equalTo: root.bottomAnchor),

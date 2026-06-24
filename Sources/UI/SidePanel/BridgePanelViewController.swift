@@ -39,7 +39,7 @@ final class BridgePanelViewController: NSViewController {
         root.layer?.backgroundColor = Theme.background.cgColor
 
         stackView.orientation = .vertical
-        stackView.alignment = .leading
+        stackView.alignment = .width
         stackView.spacing = 0
         stackView.distribution = .fill
         stackView.translatesAutoresizingMaskIntoConstraints = false
