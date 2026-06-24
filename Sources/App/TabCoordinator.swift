@@ -639,7 +639,10 @@ class TabCoordinator {
     func startBranchRefreshTimer() {
         branchRefreshTimer?.invalidate()
         branchRefreshTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-            self?.refreshBranches()
+            guard let self else { return }
+            self.refreshBranches()
+            // Re-evaluate worktree-tab idle collapse even when nothing changed.
+            self.delegate?.tabCoordinatorRequestUpdateTitleBar(self)
         }
     }
 
