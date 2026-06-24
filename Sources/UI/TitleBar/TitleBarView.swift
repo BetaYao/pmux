@@ -46,12 +46,14 @@ final class TitleBarView: NSView {
     private let leftClusterStack = NSStackView()
     private let themeButton = NSButton()
     private var paneButtons: [LeftPane: NSButton] = [:]
-    private var selectedLeftPane: LeftPane = .worktree
+    private var selectedLeftPane: LeftPane = .bridge
 
     // Worktree tab strip (horizontally scrollable) + overflow menu for idle tabs.
     private let tabStripScroll = NSScrollView()
     private let tabStripStack = NSStackView()
     private let tabOverflowButton = NSButton()
+    private var scrollTrailingToOverflow: NSLayoutConstraint?
+    private var scrollTrailingToEdge: NSLayoutConstraint?
     private var worktreeTabPaths: [String] = []
     private var collapsedTabs: [(path: String, title: String, statusColor: NSColor)] = []
 
@@ -139,10 +141,10 @@ final class TitleBarView: NSView {
                                action: #selector(themeClicked))
         leftClusterStack.addArrangedSubview(themeButton)
 
-        // Pane switchers: worktree / bridge / file / change.
+        // Pane switchers: bridge / worktree / file / change.
         let panes: [(LeftPane, String, String)] = [
-            (.worktree, "rectangle.stack", "Worktrees"),
             (.bridge, "sailboat", "First Mate"),
+            (.worktree, "rectangle.stack", "Worktrees"),
             (.file, "folder", "Files"),
             (.change, "plusminus", "Changes"),
         ]
@@ -188,14 +190,15 @@ final class TitleBarView: NSView {
         tabStripScroll.documentView = tabStripStack
         addSubview(tabStripScroll)
 
-        // Overflow button — idle (collapsed) worktrees live in its pull-down menu.
+        // Top-right overflow badge — collapsed (idle) worktrees live in its
+        // pull-down menu; the title shows how many. Hidden when none.
         tabOverflowButton.bezelStyle = .recessed
         tabOverflowButton.isBordered = false
-        tabOverflowButton.imagePosition = .imageOnly
+        tabOverflowButton.imagePosition = .imageLeading
         tabOverflowButton.image = NSImage(systemSymbolName: "chevron.left.chevron.right",
                                           accessibilityDescription: "Idle worktrees")?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 11, weight: .medium))
-        tabOverflowButton.contentTintColor = NSColor(hex: 0x888888)
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold))
+        tabOverflowButton.contentTintColor = Theme.accent
         tabOverflowButton.target = self
         tabOverflowButton.action = #selector(overflowClicked)
         tabOverflowButton.translatesAutoresizingMaskIntoConstraints = false
@@ -203,15 +206,17 @@ final class TitleBarView: NSView {
         tabOverflowButton.setAccessibilityIdentifier("titlebar.tabOverflow")
         addSubview(tabOverflowButton)
 
+        scrollTrailingToOverflow = tabStripScroll.trailingAnchor.constraint(equalTo: tabOverflowButton.leadingAnchor, constant: -6)
+        scrollTrailingToEdge = tabStripScroll.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12)
+        scrollTrailingToEdge?.isActive = true
+
         NSLayoutConstraint.activate([
             tabStripScroll.leadingAnchor.constraint(equalTo: leftClusterStack.trailingAnchor, constant: 8),
             tabStripScroll.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Layout.arcVerticalOffset),
             tabStripScroll.heightAnchor.constraint(equalToConstant: 22),
-            tabStripScroll.trailingAnchor.constraint(equalTo: tabOverflowButton.leadingAnchor, constant: -4),
 
             tabOverflowButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             tabOverflowButton.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Layout.arcVerticalOffset),
-            tabOverflowButton.widthAnchor.constraint(equalToConstant: 22),
             tabOverflowButton.heightAnchor.constraint(equalToConstant: 22),
 
             tabStripStack.topAnchor.constraint(equalTo: tabStripScroll.contentView.topAnchor),
@@ -240,8 +245,20 @@ final class TitleBarView: NSView {
 
         let hasTabs = !tabs.isEmpty
         tabStripScroll.isHidden = !hasTabs
-        tabOverflowButton.isHidden = collapsedTabs.isEmpty
         titleStack.isHidden = hasTabs
+
+        // Top-right overflow badge: count of collapsed worktrees, hidden if none.
+        let collapsedCount = collapsedTabs.count
+        tabOverflowButton.isHidden = collapsedCount == 0
+        tabOverflowButton.attributedTitle = NSAttributedString(
+            string: " \(collapsedCount)",
+            attributes: [
+                .foregroundColor: Theme.accent,
+                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+            ]
+        )
+        scrollTrailingToOverflow?.isActive = collapsedCount > 0
+        scrollTrailingToEdge?.isActive = collapsedCount == 0
 
         // Keep the selected tab in view after layout settles.
         if let selectedButton {

@@ -572,9 +572,10 @@ dashboard.surfaceManager = terminalCoordinator.surfaceManager
             let statusColor = agent?.status.color ?? NSColor(hex: 0x555555)
             let isSelected = path == selectedPath
 
-            // Idle = no activity event / start older than the collapse interval.
-            // The selected worktree is always kept visible.
-            let lastActivity = agent?.activityEvents.first?.timestamp ?? agent?.startedAt
+            // Idle = the most recent pane status/message change (a signal that
+            // only advances on real activity, not background polling) is older
+            // than the collapse interval. The selected worktree stays visible.
+            let lastActivity = statusAggregator.status(for: path)?.panes.map(\.lastUpdated).max() ?? agent?.startedAt
             let isIdle = lastActivity.map { now.timeIntervalSince($0) > Self.tabIdleCollapseInterval } ?? false
             let collapsed = isIdle && !isSelected
 

@@ -90,7 +90,7 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
     private var leftColumnWidthCollapsed: NSLayoutConstraint?
     private var isLeftColumnCollapsed = false
     /// Which of the four panes the left column currently shows.
-    private var currentLeftPane: LeftPane = .worktree
+    private var currentLeftPane: LeftPane = .bridge
 
     var selectedAgentIndex: Int {
         agents.firstIndex(where: { $0.id == selectedAgentId }) ?? 0
@@ -542,6 +542,9 @@ class DashboardViewController: NSViewController, AgentCardDelegate {
             leftRightFocusPanel.bottomAnchor.constraint(equalTo: leftRightContainer.bottomAnchor, constant: -8),
             leftRightFocusPanel.trailingAnchor.constraint(equalTo: leftRightContainer.trailingAnchor, constant: -edge),
         ])
+
+        // Default to the bridge (First Mate) pane.
+        selectLeftPane(.bridge)
     }
 
     private func setInlineCreateHeight(_ height: CGFloat, animated: Bool) {
