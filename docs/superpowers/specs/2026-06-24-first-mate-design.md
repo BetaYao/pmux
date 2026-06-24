@@ -132,6 +132,24 @@ StatusPublisher → StatusDetector → WorktreeStatusAggregator → AgentHead(�
 - tab 的生命周期跟 worktree:E 返港入坞删除 worktree 时,对应 tab 关闭。
 - 复用现有 `TabCoordinator`(已缓存 `repoVCs[repoPath]`、管 tab 切换与 surface 生命周期);本改动是把"项目 tab"粒度细化到"worktree tab",并与左栏舰桥的导航联动。
 
+### 左栏舰桥交互
+
+配合现有 vim 模态键盘(见 [[keyboard-mode-system]]),舰桥可全键盘操作:
+
+- **j / k** — 在条目间移动焦点(待批航令 + 值更统一列表)
+- **Enter** — 值更项:跳到对应 worktree tab;红区派令:执行派发;红区返港:见下确认流
+- **n** — 否决当前红区航令
+- **x** — 清除当前绿区值更项
+- **→** — 看 diff(返港预检 / 验船结果上下文)
+- 顶部 tab 切换 icon:First Mate / 文件树 / changes,紧挨折叠按钮(`‹`)
+
+**红区确认流 — 分级(方案 C):**
+
+- **派令(可重来)** → 一键执行:Enter 即派发下一条航令。
+- **返港删除(不可逆)** → 两步:第一次 Enter 展开详情(预检结果 + 要删的 worktree 路径 + 未 merge/未 push 警告),第二次 Enter(或 `y`)才真正入坞删除。
+
+与"绿区自动 / 红区请示"的分级哲学一致:可逆动作低摩擦,不可逆动作多一道保险。
+
 ## 边界情况(易翻车,需在实现中处理)
 
 1. **"完成"怎么算?** 看屏会把中途停顿误判成完工。→ 优先用 hook 的明确完工信号;无 hook 时要求 `completed` 状态稳定持续去抖窗口(复用 `DebouncedStatusTracker`)才触发验船。
