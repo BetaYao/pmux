@@ -9,6 +9,7 @@ enum FirstMateActionKind: Equatable {
     case autoCommit
     case suggestNextOrder
     case returnToPort
+    case broadcastOrder
 }
 
 struct FirstMateAction: Equatable {
@@ -19,6 +20,20 @@ struct FirstMateAction: Equatable {
     let project: String
     let terminalID: String
     let message: String
+    let payload: String?
+
+    init(kind: FirstMateActionKind, zone: FirstMateZone, worktreePath: String,
+         branch: String, project: String, terminalID: String, message: String,
+         payload: String? = nil) {
+        self.kind = kind
+        self.zone = zone
+        self.worktreePath = worktreePath
+        self.branch = branch
+        self.project = project
+        self.terminalID = terminalID
+        self.message = message
+        self.payload = payload
+    }
 }
 
 struct StatusTransition {

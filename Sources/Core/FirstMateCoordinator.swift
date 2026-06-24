@@ -32,7 +32,7 @@ final class FirstMateCoordinator {
                     notify(action)
                 case .inspect, .autoCommit:
                     runInspection(action)
-                case .suggestNextOrder, .returnToPort:
+                case .suggestNextOrder, .returnToPort, .broadcastOrder:
                     break
                 }
             case .red:
