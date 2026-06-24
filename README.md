@@ -161,7 +161,7 @@ xcodebuild -project seamux.xcodeproj -scheme seamux -configuration Debug build
 
 ### Positioning
 
-amux is built for a workflow that is becoming normal:
+Seamux is built for a workflow that is becoming normal:
 
 - too many terminal windows
 - too many loose worktrees

@@ -58,7 +58,7 @@ The project uses XcodeGen (`project.yml`) to generate the Xcode project file. Af
    - `StatusPublisher` — Timer-based polling (2s) on background queue, reads viewport text via `ghosttyLock`-protected C API calls
    - `StatusDetector` — Priority: process exit > OSC 133 shell phase > text pattern matching > Unknown
    - `WorktreeStatusAggregator` — Aggregates per-pane statuses into per-worktree status, fires `WorktreeStatusDelegate`
-   - `Config` — JSON config at `~/.config/amux/config.json`; uses `decodeIfPresent()` for backward compat
+   - `Config` — JSON config at `~/.config/seamux/config.json`; uses `decodeIfPresent()` for backward compat (migrated from legacy ~/.config/amux on first launch)
    - `SurfaceRegistry` — Global registry mapping surface IDs to `TerminalSurface` instances
    - `ExternalChannel` — Protocol for WeChat/WeCom bot integrations
 
