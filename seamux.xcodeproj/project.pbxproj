@@ -24,6 +24,7 @@
 		0F64BDB5952271D00AD2E405 /* MainWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6E2ADD0A354142EBD0BC459 /* MainWindowController.swift */; };
 		0F9CD81749134CAAE041E80E /* WeChatChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CAE9D03801A602F58A1D02E /* WeChatChannel.swift */; };
 		0FCDBB2C101084CE9595747A /* UsageSummaryStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37CA037D36BD0F522A20909C /* UsageSummaryStoreTests.swift */; };
+		0FECA4935E9CF5E947CF55F1 /* FirstMateCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD1A0EAA663D77BEDBACE7DE /* FirstMateCoordinatorTests.swift */; };
 		10B2F39B2A768837BC0E28A7 /* WebhookEventTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CB6AC28ABFB42BF72FB7EA2 /* WebhookEventTests.swift */; };
 		121BB2CF0D19E0A0D3C19DB8 /* WorkspaceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3447DA3CA2D0A05D89AFD5B /* WorkspaceManager.swift */; };
 		13031E2062776496E5AC6475 /* NotificationHistoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB038C4C6307684ABA39F4F2 /* NotificationHistoryTests.swift */; };
@@ -129,6 +130,7 @@
 		8391A3AD71D46FFB96E81966 /* WorktreeDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D201278C47685E172C3FAB56 /* WorktreeDiscoveryTests.swift */; };
 		8516BF1BD7A6C4C78EBEA586 /* SurfaceRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32619B3EF9D022AEA4F10A9D /* SurfaceRegistry.swift */; };
 		8609854653D84165A8DCB912 /* WorktreeSidePanelViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14C642FA3EFE86913F4A9A23 /* WorktreeSidePanelViewController.swift */; };
+		8619ADF8477BC2ECAE9E8662 /* FirstMateCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDD78940A3162019E8C49F16 /* FirstMateCoordinator.swift */; };
 		89B5914DD4FF8118A6AC9519 /* UsageSummaryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E96365AAB502E1A24527C99 /* UsageSummaryStore.swift */; };
 		8A6917D012BD32373C6910A0 /* CenterOverlayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73154FB3B38838D97E2DD64 /* CenterOverlayTests.swift */; };
 		8B12A0ADFAF8AC6B7B5FFEBE /* AgentTypeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15FE71ACD059F39FCFBB319A /* AgentTypeTests.swift */; };
@@ -401,6 +403,7 @@
 		A9AF675EB394AF347AC1200E /* StatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBadge.swift; sourceTree = "<group>"; };
 		ACB4CDB2286901A481174FC1 /* WorktreeTaskStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeTaskStoreTests.swift; sourceTree = "<group>"; };
 		ACEA11B8225A6D37073240C7 /* SplitContainerLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitContainerLayoutTests.swift; sourceTree = "<group>"; };
+		AD1A0EAA663D77BEDBACE7DE /* FirstMateCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMateCoordinatorTests.swift; sourceTree = "<group>"; };
 		AF4071439620EC432CDD1E04 /* ExternalChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalChannel.swift; sourceTree = "<group>"; };
 		B02676AAA229BFDD2FF955E7 /* ConfigTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigTests.swift; sourceTree = "<group>"; };
 		B1D342F0E1C4AFC756F54934 /* ShellEscapeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellEscapeTests.swift; sourceTree = "<group>"; };
@@ -411,6 +414,7 @@
 		B700B326374CE063090473D2 /* seamuxTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = seamuxTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B8214716E610C68164C37408 /* SidebarPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarPage.swift; sourceTree = "<group>"; };
 		BD4C51A8596107B2F65DDDDC /* QuickSwitcherViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickSwitcherViewController.swift; sourceTree = "<group>"; };
+		BDD78940A3162019E8C49F16 /* FirstMateCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMateCoordinator.swift; sourceTree = "<group>"; };
 		BDFA50C6F306FB53A6CA19FF /* NotificationPanelPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPanelPage.swift; sourceTree = "<group>"; };
 		BE0433FB0AFF904BE1A980D8 /* FirstMate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMate.swift; sourceTree = "<group>"; };
 		BEBA3E125C7B26425A660127 /* TerminalSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSurface.swift; sourceTree = "<group>"; };
@@ -705,6 +709,7 @@
 				EB4984831E0FA5B750CBCBD7 /* FileContentViewTests.swift */,
 				9EA419A0A45EF9867B024CF6 /* FileTreeOutlineControllerTests.swift */,
 				366B3E09947185983D1EE6C2 /* FirstMateConfigTests.swift */,
+				AD1A0EAA663D77BEDBACE7DE /* FirstMateCoordinatorTests.swift */,
 				9F0AC89D246E9A4984870473 /* FirstMateTests.swift */,
 				7608B8C2BBD00BD41B3FCFE1 /* FuzzyMatchTests.swift */,
 				8DA24C61E76012B2B11620D9 /* GatewayStateTests.swift */,
@@ -857,6 +862,7 @@
 				AF4071439620EC432CDD1E04 /* ExternalChannel.swift */,
 				BE0433FB0AFF904BE1A980D8 /* FirstMate.swift */,
 				2161282A4B2FE4DE55D34ECB /* FirstMateConfig.swift */,
+				BDD78940A3162019E8C49F16 /* FirstMateCoordinator.swift */,
 				04FD98EB2A0FC9294F168B3D /* FuzzyMatch.swift */,
 				0BABBE2A628859B5FF2C5E48 /* GatewayState.swift */,
 				8C1CFA4D585B4B8CFDE60CC9 /* HooksChannel.swift */,
@@ -1080,6 +1086,7 @@
 				392002EC9B7800FD66F71CB5 /* FileContentViewTests.swift in Sources */,
 				3F5337A7CBA98EE0B0BECE42 /* FileTreeOutlineControllerTests.swift in Sources */,
 				7484863380EC6B6AFAE3FBF4 /* FirstMateConfigTests.swift in Sources */,
+				0FECA4935E9CF5E947CF55F1 /* FirstMateCoordinatorTests.swift in Sources */,
 				5EFB6D91C0A6573F614C914A /* FirstMateTests.swift in Sources */,
 				A4D05874B1C6F5F202464FB9 /* FuzzyMatchTests.swift in Sources */,
 				613DD0F254B57E20347984AE /* GatewayStateTests.swift in Sources */,
@@ -1207,6 +1214,7 @@
 				D4C8976B71C8703691B5A4AF /* FileTreeOutlineController.swift in Sources */,
 				44D93D84F6DFA1FB74F718BE /* FirstMate.swift in Sources */,
 				30230D23CF2582B03DBFE40A /* FirstMateConfig.swift in Sources */,
+				8619ADF8477BC2ECAE9E8662 /* FirstMateCoordinator.swift in Sources */,
 				EDFE410C764F51C14D6A6DE7 /* FocusPanelView.swift in Sources */,
 				807A5C9117D717E5190F389C /* FuzzyMatch.swift in Sources */,
 				BDB0B6CD77CDB17427993832 /* GatewayState.swift in Sources */,

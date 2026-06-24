@@ -27,6 +27,10 @@ class TabCoordinator {
     var runtimeBackend: String = "local"
     private let pendingTransfers = PendingTransferTracker()
 
+    // First Mate — status-transition engine + red-zone queue
+    let pendingOrders = PendingOrdersQueue()
+    private(set) var firstMate: FirstMateCoordinator!
+
     private static let iso8601: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]
@@ -54,6 +58,32 @@ class TabCoordinator {
 
     init(config: Config) {
         self.config = config
+        let fmConfig = config.firstMate
+        let orders = pendingOrders
+        firstMate = FirstMateCoordinator(
+            config: fmConfig,
+            queue: orders,
+            notify: { action in
+                let status: AgentStatus = action.kind == .watchError ? .error : .waiting
+                NotificationManager.shared.notify(
+                    worktreePath: action.worktreePath,
+                    workspaceName: action.project,
+                    branch: action.branch,
+                    oldStatus: .running,
+                    newStatus: status,
+                    lastMessage: action.message
+                )
+            },
+            runInspection: { [weak self] action in
+                self?.runFirstMateInspection(action)
+            },
+            hasOrders: { worktreePath in
+                WorktreeTaskStore.shared.task(forWorktree: worktreePath) != nil
+            }
+        )
+        AgentHead.shared.onStatusTransition = { [weak self] t in
+            self?.firstMate?.handle(t)
+        }
         NotificationCenter.default.addObserver(forName: .repoViewDidChangeWorktree, object: nil, queue: .main) { [weak self] notification in
             guard let self,
                   let worktreePath = notification.userInfo?["worktreePath"] as? String,
@@ -801,4 +831,45 @@ class TabCoordinator {
             }
         }
     }
+}
+
+// MARK: - First Mate Inspection
+
+extension TabCoordinator {
+    /// Run inspectionCommands in the worktree dir on a background queue,
+    /// then notify with the combined output. autoReview is stubbed — the
+    /// auto-launch mechanism lives in MainWindowController and requires
+    /// backend/session context not available here (DONE_WITH_CONCERNS).
+    func runFirstMateInspection(_ action: FirstMateAction) {
+        let commands = config.firstMate.inspectionCommands
+        let worktreePath = action.worktreePath
+        guard !commands.isEmpty else { return }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else { return }
+            var results: [String] = []
+            for cmd in commands {
+                let output = ProcessRunner.output(["bash", "-lc", "cd \(worktreePath.shellQuoted) && \(cmd)"]) ?? "(no output)"
+                results.append("[\(cmd)]\n\(output)")
+            }
+            let combined = results.joined(separator: "\n---\n")
+            DispatchQueue.main.async {
+                NotificationManager.shared.notify(
+                    worktreePath: worktreePath,
+                    workspaceName: action.project,
+                    branch: action.branch,
+                    oldStatus: .running,
+                    newStatus: .idle,
+                    lastMessage: combined
+                )
+                // autoReview stub: wiring requires backend/session context in MainWindowController
+                if self.config.firstMate.autoReview {
+                    NSLog("[FirstMate] autoReview: review water 待接入 (\(action.branch))")
+                }
+            }
+        }
+    }
+}
+
+private extension String {
+    var shellQuoted: String { "'\(self.replacingOccurrences(of: "'", with: "'\\''"))'" }
 }
