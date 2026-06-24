@@ -88,7 +88,7 @@ final class BridgePanelViewController: NSViewController {
 
         ordersTableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
 
-        let section = makeSectionContainer(header: ordersHeader, scroll: ordersScrollView, minHeight: 100)
+        let section = makeSectionContainer(header: ordersHeader, scroll: ordersScrollView, minHeight: 80)
         addFullWidthArranged(section)
         addFullWidthArranged(makeDivider())
     }
@@ -123,8 +123,12 @@ final class BridgePanelViewController: NSViewController {
         watchScrollView.translatesAutoresizingMaskIntoConstraints = false
         watchTableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
 
-        let section = makeSectionContainer(header: watchHeader, scroll: watchScrollView, minHeight: 60)
+        let section = makeSectionContainer(header: watchHeader, scroll: watchScrollView, minHeight: 80)
         addFullWidthArranged(section)
+
+        // Even split: pin Watch scroll height equal to Orders scroll height.
+        // Both floors are 80 pt so the equal constraint cannot conflict at minimum size.
+        watchScrollView.heightAnchor.constraint(equalTo: ordersScrollView.heightAnchor).isActive = true
     }
 
     private func makeSectionContainer(header: NSTextField, scroll: NSScrollView, minHeight: CGFloat) -> NSView {
