@@ -1,6 +1,6 @@
-name: amux
+name: seamux
 options:
-  bundleIdPrefix: com.amux
+  bundleIdPrefix: com.seamux
   deploymentTarget:
     macOS: "14.0"
   xcodeVersion: "16.1"
@@ -16,7 +16,7 @@ packages:
     exactVersion: 0.1.20
 
 targets:
-  amux:
+  seamux:
     type: application
     platform: macOS
     dependencies:
@@ -31,15 +31,15 @@ targets:
       - path: ghostty.h
         type: file
         buildPhase: none
-      - path: amux-Bridging-Header.h
+      - path: seamux-Bridging-Header.h
         type: file
         buildPhase: none
     settings:
       base:
         SWIFT_VERSION: "5.10"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
-        PRODUCT_BUNDLE_IDENTIFIER: com.amux.app
-        PRODUCT_NAME: amux
+        PRODUCT_BUNDLE_IDENTIFIER: com.seamux.app
+        PRODUCT_NAME: seamux
         INFOPLIST_FILE: ""
         GENERATE_INFOPLIST_FILE: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -47,7 +47,7 @@ targets:
         CURRENT_PROJECT_VERSION: 1
         CODE_SIGN_STYLE: Automatic
         COMBINE_HIDPI_IMAGES: YES
-        SWIFT_OBJC_BRIDGING_HEADER: "$(PROJECT_DIR)/amux-Bridging-Header.h"
+        SWIFT_OBJC_BRIDGING_HEADER: "$(PROJECT_DIR)/seamux-Bridging-Header.h"
         HEADER_SEARCH_PATHS:
           - "$(PROJECT_DIR)"
         LIBRARY_SEARCH_PATHS:
@@ -66,29 +66,29 @@ targets:
           - "-framework"
           - Carbon
 
-  amuxTests:
+  seamuxTests:
     type: bundle.unit-test
     platform: macOS
     sources:
       - path: Tests
         type: group
     dependencies:
-      - target: amux
+      - target: seamux
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.amux.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.seamux.tests
         GENERATE_INFOPLIST_FILE: YES
 
-  amuxUITests:
+  seamuxUITests:
     type: bundle.ui-testing
     platform: macOS
     sources:
       - path: UITests
         type: group
     dependencies:
-      - target: amux
+      - target: seamux
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.amux.uitests
+        PRODUCT_BUNDLE_IDENTIFIER: com.seamux.uitests
         GENERATE_INFOPLIST_FILE: YES
-        TEST_TARGET_NAME: amux
+        TEST_TARGET_NAME: seamux
