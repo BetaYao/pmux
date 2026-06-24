@@ -362,7 +362,7 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
             height: panelHeight
         )
         panel.setFrame(panelFrame, display: true)
-        window.addChildWindow(panel, ordered: .above)
+        if panel.parent == nil { window.addChildWindow(panel, ordered: .above) }
         panel.orderFront(nil)
     }
 
@@ -371,6 +371,15 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
             panel.parent?.removeChildWindow(panel)
             panel.orderOut(nil)
         }
+    }
+
+    deinit {
+        hideCommandCompletions()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { hideCommandCompletions() }
     }
 
     private func applyCompletion(_ name: String) {
