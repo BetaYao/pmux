@@ -214,8 +214,10 @@
 		F23E2397EDCC86BDAC40B26F /* WorktreeStatusAggregator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 799F4A3213C63D6641640BA9 /* WorktreeStatusAggregator.swift */; };
 		F285F8A2F27E0FA1DF6FC44A /* TabCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C700358A5E9A55D1FFFEC88D /* TabCoordinatorTests.swift */; };
 		F350A0445AFE7D74CBC44CE1 /* WorktreeTitleResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27A6845A3C333FB94D313B61 /* WorktreeTitleResolver.swift */; };
+		F55C6DFD383317687F874354 /* PendingOrdersQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8298417BB4282E0828029F /* PendingOrdersQueueTests.swift */; };
 		F6892DE84638C19F13AF6989 /* SplitNodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11FB5F33699106B280F637DC /* SplitNodeTests.swift */; };
 		F6D29890A1786F08C0783D28 /* ProcessRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4618E68D3897D7BC41F9945B /* ProcessRunner.swift */; };
+		F7C3688847206215DB4692D5 /* PendingOrdersQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE76C5FC051792531F036357 /* PendingOrdersQueue.swift */; };
 		F9B2D7E4A08B90801247AF65 /* SemVer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F1C562DB4E855F3E915281F /* SemVer.swift */; };
 		FB5A4D9F250DFD9ED5DD0805 /* SplitNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC50214FE25D764346F23421 /* SplitNode.swift */; };
 		FC1ADCE26904B11CE052A71B /* UpdateCheckerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1E2F689D3CA44BC59D7BEEB /* UpdateCheckerTests.swift */; };
@@ -381,6 +383,7 @@
 		992D6E3BC5E14FA025D6C52F /* DashboardViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardViewController.swift; sourceTree = "<group>"; };
 		9A8C3BDA06177F8705AEA345 /* WorkspaceManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceManagerTests.swift; sourceTree = "<group>"; };
 		9AC5FAB32446AB371CF92B14 /* Keymap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keymap.swift; sourceTree = "<group>"; };
+		9B8298417BB4282E0828029F /* PendingOrdersQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingOrdersQueueTests.swift; sourceTree = "<group>"; };
 		9C7074F76F6B864FB8B2856B /* seamux-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "seamux-Bridging-Header.h"; sourceTree = "<group>"; };
 		9EA419A0A45EF9867B024CF6 /* FileTreeOutlineControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTreeOutlineControllerTests.swift; sourceTree = "<group>"; };
 		9F0AC89D246E9A4984870473 /* FirstMateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMateTests.swift; sourceTree = "<group>"; };
@@ -460,6 +463,7 @@
 		F9E7B6D3FA01BF55A9C75AFE /* AmuxUITestCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmuxUITestCase.swift; sourceTree = "<group>"; };
 		FA900D4811CAF227723ECA6F /* ActivityFeedRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityFeedRendererTests.swift; sourceTree = "<group>"; };
 		FD537A2F5B7353D5E270DD15 /* WebhookStatusProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookStatusProvider.swift; sourceTree = "<group>"; };
+		FE76C5FC051792531F036357 /* PendingOrdersQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingOrdersQueue.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -709,6 +713,7 @@
 				40F9B3F050D50631FB2BBB24 /* PanelCoordinatorTests.swift */,
 				B21A32BB689B2C5FA57758F2 /* PaneStatusTests.swift */,
 				518A4FB4704BBB3E83519922 /* PaneTransferTests.swift */,
+				9B8298417BB4282E0828029F /* PendingOrdersQueueTests.swift */,
 				CD286A808441EE80143245D8 /* ProcessRunnerTests.swift */,
 				A354C70F07DA0AC5252ED72E /* SemVerTests.swift */,
 				C4317B88F9624EC5BF556E2C /* SessionLaunchCommandTests.swift */,
@@ -848,6 +853,7 @@
 				0BABBE2A628859B5FF2C5E48 /* GatewayState.swift */,
 				8C1CFA4D585B4B8CFDE60CC9 /* HooksChannel.swift */,
 				3488FC3F9B3B42F28E636AED /* IdeaStore.swift */,
+				FE76C5FC051792531F036357 /* PendingOrdersQueue.swift */,
 				CDA926F97BA281AA00837757 /* PendingWorktreeTransfer.swift */,
 				4618E68D3897D7BC41F9945B /* ProcessRunner.swift */,
 				2B543FC7CCBB5043370724E5 /* SessionManager.swift */,
@@ -1079,6 +1085,7 @@
 				C62A5F6584591322FE279644 /* PaneStatusTests.swift in Sources */,
 				0C7A1592A6E63FADC759BD42 /* PaneTransferTests.swift in Sources */,
 				E02BED8850103F3FD9CA3785 /* PanelCoordinatorTests.swift in Sources */,
+				F55C6DFD383317687F874354 /* PendingOrdersQueueTests.swift in Sources */,
 				EEB9CA99E7B47EE5806777C7 /* ProcessRunnerTests.swift in Sources */,
 				72EA1932C2258741C753BD63 /* SemVerTests.swift in Sources */,
 				8074E7F8329B555733C0B761 /* SessionLaunchCommandTests.swift in Sources */,
@@ -1212,6 +1219,7 @@
 				A68C70CB671B0939FD116F45 /* OSC133Parser.swift in Sources */,
 				5986057F702483F052254E66 /* PaneStatus.swift in Sources */,
 				7EDF146512F64A75A61EFAA4 /* PanelCoordinator.swift in Sources */,
+				F7C3688847206215DB4692D5 /* PendingOrdersQueue.swift in Sources */,
 				B856048DC0426D315A01D1B3 /* PendingWorktreeTransfer.swift in Sources */,
 				F6D29890A1786F08C0783D28 /* ProcessRunner.swift in Sources */,
 				DAD7D26EA77B7F8458ADA93D /* QuickSwitcherViewController.swift in Sources */,
