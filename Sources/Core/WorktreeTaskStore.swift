@@ -3,7 +3,7 @@ import Foundation
 /// Persists the task description entered at worktree-creation time, keyed by
 /// worktree path, so the card/capsule title can show the user's task
 /// immediately (before the agent has written its own session summary). Stored
-/// as JSON alongside config.json (`~/.config/seamux/worktree-tasks.json`).
+/// as JSON alongside config.json (`~/.config/seahelm/worktree-tasks.json`).
 final class WorktreeTaskStore {
     static let shared = WorktreeTaskStore()
 

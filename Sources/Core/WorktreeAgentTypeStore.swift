@@ -3,7 +3,7 @@ import Foundation
 /// Persists the agent type chosen at worktree-creation time, keyed by worktree
 /// path, so the card badge reflects the user's pick immediately — instead of
 /// waiting for amux to detect the agent from terminal output. Stored as JSON
-/// alongside config.json (`~/.config/seamux/worktree-agents.json`).
+/// alongside config.json (`~/.config/seahelm/worktree-agents.json`).
 final class WorktreeAgentTypeStore {
     static let shared = WorktreeAgentTypeStore()
 
