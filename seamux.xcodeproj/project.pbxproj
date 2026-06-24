@@ -28,6 +28,7 @@
 		121BB2CF0D19E0A0D3C19DB8 /* WorkspaceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3447DA3CA2D0A05D89AFD5B /* WorkspaceManager.swift */; };
 		13031E2062776496E5AC6475 /* NotificationHistoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB038C4C6307684ABA39F4F2 /* NotificationHistoryTests.swift */; };
 		131C500004ABE86B89454A3F /* HooksChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C1CFA4D585B4B8CFDE60CC9 /* HooksChannel.swift */; };
+		136276E69C14834A26578C2F /* ReturnToPortTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6062FD9546B9CB8772FBDE8 /* ReturnToPortTests.swift */; };
 		13D322699F7AD872D4990C49 /* ActivityEventTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 008D36CB6B25445EE18128ED /* ActivityEventTests.swift */; };
 		14F9FAF170D67FE328D5ACE4 /* DashboardViewControllerClickTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37375ED8F1FB2FA3B4F9C757 /* DashboardViewControllerClickTests.swift */; };
 		15B645D769019B00541CF2CE /* WeComFrameParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AAEA7DF11F42FA35F83454D /* WeComFrameParser.swift */; };
@@ -141,6 +142,7 @@
 		92035D2BCB50ACC4676408CB /* DiffSyntaxHighlighter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65C25B8344A3F54D8D121DDD /* DiffSyntaxHighlighter.swift */; };
 		9630713CFB3A547A2ADF4F3A /* ShellEscapeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1D342F0E1C4AFC756F54934 /* ShellEscapeTests.swift */; };
 		9636AAAADBC8832B8014A084 /* DiffReviewViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C0FD137B96C91EC244C9509 /* DiffReviewViewTests.swift */; };
+		9641FD7BC033DD7B5D5BC2E7 /* ReturnToPort.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F8863E4CA169BA9EB68F572 /* ReturnToPort.swift */; };
 		99317D511FE2ED71668A8489 /* WorktreeTitleResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 542494F555786DF6EF596CE5 /* WorktreeTitleResolverTests.swift */; };
 		99A2AF8B46728BA5DF627A7D /* OSC133ParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8E3B69E946C433A87B3B9D0 /* OSC133ParserTests.swift */; };
 		9A5F45540AB2FB5B426C58C9 /* ClaudeStatuslineBridgeInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A6820004613A0A7802B66C6 /* ClaudeStatuslineBridgeInstallerTests.swift */; };
@@ -259,6 +261,7 @@
 		0BABBE2A628859B5FF2C5E48 /* GatewayState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayState.swift; sourceTree = "<group>"; };
 		0BC5A4B722E48EE8E3441A3A /* StatusDetectorActivityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusDetectorActivityTests.swift; sourceTree = "<group>"; };
 		0BC6AE54920CAAD3EF4242B8 /* TabCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabCoordinator.swift; sourceTree = "<group>"; };
+		0F8863E4CA169BA9EB68F572 /* ReturnToPort.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReturnToPort.swift; sourceTree = "<group>"; };
 		11FB5F33699106B280F637DC /* SplitNodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitNodeTests.swift; sourceTree = "<group>"; };
 		134835AB3C7AA1F15BE0A09F /* WebhookServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookServer.swift; sourceTree = "<group>"; };
 		14C642FA3EFE86913F4A9A23 /* WorktreeSidePanelViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeSidePanelViewController.swift; sourceTree = "<group>"; };
@@ -393,6 +396,7 @@
 		A354C70F07DA0AC5252ED72E /* SemVerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SemVerTests.swift; sourceTree = "<group>"; };
 		A422C38F7378489B41605329 /* MiniCardViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniCardViewTests.swift; sourceTree = "<group>"; };
 		A5AE84F7F04110FBC37821DC /* WorktreeCreatorEnvCopyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeCreatorEnvCopyTests.swift; sourceTree = "<group>"; };
+		A6062FD9546B9CB8772FBDE8 /* ReturnToPortTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReturnToPortTests.swift; sourceTree = "<group>"; };
 		A8C5FCAC39F355E488F0A2E4 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		A9AF675EB394AF347AC1200E /* StatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBadge.swift; sourceTree = "<group>"; };
 		ACB4CDB2286901A481174FC1 /* WorktreeTaskStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeTaskStoreTests.swift; sourceTree = "<group>"; };
@@ -718,6 +722,7 @@
 				518A4FB4704BBB3E83519922 /* PaneTransferTests.swift */,
 				9B8298417BB4282E0828029F /* PendingOrdersQueueTests.swift */,
 				CD286A808441EE80143245D8 /* ProcessRunnerTests.swift */,
+				A6062FD9546B9CB8772FBDE8 /* ReturnToPortTests.swift */,
 				A354C70F07DA0AC5252ED72E /* SemVerTests.swift */,
 				C4317B88F9624EC5BF556E2C /* SessionLaunchCommandTests.swift */,
 				4AFEE7DF303B5F18D74EAA75 /* SessionManagerTests.swift */,
@@ -859,6 +864,7 @@
 				FE76C5FC051792531F036357 /* PendingOrdersQueue.swift */,
 				CDA926F97BA281AA00837757 /* PendingWorktreeTransfer.swift */,
 				4618E68D3897D7BC41F9945B /* ProcessRunner.swift */,
+				0F8863E4CA169BA9EB68F572 /* ReturnToPort.swift */,
 				2B543FC7CCBB5043370724E5 /* SessionManager.swift */,
 				D1DA9C978E31F9C5F8A3CD7C /* SessionTitleLookup.swift */,
 				1B35A3FD9BBC18605E3B44A9 /* ShellEscape.swift */,
@@ -1091,6 +1097,7 @@
 				E02BED8850103F3FD9CA3785 /* PanelCoordinatorTests.swift in Sources */,
 				F55C6DFD383317687F874354 /* PendingOrdersQueueTests.swift in Sources */,
 				EEB9CA99E7B47EE5806777C7 /* ProcessRunnerTests.swift in Sources */,
+				136276E69C14834A26578C2F /* ReturnToPortTests.swift in Sources */,
 				72EA1932C2258741C753BD63 /* SemVerTests.swift in Sources */,
 				8074E7F8329B555733C0B761 /* SessionLaunchCommandTests.swift in Sources */,
 				CA47C655B6E8E2F5D1BC7399 /* SessionManagerTests.swift in Sources */,
@@ -1227,6 +1234,7 @@
 				B856048DC0426D315A01D1B3 /* PendingWorktreeTransfer.swift in Sources */,
 				F6D29890A1786F08C0783D28 /* ProcessRunner.swift in Sources */,
 				DAD7D26EA77B7F8458ADA93D /* QuickSwitcherViewController.swift in Sources */,
+				9641FD7BC033DD7B5D5BC2E7 /* ReturnToPort.swift in Sources */,
 				F9B2D7E4A08B90801247AF65 /* SemVer.swift in Sources */,
 				6CE9666DB6FE730678C1A674 /* SemanticColors.swift in Sources */,
 				CEB2FAB61BC9A415953FF160 /* SessionManager.swift in Sources */,
