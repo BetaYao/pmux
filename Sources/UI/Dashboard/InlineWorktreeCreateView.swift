@@ -277,7 +277,19 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
 
     // MARK: - Command completion
 
-    private static let commandCompletions = ["new", "order", "commit", "return", "broadcast"]
+    fileprivate struct CommandItem {
+        let name: String
+        let args: String
+        let desc: String
+    }
+
+    private static let commandCompletions: [CommandItem] = [
+        CommandItem(name: "new",       args: "<task>",            desc: "新建 worktree 并派活"),
+        CommandItem(name: "order",     args: "<branch> <task>",   desc: "给现有 worktree 派活"),
+        CommandItem(name: "commit",    args: "<branch>",          desc: "提交改动"),
+        CommandItem(name: "return",    args: "<branch>",          desc: "返港 · 删除 worktree"),
+        CommandItem(name: "broadcast", args: "<task>",            desc: "广播给全部 agent"),
+    ]
 
     func textDidChange(_ notification: Notification) {
         let text = promptTextView.plainText
@@ -292,8 +304,13 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
 
     private var completionPanel: NSPanel?
 
+    private static let completionRowHeight: CGFloat = 30
+    private static let completionPanelWidth: CGFloat = 300
+    private static let completionVerticalPadding: CGFloat = 5
+
     private func showCommandCompletions(prefix: String) {
-        let filtered = Self.commandCompletions.filter { prefix.isEmpty || $0.hasPrefix(prefix.lowercased()) }
+        let needle = prefix.lowercased()
+        let filtered = Self.commandCompletions.filter { needle.isEmpty || $0.name.hasPrefix(needle) }
         guard !filtered.isEmpty else { hideCommandCompletions(); return }
 
         // Build or reuse a borderless panel positioned above the input field
@@ -314,21 +331,19 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
         // Build a stack of item views
         let stack = NSStackView()
         stack.orientation = .vertical
-        stack.spacing = 0
-        stack.edgeInsets = NSEdgeInsets(top: 6, left: 0, bottom: 6, right: 0)
+        stack.spacing = 1
+        stack.edgeInsets = NSEdgeInsets(top: Self.completionVerticalPadding, left: 5,
+                                        bottom: Self.completionVerticalPadding, right: 5)
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        for name in filtered {
-            let label = NSTextField(labelWithString: "/\(name)")
-            label.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-            label.textColor = SemanticColors.text
-            label.translatesAutoresizingMaskIntoConstraints = false
-            label.cell?.backgroundStyle = .normal
-
-            let row = CompletionRowView(label: label) { [weak self] in
-                self?.applyCompletion(name)
+        for item in filtered {
+            let row = CompletionRowView(item: item, height: Self.completionRowHeight) { [weak self] in
+                self?.applyCompletion(item.name)
             }
+            row.translatesAutoresizingMaskIntoConstraints = false
             stack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: stack.widthAnchor,
+                                       constant: -2 * 5).isActive = true
         }
 
         let container = NSVisualEffectView()
@@ -336,7 +351,9 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
         container.blendingMode = .behindWindow
         container.state = .active
         container.wantsLayer = true
-        container.layer?.cornerRadius = 8
+        container.layer?.cornerRadius = 10
+        container.layer?.borderWidth = 0.5
+        container.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.6).cgColor
         container.layer?.masksToBounds = true
         container.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(stack)
@@ -347,9 +364,9 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
             stack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
 
-        let rowHeight: CGFloat = 28
-        let panelWidth: CGFloat = 180
-        let panelHeight = CGFloat(filtered.count) * rowHeight + 12
+        let panelHeight = CGFloat(filtered.count) * Self.completionRowHeight
+            + CGFloat(max(0, filtered.count - 1)) * 1
+            + 2 * Self.completionVerticalPadding
 
         panel.contentView = container
 
@@ -358,8 +375,8 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
         let viewOriginInScreen = window.convertToScreen(convert(bounds, to: nil))
         let panelFrame = NSRect(
             x: viewOriginInScreen.minX + 12,
-            y: viewOriginInScreen.maxY + 4,
-            width: panelWidth,
+            y: viewOriginInScreen.maxY + 6,
+            width: Self.completionPanelWidth,
             height: panelHeight
         )
         panel.setFrame(panelFrame, display: true)
@@ -574,28 +591,64 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
     }
 }
 
-/// A clickable row in the command completion popover.
+/// A clickable row in the command completion popover: `/name <args>` on the
+/// left, a short description right-aligned, with a full-row hover highlight.
 private final class CompletionRowView: NSView {
-    private let label: NSTextField
     private let action: () -> Void
+    private let nameLabel: NSTextField
+    private let argsLabel: NSTextField
+    private let descLabel: NSTextField
     private var isHovered = false {
         didSet { updateBackground() }
     }
 
-    init(label: NSTextField, action: @escaping () -> Void) {
-        self.label = label
+    init(item: InlineWorktreeCreateView.CommandItem, height: CGFloat, action: @escaping () -> Void) {
         self.action = action
+
+        nameLabel = NSTextField(labelWithString: "/\(item.name)")
+        argsLabel = NSTextField(labelWithString: item.args)
+        descLabel = NSTextField(labelWithString: item.desc)
+
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 4
-        label.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(label)
+        layer?.cornerRadius = 6
+
+        nameLabel.font = .monospacedSystemFont(ofSize: 12.5, weight: .medium)
+        nameLabel.textColor = SemanticColors.text
+        nameLabel.translatesAutoresizingMaskIntoConstraints = false
+        nameLabel.setContentHuggingPriority(.required, for: .horizontal)
+
+        argsLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        argsLabel.textColor = .tertiaryLabelColor
+        argsLabel.translatesAutoresizingMaskIntoConstraints = false
+        argsLabel.lineBreakMode = .byTruncatingTail
+        argsLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        descLabel.font = .systemFont(ofSize: 11)
+        descLabel.textColor = .secondaryLabelColor
+        descLabel.alignment = .right
+        descLabel.translatesAutoresizingMaskIntoConstraints = false
+        descLabel.lineBreakMode = .byTruncatingTail
+        descLabel.setContentHuggingPriority(.required, for: .horizontal)
+        descLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        addSubview(nameLabel)
+        addSubview(argsLabel)
+        addSubview(descLabel)
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-            heightAnchor.constraint(equalToConstant: 28),
+            heightAnchor.constraint(equalToConstant: height),
+
+            nameLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            nameLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            argsLabel.leadingAnchor.constraint(equalTo: nameLabel.trailingAnchor, constant: 6),
+            argsLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            descLabel.leadingAnchor.constraint(greaterThanOrEqualTo: argsLabel.trailingAnchor, constant: 8),
+            descLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            descLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
+
         let click = NSClickGestureRecognizer(target: self, action: #selector(clicked))
         addGestureRecognizer(click)
         let area = NSTrackingArea(rect: .zero,
@@ -613,8 +666,11 @@ private final class CompletionRowView: NSView {
 
     private func updateBackground() {
         layer?.backgroundColor = isHovered
-            ? NSColor.controlAccentColor.withAlphaComponent(0.2).cgColor
+            ? NSColor.controlAccentColor.withAlphaComponent(0.85).cgColor
             : .clear
+        nameLabel.textColor = isHovered ? .white : SemanticColors.text
+        argsLabel.textColor = isHovered ? NSColor.white.withAlphaComponent(0.75) : .tertiaryLabelColor
+        descLabel.textColor = isHovered ? NSColor.white.withAlphaComponent(0.85) : .secondaryLabelColor
     }
 }
 
