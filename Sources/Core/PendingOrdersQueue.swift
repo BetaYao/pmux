@@ -12,7 +12,8 @@ final class PendingOrdersQueue {
     var onChange: (() -> Void)?
 
     static func key(_ a: FirstMateAction) -> String {
-        "\(a.worktreePath)#\(a.kind)"
+        let base = "\(a.worktreePath)#\(a.kind)"
+        return a.payload.map { "\(base)#\($0)" } ?? base
     }
 
     func enqueue(_ action: FirstMateAction) {

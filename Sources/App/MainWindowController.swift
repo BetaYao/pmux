@@ -1300,15 +1300,10 @@ extension MainWindowController {
                   let terminalID = AgentHead.shared.agent(forWorktree: worktreePath)?.id else { return }
             AgentHead.shared.sendCommand(to: terminalID, command: task)
         case .returnToPort:
-            let path = order.action.worktreePath
-            guard let agent = AgentHead.shared.agent(forWorktree: path) else { return }
-            DispatchQueue.global(qos: .userInitiated).async {
-                try? WorktreeDeleter.deleteWorktree(
-                    worktreePath: path,
-                    repoPath: agent.project,
-                    branchName: agent.branch
-                )
-            }
+            terminalCoordinator.deleteWorktreeForReturnToPort(
+                path: order.action.worktreePath,
+                branch: order.action.branch
+            )
         case .broadcastOrder:
             guard let task = order.action.payload else { return }
             for agent in AgentHead.shared.allAgents() {

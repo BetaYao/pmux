@@ -268,6 +268,7 @@ final class InlineWorktreeCreateView: NSView, NSTextViewDelegate {
 
     private func clearAfterSubmit() {
         promptTextView.setPlainText("")
+        hideCommandCompletions()
         errorLabel.isHidden = true
         errorLabel.stringValue = ""
         errorHeight.constant = 0
