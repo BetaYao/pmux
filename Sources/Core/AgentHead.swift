@@ -13,6 +13,12 @@ class AgentHead {
 
     weak var delegate: AgentHeadDelegate?
 
+    /// First Mate observer: status-edge and completion signals, called on main thread.
+    var onStatusTransition: ((StatusTransition) -> Void)?
+
+    /// Tracks when each terminal entered its current status (for holdSeconds calculation).
+    private var statusEnteredAt: [String: Date] = [:]
+
     private var agents: [String: AgentInfo] = [:]       // keyed by terminal ID
     private var orderedIDs: [String] = []
     /// Reverse index: worktree path → terminal IDs (1:N)
@@ -25,6 +31,20 @@ class AgentHead {
     private let lock = NSLock()
 
     private init() {}
+
+    #if DEBUG
+    /// Test helper: register an agent entry without a real TerminalSurface.
+    func registerForTesting(terminalID: String, worktreePath: String, branch: String, project: String) {
+        lock.lock(); defer { lock.unlock() }
+        agents[terminalID] = AgentInfo(
+            id: terminalID, worktreePath: worktreePath, agentType: .unknown,
+            project: project, branch: branch, status: .unknown, lastMessage: "",
+            commandLine: nil, roundDuration: 0, startedAt: nil, surface: nil,
+            channel: nil, taskProgress: TaskProgress())
+        worktreeIndex[worktreePath, default: []].append(terminalID)
+        if !orderedIDs.contains(terminalID) { orderedIDs.append(terminalID) }
+    }
+    #endif
 
     // MARK: - Registration
 
@@ -144,6 +164,23 @@ class AgentHead {
         if changed {
             DispatchQueue.main.async { [weak self] in
                 self?.delegate?.agentDidUpdate(info)
+            }
+
+            if previousStatus != status {
+                let now = Date()
+                lock.lock()
+                let entered = statusEnteredAt[terminalID] ?? now
+                statusEnteredAt[terminalID] = now
+                lock.unlock()
+                let hold = now.timeIntervalSince(entered)
+                let transition = StatusTransition(
+                    worktreePath: info.worktreePath, branch: info.branch,
+                    project: info.project, terminalID: terminalID,
+                    oldStatus: previousStatus, newStatus: status,
+                    holdSeconds: hold, isCompletionSignal: false)
+                DispatchQueue.main.async { [weak self] in
+                    self?.onStatusTransition?(transition)
+                }
             }
 
             // Notify external channels on critical status transitions
@@ -316,6 +353,14 @@ class AgentHead {
             upsertLatestActivityEvent(activityEvent, forTerminalID: tid)
         case .agentStop:
             clearActivityEvents(forTerminalID: tid)
+            if let info = agent(for: tid) {
+                let t = StatusTransition(
+                    worktreePath: info.worktreePath, branch: info.branch,
+                    project: info.project, terminalID: tid,
+                    oldStatus: info.status, newStatus: info.status,
+                    holdSeconds: 0, isCompletionSignal: true)
+                DispatchQueue.main.async { [weak self] in self?.onStatusTransition?(t) }
+            }
         default:
             break
         }
