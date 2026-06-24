@@ -1,6 +1,6 @@
 import XCTest
 import AppKit
-@testable import amux
+@testable import seamux
 
 final class CenterOverlayTests: XCTestCase {
     func testShowThenDismiss() {

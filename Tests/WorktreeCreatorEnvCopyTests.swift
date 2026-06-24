@@ -1,5 +1,5 @@
 import XCTest
-@testable import amux
+@testable import seamux
 
 final class WorktreeCreatorEnvCopyTests: XCTestCase {
     private var src: URL!

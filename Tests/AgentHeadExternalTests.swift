@@ -1,5 +1,5 @@
 import XCTest
-@testable import amux
+@testable import seamux
 
 /// Mock ExternalChannel for testing
 final class MockExternalChannel: ExternalChannel {

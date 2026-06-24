@@ -1,5 +1,5 @@
 import XCTest
-@testable import amux
+@testable import seamux
 
 final class IdeaStoreTests: XCTestCase {
     private var store: IdeaStore!

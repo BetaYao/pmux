@@ -1,5 +1,5 @@
 import XCTest
-@testable import amux
+@testable import seamux
 
 /// Functional tests for WorktreeCreator using real git repos.
 final class WorktreeCreatorTests: XCTestCase {

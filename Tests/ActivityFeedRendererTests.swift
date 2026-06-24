@@ -1,6 +1,6 @@
 // Tests/ActivityFeedRendererTests.swift
 import XCTest
-@testable import amux
+@testable import seamux
 
 final class ActivityFeedRendererTests: XCTestCase {
     func testEmptyEventsReturnsEmpty() {

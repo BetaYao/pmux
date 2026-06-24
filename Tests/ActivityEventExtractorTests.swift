@@ -1,6 +1,6 @@
 // Tests/ActivityEventExtractorTests.swift
 import XCTest
-@testable import amux
+@testable import seamux
 
 final class ActivityEventExtractorTests: XCTestCase {
 

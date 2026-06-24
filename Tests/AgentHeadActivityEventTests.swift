@@ -1,6 +1,6 @@
 // Tests/AgentHeadActivityEventTests.swift
 import XCTest
-@testable import amux
+@testable import seamux
 
 final class AgentHeadActivityEventTests: XCTestCase {
 

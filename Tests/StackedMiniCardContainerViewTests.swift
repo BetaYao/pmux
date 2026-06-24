@@ -1,6 +1,6 @@
 // Tests/StackedMiniCardContainerViewTests.swift
 import XCTest
-@testable import amux
+@testable import seamux
 
 final class StackedMiniCardContainerViewTests: XCTestCase {
 

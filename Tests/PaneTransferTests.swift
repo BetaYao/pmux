@@ -1,6 +1,6 @@
 // tests/PaneTransferTests.swift
 import XCTest
-@testable import amux
+@testable import seamux
 
 final class PaneTransferTests: XCTestCase {
 

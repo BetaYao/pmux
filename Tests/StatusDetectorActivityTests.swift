@@ -1,6 +1,6 @@
 // Tests/StatusDetectorActivityTests.swift
 import XCTest
-@testable import amux
+@testable import seamux
 
 final class StatusDetectorActivityTests: XCTestCase {
     let detector = StatusDetector()

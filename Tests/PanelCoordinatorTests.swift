@@ -1,5 +1,5 @@
 import XCTest
-@testable import amux
+@testable import seamux
 
 private class MockPanelCoordinatorDelegate: PanelCoordinatorDelegate {
     var navigateCalled = false

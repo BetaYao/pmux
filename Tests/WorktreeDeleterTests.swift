@@ -1,5 +1,5 @@
 import XCTest
-@testable import amux
+@testable import seamux
 
 /// Functional tests for WorktreeDeleter using real git repos in temp directories.
 final class WorktreeDeleterTests: XCTestCase {
