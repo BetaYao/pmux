@@ -25,6 +25,9 @@ final class WorktreeSidePanelViewController: NSViewController {
     var pendingOrdersQueue: PendingOrdersQueue? {
         didSet { bridgeVC?.queue = pendingOrdersQueue }
     }
+    var watchFeed: WatchFeed? {
+        didSet { bridgeVC?.watchFeed = watchFeed }
+    }
     var onBridgeNavigate: ((String) -> Void)?
     var onBridgeApprove: ((PendingOrder) -> Void)?
 
@@ -183,6 +186,7 @@ final class WorktreeSidePanelViewController: NSViewController {
     private func showFirstMateTab() {
         let vc = BridgePanelViewController()
         vc.queue = pendingOrdersQueue
+        vc.watchFeed = watchFeed
         vc.onNavigateToWorktree = { [weak self] path in self?.onBridgeNavigate?(path) }
         vc.onApprove = { [weak self] order in self?.onBridgeApprove?(order) }
         addChild(vc)

@@ -376,6 +376,8 @@ dashboard.surfaceManager = terminalCoordinator.surfaceManager
         dashboardVC = dashboard
         tabCoordinator.dashboardVC = dashboard
 
+        dashboard.sidePanelVC.pendingOrdersQueue = tabCoordinator.pendingOrders
+        dashboard.sidePanelVC.watchFeed = tabCoordinator.watchFeed
         dashboard.sidePanelVC.onBridgeNavigate = { [weak self] path in
             self?.tabCoordinator.selectTab(forWorktree: path)
         }

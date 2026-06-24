@@ -7,6 +7,9 @@ final class BridgePanelViewController: NSViewController {
     var queue: PendingOrdersQueue? {
         didSet { rebind() }
     }
+    var watchFeed: WatchFeed? {
+        didSet { rebindWatch() }
+    }
     var onNavigateToWorktree: ((String) -> Void)?
     var onApprove: ((PendingOrder) -> Void)?
 
@@ -14,6 +17,7 @@ final class BridgePanelViewController: NSViewController {
 
     private var pendingOrders: [PendingOrder] = []
     private var expandedOrderIds: Set<String> = []
+    private var watchItems: [WatchItem] = []
 
     // MARK: - Views
 
@@ -149,10 +153,23 @@ final class BridgePanelViewController: NSViewController {
         if isViewLoaded { reload() }
     }
 
+    private func rebindWatch() {
+        watchFeed?.onChange = { [weak self] in
+            DispatchQueue.main.async { self?.reloadWatch() }
+        }
+        if isViewLoaded { reloadWatch() }
+    }
+
     private func reload() {
         pendingOrders = queue?.all() ?? []
         ordersHeader.stringValue = "Pending Orders · \(pendingOrders.count)"
         ordersTableView.reloadData()
+        watchTableView.reloadData()
+    }
+
+    private func reloadWatch() {
+        watchItems = watchFeed?.all() ?? []
+        watchHeader.stringValue = watchItems.isEmpty ? "Watch" : "Watch · \(watchItems.count)"
         watchTableView.reloadData()
     }
 
@@ -175,8 +192,7 @@ final class BridgePanelViewController: NSViewController {
         case "n":
             handleDismiss(in: activeTable)
         case "x":
-            // clear watch — no explicit watch store, orders are in queue
-            break
+            handleClearWatch()
         default:
             if event.keyCode == 124 { // right arrow
                 handleNavigate(in: activeTable)
@@ -221,6 +237,12 @@ final class BridgePanelViewController: NSViewController {
         queue?.resolve(id: order.id)
     }
 
+    private func handleClearWatch() {
+        let row = watchTableView.selectedRow
+        guard row >= 0, row < watchItems.count else { return }
+        watchFeed?.clear(id: watchItems[row].id)
+    }
+
     private func handleNavigate(in tableView: NSTableView) {
         let row = tableView.selectedRow
         guard tableView.tag == 1, row >= 0, row < pendingOrders.count else { return }
@@ -233,26 +255,40 @@ final class BridgePanelViewController: NSViewController {
 
 extension BridgePanelViewController: NSTableViewDataSource, NSTableViewDelegate {
     func numberOfRows(in tableView: NSTableView) -> Int {
-        tableView.tag == 1 ? pendingOrders.count : 0
+        tableView.tag == 1 ? pendingOrders.count : watchItems.count
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        guard tableView.tag == 1, row < pendingOrders.count else { return nil }
-        let order = pendingOrders[row]
-        let isExpanded = expandedOrderIds.contains(order.id)
-
-        let id = NSUserInterfaceItemIdentifier("OrderCell")
-        let cell: OrderCellView
-        if let reused = tableView.makeView(withIdentifier: id, owner: self) as? OrderCellView {
-            cell = reused
+        if tableView.tag == 1 {
+            guard row < pendingOrders.count else { return nil }
+            let order = pendingOrders[row]
+            let isExpanded = expandedOrderIds.contains(order.id)
+            let id = NSUserInterfaceItemIdentifier("OrderCell")
+            let cell: OrderCellView
+            if let reused = tableView.makeView(withIdentifier: id, owner: self) as? OrderCellView {
+                cell = reused
+            } else {
+                cell = OrderCellView()
+                cell.identifier = id
+            }
+            cell.configure(order: order, expanded: isExpanded,
+                           onApprove: { [weak self] in self?.approveOrder(order) },
+                           onDismiss: { [weak self] in self?.queue?.resolve(id: order.id) })
+            return cell
         } else {
-            cell = OrderCellView()
-            cell.identifier = id
+            guard row < watchItems.count else { return nil }
+            let item = watchItems[row]
+            let id = NSUserInterfaceItemIdentifier("WatchCell")
+            let cell: WatchCellView
+            if let reused = tableView.makeView(withIdentifier: id, owner: self) as? WatchCellView {
+                cell = reused
+            } else {
+                cell = WatchCellView()
+                cell.identifier = id
+            }
+            cell.configure(item: item)
+            return cell
         }
-        cell.configure(order: order, expanded: isExpanded,
-                       onApprove: { [weak self] in self?.approveOrder(order) },
-                       onDismiss: { [weak self] in self?.queue?.resolve(id: order.id) })
-        return cell
     }
 }
 
@@ -343,4 +379,57 @@ private final class OrderCellView: NSTableCellView {
 
     @objc private func tappedApprove() { onApprove?() }
     @objc private func tappedDismiss() { onDismiss?() }
+}
+
+// MARK: - WatchCellView
+
+private final class WatchCellView: NSTableCellView {
+    private let iconLabel = NSTextField(labelWithString: "")
+    private let branchLabel = NSTextField(labelWithString: "")
+    private let msgLabel = NSTextField(labelWithString: "")
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        setup()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func setup() {
+        iconLabel.font = NSFont.systemFont(ofSize: 11)
+        iconLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        branchLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
+        branchLabel.lineBreakMode = .byTruncatingTail
+        branchLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        msgLabel.font = NSFont.systemFont(ofSize: 11)
+        msgLabel.textColor = Theme.textSecondary
+        msgLabel.lineBreakMode = .byTruncatingTail
+        msgLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(iconLabel)
+        addSubview(branchLabel)
+        addSubview(msgLabel)
+
+        NSLayoutConstraint.activate([
+            iconLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            iconLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconLabel.widthAnchor.constraint(equalToConstant: 16),
+
+            branchLabel.leadingAnchor.constraint(equalTo: iconLabel.trailingAnchor, constant: 4),
+            branchLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            branchLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 100),
+
+            msgLabel.leadingAnchor.constraint(equalTo: branchLabel.trailingAnchor, constant: 6),
+            msgLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            msgLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    func configure(item: WatchItem) {
+        iconLabel.stringValue = item.kind == .watchError ? "⚠" : "⏳"
+        iconLabel.textColor = item.kind == .watchError ? .systemRed : .systemYellow
+        branchLabel.stringValue = item.branch
+        msgLabel.stringValue = item.message
+    }
 }

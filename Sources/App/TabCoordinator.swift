@@ -27,8 +27,9 @@ class TabCoordinator {
     var runtimeBackend: String = "local"
     private let pendingTransfers = PendingTransferTracker()
 
-    // First Mate — status-transition engine + red-zone queue
+    // First Mate — status-transition engine + red-zone queue + green-zone watch
     let pendingOrders = PendingOrdersQueue()
+    let watchFeed = WatchFeed()
     private(set) var firstMate: FirstMateCoordinator!
 
     private static let iso8601: ISO8601DateFormatter = {
@@ -60,10 +61,12 @@ class TabCoordinator {
         self.config = config
         let fmConfig = config.firstMate
         let orders = pendingOrders
+        let feed = watchFeed
         firstMate = FirstMateCoordinator(
             config: fmConfig,
             queue: orders,
             notify: { action in
+                feed.record(action)
                 let status: AgentStatus = action.kind == .watchError ? .error : .waiting
                 NotificationManager.shared.notify(
                     worktreePath: action.worktreePath,

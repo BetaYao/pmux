@@ -79,6 +79,7 @@
 		4C297382292B4EB14059B800 /* SettingsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B585B51545F6263FBD2CF81 /* SettingsViewController.swift */; };
 		4CEBE3330DBFDBEF7ACC2F8F /* StatusBarPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87417573B9EFD4EEFC046960 /* StatusBarPage.swift */; };
 		4F2A4345C03960F05970F260 /* ClaudeHooksSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7089D83FDE01F701A68B655 /* ClaudeHooksSetup.swift */; };
+		4F9AEBA443BBBB04CDADD484 /* WatchFeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = 859079591FD4E0630F9A04A4 /* WatchFeed.swift */; };
 		4FF45C08E3E340443A4DC5A9 /* UpdateError.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4D1CCA21076951B004C361F /* UpdateError.swift */; };
 		54D8F1468EB76C17C8187F0E /* IdeaStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3488FC3F9B3B42F28E636AED /* IdeaStore.swift */; };
 		5552478A8B819BC131A4ADA9 /* DialogPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75CCEB757AD80B5F61815718 /* DialogPage.swift */; };
@@ -203,6 +204,7 @@
 		DAB84D9ADC643F1EB5129196 /* WebhookServerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D22E1B1A4A3BC6F91C06056 /* WebhookServerTests.swift */; };
 		DAD7D26EA77B7F8458ADA93D /* QuickSwitcherViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD4C51A8596107B2F65DDDDC /* QuickSwitcherViewController.swift */; };
 		DAFCCCD19664CDDE9246AD3C /* AgentHeadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2EBCDA553C026FBF2B5C82B /* AgentHeadTests.swift */; };
+		DB896CE0DB52B5973783F00D /* WatchFeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C17553BB717164F09E2E441 /* WatchFeedTests.swift */; };
 		DCF61455E027052C0D4EF51A /* MiniCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC6A7C60E8F2AB7BCF135533 /* MiniCardView.swift */; };
 		DDD956095B36946E68925A98 /* NotificationHistoryViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB6EBA1ACC87C9CE8547799D /* NotificationHistoryViewController.swift */; };
 		DFA0F551211F12B3DC07446C /* TestViewHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EEDD332941AEAB153BDFC95 /* TestViewHelpers.swift */; };
@@ -276,6 +278,7 @@
 		18047B4EFF62FBF265B645E0 /* WorktreeStatusAggregatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeStatusAggregatorTests.swift; sourceTree = "<group>"; };
 		1950D88C182F7A6D2C5639BE /* EditorTheme+Amux.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EditorTheme+Amux.swift"; sourceTree = "<group>"; };
 		1B35A3FD9BBC18605E3B44A9 /* ShellEscape.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellEscape.swift; sourceTree = "<group>"; };
+		1C17553BB717164F09E2E441 /* WatchFeedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchFeedTests.swift; sourceTree = "<group>"; };
 		1DFD076A5E114333ECB7E972 /* TerminalCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalCoordinatorTests.swift; sourceTree = "<group>"; };
 		2161282A4B2FE4DE55D34ECB /* FirstMateConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMateConfig.swift; sourceTree = "<group>"; };
 		22CDB08FE162B9254A1D9119 /* ModalPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModalPage.swift; sourceTree = "<group>"; };
@@ -375,6 +378,7 @@
 		7E1FAC7406EC1FCDE6DD593F /* MenuBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBuilder.swift; sourceTree = "<group>"; };
 		7EF6308A1484DF6C643C4786 /* ActivityEventPipelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityEventPipelineTests.swift; sourceTree = "<group>"; };
 		80F4BDC0D69397F8EA2434C0 /* WeChatConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeChatConfig.swift; sourceTree = "<group>"; };
+		859079591FD4E0630F9A04A4 /* WatchFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchFeed.swift; sourceTree = "<group>"; };
 		87417573B9EFD4EEFC046960 /* StatusBarPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarPage.swift; sourceTree = "<group>"; };
 		8A2B8A3CF6412C27AAD8C915 /* UsageSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageSummary.swift; sourceTree = "<group>"; };
 		8A2F55C6C4ABDEF1A285AC7B /* NewBranchDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewBranchDialog.swift; sourceTree = "<group>"; };
@@ -763,6 +767,7 @@
 				570F58B9F8CA3F072F869E4E /* UpdateCoordinatorTests.swift */,
 				2FCDD58533E8F05C646077FF /* UsageSummaryFormatterTests.swift */,
 				37CA037D36BD0F522A20909C /* UsageSummaryStoreTests.swift */,
+				1C17553BB717164F09E2E441 /* WatchFeedTests.swift */,
 				3CB6AC28ABFB42BF72FB7EA2 /* WebhookEventTests.swift */,
 				4D22E1B1A4A3BC6F91C06056 /* WebhookServerTests.swift */,
 				27A1A2E69F4D90CCD4920373 /* WebhookStatusProviderTests.swift */,
@@ -890,6 +895,7 @@
 				95345658A382968A34228D1A /* TerminalSurfaceManager.swift */,
 				60E6E3C1F83F5FE8865D16E1 /* TmuxChannel.swift */,
 				EBD2DE5C03A3E1FE2E955241 /* TodoStore.swift */,
+				859079591FD4E0630F9A04A4 /* WatchFeed.swift */,
 				8CAE9D03801A602F58A1D02E /* WeChatChannel.swift */,
 				80F4BDC0D69397F8EA2434C0 /* WeChatConfig.swift */,
 				F22134F380091B40CC08D5F2 /* WeComBotChannel.swift */,
@@ -1144,6 +1150,7 @@
 				5FA4E72E985668FECB7F8FBE /* UpdateCoordinatorTests.swift in Sources */,
 				41836D2A06B766D59B56FD42 /* UsageSummaryFormatterTests.swift in Sources */,
 				0FCDBB2C101084CE9595747A /* UsageSummaryStoreTests.swift in Sources */,
+				DB896CE0DB52B5973783F00D /* WatchFeedTests.swift in Sources */,
 				9CAFA86CD7DE0DC19010F39B /* WeComFrameParserTests.swift in Sources */,
 				10B2F39B2A768837BC0E28A7 /* WebhookEventTests.swift in Sources */,
 				DAB84D9ADC643F1EB5129196 /* WebhookServerTests.swift in Sources */,
@@ -1291,6 +1298,7 @@
 				D2945F34022E654B7920E74D /* UpdateManager.swift in Sources */,
 				39B81F3E40C1F6DC672D793F /* UsageSummary.swift in Sources */,
 				89B5914DD4FF8118A6AC9519 /* UsageSummaryStore.swift in Sources */,
+				4F9AEBA443BBBB04CDADD484 /* WatchFeed.swift in Sources */,
 				0F9CD81749134CAAE041E80E /* WeChatChannel.swift in Sources */,
 				E4870265583D6101693123F3 /* WeChatConfig.swift in Sources */,
 				716E7AEDB363F5DFD0C53D86 /* WeComBotChannel.swift in Sources */,
