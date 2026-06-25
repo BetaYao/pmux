@@ -98,11 +98,8 @@ enum WorktreeCreator {
         // Write seahelm-suggest guidance to worktree
         SuggestGuidanceWriter.writeForWorktree(worktreePath)
 
-        // Return the canonical (symlink-resolved) path so it matches the paths
-        // emitted by `git worktree list`. Otherwise discovery treats the new
-        // worktree as unknown and integrates it a second time → duplicate tab.
         return WorktreeInfo(
-            path: WorktreeDiscovery.canonicalPath(worktreePath),
+            path: worktreePath,
             branch: branchName,
             commitHash: hash,
             isMainWorktree: false
