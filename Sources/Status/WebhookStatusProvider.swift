@@ -9,6 +9,10 @@ class WebhookStatusProvider {
         CodexSessionPromptLookup.lastUserPrompt(sessionId: sessionId)
     }
 
+    /// Called when a `suggest` event arrives (with parsed options) or when a
+    /// new round begins (with `[]` to clear). Fired on the main queue.
+    var onSuggestions: ((_ worktreePath: String, _ options: [String]) -> Void)?
+
     /// Called when a WorktreeCreate event arrives with a path not in knownWorktrees
     var onNewWorktreeDetected: ((String) -> Void)?
 
@@ -43,6 +47,16 @@ class WebhookStatusProvider {
     func handleEvent(_ event: WebhookEvent) {
         queue.sync {
             let canonCwd = canonicalize(event.cwd)
+
+            // Suggestions: deliver options out-of-band; never touch sessions/status.
+            if event.event == .suggest {
+                guard let worktreePath = matchWorktree(canonCwd) else { return }
+                let options = (event.data?["options"] as? [String]) ?? []
+                DispatchQueue.main.async { [weak self] in
+                    self?.onSuggestions?(worktreePath, options)
+                }
+                return
+            }
 
             // WorktreeCreate: record transfer intent before new worktree is discoverable
             if event.event == .worktreeCreate {
@@ -94,6 +108,13 @@ class WebhookStatusProvider {
             guard let worktreePath = matchWorktree(canonCwd) else {
                 NSLog("[WebhookStatusProvider] No worktree match for cwd: \(event.cwd)")
                 return
+            }
+
+            // A new user prompt starts a fresh round — clear any stale suggestions.
+            if event.event == .userPrompt {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onSuggestions?(worktreePath, [])
+                }
             }
 
             let status = event.event.agentStatus(data: event.data)

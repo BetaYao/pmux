@@ -57,6 +57,7 @@
 		4344E9AEB5D00D092883F299 /* KeyboardMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798BF92EBF7B02019D1265F7 /* KeyboardMode.swift */; };
 		43BD24E5D16ABA5AC477E89C /* DashboardFocusControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA242C3631BD163C19CFDD38 /* DashboardFocusControllerTests.swift */; };
 		43EF6A61FC26F6221292A0A3 /* WebhookStatusProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE8F5AD2CC7C21E82564BA10 /* WebhookStatusProvider.swift */; };
+		454A2E97D854F7EB257DDECC /* WebhookStatusProviderSuggestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BF94B82B2BAC5FBD3DEC5B6 /* WebhookStatusProviderSuggestTests.swift */; };
 		459BBEB6468DF695FF108ABC /* ShellEscape.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1D12B70B8065E592B7A3AC7 /* ShellEscape.swift */; };
 		466072F2F8768C44A206D990 /* LayoutPopoverPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8EB5177E50619DFE89D88CC /* LayoutPopoverPage.swift */; };
 		485E068C342B17F96A61D437 /* NotificationPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F7AD7E1066AE6B96E5EC70B /* NotificationPanelView.swift */; };
@@ -399,6 +400,7 @@
 		9A9E6A0A2CF3F54AA987F20A /* OSC133Parser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSC133Parser.swift; sourceTree = "<group>"; };
 		9B818999765D614712A04F53 /* UpdateCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCoordinatorTests.swift; sourceTree = "<group>"; };
 		9B96BFA805FFD64725FFB924 /* NotificationHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationHistory.swift; sourceTree = "<group>"; };
+		9BF94B82B2BAC5FBD3DEC5B6 /* WebhookStatusProviderSuggestTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookStatusProviderSuggestTests.swift; sourceTree = "<group>"; };
 		9CF658BBFA55756895B6848A /* BridgeConfirmFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeConfirmFlow.swift; sourceTree = "<group>"; };
 		9DE6E5E60B65B88BB4328F40 /* WeComFrameParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeComFrameParserTests.swift; sourceTree = "<group>"; };
 		9DFC7C439D7D5CB85100DB4D /* SettingsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPage.swift; sourceTree = "<group>"; };
@@ -843,6 +845,7 @@
 				5884DCB29BD98E4B9A1938AD /* WatchFeedTests.swift */,
 				D8B9C4CC61EFF38937C86A54 /* WebhookEventTests.swift */,
 				DE6D86D3DC1888F917D9F3FD /* WebhookServerTests.swift */,
+				9BF94B82B2BAC5FBD3DEC5B6 /* WebhookStatusProviderSuggestTests.swift */,
 				66D1A230FCEF8663316AD13F /* WebhookStatusProviderTests.swift */,
 				54322E1FB43B65F94D1AAC20 /* WebhookSuggestEventTests.swift */,
 				55B174E22642D5D980A37012 /* WebhookTaskParsingTests.swift */,
@@ -1178,6 +1181,7 @@
 				6B115DD3E985EBF9D42DF638 /* WeComFrameParserTests.swift in Sources */,
 				731E2F002EF8752F8E5F5241 /* WebhookEventTests.swift in Sources */,
 				CDE67201708E45E4156CC96C /* WebhookServerTests.swift in Sources */,
+				454A2E97D854F7EB257DDECC /* WebhookStatusProviderSuggestTests.swift in Sources */,
 				2C2802EE819E3CFE15765F18 /* WebhookStatusProviderTests.swift in Sources */,
 				5F16B6F4A4D85F5E6F515A4E /* WebhookSuggestEventTests.swift in Sources */,
 				5B7107654A31951EC6A5BE41 /* WebhookTaskParsingTests.swift in Sources */,
