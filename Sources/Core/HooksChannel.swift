@@ -114,6 +114,8 @@ class HooksChannel: AgentChannel {
             return "Subagent started"
         case .cwdChanged:
             return nil
+        case .suggest:
+            return nil
         }
         return nil
     }

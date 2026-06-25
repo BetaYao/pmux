@@ -241,6 +241,8 @@ class WebhookStatusProvider {
             return "Subagent started"
         case .cwdChanged:
             return nil
+        case .suggest:
+            return nil
         }
     }
 
