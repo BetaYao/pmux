@@ -401,6 +401,11 @@ dashboard.surfaceManager = terminalCoordinator.surfaceManager
 
         dashboard.sidePanelVC.pendingOrdersQueue = tabCoordinator.pendingOrders
         dashboard.sidePanelVC.watchFeed = tabCoordinator.watchFeed
+        dashboard.sidePanelVC.suggestionFeed = tabCoordinator.suggestionFeed
+        dashboard.sidePanelVC.onSuggestionTapped = { [weak self] item, optionText in
+            AgentHead.shared.sendCommand(to: item.terminalID, command: optionText)
+            self?.tabCoordinator.suggestionFeed.clear(worktreePath: item.worktreePath)
+        }
         dashboard.sidePanelVC.onBridgeNavigate = { [weak self] path in
             self?.tabCoordinator.selectTab(forWorktree: path)
         }

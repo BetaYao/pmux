@@ -12,12 +12,18 @@ final class BridgePanelViewController: NSViewController {
     }
     var onNavigateToWorktree: ((String) -> Void)?
     var onApprove: ((PendingOrder) -> Void)?
+    var suggestionFeed: SuggestionFeed? {
+        didSet { rebindSuggestions() }
+    }
+    var onSuggestionTapped: ((SuggestionItem, String) -> Void)?
 
     // MARK: - Private state
 
     private var pendingOrders: [PendingOrder] = []
     private var expandedOrderIds: Set<String> = []
     private var watchItems: [WatchItem] = []
+    /// Flattened (item, option) pairs, one per rendered chip row.
+    private var suggestionRows: [(item: SuggestionItem, option: String)] = []
 
     // MARK: - Views
 
@@ -30,6 +36,10 @@ final class BridgePanelViewController: NSViewController {
     private let watchHeader = NSTextField(labelWithString: "Watch")
     private let watchTableView = NSTableView()
     private let watchScrollView = NSScrollView()
+
+    private let suggestHeader = NSTextField(labelWithString: "Suggestions")
+    private let suggestTableView = NSTableView()
+    private let suggestScrollView = NSScrollView()
 
     /// Layer-backed views whose CGColors must be re-resolved when the
     /// effective appearance changes (light/dark switch). `.cgColor` snapshots
@@ -64,6 +74,7 @@ final class BridgePanelViewController: NSViewController {
 
         setupOrdersSection()
         setupWatchSection()
+        setupSuggestSection()
 
         view = root
     }
@@ -145,6 +156,35 @@ final class BridgePanelViewController: NSViewController {
         watchScrollView.heightAnchor.constraint(equalTo: ordersScrollView.heightAnchor).isActive = true
     }
 
+    private func setupSuggestSection() {
+        suggestHeader.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        suggestHeader.textColor = Theme.textSecondary
+        suggestHeader.translatesAutoresizingMaskIntoConstraints = false
+
+        let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("SuggestCol"))
+        col.title = ""
+        suggestTableView.addTableColumn(col)
+        suggestTableView.headerView = nil
+        suggestTableView.rowHeight = 26
+        suggestTableView.dataSource = self
+        suggestTableView.delegate = self
+        suggestTableView.tag = 3
+        suggestTableView.setAccessibilityIdentifier("bridge.suggestTable")
+        suggestTableView.allowsEmptySelection = true
+        suggestTableView.backgroundColor = .clear
+
+        suggestScrollView.documentView = suggestTableView
+        suggestScrollView.drawsBackground = false
+        suggestScrollView.hasVerticalScroller = true
+        suggestScrollView.autohidesScrollers = true
+        suggestScrollView.translatesAutoresizingMaskIntoConstraints = false
+        suggestTableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+
+        addFullWidthArranged(makeDivider())
+        let section = makeSectionContainer(header: suggestHeader, scroll: suggestScrollView, minHeight: 60)
+        addFullWidthArranged(section)
+    }
+
     private func makeSectionContainer(header: NSTextField, scroll: NSScrollView, minHeight: CGFloat) -> NSView {
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
@@ -188,6 +228,20 @@ final class BridgePanelViewController: NSViewController {
             DispatchQueue.main.async { self?.reloadWatch() }
         }
         if isViewLoaded { reloadWatch() }
+    }
+
+    private func rebindSuggestions() {
+        suggestionFeed?.onChange = { [weak self] in
+            DispatchQueue.main.async { self?.reloadSuggestions() }
+        }
+        if isViewLoaded { reloadSuggestions() }
+    }
+
+    private func reloadSuggestions() {
+        let items = suggestionFeed?.all() ?? []
+        suggestionRows = items.flatMap { item in item.options.map { (item, $0) } }
+        suggestHeader.stringValue = suggestionRows.isEmpty ? "Suggestions" : "Suggestions · \(suggestionRows.count)"
+        suggestTableView.reloadData()
     }
 
     private func reload() {
@@ -285,10 +339,29 @@ final class BridgePanelViewController: NSViewController {
 
 extension BridgePanelViewController: NSTableViewDataSource, NSTableViewDelegate {
     func numberOfRows(in tableView: NSTableView) -> Int {
-        tableView.tag == 1 ? pendingOrders.count : watchItems.count
+        switch tableView.tag {
+        case 1: return pendingOrders.count
+        case 3: return suggestionRows.count
+        default: return watchItems.count
+        }
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        if tableView.tag == 3 {
+            guard row < suggestionRows.count else { return nil }
+            let pair = suggestionRows[row]
+            let id = NSUserInterfaceItemIdentifier("SuggestCell")
+            let cell: SuggestionCellView
+            if let reused = tableView.makeView(withIdentifier: id, owner: self) as? SuggestionCellView {
+                cell = reused
+            } else {
+                cell = SuggestionCellView()
+                cell.identifier = id
+            }
+            cell.configure(branch: pair.item.branch, option: pair.option,
+                           onTap: { [weak self] in self?.onSuggestionTapped?(pair.item, pair.option) })
+            return cell
+        }
         if tableView.tag == 1 {
             guard row < pendingOrders.count else { return nil }
             let order = pendingOrders[row]
@@ -462,4 +535,55 @@ private final class WatchCellView: NSTableCellView {
         branchLabel.stringValue = item.branch
         msgLabel.stringValue = item.message
     }
+}
+
+// MARK: - SuggestionCellView
+
+private final class SuggestionCellView: NSTableCellView {
+    private let branchLabel = NSTextField(labelWithString: "")
+    private let button = NSButton()
+    private var onTap: (() -> Void)?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        setup()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func setup() {
+        branchLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
+        branchLabel.textColor = Theme.textSecondary
+        branchLabel.lineBreakMode = .byTruncatingTail
+        branchLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        button.bezelStyle = .rounded
+        button.controlSize = .small
+        button.font = NSFont.systemFont(ofSize: 11)
+        button.lineBreakMode = .byTruncatingTail
+        button.target = self
+        button.action = #selector(tapped)
+        button.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(branchLabel)
+        addSubview(button)
+
+        NSLayoutConstraint.activate([
+            branchLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            branchLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            branchLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 90),
+
+            button.leadingAnchor.constraint(equalTo: branchLabel.trailingAnchor, constant: 6),
+            button.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -6),
+            button.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    func configure(branch: String, option: String, onTap: @escaping () -> Void) {
+        self.onTap = onTap
+        branchLabel.stringValue = branch
+        button.title = option
+        button.toolTip = option
+    }
+
+    @objc private func tapped() { onTap?() }
 }
