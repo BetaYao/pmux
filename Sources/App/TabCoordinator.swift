@@ -426,6 +426,10 @@ class TabCoordinator {
     /// Integrate newly discovered worktrees into the dashboard.
     /// Called from both webhook-triggered discovery and periodic polling.
     private func integrateNewWorktrees(repoRoot: String, allDiscovered: [WorktreeInfo], newWorktrees: [WorktreeInfo]) {
+        // Idempotency guard: drop any worktree already tracked (compared by
+        // canonical path) so no caller can append a duplicate entry/tab.
+        let knownPaths = Set(allWorktrees.map { WorktreeDiscovery.canonicalPath($0.info.path) })
+        let newWorktrees = newWorktrees.filter { !knownPaths.contains(WorktreeDiscovery.canonicalPath($0.path)) }
         guard !newWorktrees.isEmpty else { return }
 
         NSLog("[TabCoordinator] Integrating \(newWorktrees.count) new worktree(s) for \(repoRoot)")
@@ -661,7 +665,9 @@ class TabCoordinator {
         guard !freshWorktrees.isEmpty else { return false }
         guard let tab = workspaceManager.tab(at: tabIndex) else { return false }
 
-        let knownPaths = Set(allWorktrees.map { $0.info.path })
+        // Compare by canonical path: discovery emits symlink-resolved paths that
+        // may differ as strings from how a worktree path was originally stored.
+        let knownPaths = Set(allWorktrees.map { WorktreeDiscovery.canonicalPath($0.info.path) })
         let freshPaths = Set(freshWorktrees.map(\.path))
         let deletedWorktrees = oldWorktrees.filter { !freshPaths.contains($0.path) }
 
@@ -675,7 +681,7 @@ class TabCoordinator {
             changed = true
         }
 
-        let newWorktrees = freshWorktrees.filter { !knownPaths.contains($0.path) }
+        let newWorktrees = freshWorktrees.filter { !knownPaths.contains(WorktreeDiscovery.canonicalPath($0.path)) }
         if !newWorktrees.isEmpty {
             integrateNewWorktrees(repoRoot: tab.repoPath, allDiscovered: freshWorktrees, newWorktrees: newWorktrees)
             changed = true

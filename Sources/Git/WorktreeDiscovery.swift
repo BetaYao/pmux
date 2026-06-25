@@ -123,6 +123,14 @@ enum WorktreeDiscovery {
     }
 
     /// Parse `git worktree list --porcelain` output
+    /// Canonical filesystem path: resolves symlinks (e.g. `/var` → `/private/var`)
+    /// and `.`/`..` components so paths from different sources compare equal.
+    /// `git worktree list` emits symlink-resolved paths, while paths we construct
+    /// from a repo root may not be — normalize both through here before comparing.
+    static func canonicalPath(_ path: String) -> String {
+        URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
     static func parsePorcelain(_ output: String) -> [WorktreeInfo] {
         var worktrees: [WorktreeInfo] = []
         var currentPath: String?
@@ -147,6 +155,7 @@ enum WorktreeDiscovery {
                 isMainWorktree = false
             } else if line.hasPrefix("worktree ") {
                 currentPath = String(line.dropFirst("worktree ".count))
+                    .trimmingCharacters(in: .whitespaces)
                 // First worktree entry is always the main worktree
                 if worktrees.isEmpty && currentPath != nil {
                     isMainWorktree = true
