@@ -95,8 +95,14 @@ enum WorktreeCreator {
         let hash = runGit(args: ["rev-parse", "--short", "HEAD"], in: worktreePath)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
+        // Write seahelm-suggest guidance to worktree
+        SuggestGuidanceWriter.writeForWorktree(worktreePath)
+
+        // Return the canonical (symlink-resolved) path so it matches the paths
+        // emitted by `git worktree list`. Otherwise discovery treats the new
+        // worktree as unknown and integrates it a second time → duplicate tab.
         return WorktreeInfo(
-            path: worktreePath,
+            path: WorktreeDiscovery.canonicalPath(worktreePath),
             branch: branchName,
             commitHash: hash,
             isMainWorktree: false
