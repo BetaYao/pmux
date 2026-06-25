@@ -27,6 +27,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             ClaudeHooksSetup.ensureHooksConfigured(port: config.webhook.port)
             ClaudeStatuslineBridgeInstaller.ensureInstalled()
             CodexHooksSetup.ensureHooksConfigured(port: config.webhook.port)
+            SeahelmSuggestInstaller.ensureInstalled(port: config.webhook.port)
         }
         NSAppearance.current = NSApp.effectiveAppearance
 
